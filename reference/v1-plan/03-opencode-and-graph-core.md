@@ -3,10 +3,10 @@
 ## Execution Snapshot
 
 - Phase number: 3
-- Source plan: `IMPLEMENTATION_PLAN.md`, Step 6 and Step 7 (`IMPLEMENTATION_PLAN.md:827-938`)
-- Readiness status: `Blocked`
+- Source plan: `reference/v1-plan/IMPLEMENTATION_PLAN.md`, Step 6 and Step 7 (`reference/v1-plan/IMPLEMENTATION_PLAN.md:827-938`)
+- Readiness status: `Ready`
 - Primary deliverable: a working OpenCode adapter and LangGraph workflow that can draft, audit, rebut, revise, and finalize
-- Blocking dependencies: Phase 1 scaffold and Phase 2 contracts are not complete
+- Blocking dependencies: None
 - Target measurements summary: no numeric thresholds; exit gates are working startup checks, graph routing, and persisted checkpointer wiring
 - Next phase: `04-telemetry-and-cli.md`
 
@@ -25,10 +25,10 @@ This phase turns the static design into a functioning orchestrator. It is where 
 
 | Dependency | Why it matters | How to verify it | Status |
 | --- | --- | --- | --- |
-| Phase 1 scaffold complete | Needed for adapter and graph implementation files | Confirm `src/opencode.ts` and `src/graph.ts` exist | Not Done |
-| Phase 2 schemas complete | Graph nodes need stable input/output types | Inspect `src/schema.ts` for audit and rebuttal schemas | Not Done |
-| Phase 2 agent definitions complete | Startup validation should fail if required roles are missing | Confirm all four agent files exist and names match config | Not Done |
-| Skill visibility check strategy exists | The adapter must verify `deep-dive-research` before first draft | Confirm startup code path exists for `app.skills` validation | Not Done |
+| Phase 1 scaffold complete | Needed for adapter and graph implementation files | Confirm `src/opencode.ts` and `src/graph.ts` exist | Done |
+| Phase 2 schemas complete | Graph nodes need stable input/output types | Inspect `src/schema.ts` for audit and rebuttal schemas | Done |
+| Phase 2 agent definitions complete | Startup validation should fail if required roles are missing | Confirm all four agent files exist and names match config | Done |
+| Skill visibility check strategy exists | The adapter must verify `deep-dive-research` before first draft | Confirm startup code path exists for `app.skills` validation | Done |
 
 ## Target Measurements And Gates
 
@@ -73,7 +73,7 @@ Exit gates:
 
 ## Implementation Details
 
-OpenCode adapter requirements from the source plan (`IMPLEMENTATION_PLAN.md:827-853`):
+OpenCode adapter requirements from the source plan (`reference/v1-plan/IMPLEMENTATION_PLAN.md:827-853`):
 
 - connect to an existing server or start one
 - list agents on startup and fail fast if a configured role is missing
@@ -82,7 +82,7 @@ OpenCode adapter requirements from the source plan (`IMPLEMENTATION_PLAN.md:827-
 - send prompts to a named agent
 - request structured output for audits and rebuttals
 
-LangGraph workflow requirements from the source plan (`IMPLEMENTATION_PLAN.md:855-938`):
+LangGraph workflow requirements from the source plan (`reference/v1-plan/IMPLEMENTATION_PLAN.md:855-938`):
 
 - implement nodes:
   - `ingestRequest`
@@ -104,7 +104,7 @@ LangGraph workflow requirements from the source plan (`IMPLEMENTATION_PLAN.md:85
 
 Persistence detail:
 
-- the graph must use a SQLite checkpointer, not in-memory persistence, because the source plan treats recovery and inspection as first-class concerns (`IMPLEMENTATION_PLAN.md:637-641`, `934-938`)
+- the graph must use a SQLite checkpointer, not in-memory persistence, because the source plan treats recovery and inspection as first-class concerns (`reference/v1-plan/IMPLEMENTATION_PLAN.md:637-641`, `934-938`)
 
 Artifact detail:
 
@@ -202,10 +202,10 @@ What the next phase should pick up:
 
 ## Open Questions Or Blockers
 
-- Unknown: whether you want the adapter to always start a local server or prefer attach-first behavior with start as fallback.
+- Decision for this phase: use attach-first behavior and fail fast if no server is reachable.
 - Unknown: whether failed runs should write one combined `summary.json` or separate `latest-draft.md` and `failure.json` artifacts.
 
 ## Sources
 
-- Source plan Step 6 and Step 7: `IMPLEMENTATION_PLAN.md:827-938`
-- Source plan persistence requirement: `IMPLEMENTATION_PLAN.md:637-641`
+- Source plan Step 6 and Step 7: `reference/v1-plan/IMPLEMENTATION_PLAN.md:827-938`
+- Source plan persistence requirement: `reference/v1-plan/IMPLEMENTATION_PLAN.md:637-641`
