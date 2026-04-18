@@ -1,0 +1,16 @@
+{
+  "designatedDrafter": "research-drafter",
+  "auditors": [
+    "source-auditor",
+    "logic-auditor",
+    "clarity-auditor"
+  ],
+  "maxRounds": 4,
+  "maxRebuttalTurnsPerFinding": 2,
+  "requireUnanimousApproval": true,
+  "artifactDir": "runs",
+  "researchTools": {
+    "prefer": ["context7", "exa", "grepapp"],
+    "webSearchProvider": "exa"
+  }
+}
