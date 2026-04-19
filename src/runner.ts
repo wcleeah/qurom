@@ -1,5 +1,6 @@
 import { createGraph } from "./graph"
-import { createTelemetry, type TelemetryRun } from "./telemetry"
+import { createOpencodeEventBridge } from "./opencode-event-bridge"
+import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
 
 import type { RuntimeConfig } from "./config"
 import type { InputRequest } from "./schema"
@@ -65,14 +66,14 @@ export function createEventBus(): EventBus {
 export type Bridge = {
   start: () => Promise<void>
   stop: () => Promise<void>
+  setTelemetryRun?: (run: TelemetryRun | undefined) => void
+  trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
 }
 
-export type BridgeFactory = (config: RuntimeConfig, opts: { bus: EventBus }) => Bridge
-
-const noopBridgeFactory: BridgeFactory = () => ({
-  async start() {},
-  async stop() {},
-})
+export type BridgeFactory = (
+  config: RuntimeConfig,
+  opts: { bus: EventBus; telemetry?: TelemetryRun },
+) => Bridge
 
 export type RuntimePrerequisites = Awaited<ReturnType<typeof validateRuntimePrerequisites>>
 
@@ -99,11 +100,10 @@ export type RunResult = {
 
 export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
   const { config, prerequisites, request, bus, signal } = args
-  const bridgeFactory = args.bridgeFactory ?? noopBridgeFactory
+  const bridgeFactory = args.bridgeFactory ?? createOpencodeEventBridge
   const telemetryFactory = args.telemetryFactory ?? createTelemetry
 
   const requestId = crypto.randomUUID()
-  const bridge = bridgeFactory(config, { bus })
 
   const telemetry = await telemetryFactory(config, {
     requestId,
@@ -111,6 +111,9 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
     topic: request.inputMode === "topic" ? request.topic : undefined,
     documentPath: request.inputMode === "document" ? request.documentPath : undefined,
   })
+
+  const bridge = bridgeFactory(config, { bus, telemetry })
+  bridge.setTelemetryRun?.(telemetry)
 
   bus.emit({
     kind: "lifecycle",
@@ -139,8 +142,8 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
         },
         telemetry: {
           run: telemetry,
-          trackSessionObservation() {
-            // Session-to-observation linking is owned by the opencode bridge (Phase 03+).
+          trackSessionObservation(sessionID, observation) {
+            bridge.trackSessionObservation?.(sessionID, observation)
           },
         },
       })
