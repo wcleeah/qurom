@@ -246,7 +246,7 @@ function hasEligibleRebuttalTurn(config: RuntimeConfig, state: ResearchState) {
   return false
 }
 
-function dedupeFindings(findings: AggregatedFinding[]) {
+export function dedupeFindings(findings: AggregatedFinding[]) {
   const uniqueByFindingId = new Map<string, AggregatedFinding>()
 
   for (const finding of findings) {
@@ -355,7 +355,7 @@ function approvedAgentsForOutcome(state: ResearchState, unresolved: AggregatedFi
   return approvedAgents
 }
 
-function effectiveResponsesByFinding(state: ResearchState) {
+export function effectiveResponsesByFinding(state: ResearchState) {
   const responsesByFinding: Record<string, RebuttalResponseRecord> = {}
 
   for (const entry of state.rebuttalResponseHistory) {
@@ -929,7 +929,7 @@ async function reviewRebuttalResponses(config: RuntimeConfig, state: ResearchSta
   return researchStateSchema.parse(nextState)
 }
 
-async function aggregateConsensus(config: RuntimeConfig, state: ResearchState) {
+export async function aggregateConsensus(config: RuntimeConfig, state: ResearchState) {
   assertStatus(state, "aggregating", "aggregateConsensus")
 
   const effectiveResponses = effectiveResponsesByFinding(state)
@@ -1089,7 +1089,7 @@ async function finalizeFailedRun(_config: RuntimeConfig, state: ResearchState) {
   return researchStateSchema.parse(state)
 }
 
-function routeAfterDrafterReview(config: RuntimeConfig, state: ResearchState) {
+export function routeAfterDrafterReview(config: RuntimeConfig, state: ResearchState) {
   if (state.status === "awaiting_auditor_rebuttal") {
     if (!hasEligibleRebuttalTurn(config, state)) {
       throw new Error("State entered awaiting_auditor_rebuttal without eligible rebuttal turns")
@@ -1105,7 +1105,7 @@ function routeAfterDrafterReview(config: RuntimeConfig, state: ResearchState) {
   throw new Error(`Invalid routeAfterDrafterReview status: ${state.status}`)
 }
 
-function routeAfterRebuttalResponses(config: RuntimeConfig, state: ResearchState) {
+export function routeAfterRebuttalResponses(config: RuntimeConfig, state: ResearchState) {
   if (state.status === "awaiting_auditor_rebuttal") {
     if (!hasEligibleRebuttalTurn(config, state)) {
       throw new Error("State entered awaiting_auditor_rebuttal without eligible rebuttal turns")
@@ -1121,7 +1121,7 @@ function routeAfterRebuttalResponses(config: RuntimeConfig, state: ResearchState
   throw new Error(`Invalid routeAfterRebuttalResponses status: ${state.status}`)
 }
 
-function routeAfterAggregate(state: ResearchState) {
+export function routeAfterAggregate(state: ResearchState) {
   if (state.status === "approved") return "finalizeApprovedDraft"
   if (state.status === "failed") return "finalizeFailedRun"
   if (state.status === "revising") return "reviseDraft"
