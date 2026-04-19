@@ -7,3 +7,6 @@
 [submodule "reference/langfuse-skill"]
 	path = reference/langfuse-skill
 	url = https://github.com/langfuse/skills.git
+[submodule "reference/opentui"]
+	path = reference/opentui
+	url = https://github.com/anomalyco/opentui.git
