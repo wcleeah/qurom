@@ -3,6 +3,7 @@ import { createGraph } from "./graph"
 import { ensureArtifactDir } from "./output"
 import { validateRuntimePrerequisites } from "./opencode"
 import { inputRequestSchema } from "./schema"
+import { createTelemetryEnrichment } from "./telemetry-enrichment"
 
 function parseArgs(argv: string[]) {
   const args = argv.slice(2)
@@ -61,10 +62,28 @@ if (!requestInput) {
 }
 
 const request = inputRequestSchema.parse(requestInput)
-const result = await createGraph(config, prerequisites.skill.content).invoke(request, {
-  configurable: {
-    thread_id: crypto.randomUUID(),
-  },
-})
+const progress = createTelemetryEnrichment(config)
 
-console.log(JSON.stringify(result, null, 2))
+await progress.start()
+
+try {
+  const result = await createGraph(config, prerequisites.skill.content, {
+    onNodeStart(node) {
+      progress.trackNodeStart(node)
+    },
+    onNodeEnd(node) {
+      progress.trackNodeEnd(node)
+    },
+    onSessionCreated({ sessionID, role }) {
+      progress.trackSession(sessionID, role)
+    },
+  }).invoke(request, {
+    configurable: {
+      thread_id: crypto.randomUUID(),
+    },
+  })
+
+  console.log(JSON.stringify(result, null, 2))
+} finally {
+  await progress.stop()
+}

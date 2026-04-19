@@ -26,6 +26,21 @@ import {
   type ResearchState,
 } from "./schema"
 
+export type RunObserver = {
+  onNodeStart?: (node: string) => void
+  onNodeEnd?: (node: string) => void
+  onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
+}
+
+function observeNode(observer: RunObserver | undefined, node: string) {
+  observer?.onNodeStart?.(node)
+}
+
+function observeNodeResult<T>(observer: RunObserver | undefined, node: string, state: T) {
+  observer?.onNodeEnd?.(node)
+  return state
+}
+
 function requestLabel(state: ResearchState) {
   if (state.inputMode === "topic") return `topic ${JSON.stringify(state.topic ?? "")}`
   return `document ${JSON.stringify(state.documentPath ?? "")}`
@@ -928,21 +943,72 @@ function routeAfterAggregate(state: ResearchState) {
   throw new Error(`Invalid routeAfterAggregate status: ${state.status}`)
 }
 
-export function createGraph(config: RuntimeConfig, skillContent: string) {
+export function createGraph(config: RuntimeConfig, skillContent: string, observer?: RunObserver) {
   return new StateGraph(researchStateObjectSchema, {
     input: graphInputSchema,
   })
-    .addNode("ingestRequest", ingestRequest, { input: graphInputSchema })
-    .addNode("bootstrapRun", (state) => bootstrapRun(config, state))
-    .addNode("draftInitial", (state) => draftInitial(config, skillContent, state))
-    .addNode("runParallelAudits", (state) => runParallelAudits(config, state))
-    .addNode("reviewFindingsByDrafter", (state) => reviewFindingsByDrafter(config, state))
-    .addNode("runTargetedRebuttals", (state) => runTargetedRebuttals(config, state))
-    .addNode("reviewRebuttalResponses", (state) => reviewRebuttalResponses(config, state))
-    .addNode("aggregateConsensus", (state) => aggregateConsensus(config, state))
-    .addNode("reviseDraft", (state) => reviseDraft(config, skillContent, state))
-    .addNode("finalizeApprovedDraft", (state) => finalizeApprovedDraft(config, state))
-    .addNode("finalizeFailedRun", (state) => finalizeFailedRun(config, state))
+    .addNode(
+      "ingestRequest",
+      async (input) => {
+        observeNode(observer, "ingestRequest")
+        return observeNodeResult(observer, "ingestRequest", await ingestRequest(input))
+      },
+      { input: graphInputSchema },
+    )
+    .addNode("bootstrapRun", async (state) => {
+      observeNode(observer, "bootstrapRun")
+      const nextState = await bootstrapRun(config, state)
+      if (nextState.rootSessionId) {
+        observer?.onSessionCreated?.({ sessionID: nextState.rootSessionId, role: "root", requestId: nextState.requestId })
+      }
+      if (nextState.drafterSessionId) {
+        observer?.onSessionCreated?.({
+          sessionID: nextState.drafterSessionId,
+          role: "drafter",
+          requestId: nextState.requestId,
+        })
+      }
+      for (const [agent, sessionID] of Object.entries(nextState.auditSessionIds)) {
+        observer?.onSessionCreated?.({ sessionID, role: `auditor:${agent}`, requestId: nextState.requestId })
+      }
+      return observeNodeResult(observer, "bootstrapRun", nextState)
+    })
+    .addNode("draftInitial", async (state) => {
+      observeNode(observer, "draftInitial")
+      return observeNodeResult(observer, "draftInitial", await draftInitial(config, skillContent, state))
+    })
+    .addNode("runParallelAudits", async (state) => {
+      observeNode(observer, "runParallelAudits")
+      return observeNodeResult(observer, "runParallelAudits", await runParallelAudits(config, state))
+    })
+    .addNode("reviewFindingsByDrafter", async (state) => {
+      observeNode(observer, "reviewFindingsByDrafter")
+      return observeNodeResult(observer, "reviewFindingsByDrafter", await reviewFindingsByDrafter(config, state))
+    })
+    .addNode("runTargetedRebuttals", async (state) => {
+      observeNode(observer, "runTargetedRebuttals")
+      return observeNodeResult(observer, "runTargetedRebuttals", await runTargetedRebuttals(config, state))
+    })
+    .addNode("reviewRebuttalResponses", async (state) => {
+      observeNode(observer, "reviewRebuttalResponses")
+      return observeNodeResult(observer, "reviewRebuttalResponses", await reviewRebuttalResponses(config, state))
+    })
+    .addNode("aggregateConsensus", async (state) => {
+      observeNode(observer, "aggregateConsensus")
+      return observeNodeResult(observer, "aggregateConsensus", await aggregateConsensus(config, state))
+    })
+    .addNode("reviseDraft", async (state) => {
+      observeNode(observer, "reviseDraft")
+      return observeNodeResult(observer, "reviseDraft", await reviseDraft(config, skillContent, state))
+    })
+    .addNode("finalizeApprovedDraft", async (state) => {
+      observeNode(observer, "finalizeApprovedDraft")
+      return observeNodeResult(observer, "finalizeApprovedDraft", await finalizeApprovedDraft(config, state))
+    })
+    .addNode("finalizeFailedRun", async (state) => {
+      observeNode(observer, "finalizeFailedRun")
+      return observeNodeResult(observer, "finalizeFailedRun", await finalizeFailedRun(config, state))
+    })
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "bootstrapRun")
     .addEdge("bootstrapRun", "draftInitial")
