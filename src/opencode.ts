@@ -3,11 +3,14 @@ import { createOpencodeClient, type Part, type Session, type TextPartInput } fro
 import { z } from "zod"
 
 import type { RuntimeConfig } from "./config"
+import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 const assistantInfoSchema = z.object({
   role: z.literal("assistant"),
   structured: z.unknown().optional(),
   error: z.unknown().optional(),
+  modelID: z.string().optional(),
+  providerID: z.string().optional(),
 })
 
 function extractText(parts: Part[]) {
@@ -18,6 +21,50 @@ function extractText(parts: Part[]) {
     .trim()
 }
 
+function buildStructuredPrompt(prompt: string, schema: Record<string, unknown>) {
+  return [
+    prompt,
+    "Output requirements:",
+    "- Return only a single JSON object as plain text.",
+    "- Do not include markdown fences, commentary, or explanation.",
+    "<required_json_schema>",
+    JSON.stringify(schema, null, 2),
+    "</required_json_schema>",
+  ].join("\n\n")
+}
+
+function formatStructuredError(error: unknown) {
+  if (error instanceof SyntaxError) return error.message
+  if (error instanceof z.ZodError) return JSON.stringify(error.issues, null, 2)
+  if (error instanceof Error) return error.message
+  return JSON.stringify(error)
+}
+
+function buildStructuredRepairPrompt(input: {
+  schema: Record<string, unknown>
+  previousResponse: string
+  error: unknown
+}) {
+  return [
+    "Your previous response did not match the required output format.",
+    "Return only a single JSON object as plain text.",
+    "Do not include markdown fences, prose, or explanation.",
+    "<required_json_schema>",
+    JSON.stringify(input.schema, null, 2),
+    "</required_json_schema>",
+    "<validation_errors>",
+    formatStructuredError(input.error),
+    "</validation_errors>",
+    "<previous_response>",
+    input.previousResponse,
+    "</previous_response>",
+  ].join("\n\n")
+}
+
+function parseStructuredResponse<T>(schema: z.ZodType<T>, text: string) {
+  return schema.parse(JSON.parse(text))
+}
+
 export async function promptAgent<T>(input: {
   config: RuntimeConfig
   sessionID: string
@@ -25,43 +72,185 @@ export async function promptAgent<T>(input: {
   prompt: string
   schema?: z.ZodType<T>
   variant?: string
+  telemetry?: {
+    run: TelemetryRun
+    parentObservation?: TraceObservation
+    name: string
+    input?: unknown
+    metadata?: unknown
+  }
 }) {
-  const response = await createOpencodeClient({
+  const client = createOpencodeClient({
     baseUrl: input.config.env.OPENCODE_BASE_URL,
     directory: input.config.env.OPENCODE_DIRECTORY,
-  }).session.prompt({
-    sessionID: input.sessionID,
-    agent: input.agent,
-    variant: input.variant,
-    parts: [{ type: "text", text: input.prompt } satisfies TextPartInput],
-    format: input.schema
-      ? {
-          type: "json_schema",
-          schema: toJsonSchema(input.schema),
-          retryCount: 1,
-        }
-      : undefined,
   })
 
-  if (response.error) {
-    throw new Error(
-      `Failed to prompt agent ${input.agent} in session ${input.sessionID}: ${JSON.stringify(response.error)}`,
-    )
+  const agentObservation =
+    input.telemetry?.run.traceId && input.telemetry.run.rootObservation
+      ? await input.telemetry.run.startObservation({
+          traceId: input.telemetry.run.traceId,
+          parentObservationId: input.telemetry.parentObservation?.id ?? input.telemetry.run.rootObservation.id,
+          name: input.telemetry.name,
+          type: "Agent",
+          input: input.telemetry.input ?? {
+            agentName: input.agent,
+            sessionId: input.sessionID,
+            structured: Boolean(input.schema),
+          },
+          metadata: {
+            agentName: input.agent,
+            sessionId: input.sessionID,
+            ...((input.telemetry.metadata as Record<string, unknown> | undefined) ?? {}),
+          },
+        })
+      : undefined
+
+  let repaired = false
+  let model: string | undefined
+  let provider: string | undefined
+
+  async function sendPrompt(prompt: string) {
+    const response = await client.session.prompt({
+      sessionID: input.sessionID,
+      agent: input.agent,
+      variant: input.variant,
+      parts: [{ type: "text", text: prompt } satisfies TextPartInput],
+    })
+
+    if (response.error) {
+      throw new Error(
+        `Failed to prompt agent ${input.agent} in session ${input.sessionID}: ${JSON.stringify(response.error)}`,
+      )
+    }
+
+    if (!response.data) {
+      throw new Error(`OpenCode returned no response data for agent ${input.agent} in session ${input.sessionID}`)
+    }
+
+    const info = assistantInfoSchema.parse(response.data.info)
+    model = info.modelID
+    provider = info.providerID
+
+    if (info.error) {
+      throw new Error(`OpenCode assistant call failed in session ${input.sessionID}: ${JSON.stringify(info.error)}`)
+    }
+
+    return {
+      text: extractText(response.data.parts),
+      model: info.modelID,
+      provider: info.providerID,
+    }
   }
 
-  if (!response.data) {
-    throw new Error(`OpenCode returned no response data for agent ${input.agent} in session ${input.sessionID}`)
-  }
+  try {
+    if (!input.schema) {
+      const response = await sendPrompt(input.prompt)
 
-  const info = assistantInfoSchema.parse(response.data.info)
+      await input.telemetry?.run.endObservation(agentObservation, {
+        output: {
+          textLength: response.text.length,
+          structured: false,
+        },
+        metadata: {
+          agentName: input.agent,
+          sessionId: input.sessionID,
+          model: response.model,
+          provider: response.provider,
+          repaired,
+        },
+      })
 
-  if (info.error) {
-    throw new Error(`OpenCode assistant call failed in session ${input.sessionID}: ${JSON.stringify(info.error)}`)
-  }
+      return {
+        text: response.text,
+        structured: undefined,
+        model: response.model,
+        provider: response.provider,
+      }
+    }
 
-  return {
-    text: input.schema ? undefined : extractText(response.data.parts),
-    structured: input.schema ? input.schema.parse(info.structured) : undefined,
+    const jsonSchema = toJsonSchema(input.schema) as Record<string, unknown>
+    const initialResponse = await sendPrompt(buildStructuredPrompt(input.prompt, jsonSchema))
+
+    try {
+      const structured = parseStructuredResponse(input.schema, initialResponse.text)
+
+      await input.telemetry?.run.endObservation(agentObservation, {
+        output: {
+          structured: true,
+          repaired,
+        },
+        metadata: {
+          agentName: input.agent,
+          sessionId: input.sessionID,
+          model,
+          provider,
+          repaired,
+        },
+      })
+
+      return {
+        text: undefined,
+        structured,
+        model,
+        provider,
+      }
+    } catch (initialError) {
+      repaired = true
+      const repairedResponse = await sendPrompt(
+        buildStructuredRepairPrompt({
+          schema: jsonSchema,
+          previousResponse: initialResponse.text,
+          error: initialError,
+        }),
+      )
+
+      try {
+        const structured = parseStructuredResponse(input.schema, repairedResponse.text)
+
+        await input.telemetry?.run.endObservation(agentObservation, {
+          output: {
+            structured: true,
+            repaired,
+          },
+          metadata: {
+            agentName: input.agent,
+            sessionId: input.sessionID,
+            model,
+            provider,
+            repaired,
+          },
+        })
+
+        return {
+          text: undefined,
+          structured,
+          model,
+          provider,
+        }
+      } catch (repairError) {
+        throw new Error(
+          [
+            `Structured response from agent ${input.agent} in session ${input.sessionID} remained invalid after repair.`,
+            `Initial error: ${formatStructuredError(initialError)}`,
+            `Repair error: ${formatStructuredError(repairError)}`,
+            `Last response: ${JSON.stringify(repairedResponse.text)}`,
+          ].join("\n"),
+        )
+      }
+    }
+  } catch (error) {
+    await input.telemetry?.run.endObservation(agentObservation, {
+      level: "ERROR",
+      statusMessage: error instanceof Error ? error.message : String(error),
+      metadata: {
+        agentName: input.agent,
+        sessionId: input.sessionID,
+        model,
+        provider,
+        repaired,
+      },
+    })
+    throw error
   }
 }
 

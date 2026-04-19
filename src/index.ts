@@ -4,6 +4,7 @@ import { ensureArtifactDir } from "./output"
 import { validateRuntimePrerequisites } from "./opencode"
 import { inputRequestSchema } from "./schema"
 import { createTelemetryEnrichment } from "./telemetry-enrichment"
+import { createTelemetry } from "./telemetry"
 
 function parseArgs(argv: string[]) {
   const args = argv.slice(2)
@@ -42,7 +43,7 @@ if (!requestInput) {
   console.log(
     JSON.stringify(
       {
-        status: "ready_for_phase_3_5",
+        status: "ready_for_phase_4",
         designatedDrafter: config.quorumConfig.designatedDrafter,
         auditors: config.quorumConfig.auditors,
         verifiedSkill: prerequisites.skill.name,
@@ -62,28 +63,87 @@ if (!requestInput) {
 }
 
 const request = inputRequestSchema.parse(requestInput)
+const requestId = crypto.randomUUID()
 const progress = createTelemetryEnrichment(config)
+const telemetry = await createTelemetry(config, {
+  requestId,
+  inputMode: request.inputMode,
+  topic: request.inputMode === "topic" ? request.topic : undefined,
+  documentPath: request.inputMode === "document" ? request.documentPath : undefined,
+})
 
 await progress.start()
 
+if (telemetry.warning) {
+  console.log(`[telemetry] ${telemetry.warning}`)
+}
+
 try {
   const result = await createGraph(config, prerequisites.skill.content, {
-    onNodeStart(node) {
-      progress.trackNodeStart(node)
+    observer: {
+      onNodeStart(node) {
+        progress.trackNodeStart(node)
+      },
+      onNodeEnd(node) {
+        progress.trackNodeEnd(node)
+      },
+      onSessionCreated({ sessionID, role }) {
+        progress.trackSession(sessionID, role)
+      },
     },
-    onNodeEnd(node) {
-      progress.trackNodeEnd(node)
-    },
-    onSessionCreated({ sessionID, role }) {
-      progress.trackSession(sessionID, role)
+    telemetry: {
+      run: telemetry,
     },
   }).invoke(request, {
     configurable: {
-      thread_id: crypto.randomUUID(),
+      thread_id: requestId,
     },
   })
 
-  console.log(JSON.stringify(result, null, 2))
+  await telemetry.updateTrace({
+    output: {
+      requestId: result.requestId,
+      outcome: result.status,
+      round: result.round,
+      approvedAgents: result.approvedAgents,
+      unresolvedFindings: result.unresolvedFindings.length,
+      failureReason: result.failureReason,
+      outputPath: result.outputPath,
+    },
+    metadata: {
+      requestId: result.requestId,
+      status: result.status,
+      round: result.round,
+      approvedAgents: result.approvedAgents,
+      unresolvedFindings: result.unresolvedFindings.length,
+      failureReason: result.failureReason,
+      outputPath: result.outputPath,
+      traced: telemetry.enabled,
+    },
+  })
+
+  if (result.outputPath) {
+    await progress.persistArtifacts(result.outputPath)
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        requestId: result.requestId,
+        outcome: result.status,
+        round: result.round,
+        approvedAgents: result.approvedAgents,
+        unresolvedFindings: result.unresolvedFindings.length,
+        failureReason: result.failureReason,
+        outputPath: result.outputPath,
+        traceId: telemetry.traceId,
+        capturedSessionIds: progress.trackedSessionIds(),
+      },
+      null,
+      2,
+    ),
+  )
 } finally {
+  await telemetry.shutdown()
   await progress.stop()
 }

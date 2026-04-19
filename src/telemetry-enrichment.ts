@@ -4,9 +4,11 @@ import type { RuntimeConfig } from "./config"
 
 type RunProgressConsole = {
   enabled: boolean
+  trackedSessionIds: () => string[]
   trackSession: (sessionID: string, role: string) => void
   trackNodeStart: (node: string) => void
   trackNodeEnd: (node: string) => void
+  persistArtifacts: (runDir: string) => Promise<void>
   start: () => Promise<void>
   stop: () => Promise<void>
 }
@@ -22,16 +24,9 @@ function formatErrorMessage(error: unknown) {
 }
 
 export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressConsole {
-  if (!process.stdout.isTTY) {
-    return {
-      enabled: false,
-      trackSession() {},
-      trackNodeStart() {},
-      trackNodeEnd() {},
-      async start() {},
-      async stop() {},
-    }
-  }
+  const captureEvents = config.env.QUORUM_CAPTURE_OPENCODE_EVENTS === "1"
+  const captureSyncHistory = config.env.QUORUM_CAPTURE_SYNC_HISTORY === "1"
+  const liveConsole = process.stdout.isTTY
 
   const client = createOpencodeClient({
     baseUrl: config.env.OPENCODE_BASE_URL,
@@ -44,10 +39,12 @@ export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressCon
   const seenPermissionRequests = new Set<string>()
   const seenToolStates = new Set<string>()
   const lastSessionStatuses = new Map<string, string>()
+  const capturedEvents: unknown[] = []
   const abortController = new AbortController()
   let streamTask: Promise<void> | undefined
 
   function logProgress(role: string | undefined, text: string) {
+    if (!liveConsole) return
     console.log(formatEventLine(role, text))
   }
 
@@ -74,8 +71,26 @@ export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressCon
     logProgress(role, `thinking ${normalized}`)
   }
 
+  if (!liveConsole && !captureEvents && !captureSyncHistory) {
+    return {
+      enabled: false,
+      trackedSessionIds() {
+        return []
+      },
+      trackSession() {},
+      trackNodeStart() {},
+      trackNodeEnd() {},
+      async persistArtifacts() {},
+      async start() {},
+      async stop() {},
+    }
+  }
+
   return {
-    enabled: true,
+    enabled: liveConsole,
+    trackedSessionIds() {
+      return [...trackedSessions.keys()]
+    },
     trackSession(sessionID, role) {
       trackedSessions.set(sessionID, role)
       logProgress(role, `session created ${sessionID}`)
@@ -85,6 +100,25 @@ export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressCon
     },
     trackNodeEnd(node) {
       logProgress(undefined, `node end ${node}`)
+    },
+    async persistArtifacts(runDir) {
+      if (captureEvents && capturedEvents.length > 0) {
+        await Bun.write(`${runDir}/opencode-events.json`, JSON.stringify(capturedEvents, null, 2))
+      }
+
+      if (!captureSyncHistory) return
+
+      await Bun.write(
+        `${runDir}/opencode-sync-history.json`,
+        JSON.stringify(
+          {
+            deferred: true,
+            reason: "Installed @opencode-ai/sdk package does not expose sync.history.list()",
+          },
+          null,
+          2,
+        ),
+      )
     },
     async start() {
       if (streamTask) return
@@ -98,6 +132,18 @@ export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressCon
         )
 
         for await (const event of response.stream) {
+          if (
+            captureEvents &&
+            "properties" in event &&
+            typeof event.properties === "object" &&
+            event.properties &&
+            "sessionID" in event.properties &&
+            typeof event.properties.sessionID === "string" &&
+            trackedSessions.has(event.properties.sessionID)
+          ) {
+            capturedEvents.push(event)
+          }
+
           if (event.type === "session.status") {
             const role = trackedSessions.get(event.properties.sessionID)
             if (!role) continue

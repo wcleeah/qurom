@@ -25,11 +25,17 @@ import {
   type RebuttalResponseRecord,
   type ResearchState,
 } from "./schema"
+import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 export type RunObserver = {
   onNodeStart?: (node: string) => void
   onNodeEnd?: (node: string) => void
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
+}
+
+type GraphTelemetry = {
+  run: TelemetryRun
+  currentNode?: TraceObservation
 }
 
 function observeNode(observer: RunObserver | undefined, node: string) {
@@ -445,7 +451,7 @@ async function bootstrapRun(config: RuntimeConfig, state: ResearchState) {
   })
 }
 
-async function draftInitial(config: RuntimeConfig, skillContent: string, state: ResearchState) {
+async function draftInitial(config: RuntimeConfig, skillContent: string, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "drafting", "draftInitial")
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during draftInitial")
 
@@ -454,6 +460,13 @@ async function draftInitial(config: RuntimeConfig, skillContent: string, state: 
     sessionID: state.drafterSessionId,
     agent: config.quorumConfig.designatedDrafter,
     prompt: draftPrompt(config, state, skillContent),
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.draftInitial",
+      agentName: config.quorumConfig.designatedDrafter,
+      sessionId: state.drafterSessionId,
+    }),
   })
 
   return researchStateSchema.parse({
@@ -463,7 +476,38 @@ async function draftInitial(config: RuntimeConfig, skillContent: string, state: 
   })
 }
 
-async function runParallelAudits(config: RuntimeConfig, state: ResearchState) {
+function graphAgentTelemetry(input: {
+  telemetry: GraphTelemetry | undefined
+  state: ResearchState
+  name: string
+  agentName: string
+  sessionId: string
+  input?: unknown
+}) {
+  if (!input.telemetry) return undefined
+
+  return {
+    run: input.telemetry.run,
+    parentObservation: input.telemetry.currentNode,
+    name: input.name,
+    input:
+      input.input ??
+      ({
+        requestId: input.state.requestId,
+        round: input.state.round,
+        status: input.state.status,
+      } satisfies Record<string, unknown>),
+    metadata: {
+      requestId: input.state.requestId,
+      round: input.state.round,
+      status: input.state.status,
+      agentName: input.agentName,
+      sessionId: input.sessionId,
+    },
+  }
+}
+
+async function runParallelAudits(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "auditing", "runParallelAudits")
   const request = requestLabel(state)
   const auditPromises: Promise<AuditResultRecord>[] = []
@@ -479,6 +523,18 @@ async function runParallelAudits(config: RuntimeConfig, state: ResearchState) {
         agent,
         prompt: auditPrompt(config, agent, request, state.draft),
         schema: auditResultSchema,
+        telemetry: graphAgentTelemetry({
+          telemetry,
+          state,
+          name: `agent.audit.${agent}`,
+          agentName: agent,
+          sessionId: sessionID,
+          input: {
+            requestId: state.requestId,
+            round: state.round,
+            agent,
+          },
+        }),
       }).then((response) => {
         if (!response.structured) {
           throw new Error(`Missing structured audit response from agent ${agent}`)
@@ -523,7 +579,7 @@ async function runParallelAudits(config: RuntimeConfig, state: ResearchState) {
   })
 }
 
-async function reviewFindingsByDrafter(config: RuntimeConfig, state: ResearchState) {
+async function reviewFindingsByDrafter(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "reviewing_findings", "reviewFindingsByDrafter")
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviewFindingsByDrafter")
 
@@ -550,6 +606,18 @@ async function reviewFindingsByDrafter(config: RuntimeConfig, state: ResearchSta
     agent: config.quorumConfig.designatedDrafter,
     prompt: drafterReviewPrompt(config, requestLabel(state), state.draft, findingsOnly, state.rebuttalTurnCounts),
     schema: drafterFindingReviewSchema,
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.reviewFindingsByDrafter",
+      agentName: config.quorumConfig.designatedDrafter,
+      sessionId: state.drafterSessionId,
+      input: {
+        requestId: state.requestId,
+        round: state.round,
+        findings: findingsOnly.length,
+      },
+    }),
   })
 
   if (!response.structured) {
@@ -604,7 +672,7 @@ async function reviewFindingsByDrafter(config: RuntimeConfig, state: ResearchSta
   return researchStateSchema.parse(nextState)
 }
 
-async function runTargetedRebuttals(config: RuntimeConfig, state: ResearchState) {
+async function runTargetedRebuttals(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "awaiting_auditor_rebuttal", "runTargetedRebuttals")
   if (!hasEligibleRebuttalTurn(config, state)) {
     throw new Error("No eligible rebuttal turns remain for runTargetedRebuttals")
@@ -631,6 +699,18 @@ async function runTargetedRebuttals(config: RuntimeConfig, state: ResearchState)
         agent,
         prompt: rebuttalPrompt(config, requestLabel(state), state.draft, rebuttals),
         schema: rebuttalBatchResponseSchema,
+        telemetry: graphAgentTelemetry({
+          telemetry,
+          state,
+          name: `agent.rebuttal.${agent}`,
+          agentName: agent,
+          sessionId: sessionID,
+          input: {
+            requestId: state.requestId,
+            round: state.round,
+            rebuttalCount: rebuttals.length,
+          },
+        }),
       }).then((response) => {
         if (!response.structured) {
           throw new Error(`Missing structured rebuttal response from agent ${agent}`)
@@ -691,7 +771,7 @@ async function runTargetedRebuttals(config: RuntimeConfig, state: ResearchState)
   })
 }
 
-async function reviewRebuttalResponses(config: RuntimeConfig, state: ResearchState) {
+async function reviewRebuttalResponses(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "reviewing_rebuttal_responses", "reviewRebuttalResponses")
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviewRebuttalResponses")
 
@@ -726,6 +806,18 @@ async function reviewRebuttalResponses(config: RuntimeConfig, state: ResearchSta
     agent: config.quorumConfig.designatedDrafter,
     prompt: rebuttalReviewPrompt(config, requestLabel(state), state.draft, disputed, state.rebuttalTurnCounts),
     schema: drafterFindingReviewSchema,
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.reviewRebuttalResponses",
+      agentName: config.quorumConfig.designatedDrafter,
+      sessionId: state.drafterSessionId,
+      input: {
+        requestId: state.requestId,
+        round: state.round,
+        disputed: disputed.length,
+      },
+    }),
   })
 
   if (!response.structured) {
@@ -852,7 +944,7 @@ async function aggregateConsensus(config: RuntimeConfig, state: ResearchState) {
   })
 }
 
-async function reviseDraft(config: RuntimeConfig, skillContent: string, state: ResearchState) {
+async function reviseDraft(config: RuntimeConfig, skillContent: string, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "revising", "reviseDraft")
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviseDraft")
   if (!state.outputPath) throw new Error("Missing outputPath during reviseDraft")
@@ -864,6 +956,18 @@ async function reviseDraft(config: RuntimeConfig, skillContent: string, state: R
     sessionID: state.drafterSessionId,
     agent: config.quorumConfig.designatedDrafter,
     prompt: revisionPrompt(config, state, skillContent),
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.reviseDraft",
+      agentName: config.quorumConfig.designatedDrafter,
+      sessionId: state.drafterSessionId,
+      input: {
+        requestId: state.requestId,
+        round: state.round,
+        unresolvedFindings: state.unresolvedFindings.length,
+      },
+    }),
   })
 
   return researchStateSchema.parse({
@@ -943,72 +1047,128 @@ function routeAfterAggregate(state: ResearchState) {
   throw new Error(`Invalid routeAfterAggregate status: ${state.status}`)
 }
 
-export function createGraph(config: RuntimeConfig, skillContent: string, observer?: RunObserver) {
+export function createGraph(
+  config: RuntimeConfig,
+  skillContent: string,
+  input?: {
+    observer?: RunObserver
+    telemetry?: GraphTelemetry
+  },
+) {
+  const observer = input?.observer
+  const graphTelemetry = input?.telemetry
+
+  async function withNodeTelemetry<T>(node: string, state: ResearchState | GraphInput, fn: () => Promise<T>) {
+    observeNode(observer, node)
+
+    const round = "round" in state ? state.round : 0
+    const status = "status" in state ? state.status : "starting"
+    const parentObservationId = graphTelemetry?.currentNode?.id ?? graphTelemetry?.run.rootObservation?.id
+    const observation = graphTelemetry?.run.traceId
+      ? await graphTelemetry.run.startObservation({
+          traceId: graphTelemetry.run.traceId,
+          parentObservationId,
+          name: `graph.${node}`,
+          input: {
+            node,
+            round,
+            status,
+          },
+          metadata: {
+            node,
+            round,
+            status,
+          },
+        })
+      : undefined
+
+    const previousNode = graphTelemetry?.currentNode
+    if (graphTelemetry && observation) {
+      graphTelemetry.currentNode = observation
+    }
+
+    try {
+      const result = await fn()
+      await graphTelemetry?.run.endObservation(observation, {
+        output: {
+          node,
+          round,
+          status: "completed",
+        },
+      })
+      return observeNodeResult(observer, node, result)
+    } catch (error) {
+      await graphTelemetry?.run.endObservation(observation, {
+        level: "ERROR",
+        statusMessage: error instanceof Error ? error.message : String(error),
+        metadata: {
+          node,
+          round,
+          status,
+        },
+      })
+      throw error
+    } finally {
+      if (graphTelemetry) {
+        graphTelemetry.currentNode = previousNode
+      }
+    }
+  }
+
   return new StateGraph(researchStateObjectSchema, {
     input: graphInputSchema,
   })
     .addNode(
       "ingestRequest",
-      async (input) => {
-        observeNode(observer, "ingestRequest")
-        return observeNodeResult(observer, "ingestRequest", await ingestRequest(input))
-      },
+      async (input) => withNodeTelemetry("ingestRequest", input, () => ingestRequest(input)),
       { input: graphInputSchema },
     )
-    .addNode("bootstrapRun", async (state) => {
-      observeNode(observer, "bootstrapRun")
-      const nextState = await bootstrapRun(config, state)
-      if (nextState.rootSessionId) {
-        observer?.onSessionCreated?.({ sessionID: nextState.rootSessionId, role: "root", requestId: nextState.requestId })
-      }
-      if (nextState.drafterSessionId) {
-        observer?.onSessionCreated?.({
-          sessionID: nextState.drafterSessionId,
-          role: "drafter",
-          requestId: nextState.requestId,
-        })
-      }
-      for (const [agent, sessionID] of Object.entries(nextState.auditSessionIds)) {
-        observer?.onSessionCreated?.({ sessionID, role: `auditor:${agent}`, requestId: nextState.requestId })
-      }
-      return observeNodeResult(observer, "bootstrapRun", nextState)
-    })
-    .addNode("draftInitial", async (state) => {
-      observeNode(observer, "draftInitial")
-      return observeNodeResult(observer, "draftInitial", await draftInitial(config, skillContent, state))
-    })
-    .addNode("runParallelAudits", async (state) => {
-      observeNode(observer, "runParallelAudits")
-      return observeNodeResult(observer, "runParallelAudits", await runParallelAudits(config, state))
-    })
-    .addNode("reviewFindingsByDrafter", async (state) => {
-      observeNode(observer, "reviewFindingsByDrafter")
-      return observeNodeResult(observer, "reviewFindingsByDrafter", await reviewFindingsByDrafter(config, state))
-    })
-    .addNode("runTargetedRebuttals", async (state) => {
-      observeNode(observer, "runTargetedRebuttals")
-      return observeNodeResult(observer, "runTargetedRebuttals", await runTargetedRebuttals(config, state))
-    })
-    .addNode("reviewRebuttalResponses", async (state) => {
-      observeNode(observer, "reviewRebuttalResponses")
-      return observeNodeResult(observer, "reviewRebuttalResponses", await reviewRebuttalResponses(config, state))
-    })
-    .addNode("aggregateConsensus", async (state) => {
-      observeNode(observer, "aggregateConsensus")
-      return observeNodeResult(observer, "aggregateConsensus", await aggregateConsensus(config, state))
-    })
-    .addNode("reviseDraft", async (state) => {
-      observeNode(observer, "reviseDraft")
-      return observeNodeResult(observer, "reviseDraft", await reviseDraft(config, skillContent, state))
-    })
-    .addNode("finalizeApprovedDraft", async (state) => {
-      observeNode(observer, "finalizeApprovedDraft")
-      return observeNodeResult(observer, "finalizeApprovedDraft", await finalizeApprovedDraft(config, state))
-    })
-    .addNode("finalizeFailedRun", async (state) => {
-      observeNode(observer, "finalizeFailedRun")
-      return observeNodeResult(observer, "finalizeFailedRun", await finalizeFailedRun(config, state))
-    })
+    .addNode("bootstrapRun", async (state) =>
+      withNodeTelemetry("bootstrapRun", state, async () => {
+        const nextState = await bootstrapRun(config, state)
+        if (nextState.rootSessionId) {
+          observer?.onSessionCreated?.({ sessionID: nextState.rootSessionId, role: "root", requestId: nextState.requestId })
+        }
+        if (nextState.drafterSessionId) {
+          observer?.onSessionCreated?.({
+            sessionID: nextState.drafterSessionId,
+            role: "drafter",
+            requestId: nextState.requestId,
+          })
+        }
+        for (const [agent, sessionID] of Object.entries(nextState.auditSessionIds)) {
+          observer?.onSessionCreated?.({ sessionID, role: `auditor:${agent}`, requestId: nextState.requestId })
+        }
+        return nextState
+      }),
+    )
+    .addNode("draftInitial", async (state) =>
+      withNodeTelemetry("draftInitial", state, () => draftInitial(config, skillContent, state, graphTelemetry)),
+    )
+    .addNode("runParallelAudits", async (state) =>
+      withNodeTelemetry("runParallelAudits", state, () => runParallelAudits(config, state, graphTelemetry)),
+    )
+    .addNode("reviewFindingsByDrafter", async (state) =>
+      withNodeTelemetry("reviewFindingsByDrafter", state, () => reviewFindingsByDrafter(config, state, graphTelemetry)),
+    )
+    .addNode("runTargetedRebuttals", async (state) =>
+      withNodeTelemetry("runTargetedRebuttals", state, () => runTargetedRebuttals(config, state, graphTelemetry)),
+    )
+    .addNode("reviewRebuttalResponses", async (state) =>
+      withNodeTelemetry("reviewRebuttalResponses", state, () => reviewRebuttalResponses(config, state, graphTelemetry)),
+    )
+    .addNode("aggregateConsensus", async (state) =>
+      withNodeTelemetry("aggregateConsensus", state, () => aggregateConsensus(config, state)),
+    )
+    .addNode("reviseDraft", async (state) =>
+      withNodeTelemetry("reviseDraft", state, () => reviseDraft(config, skillContent, state, graphTelemetry)),
+    )
+    .addNode("finalizeApprovedDraft", async (state) =>
+      withNodeTelemetry("finalizeApprovedDraft", state, () => finalizeApprovedDraft(config, state)),
+    )
+    .addNode("finalizeFailedRun", async (state) =>
+      withNodeTelemetry("finalizeFailedRun", state, () => finalizeFailedRun(config, state)),
+    )
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "bootstrapRun")
     .addEdge("bootstrapRun", "draftInitial")
