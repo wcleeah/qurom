@@ -5,12 +5,13 @@ import {
   type BridgeFactory,
   type EventBus,
   type RunnerEvent,
+  attachTelemetryListener,
   createEventBus,
   describeRunnerEvent,
   runQuorum,
 } from "../src/runner.ts"
 import type { RuntimeConfig } from "../src/config.ts"
-import type { TelemetryRun } from "../src/telemetry.ts"
+import type { TelemetryRun, TraceObservation } from "../src/telemetry.ts"
 
 const config: RuntimeConfig = {
   env: {
@@ -104,8 +105,17 @@ describe("createEventBus", () => {
       { kind: "session.error", sessionID: "s", role: "drafter", name: "X" },
       { kind: "agent.message.start", role: "drafter", messageID: "m" },
       { kind: "agent.reasoning", role: "drafter", text: "hmm" },
-      { kind: "agent.tool", role: "drafter", tool: "read", status: "running", callID: "c" },
-      { kind: "agent.permission", role: "drafter", permission: "edit" },
+      {
+        kind: "agent.tool",
+        role: "drafter",
+        tool: "read",
+        status: "running",
+        callID: "c",
+        sessionID: "s",
+        messageID: "m",
+        partID: "p",
+      },
+      { kind: "agent.permission", role: "drafter", permission: "edit", sessionID: "s" },
       { kind: "agent.telemetry", role: "drafter" },
       { kind: "result", runResult: { ok: true } },
     ]
@@ -209,5 +219,208 @@ describe("runQuorum", () => {
 
     expect(telemetryShutdownCalled).toBe(true)
     expect(bridgeStopCalled).toBe(true)
+  })
+})
+
+describe("attachTelemetryListener", () => {
+  type StartArgs = Parameters<TelemetryRun["startObservation"]>[0]
+  type EndArgs = Parameters<TelemetryRun["endObservation"]>
+
+  function makeRecordingTelemetry(opts: { startDelayMs?: number } = {}): {
+    telemetry: TelemetryRun
+    starts: StartArgs[]
+    ends: EndArgs[]
+    nextObservationId: () => string
+  } {
+    const starts: StartArgs[] = []
+    const ends: EndArgs[] = []
+    let counter = 0
+    const nextObservationId = () => `obs-${++counter}`
+
+    const telemetry: TelemetryRun = {
+      enabled: true,
+      runWithRootObservation: async (fn) => fn(),
+      async startObservation(input) {
+        starts.push(input)
+        if (opts.startDelayMs) await new Promise((r) => setTimeout(r, opts.startDelayMs))
+        const observation: TraceObservation = {
+          id: nextObservationId(),
+          traceId: input.traceId,
+          type: input.type ?? "Span",
+          observation: {} as TraceObservation["observation"],
+        }
+        return observation
+      },
+      async endObservation(observation, input) {
+        ends.push([observation, input])
+      },
+      updateTrace: async () => {},
+      shutdown: async () => {},
+    }
+
+    return { telemetry, starts, ends, nextObservationId }
+  }
+
+  function makeParent(): TraceObservation {
+    return {
+      id: "parent-obs",
+      traceId: "trace-1",
+      type: "Span",
+      observation: {} as TraceObservation["observation"],
+    }
+  }
+
+  test("opens a Tool observation under the registered session parent and closes it on completion", async () => {
+    const bus = createEventBus()
+    const { telemetry, starts, ends } = makeRecordingTelemetry()
+    const listener = attachTelemetryListener(bus, telemetry)
+
+    listener.trackSessionObservation("s1", makeParent())
+
+    bus.emit({
+      kind: "agent.tool",
+      role: "drafter",
+      tool: "webfetch",
+      status: "running",
+      callID: "c1",
+      sessionID: "s1",
+      messageID: "m1",
+      partID: "t1",
+      input: { url: "https://example.com" },
+    })
+    bus.emit({
+      kind: "agent.tool",
+      role: "drafter",
+      tool: "webfetch",
+      status: "completed",
+      callID: "c1",
+      sessionID: "s1",
+      messageID: "m1",
+      partID: "t1",
+      output: { ok: true },
+    })
+
+    await listener.dispose()
+
+    expect(starts).toHaveLength(1)
+    expect(starts[0]).toMatchObject({
+      traceId: "trace-1",
+      parentObservationId: "parent-obs",
+      name: "tool.webfetch",
+      type: "Tool",
+    })
+    expect(ends).toHaveLength(1)
+    expect(ends[0][1]?.output).toMatchObject({ tool: "webfetch", status: "completed", result: { ok: true } })
+  })
+
+  test("skips tool observations when no session parent has been registered", async () => {
+    const bus = createEventBus()
+    const { telemetry, starts, ends } = makeRecordingTelemetry()
+    const listener = attachTelemetryListener(bus, telemetry)
+
+    bus.emit({
+      kind: "agent.tool",
+      role: "drafter",
+      tool: "webfetch",
+      status: "running",
+      callID: "c1",
+      sessionID: "untracked",
+      messageID: "m1",
+      partID: "t1",
+    })
+    bus.emit({
+      kind: "agent.tool",
+      role: "drafter",
+      tool: "webfetch",
+      status: "completed",
+      callID: "c1",
+      sessionID: "untracked",
+      messageID: "m1",
+      partID: "t1",
+    })
+
+    await listener.dispose()
+
+    expect(starts).toHaveLength(0)
+    expect(ends).toHaveLength(0)
+  })
+
+  test("serializes start before end for the same tool key (per-key promise chain)", async () => {
+    const bus = createEventBus()
+    // 30ms start delay forces the running event to still be in-flight when completed arrives.
+    const { telemetry, starts, ends } = makeRecordingTelemetry({ startDelayMs: 30 })
+    const listener = attachTelemetryListener(bus, telemetry)
+
+    listener.trackSessionObservation("s1", makeParent())
+
+    bus.emit({
+      kind: "agent.tool",
+      role: "drafter",
+      tool: "webfetch",
+      status: "running",
+      callID: "c1",
+      sessionID: "s1",
+      messageID: "m1",
+      partID: "t1",
+    })
+    bus.emit({
+      kind: "agent.tool",
+      role: "drafter",
+      tool: "webfetch",
+      status: "completed",
+      callID: "c1",
+      sessionID: "s1",
+      messageID: "m1",
+      partID: "t1",
+    })
+
+    await listener.dispose()
+
+    expect(starts).toHaveLength(1)
+    expect(ends).toHaveLength(1)
+    // The end must have received an observation produced by the prior start, not undefined.
+    expect(ends[0][0]).toBeDefined()
+  })
+
+  test("attaches captured permissions from agent.permission to the tool observation metadata", async () => {
+    const bus = createEventBus()
+    const { telemetry, starts, ends } = makeRecordingTelemetry()
+    const listener = attachTelemetryListener(bus, telemetry)
+
+    listener.trackSessionObservation("s1", makeParent())
+
+    bus.emit({
+      kind: "agent.permission",
+      role: "drafter",
+      permission: "edit",
+      sessionID: "s1",
+      messageID: "m1",
+      callID: "c1",
+    })
+    bus.emit({
+      kind: "agent.tool",
+      role: "drafter",
+      tool: "edit",
+      status: "running",
+      callID: "c1",
+      sessionID: "s1",
+      messageID: "m1",
+      partID: "t1",
+    })
+    bus.emit({
+      kind: "agent.tool",
+      role: "drafter",
+      tool: "edit",
+      status: "completed",
+      callID: "c1",
+      sessionID: "s1",
+      messageID: "m1",
+      partID: "t1",
+    })
+
+    await listener.dispose()
+
+    expect(starts[0]?.metadata?.permissions).toEqual(["edit"])
+    expect(ends[0][1]?.metadata?.permissions).toEqual(["edit"])
   })
 })

@@ -31,6 +31,7 @@ type StreamController = {
   end: () => void
   returnCalls: number
   subscribeCalls: number
+  lastSubscribeArgs?: unknown
 }
 
 function makeStubClient(): { client: unknown; controller: StreamController } {
@@ -43,8 +44,9 @@ function makeStubClient(): { client: unknown; controller: StreamController } {
 
   const client = {
     event: {
-      subscribe: async (_args: unknown, opts: { signal: AbortSignal }) => {
+      subscribe: async (args: unknown, opts: { signal: AbortSignal }) => {
         controller.subscribeCalls += 1
+        controller.lastSubscribeArgs = args
 
         const queue: unknown[] = []
         let resolveNext: ((value: IteratorResult<unknown>) => void) | undefined
@@ -158,7 +160,12 @@ describe("createOpencodeEventBridge", () => {
     expect(err).toMatchObject({ kind: "session.error", role: "drafter", name: "BoomError", message: "kapow" })
 
     const perm = events.find((e) => e.kind === "agent.permission")
-    expect(perm).toMatchObject({ kind: "agent.permission", role: "drafter", permission: "read" })
+    expect(perm).toMatchObject({
+      kind: "agent.permission",
+      role: "drafter",
+      permission: "read",
+      sessionID: "s1",
+    })
 
     const start = events.find((e) => e.kind === "agent.message.start")
     expect(start).toMatchObject({ kind: "agent.message.start", role: "drafter", messageID: "m1" })
@@ -289,11 +296,30 @@ describe("createOpencodeEventBridge", () => {
       tool: "webfetch",
       status: "running",
       callID: "c1",
+      sessionID: "s1",
+      messageID: "m1",
+      partID: "t1",
     })
 
     const telemetryEvents = events.filter((e) => e.kind === "agent.telemetry")
     expect(telemetryEvents).toHaveLength(1)
     expect(telemetryEvents[0]).toMatchObject({ kind: "agent.telemetry", role: "drafter", toolCallsTotal: 1 })
+
+    await bridge.stop()
+  })
+
+  test("scopes the SSE subscription to the configured opencode directory", async () => {
+    const bus = createEventBus()
+    const { client, controller } = makeStubClient()
+
+    const bridge = createOpencodeEventBridge(baseConfig, {
+      bus,
+      clientFactory: () => client as never,
+    })
+
+    await bridge.start()
+    expect(controller.subscribeCalls).toBe(1)
+    expect(controller.lastSubscribeArgs).toMatchObject({ directory: baseConfig.env.OPENCODE_DIRECTORY })
 
     await bridge.stop()
   })

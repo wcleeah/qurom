@@ -2,13 +2,11 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 
 import type { RuntimeConfig } from "./config"
 import type { Bridge, EventBus, RunnerEvent } from "./runner"
-import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 type OpencodeClient = ReturnType<typeof createOpencodeClient>
 
 export type OpencodeBridgeOptions = {
   bus: EventBus
-  telemetry?: TelemetryRun
   // Test seam: inject a stub client. Defaults to the real opencode SDK client.
   clientFactory?: (config: RuntimeConfig) => OpencodeClient
 }
@@ -16,10 +14,6 @@ export type OpencodeBridgeOptions = {
 function formatErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message
   return String(error)
-}
-
-function permissionKey(input: { sessionID: string; messageID: string; callID: string }) {
-  return `${input.sessionID}:${input.messageID}:${input.callID}`
 }
 
 function defaultClientFactory(config: RuntimeConfig): OpencodeClient {
@@ -37,21 +31,17 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
   const client = (opts.clientFactory ?? defaultClientFactory)(config)
 
   const trackedSessions = new Map<string, string>()
-  const sessionObservations = new Map<string, TraceObservation>()
   const activeReasoningParts = new Set<string>()
   const reasoningBuffers = new Map<string, string>()
   const seenAssistantMessages = new Set<string>()
   const seenPermissionRequests = new Set<string>()
-  const toolPermissions = new Map<string, string[]>()
   const seenToolStates = new Set<string>()
-  const toolObservations = new Map<string, TraceObservation>()
   const lastSessionStatuses = new Map<string, string>()
   const roleCounters = new Map<string, { tools: number; errors: number }>()
   const capturedEvents: unknown[] = []
 
   let abortController = new AbortController()
   let streamTask: Promise<void> | undefined
-  let telemetryRun: TelemetryRun | undefined = opts.telemetry
   let unsubscribeBus: (() => void) | undefined
 
   function reasoningPartKey(sessionID: string, messageID: string, partID: string) {
@@ -118,10 +108,8 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
 
   async function consumeStream() {
     const response = await client.event.subscribe(
-      {},
-      {
-        signal: abortController.signal,
-      },
+      { directory: config.env.OPENCODE_DIRECTORY },
+      { signal: abortController.signal },
     )
 
     for await (const event of response.stream) {
@@ -173,18 +161,14 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
 
         seenPermissionRequests.add(event.properties.id)
 
-        if (event.properties.tool) {
-          const key = permissionKey({
-            sessionID: event.properties.sessionID,
-            messageID: event.properties.tool.messageID,
-            callID: event.properties.tool.callID,
-          })
-          const permissions = toolPermissions.get(key) ?? []
-          permissions.push(event.properties.permission)
-          toolPermissions.set(key, permissions)
-        }
-
-        bus.emit({ kind: "agent.permission", role, permission: event.properties.permission })
+        bus.emit({
+          kind: "agent.permission",
+          role,
+          permission: event.properties.permission,
+          sessionID: event.properties.sessionID,
+          messageID: event.properties.tool?.messageID,
+          callID: event.properties.tool?.callID,
+        })
         continue
       }
 
@@ -240,86 +224,37 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
       if (part.type !== "tool") continue
       if (part.state.status === "pending") continue
 
-      const toolObservationKey = `${event.properties.sessionID}:${part.messageID}:${part.id}`
-      const toolPermissionKey = permissionKey({
-        sessionID: event.properties.sessionID,
-        messageID: part.messageID,
-        callID: part.callID,
-      })
-      const toolStateKey = `${toolObservationKey}:${part.state.status}`
+      const toolStateKey = `${event.properties.sessionID}:${part.messageID}:${part.id}:${part.state.status}`
       if (seenToolStates.has(toolStateKey)) continue
-
       seenToolStates.add(toolStateKey)
-
-      if (!toolObservations.has(toolObservationKey)) {
-        const parentObservation = sessionObservations.get(event.properties.sessionID)
-        const toolObservation =
-          parentObservation && telemetryRun
-            ? await telemetryRun.startObservation({
-                traceId: parentObservation.traceId,
-                parentObservationId: parentObservation.id,
-                name: `tool.${part.tool}`,
-                type: "Tool",
-                input: {
-                  tool: part.tool,
-                  callId: part.callID,
-                  args: part.state.input,
-                },
-                metadata: {
-                  sessionId: event.properties.sessionID,
-                  messageId: part.messageID,
-                  partId: part.id,
-                  callId: part.callID,
-                  permissions: toolPermissions.get(toolPermissionKey),
-                  ...("metadata" in part.state && part.state.metadata ? { toolMetadata: part.state.metadata } : {}),
-                },
-              })
-            : undefined
-
-        if (toolObservation) {
-          toolObservations.set(toolObservationKey, toolObservation)
-        }
-      }
-
-      const toolObservation = toolObservations.get(toolObservationKey)
-      if (part.state.status === "completed" || part.state.status === "error") {
-        await telemetryRun?.endObservation(toolObservation, {
-          output: {
-            tool: part.tool,
-            status: part.state.status,
-            result: part.state.status === "completed" ? part.state.output : undefined,
-            error: part.state.status === "error" ? part.state.error : undefined,
-          },
-          metadata: {
-            sessionId: event.properties.sessionID,
-            callId: part.callID,
-            permissions: toolPermissions.get(toolPermissionKey),
-            ...("metadata" in part.state && part.state.metadata ? { toolMetadata: part.state.metadata } : {}),
-          },
-          level: part.state.status === "error" ? "ERROR" : undefined,
-        })
-        toolObservations.delete(toolObservationKey)
-        toolPermissions.delete(toolPermissionKey)
-      }
 
       const status: "running" | "completed" | "error" =
         part.state.status === "completed" ? "completed" : part.state.status === "error" ? "error" : "running"
       const errorText =
         part.state.status === "error" && part.state.error ? formatErrorMessage(part.state.error) : undefined
+      const partMetadata = "metadata" in part.state && part.state.metadata ? part.state.metadata : undefined
+      const output =
+        part.state.status === "completed" && "output" in part.state ? part.state.output : undefined
 
-      bus.emit({ kind: "agent.tool", role, tool: part.tool, status, callID: part.callID, error: errorText })
+      bus.emit({
+        kind: "agent.tool",
+        role,
+        tool: part.tool,
+        status,
+        callID: part.callID,
+        sessionID: event.properties.sessionID,
+        messageID: part.messageID,
+        partID: part.id,
+        input: part.state.input,
+        output,
+        metadata: partMetadata as Record<string, unknown> | undefined,
+        error: errorText,
+      })
       bumpToolCounter(role, status)
     }
   }
 
   return {
-    setTelemetryRun(run: TelemetryRun | undefined) {
-      telemetryRun = run
-    },
-    trackSessionObservation(sessionID: string, observation: TraceObservation | undefined) {
-      if (!observation) return
-      sessionObservations.set(sessionID, observation)
-    },
     async start() {
       if (streamTask) return
 

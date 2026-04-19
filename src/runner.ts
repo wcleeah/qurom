@@ -27,9 +27,22 @@ export type RunnerEvent =
       tool: string
       status: "running" | "completed" | "error"
       callID: string
+      sessionID: string
+      messageID: string
+      partID: string
+      input?: unknown
+      output?: unknown
+      metadata?: Record<string, unknown>
       error?: string
     }
-  | { kind: "agent.permission"; role: string; permission: string }
+  | {
+      kind: "agent.permission"
+      role: string
+      permission: string
+      sessionID: string
+      messageID?: string
+      callID?: string
+    }
   | { kind: "agent.telemetry"; role: string; tokensIn?: number; tokensOut?: number; toolCallsTotal?: number }
   | { kind: "result"; runResult: unknown }
 
@@ -66,14 +79,9 @@ export function createEventBus(): EventBus {
 export type Bridge = {
   start: () => Promise<void>
   stop: () => Promise<void>
-  setTelemetryRun?: (run: TelemetryRun | undefined) => void
-  trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
 }
 
-export type BridgeFactory = (
-  config: RuntimeConfig,
-  opts: { bus: EventBus; telemetry?: TelemetryRun },
-) => Bridge
+export type BridgeFactory = (config: RuntimeConfig, opts: { bus: EventBus }) => Bridge
 
 export type RuntimePrerequisites = Awaited<ReturnType<typeof validateRuntimePrerequisites>>
 
@@ -98,6 +106,132 @@ export type RunResult = {
   raw: unknown
 }
 
+function toolKey(event: { sessionID: string; messageID: string; partID: string }) {
+  return `${event.sessionID}:${event.messageID}:${event.partID}`
+}
+
+function permissionKey(input: { sessionID: string; messageID?: string; callID?: string }) {
+  return `${input.sessionID}:${input.messageID ?? ""}:${input.callID ?? ""}`
+}
+
+// Subscribes to bus.agent.tool / bus.agent.permission and owns Langfuse Tool span lifecycle.
+// Per-key promise chain preserves the natural ordering the bridge stream provides while
+// still letting other tool keys progress in parallel.
+// Exported for direct testing; runQuorum is the only production caller.
+export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) {
+  const sessionObservations = new Map<string, TraceObservation>()
+  const toolObservations = new Map<string, TraceObservation>()
+  const toolPermissions = new Map<string, string[]>()
+  const pending = new Map<string, Promise<void>>()
+
+  const off = bus.on((event) => {
+    if (event.kind === "agent.permission") {
+      if (!event.messageID || !event.callID) return
+      const key = permissionKey(event)
+      const list = toolPermissions.get(key) ?? []
+      list.push(event.permission)
+      toolPermissions.set(key, list)
+      return
+    }
+
+    if (event.kind !== "agent.tool") return
+
+    const key = toolKey(event)
+    const permKey = permissionKey({
+      sessionID: event.sessionID,
+      messageID: event.messageID,
+      callID: event.callID,
+    })
+    const snapshot = { ...event, permKey }
+
+    const previous = pending.get(key) ?? Promise.resolve()
+    const next = previous.then(() => handle(snapshot)).catch(() => {})
+    pending.set(
+      key,
+      next.finally(() => {
+        if (pending.get(key) === next) pending.delete(key)
+      }),
+    )
+  })
+
+  async function handle(snapshot: {
+    role: string
+    tool: string
+    status: "running" | "completed" | "error"
+    callID: string
+    sessionID: string
+    messageID: string
+    partID: string
+    input?: unknown
+    output?: unknown
+    metadata?: Record<string, unknown>
+    error?: string
+    permKey: string
+  }) {
+    const key = toolKey(snapshot)
+    const existing = toolObservations.get(key)
+
+    if (!existing) {
+      const parent = sessionObservations.get(snapshot.sessionID)
+      if (!parent) return // No parent span available yet; skip silently.
+
+      const observation = await telemetry.startObservation({
+        traceId: parent.traceId,
+        parentObservationId: parent.id,
+        name: `tool.${snapshot.tool}`,
+        type: "Tool",
+        input: {
+          tool: snapshot.tool,
+          callId: snapshot.callID,
+          args: snapshot.input,
+        },
+        metadata: {
+          sessionId: snapshot.sessionID,
+          messageId: snapshot.messageID,
+          partId: snapshot.partID,
+          callId: snapshot.callID,
+          permissions: toolPermissions.get(snapshot.permKey),
+          ...(snapshot.metadata ? { toolMetadata: snapshot.metadata } : {}),
+        },
+      })
+      if (observation) toolObservations.set(key, observation)
+    }
+
+    if (snapshot.status === "completed" || snapshot.status === "error") {
+      const observation = toolObservations.get(key)
+      await telemetry.endObservation(observation, {
+        output: {
+          tool: snapshot.tool,
+          status: snapshot.status,
+          result: snapshot.status === "completed" ? snapshot.output : undefined,
+          error: snapshot.status === "error" ? snapshot.error : undefined,
+        },
+        metadata: {
+          sessionId: snapshot.sessionID,
+          callId: snapshot.callID,
+          permissions: toolPermissions.get(snapshot.permKey),
+          ...(snapshot.metadata ? { toolMetadata: snapshot.metadata } : {}),
+        },
+        level: snapshot.status === "error" ? "ERROR" : undefined,
+      })
+      toolObservations.delete(key)
+      toolPermissions.delete(snapshot.permKey)
+    }
+  }
+
+  function trackSessionObservation(sessionID: string, observation: TraceObservation | undefined) {
+    if (!observation) return
+    sessionObservations.set(sessionID, observation)
+  }
+
+  async function dispose() {
+    off()
+    await Promise.allSettled([...pending.values()])
+  }
+
+  return { trackSessionObservation, dispose }
+}
+
 export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
   const { config, prerequisites, request, bus, signal } = args
   const bridgeFactory = args.bridgeFactory ?? createOpencodeEventBridge
@@ -112,8 +246,8 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
     documentPath: request.inputMode === "document" ? request.documentPath : undefined,
   })
 
-  const bridge = bridgeFactory(config, { bus, telemetry })
-  bridge.setTelemetryRun?.(telemetry)
+  const bridge = bridgeFactory(config, { bus })
+  const telemetryListener = attachTelemetryListener(bus, telemetry)
 
   bus.emit({
     kind: "lifecycle",
@@ -142,9 +276,7 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
         },
         telemetry: {
           run: telemetry,
-          trackSessionObservation(sessionID, observation) {
-            bridge.trackSessionObservation?.(sessionID, observation)
-          },
+          trackSessionObservation: telemetryListener.trackSessionObservation,
         },
       })
 
@@ -206,6 +338,11 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
     })
     throw error
   } finally {
+    try {
+      await telemetryListener.dispose()
+    } catch {
+      // Telemetry listener disposal errors must not mask the original failure.
+    }
     try {
       await telemetry.shutdown()
     } catch {
