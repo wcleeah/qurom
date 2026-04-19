@@ -36,6 +36,7 @@ export type RunObserver = {
 type GraphTelemetry = {
   run: TelemetryRun
   currentNode?: TraceObservation
+  trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
 }
 
 function observeNode(observer: RunObserver | undefined, node: string) {
@@ -384,7 +385,7 @@ function buildRunSummary(state: ResearchState, outcome: AggregatedFindings["outc
 
 async function ingestRequest(input: GraphInput) {
   const parsed = inputRequestSchema.parse(input)
-  const requestId = randomUUID()
+  const requestId = input.requestId ?? randomUUID()
   const baseState = {
     requestId,
     round: 0,
@@ -482,6 +483,7 @@ function graphAgentTelemetry(input: {
   name: string
   agentName: string
   sessionId: string
+  type?: "Span" | "Agent" | "Chain" | "Evaluator" | "Generation" | "Tool"
   input?: unknown
 }) {
   if (!input.telemetry) return undefined
@@ -490,6 +492,7 @@ function graphAgentTelemetry(input: {
     run: input.telemetry.run,
     parentObservation: input.telemetry.currentNode,
     name: input.name,
+    type: input.type ?? "Agent",
     input:
       input.input ??
       ({
@@ -504,6 +507,7 @@ function graphAgentTelemetry(input: {
       agentName: input.agentName,
       sessionId: input.sessionId,
     },
+    trackSessionObservation: input.telemetry.trackSessionObservation,
   }
 }
 
@@ -550,11 +554,13 @@ async function runParallelAudits(config: RuntimeConfig, state: ResearchState, te
           })
         }
 
-        return auditResultRecordSchema.parse({
+        const record = auditResultRecordSchema.parse({
           ...response.structured,
           agent,
           findings,
         })
+
+        return record
       }),
     )
   }
@@ -688,70 +694,124 @@ async function runTargetedRebuttals(config: RuntimeConfig, state: ResearchState,
 
   const responsePromises: Promise<Array<[string, RebuttalResponseRecord]>>[] = []
 
-  for (const [agent, rebuttals] of Object.entries(rebuttalsByAgent)) {
-    const sessionID = state.auditSessionIds[agent]
-    if (!sessionID) throw new Error(`Missing audit session for rebuttal agent ${agent}`)
+  async function runAgentRebuttal(
+    agent: string,
+    rebuttals: Rebuttal[],
+    sessionID: string,
+  ): Promise<Array<[string, RebuttalResponseRecord]>> {
+    const chainObservation = await telemetry?.run.startObservation({
+      traceId: telemetry.run.traceId ?? "",
+      parentObservationId: telemetry.currentNode?.id,
+      name: `chain.rebuttal.${agent}`,
+      type: "Chain",
+      input: {
+        requestId: state.requestId,
+        round: state.round,
+        rebuttalCount: rebuttals.length,
+      },
+      metadata: {
+        requestId: state.requestId,
+        round: state.round,
+        agentName: agent,
+        sessionId: sessionID,
+      },
+    })
 
-    responsePromises.push(
-      promptAgent({
+    try {
+      const response = await promptAgent({
         config,
         sessionID,
         agent,
         prompt: rebuttalPrompt(config, requestLabel(state), state.draft, rebuttals),
         schema: rebuttalBatchResponseSchema,
-        telemetry: graphAgentTelemetry({
-          telemetry,
-          state,
-          name: `agent.rebuttal.${agent}`,
-          agentName: agent,
-          sessionId: sessionID,
-          input: {
-            requestId: state.requestId,
-            round: state.round,
-            rebuttalCount: rebuttals.length,
-          },
-        }),
-      }).then((response) => {
-        if (!response.structured) {
-          throw new Error(`Missing structured rebuttal response from agent ${agent}`)
-        }
-
-        const expectedFindingIds = new Set<string>()
-        for (const rebuttal of rebuttals) {
-          expectedFindingIds.add(rebuttal.findingId)
-        }
-
-        const receivedFindingIds = new Set<string>()
-
-        const turnResponses: Array<[string, RebuttalResponseRecord]> = []
-
-        for (const entry of response.structured.responses) {
-          const active = rebuttals.find((rebuttal) => rebuttal.findingId === entry.findingId)
-          if (!active) {
-            throw new Error(`No active rebuttal found for ${agent}:${entry.findingId}`)
-          }
-
-          receivedFindingIds.add(entry.findingId)
-
-          turnResponses.push([
-            findingStateKey(active),
-            {
-              ...entry,
-              agent,
-              turn: state.rebuttalTurnCounts[active.findingId] ?? 1,
+        telemetry: !telemetry
+          ? undefined
+          : {
+              run: telemetry.run,
+              parentObservation: chainObservation ?? telemetry.currentNode,
+              trackSessionObservation: telemetry.trackSessionObservation,
+              name: `agent.rebuttal.${agent}`,
+              input: {
+                requestId: state.requestId,
+                round: state.round,
+                rebuttalCount: rebuttals.length,
+              },
+              metadata: {
+                requestId: state.requestId,
+                round: state.round,
+                status: state.status,
+                agentName: agent,
+                sessionId: sessionID,
+              },
             },
-          ])
+      })
+
+      if (!response.structured) {
+        throw new Error(`Missing structured rebuttal response from agent ${agent}`)
+      }
+
+      const expectedFindingIds = new Set<string>()
+      for (const rebuttal of rebuttals) {
+        expectedFindingIds.add(rebuttal.findingId)
+      }
+
+      const receivedFindingIds = new Set<string>()
+      const turnResponses: Array<[string, RebuttalResponseRecord]> = []
+
+      for (const entry of response.structured.responses) {
+        const active = rebuttals.find((rebuttal) => rebuttal.findingId === entry.findingId)
+        if (!active) {
+          throw new Error(`No active rebuttal found for ${agent}:${entry.findingId}`)
         }
 
-        for (const findingId of expectedFindingIds) {
-          if (!receivedFindingIds.has(findingId)) {
-            throw new Error(`Missing rebuttal response for ${agent}:${findingId}`)
-          }
-        }
+        receivedFindingIds.add(entry.findingId)
 
-        return turnResponses
-      }),
-    )
+        turnResponses.push([
+          findingStateKey(active),
+          {
+            ...entry,
+            agent,
+            turn: state.rebuttalTurnCounts[active.findingId] ?? 1,
+          },
+        ])
+      }
+
+      for (const findingId of expectedFindingIds) {
+        if (!receivedFindingIds.has(findingId)) {
+          throw new Error(`Missing rebuttal response for ${agent}:${findingId}`)
+        }
+      }
+
+      await telemetry?.run.endObservation(chainObservation, {
+        output: {
+          rebuttalCount: turnResponses.length,
+        },
+        metadata: {
+          requestId: state.requestId,
+          round: state.round,
+          agentName: agent,
+        },
+      })
+
+      return turnResponses
+    } catch (error) {
+      await telemetry?.run.endObservation(chainObservation, {
+        level: "ERROR",
+        statusMessage: error instanceof Error ? error.message : String(error),
+        metadata: {
+          requestId: state.requestId,
+          round: state.round,
+          agentName: agent,
+        },
+      })
+      throw error
+    }
+  }
+
+  for (const [agent, rebuttals] of Object.entries(rebuttalsByAgent)) {
+    const sessionID = state.auditSessionIds[agent]
+    if (!sessionID) throw new Error(`Missing audit session for rebuttal agent ${agent}`)
+    responsePromises.push(runAgentRebuttal(agent, rebuttals, sessionID))
   }
 
   const responseEntries = await Promise.all(responsePromises)
@@ -944,6 +1004,28 @@ async function aggregateConsensus(config: RuntimeConfig, state: ResearchState) {
   })
 }
 
+function summarizeNodeResult(result: unknown) {
+  if (!result || typeof result !== "object") return undefined
+
+  if (researchStateSchema.safeParse(result).success) {
+    const state = result as ResearchState
+    return {
+      requestId: state.requestId,
+      round: state.round,
+      status: state.status,
+      approvedAgents: state.approvedAgents.length,
+      audits: state.audits.length,
+      activeRebuttals: Object.keys(state.activeRebuttals).length,
+      rebuttalResponses: Object.keys(state.currentRebuttalResponsesByFinding).length,
+      unresolvedFindings: state.unresolvedFindings.length,
+      failureReason: state.failureReason,
+      outputPath: state.outputPath,
+    }
+  }
+
+  return result
+}
+
 async function reviseDraft(config: RuntimeConfig, skillContent: string, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "revising", "reviseDraft")
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviseDraft")
@@ -1090,7 +1172,7 @@ export function createGraph(
     try {
       const result = await fn()
       await graphTelemetry?.run.endObservation(observation, {
-        output: {
+        output: summarizeNodeResult(result) ?? {
           node,
           round,
           status: "completed",

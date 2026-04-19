@@ -1,11 +1,14 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 
 import type { RuntimeConfig } from "./config"
+import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 type RunProgressConsole = {
   enabled: boolean
   trackedSessionIds: () => string[]
   trackSession: (sessionID: string, role: string) => void
+  trackTelemetry: (sessionID: string, observation: TraceObservation | undefined) => void
+  setTelemetryRun: (telemetry: TelemetryRun | undefined) => void
   trackNodeStart: (node: string) => void
   trackNodeEnd: (node: string) => void
   persistArtifacts: (runDir: string) => Promise<void>
@@ -23,6 +26,10 @@ function formatErrorMessage(error: unknown) {
   return String(error)
 }
 
+function permissionKey(input: { sessionID: string; messageID: string; callID: string }) {
+  return `${input.sessionID}:${input.messageID}:${input.callID}`
+}
+
 export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressConsole {
   const captureEvents = config.env.QUORUM_CAPTURE_OPENCODE_EVENTS === "1"
   const captureSyncHistory = config.env.QUORUM_CAPTURE_SYNC_HISTORY === "1"
@@ -33,15 +40,19 @@ export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressCon
     directory: config.env.OPENCODE_DIRECTORY,
   })
   const trackedSessions = new Map<string, string>()
+  const sessionObservations = new Map<string, TraceObservation>()
   const activeReasoningParts = new Set<string>()
   const reasoningBuffers = new Map<string, string>()
   const seenAssistantMessages = new Set<string>()
   const seenPermissionRequests = new Set<string>()
+  const toolPermissions = new Map<string, string[]>()
   const seenToolStates = new Set<string>()
+  const toolObservations = new Map<string, TraceObservation>()
   const lastSessionStatuses = new Map<string, string>()
   const capturedEvents: unknown[] = []
   const abortController = new AbortController()
   let streamTask: Promise<void> | undefined
+  let telemetryRun: TelemetryRun | undefined
 
   function logProgress(role: string | undefined, text: string) {
     if (!liveConsole) return
@@ -78,6 +89,8 @@ export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressCon
         return []
       },
       trackSession() {},
+      trackTelemetry() {},
+      setTelemetryRun() {},
       trackNodeStart() {},
       trackNodeEnd() {},
       async persistArtifacts() {},
@@ -94,6 +107,13 @@ export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressCon
     trackSession(sessionID, role) {
       trackedSessions.set(sessionID, role)
       logProgress(role, `session created ${sessionID}`)
+    },
+    trackTelemetry(sessionID, observation) {
+      if (!observation) return
+      sessionObservations.set(sessionID, observation)
+    },
+    setTelemetryRun(telemetry) {
+      telemetryRun = telemetry
     },
     trackNodeStart(node) {
       logProgress(undefined, `node start ${node}`)
@@ -179,6 +199,18 @@ export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressCon
             if (seenPermissionRequests.has(event.properties.id)) continue
 
             seenPermissionRequests.add(event.properties.id)
+
+            if (event.properties.tool) {
+              const key = permissionKey({
+                sessionID: event.properties.sessionID,
+                messageID: event.properties.tool.messageID,
+                callID: event.properties.tool.callID,
+              })
+              const permissions = toolPermissions.get(key) ?? []
+              permissions.push(event.properties.permission)
+              toolPermissions.set(key, permissions)
+            }
+
             logProgress(role, `permission asked ${event.properties.permission}`)
             continue
           }
@@ -235,10 +267,68 @@ export function createTelemetryEnrichment(config: RuntimeConfig): RunProgressCon
           if (part.type !== "tool") continue
           if (part.state.status === "pending") continue
 
-          const toolStateKey = `${part.messageID}:${part.id}:${part.state.status}`
+          const toolObservationKey = `${event.properties.sessionID}:${part.messageID}:${part.id}`
+          const toolPermissionKey = permissionKey({
+            sessionID: event.properties.sessionID,
+            messageID: part.messageID,
+            callID: part.callID,
+          })
+          const toolStateKey = `${toolObservationKey}:${part.state.status}`
           if (seenToolStates.has(toolStateKey)) continue
 
           seenToolStates.add(toolStateKey)
+
+          if (!toolObservations.has(toolObservationKey)) {
+            const parentObservation = sessionObservations.get(event.properties.sessionID)
+            const toolObservation =
+              parentObservation && telemetryRun
+                ? await telemetryRun.startObservation({
+                    traceId: parentObservation.traceId,
+                    parentObservationId: parentObservation.id,
+                    name: `tool.${part.tool}`,
+                    type: "Tool",
+                    input: {
+                      tool: part.tool,
+                      callId: part.callID,
+                      args: part.state.input,
+                    },
+                    metadata: {
+                      sessionId: event.properties.sessionID,
+                      messageId: part.messageID,
+                      partId: part.id,
+                      callId: part.callID,
+                      permissions: toolPermissions.get(toolPermissionKey),
+                      ...("metadata" in part.state && part.state.metadata ? { toolMetadata: part.state.metadata } : {}),
+                    },
+                  })
+                : undefined
+
+            if (toolObservation) {
+              toolObservations.set(toolObservationKey, toolObservation)
+            }
+          }
+
+          const toolObservation = toolObservations.get(toolObservationKey)
+          if (part.state.status === "completed" || part.state.status === "error") {
+            await telemetryRun?.endObservation(toolObservation, {
+              output: {
+                tool: part.tool,
+                status: part.state.status,
+                result: part.state.status === "completed" ? part.state.output : undefined,
+                error: part.state.status === "error" ? part.state.error : undefined,
+              },
+              metadata: {
+                sessionId: event.properties.sessionID,
+                callId: part.callID,
+                permissions: toolPermissions.get(toolPermissionKey),
+                ...("metadata" in part.state && part.state.metadata ? { toolMetadata: part.state.metadata } : {}),
+              },
+              level: part.state.status === "error" ? "ERROR" : undefined,
+            })
+            toolObservations.delete(toolObservationKey)
+            toolPermissions.delete(toolPermissionKey)
+          }
+
           logProgress(
             role,
             `tool ${part.tool} ${part.state.status === "error" ? "failed" : part.state.status}`,

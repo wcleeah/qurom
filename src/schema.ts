@@ -38,6 +38,7 @@ export const graphInputSchema = z.object({
   inputMode: inputModeSchema,
   topic: nonEmptyStringSchema.optional(),
   documentPath: nonEmptyStringSchema.optional(),
+  requestId: nonEmptyStringSchema.optional(),
 })
 
 const auditFindingSchema = z.object({

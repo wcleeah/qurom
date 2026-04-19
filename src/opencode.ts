@@ -65,6 +65,20 @@ function parseStructuredResponse<T>(schema: z.ZodType<T>, text: string) {
   return schema.parse(JSON.parse(text))
 }
 
+function generationMetadata(input: {
+  agent: string
+  sessionID: string
+  provider?: string
+  variant?: string
+}) {
+  return {
+    agentName: input.agent,
+    sessionId: input.sessionID,
+    provider: input.provider,
+    variant: input.variant,
+  }
+}
+
 export async function promptAgent<T>(input: {
   config: RuntimeConfig
   sessionID: string
@@ -75,6 +89,7 @@ export async function promptAgent<T>(input: {
   telemetry?: {
     run: TelemetryRun
     parentObservation?: TraceObservation
+    trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
     name: string
     input?: unknown
     metadata?: unknown
@@ -105,11 +120,35 @@ export async function promptAgent<T>(input: {
         })
       : undefined
 
+  input.telemetry?.trackSessionObservation?.(input.sessionID, agentObservation)
+
   let repaired = false
   let model: string | undefined
   let provider: string | undefined
 
   async function sendPrompt(prompt: string) {
+    const generationObservation =
+      input.telemetry?.run.traceId && agentObservation
+        ? await input.telemetry.run.startObservation({
+            traceId: input.telemetry.run.traceId,
+            parentObservationId: agentObservation.id,
+            name: `${input.telemetry.name}.generation`,
+            type: "Generation",
+            input: {
+              prompt,
+              structured: Boolean(input.schema),
+              variant: input.variant,
+            },
+            metadata: {
+              ...generationMetadata({
+                agent: input.agent,
+                sessionID: input.sessionID,
+                variant: input.variant,
+              }),
+            },
+          })
+        : undefined
+
     const response = await client.session.prompt({
       sessionID: input.sessionID,
       agent: input.agent,
@@ -118,12 +157,20 @@ export async function promptAgent<T>(input: {
     })
 
     if (response.error) {
+      await input.telemetry?.run.endObservation(generationObservation, {
+        level: "ERROR",
+        statusMessage: `OpenCode prompt failed: ${JSON.stringify(response.error)}`,
+      })
       throw new Error(
         `Failed to prompt agent ${input.agent} in session ${input.sessionID}: ${JSON.stringify(response.error)}`,
       )
     }
 
     if (!response.data) {
+      await input.telemetry?.run.endObservation(generationObservation, {
+        level: "ERROR",
+        statusMessage: "OpenCode returned no response data",
+      })
       throw new Error(`OpenCode returned no response data for agent ${input.agent} in session ${input.sessionID}`)
     }
 
@@ -132,11 +179,46 @@ export async function promptAgent<T>(input: {
     provider = info.providerID
 
     if (info.error) {
+      await input.telemetry?.run.endObservation(generationObservation, {
+        level: "ERROR",
+        statusMessage: `OpenCode assistant call failed: ${JSON.stringify(info.error)}`,
+        output: {
+          error: info.error,
+        },
+        model: info.modelID,
+        metadata: {
+          ...generationMetadata({
+            agent: input.agent,
+            sessionID: input.sessionID,
+            provider: info.providerID,
+            variant: input.variant,
+          }),
+          model: info.modelID,
+        },
+      })
       throw new Error(`OpenCode assistant call failed in session ${input.sessionID}: ${JSON.stringify(info.error)}`)
     }
 
+    const text = extractText(response.data.parts)
+
+    await input.telemetry?.run.endObservation(generationObservation, {
+      output: {
+        response: text,
+      },
+      model: info.modelID,
+      metadata: {
+        ...generationMetadata({
+          agent: input.agent,
+          sessionID: input.sessionID,
+          provider: info.providerID,
+          variant: input.variant,
+        }),
+        model: info.modelID,
+      },
+    })
+
     return {
-      text: extractText(response.data.parts),
+      text,
       model: info.modelID,
       provider: info.providerID,
     }
@@ -148,7 +230,7 @@ export async function promptAgent<T>(input: {
 
       await input.telemetry?.run.endObservation(agentObservation, {
         output: {
-          textLength: response.text.length,
+          response: response.text,
           structured: false,
         },
         metadata: {
@@ -176,6 +258,8 @@ export async function promptAgent<T>(input: {
 
       await input.telemetry?.run.endObservation(agentObservation, {
         output: {
+          response: initialResponse.text,
+          parsed: structured,
           structured: true,
           repaired,
         },
@@ -209,6 +293,8 @@ export async function promptAgent<T>(input: {
 
         await input.telemetry?.run.endObservation(agentObservation, {
           output: {
+            response: repairedResponse.text,
+            parsed: structured,
             structured: true,
             repaired,
           },
