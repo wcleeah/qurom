@@ -10,7 +10,9 @@
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["bun"],
-    "lib": ["ES2022"]
+    "lib": ["ESNext", "DOM"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
