@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { createOpencodeEventBridge } from "../src/opencode-event-bridge.ts"
 import { createEventBus, type RunnerEvent } from "../src/runner.ts"
@@ -115,20 +118,19 @@ async function flush() {
 }
 
 describe("createOpencodeEventBridge", () => {
-  test("translates session.status, session.error, permission, message.updated to typed bus events", async () => {
+  test("translates session.status, session.error, permission, message.updated to typed bus events without role", async () => {
     const bus = createEventBus()
     const events = collect(bus)
     const { client, controller } = makeStubClient()
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
+      runDir: "/tmp/unused",
       clientFactory: () => client as never,
     })
 
     await bridge.start()
     expect(controller.subscribeCalls).toBe(1)
-
-    bus.emit({ kind: "session.created", sessionID: "s1", role: "drafter" })
 
     controller.push({ type: "session.status", properties: { sessionID: "s1", status: { type: "running" } } })
     controller.push({
@@ -154,21 +156,20 @@ describe("createOpencodeEventBridge", () => {
     expect(kinds).toContain("agent.message.start")
 
     const status = events.find((e) => e.kind === "session.status")
-    expect(status).toMatchObject({ kind: "session.status", role: "drafter", status: "running", sessionID: "s1" })
+    expect(status).toMatchObject({ kind: "session.status", status: "running", sessionID: "s1" })
+    expect(status).not.toHaveProperty("role")
 
     const err = events.find((e) => e.kind === "session.error")
-    expect(err).toMatchObject({ kind: "session.error", role: "drafter", name: "BoomError", message: "kapow" })
+    expect(err).toMatchObject({ kind: "session.error", name: "BoomError", message: "kapow", sessionID: "s1" })
+    expect(err).not.toHaveProperty("role")
 
     const perm = events.find((e) => e.kind === "agent.permission")
-    expect(perm).toMatchObject({
-      kind: "agent.permission",
-      role: "drafter",
-      permission: "read",
-      sessionID: "s1",
-    })
+    expect(perm).toMatchObject({ kind: "agent.permission", permission: "read", sessionID: "s1" })
+    expect(perm).not.toHaveProperty("role")
 
     const start = events.find((e) => e.kind === "agent.message.start")
-    expect(start).toMatchObject({ kind: "agent.message.start", role: "drafter", messageID: "m1" })
+    expect(start).toMatchObject({ kind: "agent.message.start", messageID: "m1", sessionID: "s1" })
+    expect(start).not.toHaveProperty("role")
   })
 
   test("buffers reasoning deltas and only flushes on terminal punctuation", async () => {
@@ -178,11 +179,11 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
+      runDir: "/tmp/unused",
       clientFactory: () => client as never,
     })
 
     await bridge.start()
-    bus.emit({ kind: "session.created", sessionID: "s1", role: "drafter" })
 
     // Open a reasoning part so deltas are accepted.
     controller.push({
@@ -213,9 +214,37 @@ describe("createOpencodeEventBridge", () => {
 
     const reasoningEvents = events.filter((e) => e.kind === "agent.reasoning")
     expect(reasoningEvents).toHaveLength(1)
-    expect(reasoningEvents[0]).toMatchObject({ kind: "agent.reasoning", role: "drafter" })
+    expect(reasoningEvents[0]).toMatchObject({ kind: "agent.reasoning", sessionID: "s1" })
+    expect(reasoningEvents[0]).not.toHaveProperty("role")
 
     await bridge.stop()
+  })
+
+  test("emits events for sessions the bridge never saw a session.created for (no per-session filter)", async () => {
+    const bus = createEventBus()
+    const events = collect(bus)
+    const { client, controller } = makeStubClient()
+
+    const bridge = createOpencodeEventBridge(baseConfig, {
+      bus,
+      runDir: "/tmp/unused",
+      clientFactory: () => client as never,
+    })
+
+    await bridge.start()
+
+    controller.push({
+      type: "session.status",
+      properties: { sessionID: "stranger-session", status: { type: "running" } },
+    })
+    await flush()
+    await bridge.stop()
+
+    expect(events.find((e) => e.kind === "session.status")).toMatchObject({
+      kind: "session.status",
+      sessionID: "stranger-session",
+      status: "running",
+    })
   })
 
   test("double start() does not open a second subscriber", async () => {
@@ -224,6 +253,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
+      runDir: "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -242,6 +272,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
+      runDir: "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -249,9 +280,6 @@ describe("createOpencodeEventBridge", () => {
     expect(controller.subscribeCalls).toBe(1)
 
     await bridge.stop()
-    // The iterator is unblocked via abort signal; the for-await loop exits cleanly.
-    // We don't require return() to be called (abort path uses ended flag), only that
-    // a second start() opens a brand new subscription.
 
     await bridge.start()
     expect(controller.subscribeCalls).toBe(2)
@@ -259,18 +287,18 @@ describe("createOpencodeEventBridge", () => {
     await bridge.stop()
   })
 
-  test("emits agent.tool and agent.telemetry counter on tool completion", async () => {
+  test("emits agent.tool on tool state transitions without role", async () => {
     const bus = createEventBus()
     const events = collect(bus)
     const { client, controller } = makeStubClient()
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
+      runDir: "/tmp/unused",
       clientFactory: () => client as never,
     })
 
     await bridge.start()
-    bus.emit({ kind: "session.created", sessionID: "s1", role: "drafter" })
 
     controller.push({
       type: "message.part.updated",
@@ -292,7 +320,6 @@ describe("createOpencodeEventBridge", () => {
     expect(toolEvents).toHaveLength(1)
     expect(toolEvents[0]).toMatchObject({
       kind: "agent.tool",
-      role: "drafter",
       tool: "webfetch",
       status: "running",
       callID: "c1",
@@ -300,10 +327,9 @@ describe("createOpencodeEventBridge", () => {
       messageID: "m1",
       partID: "t1",
     })
+    expect(toolEvents[0]).not.toHaveProperty("role")
 
-    const telemetryEvents = events.filter((e) => e.kind === "agent.telemetry")
-    expect(telemetryEvents).toHaveLength(1)
-    expect(telemetryEvents[0]).toMatchObject({ kind: "agent.telemetry", role: "drafter", toolCallsTotal: 1 })
+    expect(events.filter((e) => (e as { kind: string }).kind === "agent.telemetry")).toHaveLength(0)
 
     await bridge.stop()
   })
@@ -314,6 +340,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
+      runDir: "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -322,5 +349,74 @@ describe("createOpencodeEventBridge", () => {
     expect(controller.lastSubscribeArgs).toMatchObject({ directory: baseConfig.env.OPENCODE_DIRECTORY })
 
     await bridge.stop()
+  })
+
+  test("on session.idle event, persists captured opencode events to runDir/opencode-events.json", async () => {
+    const bus = createEventBus()
+    const { client, controller } = makeStubClient()
+    const runDir = await mkdtemp(join(tmpdir(), "bridge-snapshot-"))
+
+    try {
+      const bridge = createOpencodeEventBridge(
+        {
+          ...baseConfig,
+          env: { ...baseConfig.env, QUORUM_CAPTURE_OPENCODE_EVENTS: "1" },
+        },
+        {
+          bus,
+          runDir,
+          clientFactory: () => client as never,
+        },
+      )
+
+      await bridge.start()
+
+      controller.push({ type: "session.status", properties: { sessionID: "s1", status: { type: "running" } } })
+      controller.push({ type: "session.idle", properties: { sessionID: "s1" } })
+      await flush()
+      // give persistArtifacts microtask a chance to flush
+      await new Promise((r) => setTimeout(r, 10))
+
+      const snapshot = JSON.parse(await readFile(join(runDir, "opencode-events.json"), "utf8"))
+      expect(Array.isArray(snapshot)).toBe(true)
+      expect(snapshot.length).toBeGreaterThanOrEqual(2)
+      expect(snapshot[0]).toMatchObject({ type: "session.status" })
+
+      await bridge.stop()
+    } finally {
+      await rm(runDir, { recursive: true, force: true })
+    }
+  })
+
+  test("stop() flushes a final snapshot for any unwritten captured events", async () => {
+    const bus = createEventBus()
+    const { client, controller } = makeStubClient()
+    const runDir = await mkdtemp(join(tmpdir(), "bridge-final-"))
+
+    try {
+      const bridge = createOpencodeEventBridge(
+        {
+          ...baseConfig,
+          env: { ...baseConfig.env, QUORUM_CAPTURE_OPENCODE_EVENTS: "1" },
+        },
+        {
+          bus,
+          runDir,
+          clientFactory: () => client as never,
+        },
+      )
+
+      await bridge.start()
+
+      controller.push({ type: "session.status", properties: { sessionID: "s1", status: { type: "running" } } })
+      await flush()
+      await bridge.stop()
+
+      const snapshot = JSON.parse(await readFile(join(runDir, "opencode-events.json"), "utf8"))
+      expect(Array.isArray(snapshot)).toBe(true)
+      expect(snapshot.length).toBeGreaterThanOrEqual(1)
+    } finally {
+      await rm(runDir, { recursive: true, force: true })
+    }
   })
 })

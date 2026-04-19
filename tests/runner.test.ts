@@ -101,13 +101,12 @@ describe("createEventBus", () => {
       { kind: "lifecycle", phase: "starting", requestId: "r" },
       { kind: "graph.node", node: "draftInitial", phase: "start" },
       { kind: "session.created", sessionID: "s", role: "drafter" },
-      { kind: "session.status", sessionID: "s", role: "drafter", status: "active" },
-      { kind: "session.error", sessionID: "s", role: "drafter", name: "X" },
-      { kind: "agent.message.start", role: "drafter", messageID: "m" },
-      { kind: "agent.reasoning", role: "drafter", text: "hmm" },
+      { kind: "session.status", sessionID: "s", status: "active" },
+      { kind: "session.error", sessionID: "s", name: "X" },
+      { kind: "agent.message.start", sessionID: "s", messageID: "m" },
+      { kind: "agent.reasoning", sessionID: "s", text: "hmm" },
       {
         kind: "agent.tool",
-        role: "drafter",
         tool: "read",
         status: "running",
         callID: "c",
@@ -115,8 +114,7 @@ describe("createEventBus", () => {
         messageID: "m",
         partID: "p",
       },
-      { kind: "agent.permission", role: "drafter", permission: "edit", sessionID: "s" },
-      { kind: "agent.telemetry", role: "drafter" },
+      { kind: "agent.permission", permission: "edit", sessionID: "s" },
       { kind: "result", runResult: { ok: true } },
     ]
     const labels = samples.map(describeRunnerEvent)
@@ -275,11 +273,11 @@ describe("attachTelemetryListener", () => {
     const { telemetry, starts, ends } = makeRecordingTelemetry()
     const listener = attachTelemetryListener(bus, telemetry)
 
+    bus.emit({ kind: "session.created", sessionID: "s1", role: "drafter" })
     listener.trackSessionObservation("s1", makeParent())
 
     bus.emit({
       kind: "agent.tool",
-      role: "drafter",
       tool: "webfetch",
       status: "running",
       callID: "c1",
@@ -290,7 +288,6 @@ describe("attachTelemetryListener", () => {
     })
     bus.emit({
       kind: "agent.tool",
-      role: "drafter",
       tool: "webfetch",
       status: "completed",
       callID: "c1",
@@ -309,8 +306,34 @@ describe("attachTelemetryListener", () => {
       name: "tool.webfetch",
       type: "Tool",
     })
+    expect(starts[0]?.metadata?.role).toBe("drafter")
     expect(ends).toHaveLength(1)
     expect(ends[0][1]?.output).toMatchObject({ tool: "webfetch", status: "completed", result: { ok: true } })
+    expect(ends[0][1]?.metadata?.role).toBe("drafter")
+  })
+
+  test("ignores tool events for sessions that were never registered via session.created", async () => {
+    const bus = createEventBus()
+    const { telemetry, starts, ends } = makeRecordingTelemetry()
+    const listener = attachTelemetryListener(bus, telemetry)
+
+    // No session.created emitted — bridge may surface events from other quorum runs in the same dir.
+    listener.trackSessionObservation("s1", makeParent())
+
+    bus.emit({
+      kind: "agent.tool",
+      tool: "webfetch",
+      status: "running",
+      callID: "c1",
+      sessionID: "s1",
+      messageID: "m1",
+      partID: "t1",
+    })
+
+    await listener.dispose()
+
+    expect(starts).toHaveLength(0)
+    expect(ends).toHaveLength(0)
   })
 
   test("skips tool observations when no session parent has been registered", async () => {
@@ -318,9 +341,10 @@ describe("attachTelemetryListener", () => {
     const { telemetry, starts, ends } = makeRecordingTelemetry()
     const listener = attachTelemetryListener(bus, telemetry)
 
+    bus.emit({ kind: "session.created", sessionID: "untracked", role: "drafter" })
+
     bus.emit({
       kind: "agent.tool",
-      role: "drafter",
       tool: "webfetch",
       status: "running",
       callID: "c1",
@@ -330,7 +354,6 @@ describe("attachTelemetryListener", () => {
     })
     bus.emit({
       kind: "agent.tool",
-      role: "drafter",
       tool: "webfetch",
       status: "completed",
       callID: "c1",
@@ -351,11 +374,11 @@ describe("attachTelemetryListener", () => {
     const { telemetry, starts, ends } = makeRecordingTelemetry({ startDelayMs: 30 })
     const listener = attachTelemetryListener(bus, telemetry)
 
+    bus.emit({ kind: "session.created", sessionID: "s1", role: "drafter" })
     listener.trackSessionObservation("s1", makeParent())
 
     bus.emit({
       kind: "agent.tool",
-      role: "drafter",
       tool: "webfetch",
       status: "running",
       callID: "c1",
@@ -365,7 +388,6 @@ describe("attachTelemetryListener", () => {
     })
     bus.emit({
       kind: "agent.tool",
-      role: "drafter",
       tool: "webfetch",
       status: "completed",
       callID: "c1",
@@ -387,11 +409,11 @@ describe("attachTelemetryListener", () => {
     const { telemetry, starts, ends } = makeRecordingTelemetry()
     const listener = attachTelemetryListener(bus, telemetry)
 
+    bus.emit({ kind: "session.created", sessionID: "s1", role: "drafter" })
     listener.trackSessionObservation("s1", makeParent())
 
     bus.emit({
       kind: "agent.permission",
-      role: "drafter",
       permission: "edit",
       sessionID: "s1",
       messageID: "m1",
@@ -399,7 +421,6 @@ describe("attachTelemetryListener", () => {
     })
     bus.emit({
       kind: "agent.tool",
-      role: "drafter",
       tool: "edit",
       status: "running",
       callID: "c1",
@@ -409,7 +430,6 @@ describe("attachTelemetryListener", () => {
     })
     bus.emit({
       kind: "agent.tool",
-      role: "drafter",
       tool: "edit",
       status: "completed",
       callID: "c1",

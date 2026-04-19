@@ -1,5 +1,6 @@
 import { createGraph } from "./graph"
 import { createOpencodeEventBridge } from "./opencode-event-bridge"
+import { ensureRunDir } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
 
 import type { RuntimeConfig } from "./config"
@@ -17,13 +18,12 @@ export type RunnerEvent =
     }
   | { kind: "graph.node"; node: string; phase: "start" | "end" }
   | { kind: "session.created"; sessionID: string; role: string }
-  | { kind: "session.status"; sessionID: string; role: string; status: string }
-  | { kind: "session.error"; sessionID: string; role: string; name: string; message?: string }
-  | { kind: "agent.message.start"; role: string; messageID: string }
-  | { kind: "agent.reasoning"; role: string; text: string }
+  | { kind: "session.status"; sessionID: string; status: string }
+  | { kind: "session.error"; sessionID: string; name: string; message?: string }
+  | { kind: "agent.message.start"; sessionID: string; messageID: string }
+  | { kind: "agent.reasoning"; sessionID: string; text: string }
   | {
       kind: "agent.tool"
-      role: string
       tool: string
       status: "running" | "completed" | "error"
       callID: string
@@ -37,13 +37,11 @@ export type RunnerEvent =
     }
   | {
       kind: "agent.permission"
-      role: string
       permission: string
       sessionID: string
       messageID?: string
       callID?: string
     }
-  | { kind: "agent.telemetry"; role: string; tokensIn?: number; tokensOut?: number; toolCallsTotal?: number }
   | { kind: "result"; runResult: unknown }
 
 export type RunnerEventListener = (event: RunnerEvent) => void
@@ -81,7 +79,7 @@ export type Bridge = {
   stop: () => Promise<void>
 }
 
-export type BridgeFactory = (config: RuntimeConfig, opts: { bus: EventBus }) => Bridge
+export type BridgeFactory = (config: RuntimeConfig, opts: { bus: EventBus; runDir: string }) => Bridge
 
 export type RuntimePrerequisites = Awaited<ReturnType<typeof validateRuntimePrerequisites>>
 
@@ -115,18 +113,28 @@ function permissionKey(input: { sessionID: string; messageID?: string; callID?: 
 }
 
 // Subscribes to bus.agent.tool / bus.agent.permission and owns Langfuse Tool span lifecycle.
+// Maintains its own sessionID -> role map (built from session.created) so it can attach role
+// metadata to spans even though bridge events no longer carry role.
 // Per-key promise chain preserves the natural ordering the bridge stream provides while
 // still letting other tool keys progress in parallel.
 // Exported for direct testing; runQuorum is the only production caller.
 export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) {
   const sessionObservations = new Map<string, TraceObservation>()
+  const sessionRoles = new Map<string, string>()
   const toolObservations = new Map<string, TraceObservation>()
   const toolPermissions = new Map<string, string[]>()
   const pending = new Map<string, Promise<void>>()
 
   const off = bus.on((event) => {
+    if (event.kind === "session.created") {
+      sessionRoles.set(event.sessionID, event.role)
+      return
+    }
+
     if (event.kind === "agent.permission") {
       if (!event.messageID || !event.callID) return
+      // Filter events for sessions this run did not spawn (bridge no longer filters).
+      if (!sessionRoles.has(event.sessionID)) return
       const key = permissionKey(event)
       const list = toolPermissions.get(key) ?? []
       list.push(event.permission)
@@ -135,6 +143,7 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
     }
 
     if (event.kind !== "agent.tool") return
+    if (!sessionRoles.has(event.sessionID)) return
 
     const key = toolKey(event)
     const permKey = permissionKey({
@@ -142,7 +151,8 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
       messageID: event.messageID,
       callID: event.callID,
     })
-    const snapshot = { ...event, permKey }
+    const role = sessionRoles.get(event.sessionID) ?? "unknown"
+    const snapshot = { ...event, role, permKey }
 
     const previous = pending.get(key) ?? Promise.resolve()
     const next = previous.then(() => handle(snapshot)).catch(() => {})
@@ -186,6 +196,7 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
           args: snapshot.input,
         },
         metadata: {
+          role: snapshot.role,
           sessionId: snapshot.sessionID,
           messageId: snapshot.messageID,
           partId: snapshot.partID,
@@ -207,6 +218,7 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
           error: snapshot.status === "error" ? snapshot.error : undefined,
         },
         metadata: {
+          role: snapshot.role,
           sessionId: snapshot.sessionID,
           callId: snapshot.callID,
           permissions: toolPermissions.get(snapshot.permKey),
@@ -238,6 +250,7 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
   const telemetryFactory = args.telemetryFactory ?? createTelemetry
 
   const requestId = crypto.randomUUID()
+  const runDir = await ensureRunDir(config.quorumConfig.artifactDir, requestId)
 
   const telemetry = await telemetryFactory(config, {
     requestId,
@@ -246,7 +259,7 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
     documentPath: request.inputMode === "document" ? request.documentPath : undefined,
   })
 
-  const bridge = bridgeFactory(config, { bus })
+  const bridge = bridgeFactory(config, { bus, runDir })
   const telemetryListener = attachTelemetryListener(bus, telemetry)
 
   bus.emit({
@@ -370,19 +383,17 @@ export function describeRunnerEvent(event: RunnerEvent): string {
     case "session.created":
       return `session.created:${event.role}`
     case "session.status":
-      return `session.status:${event.role}:${event.status}`
+      return `session.status:${event.sessionID}:${event.status}`
     case "session.error":
-      return `session.error:${event.role}:${event.name}`
+      return `session.error:${event.sessionID}:${event.name}`
     case "agent.message.start":
-      return `agent.message.start:${event.role}`
+      return `agent.message.start:${event.sessionID}`
     case "agent.reasoning":
-      return `agent.reasoning:${event.role}`
+      return `agent.reasoning:${event.sessionID}`
     case "agent.tool":
-      return `agent.tool:${event.role}:${event.tool}:${event.status}`
+      return `agent.tool:${event.sessionID}:${event.tool}:${event.status}`
     case "agent.permission":
-      return `agent.permission:${event.role}:${event.permission}`
-    case "agent.telemetry":
-      return `agent.telemetry:${event.role}`
+      return `agent.permission:${event.sessionID}:${event.permission}`
     case "result":
       return "result"
     default:
