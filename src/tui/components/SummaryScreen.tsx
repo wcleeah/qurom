@@ -146,7 +146,7 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
             <select
               focused
               options={NEXT_OPTIONS}
-              onChange={(_, option) => {
+              onSelect={(_, option) => {
                 const v = option?.value
                 if (v === "rerun" || v === "new-topic" || v === "new-document" || v === "quit") {
                   onAction(v)

@@ -1,5 +1,6 @@
 import { createGraph } from "./graph"
 import { createOpencodeEventBridge } from "./opencode-event-bridge"
+import { abortSession } from "./opencode"
 import { ensureRunDir } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
 
@@ -94,6 +95,7 @@ export type RunQuorumArgs = {
   signal?: AbortSignal
   graphFactory?: GraphFactory
   bridgeFactory?: BridgeFactory
+  abortSessionFn?: typeof abortSession
   telemetryFactory?: (
     config: RuntimeConfig,
     input: { requestId: string; inputMode: "topic" | "document"; topic?: string; documentPath?: string },
@@ -252,6 +254,7 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
   const { config, prerequisites, request, bus, signal } = args
   const graphFactory = args.graphFactory ?? createGraph
   const bridgeFactory = args.bridgeFactory ?? createOpencodeEventBridge
+  const abortSessionFn = args.abortSessionFn ?? abortSession
   const telemetryFactory = args.telemetryFactory ?? createTelemetry
 
   const requestId = crypto.randomUUID()
@@ -280,6 +283,11 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
     },
   })
   const telemetryListener = attachTelemetryListener(bus, telemetry)
+  const sessionIDs = new Set<string>()
+  const offSessionCreated = bus.on((event) => {
+    if (event.kind !== "session.created") return
+    sessionIDs.add(event.sessionID)
+  })
 
   bus.emit({
     kind: "lifecycle",
@@ -360,7 +368,7 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
       outcome: runResult.status,
       raw: runResult,
     }
-  } catch (error) {
+   } catch (error) {
     const surfaced = bridgeStreamError ?? error
     bus.emit({
       kind: "lifecycle",
@@ -370,10 +378,14 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
       error: surfaced,
     })
     throw surfaced
-  } finally {
-    try {
-      await telemetryListener.dispose()
-    } catch {
+   } finally {
+     offSessionCreated()
+     if (bridgeAbort.signal.aborted && sessionIDs.size > 0) {
+       await Promise.allSettled([...sessionIDs].map((sessionID) => abortSessionFn(config, sessionID)))
+     }
+     try {
+       await telemetryListener.dispose()
+     } catch {
       // Telemetry listener disposal errors must not mask the original failure.
     }
     try {

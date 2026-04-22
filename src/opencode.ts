@@ -360,6 +360,20 @@ export async function createSession(config: RuntimeConfig, title: string, parent
   return response.data satisfies Session
 }
 
+export async function abortSession(config: RuntimeConfig, sessionID: string) {
+  const response = await createOpencodeClient({
+    baseUrl: config.env.OPENCODE_BASE_URL,
+    directory: config.env.OPENCODE_DIRECTORY,
+  }).session.abort({
+    sessionID,
+    directory: config.env.OPENCODE_DIRECTORY,
+  })
+
+  if (response.error) {
+    throw new Error(`Failed to abort OpenCode session "${sessionID}": ${JSON.stringify(response.error)}`)
+  }
+}
+
 export async function listAgents(config: RuntimeConfig) {
   const response = await createOpencodeClient({
     baseUrl: config.env.OPENCODE_BASE_URL,

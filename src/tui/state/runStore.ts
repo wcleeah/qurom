@@ -19,6 +19,7 @@ export type AgentState = {
   sessionID?: string
   status: AgentStatus
   lastEventAt: number
+  model?: string
   scrollback: ScrollbackEntry[]
   tokensIn: number
   tokensOut: number
@@ -49,9 +50,13 @@ export type RunStoreState = {
 
 export type RunStore = StoreApi<RunStoreState>
 
+export type RunStoreInitialState = Partial<Omit<RunStoreState, "agents">> & {
+  agents?: Record<string, Partial<AgentState>>
+}
+
 export type CreateRunStoreInput = {
   config: RuntimeConfig
-  initial?: Partial<RunStoreState>
+  initial?: RunStoreInitialState
 }
 
 const INITIAL_PHASE: LifecyclePhase = "starting"
@@ -70,24 +75,31 @@ function emptyAgent(): AgentState {
   return {
     status: "idle",
     lastEventAt: 0,
+    model: undefined,
     scrollback: [],
     tokensIn: 0,
     tokensOut: 0,
   }
 }
 
-export function createInitialState(config: RuntimeConfig, initial?: Partial<RunStoreState>): RunStoreState {
+export function createInitialState(config: RuntimeConfig, initial?: RunStoreInitialState): RunStoreState {
   const agents: Record<string, AgentState> = {}
   agents[config.quorumConfig.designatedDrafter] = emptyAgent()
   for (const auditor of config.quorumConfig.auditors) {
     agents[auditor] = emptyAgent()
   }
+
+  for (const [key, value] of Object.entries(initial?.agents ?? {})) {
+    if (!agents[key]) continue
+    agents[key] = { ...agents[key], ...value }
+  }
+
   return {
     lifecycle: { phase: INITIAL_PHASE },
     graph: {},
-    agents,
     systemLog: [],
     ...initial,
+    agents,
   }
 }
 

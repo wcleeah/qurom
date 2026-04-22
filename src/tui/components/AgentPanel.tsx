@@ -42,6 +42,11 @@ const roleColor = (isDrafter: boolean): string => {
   return theme.text
 }
 
+const formatModel = (value?: string): string => {
+  if (!value) return "model unknown"
+  return value.replace(/^opencode\//, "")
+}
+
 const PanelScrollback = ({
   store,
   roleKey,
@@ -172,21 +177,26 @@ export const AgentPanel = ({
       paddingTop={1}
       paddingBottom={1}
     >
-      <box flexDirection="row" gap={1}>
-        <text fg={roleColor(isDrafter)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-          {title}
-        </text>
+      <box flexDirection="row" justifyContent="space-between">
+        <box flexDirection="column">
+          <text fg={roleColor(isDrafter)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            {title}
+          </text>
+          <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            {formatModel(agent.model)}
+          </text>
+        </box>
         <text fg={statusColor(agent.status)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
           {`${statusDot(agent.status)} ${agent.status}`}
         </text>
       </box>
       {toolLabel ? (
-        <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-          {toolLabel}
+        <text fg={theme.tool} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          tool: {toolLabel}
         </text>
       ) : null}
       {agent.pendingPermission ? (
-        <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+        <text fg={theme.permission} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
           permission: {agent.pendingPermission}
         </text>
       ) : null}

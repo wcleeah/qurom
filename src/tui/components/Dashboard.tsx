@@ -10,25 +10,6 @@ export interface DashboardProps {
   focused?: boolean
 }
 
-const roleLabel = (roleKey: string): string => {
-  if (roleKey === "research-drafter") return "drafter"
-  return roleKey.replace(/-auditor$/, "")
-}
-
-const statusDot = (status: "idle" | "running" | "error" | "complete"): string => {
-  if (status === "running") return "●"
-  if (status === "complete") return "✓"
-  if (status === "error") return "✗"
-  return "○"
-}
-
-const statusColor = (status: "idle" | "running" | "error" | "complete"): string => {
-  if (status === "running") return theme.status.running
-  if (status === "complete") return theme.status.complete
-  if (status === "error") return theme.status.error
-  return theme.status.idle
-}
-
 const phaseColor = (phase: "starting" | "running" | "complete" | "error"): string => {
   if (phase === "complete") return theme.success
   if (phase === "error") return theme.error
@@ -77,7 +58,6 @@ export const Dashboard = ({ store, focused = false }: DashboardProps) => {
   const graphNode = useStoreSelector(store, (s) => s.graph.node)
   const graphPhase = useStoreSelector(store, (s) => s.graph.phase)
   const graphState = useStoreSelector(store, (s) => s.graph.state as ResearchState | undefined)
-  const agents = useStoreSelector(store, (s) => s.agents)
   const round = useStoreSelector(store, (s) =>
     s.graph.state && "round" in s.graph.state ? (s.graph.state as { round?: number }).round : undefined,
   )
@@ -109,60 +89,59 @@ export const Dashboard = ({ store, focused = false }: DashboardProps) => {
       marginRight={1}
       flexShrink={0}
     >
-      <box flexDirection="column" gap={wide ? 1 : 0}>
-        <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-          <span fg={phaseColor(phase)}>{phase}</span>
-          <span fg={theme.textMuted}>{`  ·  round ${round ?? "-"}`}</span>
-          {graphNode ? <span fg={theme.accent}>{`  ·  node ${graphNode}`}</span> : null}
-          {graphPhase ? <span fg={theme.accent}>{`  ·  ${graphPhase}`}</span> : null}
-          <span fg={theme.textMuted}>{`  ·  ${formatElapsed(elapsed)}`}</span>
-        </text>
-        {medium ? (
+      <box flexDirection={wide ? "row" : "column"} gap={wide ? 2 : 1}>
+        <box flexGrow={3} flexDirection="column">
           <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            request {requestId ?? "-"}
+            <span fg={phaseColor(phase)}>{phase}</span>
+            <span fg={theme.textMuted}>{`  ·  round ${round ?? "-"}`}</span>
+            {graphNode ? <span fg={theme.accent}>{`  ·  ${graphNode}`}</span> : null}
+            {graphPhase ? <span fg={theme.textMuted}>{`  ${graphPhase}`}</span> : null}
+            <span fg={theme.textMuted}>{`  ·  ${formatElapsed(elapsed)}`}</span>
           </text>
-        ) : null}
-        {medium ? (
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            trace   {traceId ?? "-"}
-          </text>
-        ) : null}
-        {inputLabel ? (
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.accent}>{inputLabel}</span>
-          </text>
-        ) : null}
-        {wide && outputDir ? (
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            output  {outputDir}
-          </text>
-        ) : null}
-        {graphState ? (
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.accent}>{`findings ${unresolvedCount}`}</span>
-            <span fg={theme.textMuted}>{`  ·  votes ${voteApproveCount} approve / ${voteReviseCount} revise`}</span>
-            <span fg={theme.textMuted}>{`  ·  rebuttals ${rebuttalCount}`}</span>
-            <span fg={theme.textMuted}>{`  ·  responses ${rebuttalResponseCount}`}</span>
-            <span fg={theme.textMuted}>{`  ·  accepted ${acceptedCount}`}</span>
-            <span fg={theme.textMuted}>{`  ·  approved ${approvedCount}`}</span>
-          </text>
-        ) : null}
-        <box flexDirection={wide ? "row" : "column"} gap={wide ? 2 : 0}>
-          {Object.entries(agents).map(([roleKey, agent]) => (
-            <text key={roleKey} wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-              <span fg={statusColor(agent.status)}>{statusDot(agent.status)}</span>
-              <span fg={theme.textMuted}>{` ${roleLabel(roleKey)}`}</span>
-              <span fg={theme.textMuted}>{`  ${agent.status}`}</span>
-              {agent.activeTool ? <span fg={theme.textMuted}>{`  ·  ${agent.activeTool.tool}`}</span> : null}
-              {agent.pendingPermission ? <span fg={theme.accent}>{`  ·  permission ${agent.pendingPermission}`}</span> : null}
+          {inputLabel ? (
+            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              <span fg={theme.textMuted}>input </span>
+              <span fg={theme.text}>{inputLabel}</span>
             </text>
-          ))}
+          ) : null}
+          {medium ? (
+            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              <span fg={theme.textMuted}>request </span>
+              <span fg={theme.text}>{requestId ?? "-"}</span>
+            </text>
+          ) : null}
         </box>
-        {!wide && outputDir ? (
+
+        <box flexGrow={2} flexDirection="column">
+          {graphState ? (
+            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              <span fg={theme.warning}>{`findings ${unresolvedCount}`}</span>
+              <span fg={theme.textMuted}>{`  ·  ${voteApproveCount} approve / ${voteReviseCount} revise`}</span>
+            </text>
+          ) : null}
           <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            output  {outputDir}
+            <span fg={theme.textMuted}>rebuttals </span>
+            <span fg={theme.warning}>{rebuttalCount}</span>
+            <span fg={theme.textMuted}>{`  ·  responses `}</span>
+            <span fg={theme.text}>{rebuttalResponseCount}</span>
+            <span fg={theme.textMuted}>{`  ·  accepted `}</span>
+            <span fg={theme.success}>{acceptedCount}</span>
+            <span fg={theme.textMuted}>{`  ·  approved `}</span>
+            <span fg={theme.success}>{approvedCount}</span>
           </text>
-        ) : null}
+          {traceId ? (
+            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              <span fg={theme.textMuted}>trace </span>
+              <span fg={theme.text}>{traceId}</span>
+            </text>
+          ) : null}
+          {outputDir ? (
+            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              <span fg={theme.textMuted}>output </span>
+              <span fg={theme.text}>{outputDir}</span>
+            </text>
+          ) : null}
+        </box>
       </box>
     </box>
   )

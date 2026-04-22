@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 
 import {
   type Bridge,
   type BridgeFactory,
   type EventBus,
+  type GraphFactory,
   type RunnerEvent,
   attachTelemetryListener,
   createEventBus,
@@ -217,6 +218,44 @@ describe("runQuorum", () => {
 
     expect(telemetryShutdownCalled).toBe(true)
     expect(bridgeStopCalled).toBe(true)
+  })
+
+  test("aborts created OpenCode sessions when the run signal is aborted", async () => {
+    const bus = createEventBus()
+    const ac = new AbortController()
+    const abortSession = mock(() => Promise.resolve())
+
+    const graphFactory: GraphFactory = ((_, __, input) => ({
+      invoke: async () => {
+        input?.observer?.onSessionCreated?.({ sessionID: "root-1", role: "root", requestId: "req-1" })
+        input?.observer?.onSessionCreated?.({ sessionID: "drafter-1", role: "drafter", requestId: "req-1" })
+        ac.abort(new Error("cancelled"))
+        throw new Error("cancelled")
+      },
+    })) as GraphFactory
+
+    const prerequisites = {
+      skill: { name: "research", content: "skill" },
+      agents: [],
+    } as unknown as Parameters<typeof runQuorum>[0]["prerequisites"]
+
+    await expect(
+      runQuorum({
+        config,
+        prerequisites,
+        request: { inputMode: "topic", topic: "cancel" },
+        bus,
+        signal: ac.signal,
+        graphFactory,
+        bridgeFactory: () => ({ async start() {}, async stop() {} }),
+        abortSessionFn: abortSession,
+        telemetryFactory: async () => disabledTelemetry(),
+      }),
+    ).rejects.toThrow("cancelled")
+
+    expect(abortSession).toHaveBeenCalledTimes(2)
+    expect(abortSession).toHaveBeenCalledWith(config, "root-1")
+    expect(abortSession).toHaveBeenCalledWith(config, "drafter-1")
   })
 })
 

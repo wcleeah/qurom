@@ -52,6 +52,17 @@ describe("createInitialState", () => {
     }
     expect(state.lifecycle.phase).toBe("starting")
   })
+
+  test("merges initial agent metadata into seeded agent slots", () => {
+    const state = createInitialState(config, {
+      agents: {
+        "research-drafter": { model: "opencode/minimax-m2.5-free" },
+      } as never,
+    })
+
+    expect(state.agents["research-drafter"]?.model).toBe("opencode/minimax-m2.5-free")
+    expect(state.agents["source-auditor"]?.model).toBeUndefined()
+  })
 })
 
 describe("reduce", () => {

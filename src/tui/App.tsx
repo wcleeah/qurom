@@ -15,7 +15,7 @@ import { openInEditor } from "./editor"
 import { nextFocus } from "./keymap/gridNav"
 import { computeLayout, type FocusRegion } from "./state/layout"
 import { bindBusToStore } from "./state/eventBindings"
-import { createRunStore, type RunStore } from "./state/runStore"
+import { createRunStore, type RunStore, type RunStoreInitialState } from "./state/runStore"
 import type { SystemStatusStore } from "./state/systemStatus"
 
 export type Screen = "prompt" | "running" | "summary"
@@ -42,6 +42,19 @@ interface RunCtx {
   promise: Promise<unknown>
 }
 
+function buildAgentInitialState(prerequisites: RuntimePrerequisites, config: RuntimeConfig): RunStoreInitialState["agents"] {
+  const byName = new Map(prerequisites.agents.map((agent) => [agent.name, agent]))
+
+  return Object.fromEntries(
+    [config.quorumConfig.designatedDrafter, ...config.quorumConfig.auditors].map((name) => [
+      name,
+      {
+        model: byName.get(name)?.model?.modelID,
+      },
+    ]),
+  )
+}
+
 export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) => {
   const renderer = useRenderer()
   const [screen, setScreen] = useState<Screen>("prompt")
@@ -52,6 +65,7 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
   const [gPending, setGPending] = useState(false)
   const [promptState, setPromptState] = useState<PromptState>({ mode: "topic", topic: "", hint: "" })
   const lastRequestRef = useRef<InputRequest | undefined>(undefined)
+  const initialAgents = useRef(buildAgentInitialState(prerequisites, config))
   const width = renderer.width
   const layout = computeLayout(width, [
     "dashboard",
@@ -138,8 +152,12 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
       return
     }
 
-    if (focused === "dashboard" || key.name === "h" || key.name === "j" || key.name === "k" || key.name === "l") {
-      const next = nextFocus(focused, key.name as "h" | "j" | "k" | "l", layout)
+    const navKey = key.name as "h" | "j" | "k" | "l"
+    const shouldHandleNav =
+      focused === "dashboard" ? navKey === "h" || navKey === "j" || navKey === "k" || navKey === "l" : navKey === "h" || navKey === "l"
+
+    if (shouldHandleNav) {
+      const next = nextFocus(focused, navKey, layout)
       if (next) {
         setFocused(next)
         setGPending(false)
@@ -160,7 +178,7 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
         hint: "",
       })
       const bus = createEventBus()
-      const store = createRunStore({ config })
+      const store = createRunStore({ config, initial: { agents: initialAgents.current } })
       const unbind = bindBusToStore({ bus, store, config })
       const ac = new AbortController()
       const promise = runQuorum({ config, prerequisites, request, bus, signal: ac.signal })
