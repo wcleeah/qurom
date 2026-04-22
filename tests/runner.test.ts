@@ -99,7 +99,7 @@ describe("createEventBus", () => {
   test("describeRunnerEvent covers every RunnerEvent kind (compile-time exhaustive)", () => {
     const samples: RunnerEvent[] = [
       { kind: "lifecycle", phase: "starting", requestId: "r" },
-      { kind: "graph.node", node: "draftInitial", phase: "start" },
+      { kind: "graph.node", node: "draftInitial", phase: "start", state: { inputMode: "topic", topic: "x", requestId: "r" } },
       { kind: "session.created", sessionID: "s", role: "drafter" },
       { kind: "session.status", sessionID: "s", status: "active" },
       { kind: "session.error", sessionID: "s", name: "X" },

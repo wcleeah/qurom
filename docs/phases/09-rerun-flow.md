@@ -262,6 +262,20 @@ This is the final phase. There is nothing to hand off. Instead:
 - Whether the integration test's stub `createGraph` interface matches the real one closely enough to catch a real subscriber leak. Inferred — if the real `createGraph` evolves, the test must be kept in sync. Note this in `src/runner.integration.test.ts`.
 - Whether `crypto.randomUUID()` is acceptable as the `requestId` source (vs the existing one in `src/index.ts:9-179`). Inferred from the rest of the plan; if `runQuorum` requires a specific shape, mirror it.
 
+## Follow-up: re-introduce `agent.telemetry` (tokens-only)
+
+Phase 06 deliberately dropped the `agent.telemetry` `RunnerEvent` variant and the per-role tool counters (`toolsTotal`, `toolsErrored`) on the grounds that per-role aggregation crosses the runner/TUI boundary. Token counts, by contrast, are legitimately surfaced by opencode's SDK on each assistant message and the TUI dashboard wants to show them per agent. This sub-task adds them back — tokens only, no tool counters.
+
+Steps:
+
+1. **Bridge emission** (`src/opencode-event-bridge.ts`): on each `message.updated` (or equivalent) SDK event whose `info.tokens` is populated, emit a new `RunnerEvent` of kind `agent.telemetry` carrying `{ sessionID, tokensIn, tokensOut }`. Source the values from `info.tokens.input` / `info.tokens.output` (verify exact field names against the SDK at implementation time).
+2. **`RunnerEvent` union** (`src/runner.ts`): add `| { kind: "agent.telemetry"; sessionID: string; tokensIn: number; tokensOut: number }`. **Do not** add tool counters of any kind. Update `describeRunnerEvent` and the exhaustiveness check.
+3. **Reducer** (`src/tui/state/runStore.ts`): add a case that routes via `sessionID → agent slot` (same lookup pattern as `agent.reasoning`) and **replaces** (not adds) `tokensIn` / `tokensOut` on the agent. Tokens from the SDK are cumulative per session, not deltas.
+4. **Tests:** extend `tests/runStore.test.ts` with one case for `agent.telemetry` updating `tokensIn`/`tokensOut`. Extend `tests/opencode-event-bridge.test.ts` with one case asserting the bridge emits `agent.telemetry` when token info is present, and does not emit it when absent.
+5. **Components** (Phase 07 deliverable, kept consistent here): `AgentPanel` already reads `tokensIn`/`tokensOut` placeholders; nothing should change in the component — only the underlying values become non-zero.
+
+Out of scope for this sub-task: any per-role tool counter, cost computation, model-specific token pricing. Keep the variant minimal and additive.
+
 ## Sources
 
 - `docs/tui-implementation-plan.md` §10 Step 9 (re-run flow), §11 (summary mock), §12 (double-subscribe risk + Ctrl-C + draft accumulation), §13 (full manual verification + integration test spec), §14 (rollback plan).

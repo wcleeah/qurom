@@ -28,8 +28,8 @@ import {
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 export type RunObserver = {
-  onNodeStart?: (node: string) => void
-  onNodeEnd?: (node: string) => void
+  onNodeStart?: (node: string, state: ResearchState | GraphInput) => void
+  onNodeEnd?: (node: string, state: ResearchState | GraphInput) => void
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
 }
 
@@ -39,13 +39,18 @@ type GraphTelemetry = {
   trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
 }
 
-function observeNode(observer: RunObserver | undefined, node: string) {
-  observer?.onNodeStart?.(node)
+function observeNode(observer: RunObserver | undefined, node: string, state: ResearchState | GraphInput) {
+  observer?.onNodeStart?.(node, state)
 }
 
-function observeNodeResult<T>(observer: RunObserver | undefined, node: string, state: T) {
-  observer?.onNodeEnd?.(node)
-  return state
+function observeNodeResult<T>(
+  observer: RunObserver | undefined,
+  node: string,
+  state: ResearchState | GraphInput,
+  result: T,
+) {
+  observer?.onNodeEnd?.(node, state)
+  return result
 }
 
 function requestLabel(state: ResearchState) {
@@ -1141,7 +1146,7 @@ export function createGraph(
   const graphTelemetry = input?.telemetry
 
   async function withNodeTelemetry<T>(node: string, state: ResearchState | GraphInput, fn: () => Promise<T>) {
-    observeNode(observer, node)
+    observeNode(observer, node, state)
 
     const round = "round" in state ? state.round : 0
     const status = "status" in state ? state.status : "starting"
@@ -1178,7 +1183,7 @@ export function createGraph(
           status: "completed",
         },
       })
-      return observeNodeResult(observer, node, result)
+      return observeNodeResult(observer, node, state, result)
     } catch (error) {
       await graphTelemetry?.run.endObservation(observation, {
         level: "ERROR",

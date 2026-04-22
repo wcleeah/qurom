@@ -2,6 +2,13 @@
 
 Source plan: `docs/tui-implementation-plan.md` §10 Step 6.
 
+## Deviations from the original brief (executed)
+
+- **`agent.telemetry` variant deferred.** Per-role token counts are postponed to a follow-up in Phase 09 (tokens-only, no tool counters). `AgentState.tokensIn` / `tokensOut` remain in the shape as `0` placeholders.
+- **`toolsTotal` / `toolsErrored` removed entirely.** Per-role tool aggregation crosses the runner/TUI boundary; the runner is the only legitimate aggregator. The reducer table row for `agent.tool` no longer increments any counter.
+- **`graph.node` event carries the full `ResearchState`** (cloned at the emission site via `structuredClone`). `RunObserver.onNodeStart` / `onNodeEnd` were extended in `src/graph.ts` to receive state, and `RunnerEvent.graph.node` gained a `state` field. This decouples future TUI views from runner-side curation.
+- **Tests live in `tests/`** (the repo convention) not in `src/tui/state/`.
+
 ## Execution Snapshot
 
 - Phase: 06 / 09

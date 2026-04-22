@@ -4,7 +4,7 @@ import { ensureRunDir } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
 
 import type { RuntimeConfig } from "./config"
-import type { InputRequest } from "./schema"
+import type { GraphInput, InputRequest, ResearchState } from "./schema"
 import type { validateRuntimePrerequisites } from "./opencode"
 
 export type RunnerEvent =
@@ -16,7 +16,7 @@ export type RunnerEvent =
       outputDir?: string
       error?: unknown
     }
-  | { kind: "graph.node"; node: string; phase: "start" | "end" }
+  | { kind: "graph.node"; node: string; phase: "start" | "end"; state: ResearchState | GraphInput }
   | { kind: "session.created"; sessionID: string; role: string }
   | { kind: "session.status"; sessionID: string; status: string }
   | { kind: "session.error"; sessionID: string; name: string; message?: string }
@@ -277,11 +277,11 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
 
       const graph = createGraph(config, prerequisites.skill.content, {
         observer: {
-          onNodeStart(node) {
-            bus.emit({ kind: "graph.node", node, phase: "start" })
+          onNodeStart(node, state) {
+            bus.emit({ kind: "graph.node", node, phase: "start", state: structuredClone(state) })
           },
-          onNodeEnd(node) {
-            bus.emit({ kind: "graph.node", node, phase: "end" })
+          onNodeEnd(node, state) {
+            bus.emit({ kind: "graph.node", node, phase: "end", state: structuredClone(state) })
           },
           onSessionCreated({ sessionID, role }) {
             bus.emit({ kind: "session.created", sessionID, role })
