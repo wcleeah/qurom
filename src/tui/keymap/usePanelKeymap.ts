@@ -10,12 +10,12 @@ export type ScrollAdapter = {
 }
 
 export type UsePanelKeymapInput = {
-  focused: boolean
+  active: boolean
   scroll: ScrollAdapter
   onGPendingChange?: (pending: boolean) => void
 }
 
-export function usePanelKeymap({ focused, scroll, onGPendingChange }: UsePanelKeymapInput) {
+export function usePanelKeymap({ active, scroll, onGPendingChange }: UsePanelKeymapInput) {
   const gPendingRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(
@@ -26,7 +26,7 @@ export function usePanelKeymap({ focused, scroll, onGPendingChange }: UsePanelKe
   )
 
   useKeyboard((key) => {
-    if (!focused) return
+    if (!active) return
 
     if (key.name === "j") return scroll.scrollBy(1)
     if (key.name === "k") return scroll.scrollBy(-1)

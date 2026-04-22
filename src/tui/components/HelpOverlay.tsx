@@ -15,10 +15,11 @@ export const HelpOverlay = () => (
     zIndex={20}
   >
     <text fg={theme.accent}>keyboard help</text>
-    <text fg={theme.textMuted}>h/j/k/l move focus</text>
-    <text fg={theme.textMuted}>Tab / Shift-Tab cycle focus</text>
-    <text fg={theme.textMuted}>Esc release panel focus</text>
-    <text fg={theme.textMuted}>focused panel: j/k, Ctrl-d/u, Ctrl-f/b, gg, G</text>
+    <text fg={theme.textMuted}>h/j/k/l move selection</text>
+    <text fg={theme.textMuted}>Tab / Shift-Tab cycle selection</text>
+    <text fg={theme.textMuted}>Enter focus selected panel</text>
+    <text fg={theme.textMuted}>Esc leave focused panel</text>
+    <text fg={theme.textMuted}>focused panel: j/k | Ctrl-d/u | Ctrl-f/b | gg | G</text>
     <text fg={theme.textMuted}>? toggle help</text>
     <text fg={theme.textMuted}>Ctrl-C cancel run</text>
     <text fg={theme.textMuted}>Q force-quit confirm</text>

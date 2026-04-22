@@ -17,6 +17,20 @@ export interface PromptScreenProps {
   initialHint?: string
 }
 
+const PromptHint = ({ mode }: { mode: PromptMode }) => (
+  <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+    {mode === "topic" ? "Tab: switch modes | Enter: run" : "Tab or Esc: topics | Enter: run | e: open editor"}
+  </text>
+)
+
+const PromptDescription = ({ mode }: { mode: PromptMode }) => (
+  <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+    {mode === "topic"
+      ? "Ask a research question or paste a topic."
+      : "Open $EDITOR, save the document, then run the quorum on that draft."}
+  </text>
+)
+
 const generateRequestId = (): string => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID()
   return `req-${Date.now().toString(16)}-${Math.floor(Math.random() * 1e9).toString(16)}`
@@ -27,20 +41,12 @@ const formatCharCount = (value: string): string => {
   return `${value.length} chars`
 }
 
-const previewLine = (value: string): string => {
-  const line = value
-    .split("\n")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.length > 0)
-  return line ? line.slice(0, 72) : "(empty document)"
-}
-
 const ModeChip = ({ active, label }: { active: boolean; label: string }) => (
   <box
     border
     borderStyle="single"
     borderColor={active ? theme.borderActive : theme.borderSubtle}
-    backgroundColor={active ? theme.backgroundPanel : theme.backgroundElement}
+    backgroundColor={active ? theme.backgroundPanel : theme.background}
     paddingLeft={1}
     paddingRight={1}
   >
@@ -66,7 +72,6 @@ export const PromptScreen = ({
   const requestId = useMemo(generateRequestId, [])
   const columnWidth = centeredColumnWidth(width, 84, 68)
   const topBias = height >= 34 ? 2 : 1
-  const topicInputWidth = Math.max(24, columnWidth - 6)
 
   useEffect(() => {
     setMode(initialMode)
@@ -160,72 +165,55 @@ export const PromptScreen = ({
 
           <box
             border
-            borderStyle={mode === "topic" ? "double" : "single"}
-            borderColor={mode === "topic" ? theme.borderActive : theme.borderSubtle}
+            borderStyle="double"
+            borderColor={theme.borderActive}
             backgroundColor={theme.backgroundPanel}
             padding={1}
             flexDirection="column"
+            gap={1}
           >
+            <PromptDescription mode={mode} />
             {mode === "topic" ? (
-              <>
-                <text fg={theme.textMuted}>Ask a research question or paste a topic.</text>
-                <box
-                  border
-                  borderStyle="single"
-                  borderColor={theme.borderSubtle}
-                  backgroundColor={theme.backgroundElement}
-                  width={topicInputWidth}
-                  paddingLeft={1}
-                >
-                  <input
-                    placeholder="e.g. effects of Mediterranean diet on cardiovascular outcomes"
-                    focused
-                    width="100%"
-                    onInput={setTopic}
-                    onSubmit={submitTopic}
-                  />
-                </box>
-                <text fg={theme.textMuted}>Enter run  ·  Tab switch modes</text>
-              </>
+              <box
+                border
+                borderStyle="single"
+                borderColor={theme.borderSubtle}
+                backgroundColor={theme.backgroundElement}
+                width="100%"
+                paddingLeft={1}
+                paddingRight={1}
+              >
+                <input
+                  placeholder="e.g. effects of Mediterranean diet on cardiovascular outcomes"
+                  focused
+                  width="100%"
+                  onInput={setTopic}
+                  onSubmit={submitTopic}
+                />
+              </box>
             ) : (
-              <>
-                <text fg={theme.textMuted}>Open $EDITOR, save the document, then run the quorum on that draft.</text>
-                <box
-                  border
-                  borderStyle="single"
-                  borderColor={theme.borderSubtle}
-                  backgroundColor={theme.backgroundElement}
-                  padding={1}
-                  flexDirection="column"
-                >
-                  {doc ? (
-                    <>
-                      <text wrapMode="word">{doc.path}</text>
-                      <text fg={theme.textMuted} wrapMode="word">
-                        {`${formatCharCount(doc.content)}  ·  ${previewLine(doc.content)}`}
-                      </text>
-                    </>
-                  ) : (
-                    <text fg={theme.textMuted}>(no document loaded yet)</text>
-                  )}
-                </box>
-                <text fg={theme.textMuted}>e open editor  ·  Enter run  ·  Tab or Esc topic</text>
-              </>
+              <box
+                border
+                borderStyle="single"
+                borderColor={theme.borderSubtle}
+                backgroundColor={theme.backgroundElement}
+                width="100%"
+                paddingLeft={1}
+                paddingRight={1}
+              >
+                {doc ? (
+                  <text wrapMode="word">
+                    {`${doc.path} | ${formatCharCount(doc.content)}`}
+                  </text>
+                ) : (
+                  <text fg={theme.textMuted}>(no document loaded yet)</text>
+                )}
+              </box>
             )}
           </box>
 
-          {hint ? (
-            <box
-              border
-              borderStyle="single"
-              borderColor={theme.borderSubtle}
-              backgroundColor={theme.backgroundElement}
-              paddingLeft={1}
-              paddingRight={1}
-            >
-              <text fg={theme.textMuted}>{hint}</text>
-            </box>
-          ) : null}
+          <PromptHint mode={mode} />
+          {hint ? <text fg={theme.warning}>{hint}</text> : null}
 
           <box>
             <text fg={theme.textMuted}>

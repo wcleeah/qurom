@@ -6,7 +6,6 @@ import { createEventBus, runQuorum, type EventBus, type RuntimePrerequisites } f
 import type { InputRequest } from "../schema"
 import { copy } from "./clipboard"
 import { HelpOverlay } from "./components/HelpOverlay"
-import { Footer } from "./components/Footer"
 import { PromptScreen } from "./components/PromptScreen"
 import { QuitConfirm } from "./components/QuitConfirm"
 import { RunningScreen } from "./components/RunningScreen"
@@ -59,7 +58,8 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
   const renderer = useRenderer()
   const [screen, setScreen] = useState<Screen>("prompt")
   const [runCtx, setRunCtx] = useState<RunCtx | undefined>(undefined)
-  const [focused, setFocused] = useState<FocusRegion>("dashboard")
+  const [selected, setSelected] = useState<FocusRegion>("dashboard")
+  const [active, setActive] = useState<FocusRegion | undefined>(undefined)
   const [showHelp, setShowHelp] = useState(false)
   const [pendingForceQuit, setPendingForceQuit] = useState(false)
   const [gPending, setGPending] = useState(false)
@@ -141,25 +141,33 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
     if (key.name === "q") return
 
     if (key.name === "escape") {
-      setFocused("dashboard")
+      setActive(undefined)
       setGPending(false)
       return
     }
 
+    if (key.name === "return") {
+      if (selected !== "dashboard") {
+        setActive(selected)
+        setGPending(false)
+      }
+      return
+    }
+
     if (key.name === "tab") {
-      const next = nextFocus(focused, key.shift ? "shift-tab" : "tab", layout)
-      if (next) setFocused(next)
+      if (active) return
+      const next = nextFocus(selected, key.shift ? "shift-tab" : "tab", layout)
+      if (next) setSelected(next)
       return
     }
 
     const navKey = key.name as "h" | "j" | "k" | "l"
-    const shouldHandleNav =
-      focused === "dashboard" ? navKey === "h" || navKey === "j" || navKey === "k" || navKey === "l" : navKey === "h" || navKey === "l"
+    const shouldHandleNav = !active
 
     if (shouldHandleNav) {
-      const next = nextFocus(focused, navKey, layout)
+      const next = nextFocus(selected, navKey, layout)
       if (next) {
-        setFocused(next)
+        setSelected(next)
         setGPending(false)
       }
     }
@@ -184,7 +192,8 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
       const promise = runQuorum({ config, prerequisites, request, bus, signal: ac.signal })
       const ctx: RunCtx = { bus, store, unbind, ac, promise }
       setRunCtx(ctx)
-      setFocused("dashboard")
+      setSelected("dashboard")
+      setActive(undefined)
       setShowHelp(false)
       setPendingForceQuit(false)
       setGPending(false)
@@ -238,12 +247,14 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
 
   const handleNewTopic = useCallback(() => {
     setRunCtx(undefined)
+    setActive(undefined)
     setPromptState({ mode: "topic", topic: "", document: undefined, hint: "" })
     setScreen("prompt")
   }, [])
 
   const handleNewDocument = useCallback(async () => {
     setRunCtx(undefined)
+    setActive(undefined)
     setScreen("prompt")
     const requestId = crypto.randomUUID()
     const result = await openInEditor({
@@ -299,7 +310,6 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
           initialDocument={promptState.document}
           initialHint={promptState.hint}
         />
-        <Footer screen="prompt" />
       </box>
     )
   }
@@ -310,7 +320,8 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
           store={runCtx.store}
           config={config}
           systemStatus={systemStatus}
-          focused={focused}
+          selected={selected}
+          active={active}
           gPending={gPending}
           onGPendingChange={setGPending}
         />
@@ -323,7 +334,6 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
     return (
       <box flexGrow={1} position="relative">
         <SummaryScreen store={runCtx.store} onAction={handleSummaryAction} />
-        <Footer screen="summary" />
       </box>
     )
   }

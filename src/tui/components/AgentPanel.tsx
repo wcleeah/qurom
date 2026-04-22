@@ -12,7 +12,8 @@ export interface AgentPanelProps {
   isDrafter: boolean
   compact?: boolean
   emphasize?: boolean
-  focused?: boolean
+  selected?: boolean
+  active?: boolean
   onGPendingChange?: (pending: boolean) => void
 }
 
@@ -104,7 +105,8 @@ export const AgentPanel = ({
   isDrafter,
   compact = false,
   emphasize = false,
-  focused = false,
+  selected = false,
+  active = false,
   onGPendingChange,
 }: AgentPanelProps) => {
   const agent = useStoreSelector(store, (s) => s.agents[roleKey])
@@ -117,7 +119,7 @@ export const AgentPanel = ({
   } | null>(null)
 
   usePanelKeymap({
-    focused,
+    active,
     onGPendingChange,
     scroll: {
       scrollBy(delta) {
@@ -160,9 +162,16 @@ export const AgentPanel = ({
     )
   }
 
-  const borderColor = focused ? theme.borderActive : isDrafter ? theme.drafter.borderColor : theme.auditor.borderColor
+  const borderColor = selected
+    ? theme.selectionBorder
+    : agent.status === "running"
+      ? theme.runningBorder
+      : isDrafter
+        ? theme.drafter.borderColor
+        : theme.auditor.borderColor
   const borderStyle = isDrafter ? theme.drafter.borderStyle : theme.auditor.borderStyle
   const toolLabel = agent.activeTool?.tool
+  const focusLabel = active ? "focus" : selected ? "selected" : undefined
 
   return (
     <box
@@ -186,9 +195,16 @@ export const AgentPanel = ({
             {formatModel(agent.model)}
           </text>
         </box>
-        <text fg={statusColor(agent.status)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-          {`${statusDot(agent.status)} ${agent.status}`}
-        </text>
+        <box flexDirection="column" alignItems="flex-end">
+          <text fg={statusColor(agent.status)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            {`${statusDot(agent.status)} ${agent.status}`}
+          </text>
+          {focusLabel ? (
+            <text fg={theme.selectionBorder} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              {focusLabel}
+            </text>
+          ) : null}
+        </box>
       </box>
       {toolLabel ? (
         <text fg={theme.tool} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>

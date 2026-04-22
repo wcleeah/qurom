@@ -10,11 +10,12 @@ import { TooSmallBanner } from "./TooSmallBanner"
 export interface AgentGridProps {
   store: RunStore
   config: RuntimeConfig
-  focused: FocusRegion
+  selected: FocusRegion
+  active?: FocusRegion
   onGPendingChange: (pending: boolean) => void
 }
 
-export const AgentGrid = ({ store, config, focused, onGPendingChange }: AgentGridProps) => {
+export const AgentGrid = ({ store, config, selected, active, onGPendingChange }: AgentGridProps) => {
   const { width, height } = useTerminalDimensions()
   const drafter = config.quorumConfig.designatedDrafter as Exclude<FocusRegion, "dashboard">
   const auditors = config.quorumConfig.auditors as Array<Exclude<FocusRegion, "dashboard">>
@@ -38,7 +39,8 @@ export const AgentGrid = ({ store, config, focused, onGPendingChange }: AgentGri
       isDrafter={key === drafter}
       compact={compact}
       emphasize={emphasize}
-      focused={focused === key}
+      selected={selected === key}
+      active={active === key}
       onGPendingChange={onGPendingChange}
     />
   )
@@ -52,13 +54,12 @@ export const AgentGrid = ({ store, config, focused, onGPendingChange }: AgentGri
     )
   }
 
-  const drafterFlex = auditHeavy ? 3 : 7
-  const auditFlex = auditHeavy ? 7 : 3
-
   return (
     <box flexDirection="row" flexGrow={1} paddingLeft={1} paddingRight={1} paddingBottom={1} gap={1}>
-      <box flexGrow={drafterFlex}>{renderPanel(drafter, false, !auditHeavy)}</box>
-      <box flexGrow={auditFlex} flexDirection="column" gap={1}>
+      <box width="50%" flexShrink={0} flexGrow={0}>
+        {renderPanel(drafter, false, !auditHeavy)}
+      </box>
+      <box width="50%" flexShrink={0} flexGrow={0} flexDirection="column" gap={1}>
         {auditors.map((auditor) => renderPanel(auditor, false, auditHeavy))}
       </box>
     </box>
