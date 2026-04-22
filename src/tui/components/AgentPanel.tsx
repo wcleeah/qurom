@@ -1,0 +1,71 @@
+import type { AgentState, RunStore, ScrollbackEntry } from "../state/runStore"
+import { useStoreSelector } from "../state/useStore"
+import { theme } from "../theme"
+
+export interface AgentPanelProps {
+  store: RunStore
+  roleKey: string
+  title: string
+  isDrafter: boolean
+  focused: boolean
+}
+
+const statusDot = (status: AgentState["status"]): string => {
+  if (status === "running") return "●"
+  if (status === "complete") return "✓"
+  if (status === "error") return "✗"
+  return "○"
+}
+
+const statusColor = (status: AgentState["status"]): string => {
+  if (status === "running") return theme.status.running
+  if (status === "complete") return theme.status.complete
+  if (status === "error") return theme.status.error
+  return theme.status.idle
+}
+
+const kindColor = (kind: ScrollbackEntry["kind"]): string => {
+  if (kind === "tool") return theme.tool
+  if (kind === "permission") return theme.permission
+  if (kind === "system") return theme.system
+  return theme.reasoning
+}
+
+export const AgentPanel = ({ store, roleKey, title, isDrafter, focused }: AgentPanelProps) => {
+  const agent = useStoreSelector(store, (s) => s.agents[roleKey])
+  if (!agent) {
+    return (
+      <box border title={title} borderStyle="single" flexGrow={1}>
+        <text fg={theme.dim}>(no agent slot)</text>
+      </box>
+    )
+  }
+  const borderColor = isDrafter ? theme.drafterColor : theme.panel
+  const borderStyle = isDrafter ? "double" : "single"
+
+  return (
+    <box
+      border
+      title={title}
+      borderStyle={borderStyle}
+      borderColor={borderColor}
+      flexGrow={1}
+      flexDirection="column"
+      paddingLeft={1}
+      paddingRight={1}
+    >
+      <box flexDirection="row" gap={1}>
+        <text fg={statusColor(agent.status)}>{statusDot(agent.status)}</text>
+        <text>{agent.activeTool?.tool ?? "-"}</text>
+        {focused ? <text fg={theme.accent}>[focus]</text> : null}
+      </box>
+      <scrollbox focused={focused} flexGrow={1}>
+        {agent.scrollback.map((entry, i) => (
+          <text key={i} fg={kindColor(entry.kind)}>
+            {`> ${entry.text}`}
+          </text>
+        ))}
+      </scrollbox>
+    </box>
+  )
+}
