@@ -1,10 +1,7 @@
-import { useSyncExternalStore } from "react"
+import { useStore } from "zustand"
+import { useShallow } from "zustand/react/shallow"
 import type { RunStore, RunStoreState } from "./runStore"
 
 export function useStoreSelector<T>(store: RunStore, selector: (s: RunStoreState) => T): T {
-  return useSyncExternalStore(
-    store.subscribe,
-    () => selector(store.get()),
-    () => selector(store.get()),
-  )
+  return useStore(store, useShallow(selector))
 }

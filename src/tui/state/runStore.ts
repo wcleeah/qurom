@@ -1,3 +1,4 @@
+import { createStore, type StoreApi } from "zustand/vanilla"
 import type { RuntimeConfig } from "../../config"
 import type { RunnerEvent } from "../../runner"
 import type { GraphInput, ResearchState } from "../../schema"
@@ -44,11 +45,7 @@ export type RunStoreState = {
   result?: unknown
 }
 
-export type RunStore = {
-  get: () => RunStoreState
-  set: (next: RunStoreState) => void
-  subscribe: (listener: (state: RunStoreState) => void) => () => void
-}
+export type RunStore = StoreApi<RunStoreState>
 
 export type CreateRunStoreInput = {
   config: RuntimeConfig
@@ -99,8 +96,12 @@ function deriveStatus(raw: string): AgentStatus {
 }
 
 function appendScrollback(agent: AgentState, entry: ScrollbackEntry): AgentState {
-  return { ...agent, scrollback: [...agent.scrollback, entry], lastEventAt: entry.ts }
+  const next = [...agent.scrollback, entry]
+  const trimmed = next.length > SCROLLBACK_LIMIT ? next.slice(next.length - SCROLLBACK_LIMIT) : next
+  return { ...agent, scrollback: trimmed, lastEventAt: entry.ts }
 }
+
+const SCROLLBACK_LIMIT = 500
 
 function withAgent(state: RunStoreState, key: string, mutate: (agent: AgentState) => AgentState): RunStoreState {
   const existing = state.agents[key] ?? emptyAgent()
@@ -108,7 +109,9 @@ function withAgent(state: RunStoreState, key: string, mutate: (agent: AgentState
 }
 
 function appendSystem(state: RunStoreState, entry: ScrollbackEntry): RunStoreState {
-  return { ...state, systemLog: [...state.systemLog, entry] }
+  const next = [...state.systemLog, entry]
+  const trimmed = next.length > SCROLLBACK_LIMIT ? next.slice(next.length - SCROLLBACK_LIMIT) : next
+  return { ...state, systemLog: trimmed }
 }
 
 export function reduce(state: RunStoreState, event: RunnerEvent, config: RuntimeConfig): RunStoreState {
@@ -137,8 +140,6 @@ export function reduce(state: RunStoreState, event: RunnerEvent, config: Runtime
       return withAgent(state, key, (agent) => ({ ...agent, sessionID: event.sessionID, lastEventAt: ts }))
     }
     case "session.status": {
-      // session.status carries no role; we cannot route without a sessionID->role map (owned by runner).
-      // Reducer is pure: write status only if the sessionID matches a known agent slot.
       const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
       if (!entry) return state
       const [key] = entry
@@ -184,7 +185,6 @@ export function reduce(state: RunStoreState, event: RunnerEvent, config: Runtime
           appendScrollback({ ...agent, activeTool: undefined }, { kind: "tool", text: `${event.tool} completed`, ts }),
         )
       }
-      // error
       return withAgent(state, key, (agent) =>
         appendScrollback(
           { ...agent, activeTool: undefined },
@@ -206,25 +206,5 @@ export function reduce(state: RunStoreState, event: RunnerEvent, config: Runtime
 }
 
 export function createRunStore(input: CreateRunStoreInput): RunStore {
-  let state = createInitialState(input.config, input.initial)
-  const listeners = new Set<(state: RunStoreState) => void>()
-  return {
-    get() {
-      return state
-    },
-    set(next) {
-      state = next
-      for (const listener of listeners) {
-        try {
-          listener(state)
-        } catch {
-          // Subscriber errors must not break other subscribers.
-        }
-      }
-    },
-    subscribe(listener) {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-  }
+  return createStore<RunStoreState>(() => createInitialState(input.config, input.initial))
 }

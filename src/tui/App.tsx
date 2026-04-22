@@ -54,10 +54,9 @@ export const App = ({ config, prerequisites }: AppProps) => {
         .catch((err) => {
           // Lifecycle reducer already records the error from the runner's lifecycle:error event.
           // If the rejection bypassed lifecycle (e.g. abort), surface it manually.
-          const current = store.get()
+          const current = store.getState()
           if (!current.lifecycle.error) {
-            store.set({
-              ...current,
+            store.setState({
               lifecycle: { ...current.lifecycle, phase: "error", error: err },
             })
           }

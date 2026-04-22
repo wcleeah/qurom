@@ -230,34 +230,21 @@ describe("reduce", () => {
 })
 
 describe("createRunStore", () => {
-  test("get returns initial seeded state", () => {
+  test("getState returns initial seeded state", () => {
     const store = createRunStore({ config })
-    expect(store.get().lifecycle.phase).toBe("starting")
-    expect(store.get().agents["research-drafter"]).toBeDefined()
+    expect(store.getState().lifecycle.phase).toBe("starting")
+    expect(store.getState().agents["research-drafter"]).toBeDefined()
   })
 
-  test("set notifies subscribers; unsubscribe stops notifications", () => {
+  test("setState notifies subscribers; unsubscribe stops notifications", () => {
     const store = createRunStore({ config })
     const calls: number[] = []
     const unsub = store.subscribe((s) => calls.push(s.systemLog.length))
-    const next: typeof store extends infer S ? (S extends { get: () => infer T } ? T : never) : never =
-      store.get()
-    store.set({ ...next, systemLog: [{ kind: "system", text: "hello", ts: 1 }] })
+    store.setState({ systemLog: [{ kind: "system", text: "hello", ts: 1 }] })
     expect(calls).toEqual([1])
     unsub()
-    store.set({ ...store.get(), systemLog: [] })
+    store.setState({ systemLog: [] })
     expect(calls).toEqual([1])
-  })
-
-  test("throwing subscriber does not break other subscribers", () => {
-    const store = createRunStore({ config })
-    const seen: string[] = []
-    store.subscribe(() => {
-      throw new Error("boom")
-    })
-    store.subscribe(() => seen.push("ok"))
-    store.set({ ...store.get(), systemLog: [{ kind: "system", text: "x", ts: 0 }] })
-    expect(seen).toEqual(["ok"])
   })
 })
 

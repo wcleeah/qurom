@@ -259,7 +259,21 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
     documentPath: request.inputMode === "document" ? request.documentPath : undefined,
   })
 
-  const bridge = bridgeFactory(config, { bus, runDir })
+  const bridgeAbort = new AbortController()
+  let bridgeStreamError: unknown
+  if (signal) {
+    if (signal.aborted) bridgeAbort.abort(signal.reason)
+    else signal.addEventListener("abort", () => bridgeAbort.abort(signal.reason), { once: true })
+  }
+
+  const bridge = bridgeFactory(config, {
+    bus,
+    runDir,
+    onStreamError: (error) => {
+      bridgeStreamError = error
+      bridgeAbort.abort(error)
+    },
+  })
   const telemetryListener = attachTelemetryListener(bus, telemetry)
 
   bus.emit({
@@ -295,7 +309,7 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
 
       const invocation = await graph.invoke(
         { ...request, requestId },
-        { configurable: { thread_id: requestId }, signal },
+        { configurable: { thread_id: requestId }, signal: bridgeAbort.signal },
       )
 
       const traceMetadata = {
@@ -342,14 +356,15 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
       raw: runResult,
     }
   } catch (error) {
+    const surfaced = bridgeStreamError ?? error
     bus.emit({
       kind: "lifecycle",
       phase: "error",
       requestId,
       traceId: telemetry.traceId,
-      error,
+      error: surfaced,
     })
-    throw error
+    throw surfaced
   } finally {
     try {
       await telemetryListener.dispose()

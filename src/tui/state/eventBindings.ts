@@ -17,17 +17,30 @@ export function bindBusToStore(input: BindBusToStoreInput): () => void {
 
   let pending: RunnerEvent[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
+  let flushing = false
 
   function flush() {
     timer = undefined
+    if (flushing) {
+      // Re-entrant call: defer to next tick so we never recurse via subscriber side effects.
+      timer = setTimeout(flush, flushMs)
+      return
+    }
     if (pending.length === 0) return
     const batch = pending
     pending = []
-    let next = store.get()
-    for (const event of batch) {
-      next = reduce(next, event, config)
+    flushing = true
+    try {
+      store.setState((current) => {
+        let next = current
+        for (const event of batch) {
+          next = reduce(next, event, config)
+        }
+        return next
+      })
+    } finally {
+      flushing = false
     }
-    store.set(next)
   }
 
   const off = bus.on((event) => {

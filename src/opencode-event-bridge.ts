@@ -10,6 +10,9 @@ export type OpencodeBridgeOptions = {
   runDir: string
   // Test seam: inject a stub client. Defaults to the real opencode SDK client.
   clientFactory?: (config: RuntimeConfig) => OpencodeClient
+  // Invoked when the SDK event stream errors out unexpectedly (e.g. opencode server died).
+  // Lets the runner abort the in-flight graph invocation instead of hanging.
+  onStreamError?: (error: unknown) => void
 }
 
 function formatErrorMessage(error: unknown) {
@@ -230,8 +233,7 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
 
       streamTask = consumeStream().catch((error) => {
         if (abortController.signal.aborted) return
-        // Stream failures cannot be attributed to a specific session here; swallow silently.
-        void error
+        opts.onStreamError?.(error)
       })
     },
     async stop() {
