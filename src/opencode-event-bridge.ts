@@ -36,6 +36,8 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
 
   const activeReasoningParts = new Set<string>()
   const reasoningBuffers = new Map<string, string>()
+  const activeTextParts = new Set<string>()
+  const textBuffers = new Map<string, string>()
   const seenAssistantMessages = new Set<string>()
   const seenPermissionRequests = new Set<string>()
   const seenToolStates = new Set<string>()
@@ -57,10 +59,26 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
     return normalized.length >= 220
   }
 
+  function shouldFlushText(buffer: string) {
+    const normalized = buffer.replace(/\s+/g, " ").trim()
+    if (!normalized) return false
+    if (buffer.includes("\n")) return true
+    if (/[.!?:]["')\]]?\s*$/.test(buffer)) return true
+    return normalized.length >= 220
+  }
+
   // Pure: returns the normalized buffer text (or undefined if nothing to flush).
   // Caller owns the reasoningBuffers mutation and bus emission.
   function takeReasoning(key: string): string | undefined {
     const text = reasoningBuffers.get(key)
+    if (!text) return undefined
+    const normalized = text.replace(/\s+/g, " ").trim()
+    if (!normalized) return undefined
+    return normalized
+  }
+
+  function takeText(key: string): string | undefined {
+    const text = textBuffers.get(key)
     if (!text) return undefined
     const normalized = text.replace(/\s+/g, " ").trim()
     if (!normalized) return undefined
@@ -160,13 +178,22 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
 
         const sessionID = event.properties.sessionID
         const key = reasoningPartKey(sessionID, event.properties.messageID, event.properties.partID)
-        if (!activeReasoningParts.has(key)) continue
+        if (activeReasoningParts.has(key)) {
+          const nextBuffer = `${reasoningBuffers.get(key) ?? ""}${event.properties.delta}`
+          reasoningBuffers.set(key, nextBuffer)
+          if (!shouldFlushReasoning(nextBuffer)) continue
+          const text = takeReasoning(key)
+          if (text) bus.emit({ kind: "agent.reasoning", sessionID, key, text, done: false })
+          continue
+        }
 
-        const nextBuffer = `${reasoningBuffers.get(key) ?? ""}${event.properties.delta}`
-        reasoningBuffers.set(key, nextBuffer)
-        if (!shouldFlushReasoning(nextBuffer)) continue
-        const text = takeReasoning(key)
-        if (text) bus.emit({ kind: "agent.reasoning", sessionID, key, text, done: false })
+        if (!activeTextParts.has(key)) continue
+
+        const nextBuffer = `${textBuffers.get(key) ?? ""}${event.properties.delta}`
+        textBuffers.set(key, nextBuffer)
+        if (!shouldFlushText(nextBuffer)) continue
+        const text = takeText(key)
+        if (text) bus.emit({ kind: "agent.message.text", sessionID, key, text, done: false })
         continue
       }
 
@@ -187,6 +214,21 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
         reasoningBuffers.delete(key)
         activeReasoningParts.delete(key)
         if (text) bus.emit({ kind: "agent.reasoning", sessionID, key, text, done: true })
+        continue
+      }
+
+      if (part.type === "text") {
+        const key = reasoningPartKey(sessionID, part.messageID, part.id)
+        if (!part.time?.end) {
+          activeTextParts.add(key)
+          if (!textBuffers.has(key)) textBuffers.set(key, "")
+          continue
+        }
+
+        const text = takeText(key)
+        textBuffers.delete(key)
+        activeTextParts.delete(key)
+        if (text) bus.emit({ kind: "agent.message.text", sessionID, key, text, done: true })
         continue
       }
 

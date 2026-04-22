@@ -233,6 +233,52 @@ describe("createOpencodeEventBridge", () => {
     await bridge.stop()
   })
 
+  test("emits assistant text parts so non-reasoning replies are visible", async () => {
+    const bus = createEventBus()
+    const events = collect(bus)
+    const { client, controller } = makeStubClient()
+
+    const bridge = createOpencodeEventBridge(baseConfig, {
+      bus,
+      runDir: "/tmp/unused",
+      clientFactory: () => client as never,
+    })
+
+    await bridge.start()
+
+    controller.push({
+      type: "message.part.updated",
+      properties: {
+        sessionID: "s1",
+        part: { type: "text", messageID: "m1", id: "p1", time: { end: undefined } },
+      },
+    })
+
+    controller.push({
+      type: "message.part.delta",
+      properties: { sessionID: "s1", messageID: "m1", partID: "p1", field: "text", delta: "This is visible." },
+    })
+    await flush()
+
+    const partial = events.filter((e) => e.kind === "agent.message.text")
+    expect(partial).toHaveLength(1)
+    expect(partial[0]).toMatchObject({ kind: "agent.message.text", sessionID: "s1", key: "s1:m1:p1", done: false })
+
+    controller.push({
+      type: "message.part.updated",
+      properties: {
+        sessionID: "s1",
+        part: { type: "text", messageID: "m1", id: "p1", time: { end: Date.now() } },
+      },
+    })
+    await flush()
+
+    const final = events.filter((e) => e.kind === "agent.message.text")
+    expect(final.at(-1)).toMatchObject({ kind: "agent.message.text", sessionID: "s1", key: "s1:m1:p1", done: true })
+
+    await bridge.stop()
+  })
+
   test("emits events for sessions the bridge never saw a session.created for (no per-session filter)", async () => {
     const bus = createEventBus()
     const events = collect(bus)

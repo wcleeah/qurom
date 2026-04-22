@@ -21,6 +21,7 @@ export type RunnerEvent =
   | { kind: "session.status"; sessionID: string; status: string }
   | { kind: "session.error"; sessionID: string; name: string; message?: string }
   | { kind: "agent.message.start"; sessionID: string; messageID: string }
+  | { kind: "agent.message.text"; sessionID: string; key: string; text: string; done?: boolean }
   | { kind: "agent.reasoning"; sessionID: string; key: string; text: string; done?: boolean }
   | {
       kind: "agent.tool"
@@ -403,6 +404,8 @@ export function describeRunnerEvent(event: RunnerEvent): string {
       return `session.error:${event.sessionID}:${event.name}`
     case "agent.message.start":
       return `agent.message.start:${event.sessionID}`
+    case "agent.message.text":
+      return `agent.message.text:${event.sessionID}`
     case "agent.reasoning":
       return `agent.reasoning:${event.sessionID}`
     case "agent.tool":

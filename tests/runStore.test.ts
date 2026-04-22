@@ -146,6 +146,18 @@ describe("reduce", () => {
     expect(entry.text).toBe("thinking more")
   })
 
+  test("agent.message.text upserts a system entry by key", () => {
+    let state = createInitialState(config)
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
+    state = reduce(state, { kind: "agent.message.text", sessionID: "d-s", key: "m-1:p-1", text: "partial", done: false }, config)
+    state = reduce(state, { kind: "agent.message.text", sessionID: "d-s", key: "m-1:p-1", text: "final sentence.", done: true }, config)
+    const entry = state.agents["research-drafter"]!.scrollback.at(-1)!
+    expect(entry.kind).toBe("system")
+    expect(entry.key).toBe("m-1:p-1")
+    expect(entry.done).toBe(true)
+    expect(entry.text).toBe("final sentence.")
+  })
+
   test("agent.tool running sets activeTool and appends a tool entry (no counter)", () => {
     let state = createInitialState(config)
     state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
