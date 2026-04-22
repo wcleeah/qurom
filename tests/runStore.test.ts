@@ -112,6 +112,8 @@ describe("reduce", () => {
     state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
     state = reduce(state, { kind: "session.status", sessionID: "d-s", status: "active" }, config)
     expect(state.agents["research-drafter"]?.status).toBe("running")
+    state = reduce(state, { kind: "session.status", sessionID: "d-s", status: "completed" }, config)
+    expect(state.agents["research-drafter"]?.status).toBe("complete")
     state = reduce(state, { kind: "session.status", sessionID: "d-s", status: "idle" }, config)
     expect(state.agents["research-drafter"]?.status).toBe("idle")
   })

@@ -12,6 +12,13 @@ export interface PromptScreenProps {
   onSubmit: (request: InputRequest) => void
 }
 
+const MODE_OPTIONS = [
+  { name: "Topic", description: "Type a research topic", value: "topic" },
+  { name: "Compose document", description: "Open $EDITOR to write a draft", value: "document" },
+]
+
+const MODE_SELECT_STYLE = { height: 4 }
+
 const generateRequestId = (): string => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID()
   return `req-${Date.now().toString(16)}-${Math.floor(Math.random() * 1e9).toString(16)}`
@@ -80,10 +87,7 @@ export const PromptScreen = ({ config, onSubmit }: PromptScreenProps) => {
       <box border title="research-qurom" padding={1} flexDirection="column">
         <text fg={theme.accent}>choose input mode</text>
         <select
-          options={[
-            { name: "Topic", description: "Type a research topic", value: "topic" },
-            { name: "Compose document", description: "Open $EDITOR to write a draft", value: "document" },
-          ]}
+          options={MODE_OPTIONS}
           focused={false}
           onChange={(_, option) => {
             const value = option?.value
@@ -92,7 +96,7 @@ export const PromptScreen = ({ config, onSubmit }: PromptScreenProps) => {
               setHint("")
             }
           }}
-          style={{ height: 4 }}
+          style={MODE_SELECT_STYLE}
         />
       </box>
 

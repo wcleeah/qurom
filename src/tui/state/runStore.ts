@@ -91,7 +91,8 @@ export function createInitialState(config: RuntimeConfig, initial?: Partial<RunS
 
 function deriveStatus(raw: string): AgentStatus {
   if (raw === "error") return "error"
-  if (raw === "complete" || raw === "completed" || raw === "idle") return "idle"
+  if (raw === "complete" || raw === "completed") return "complete"
+  if (raw === "idle") return "idle"
   return "running"
 }
 

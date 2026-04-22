@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import type { RunStore, RunStoreState } from "../state/runStore"
+import type { RunStore } from "../state/runStore"
 import { useStoreSelector } from "../state/useStore"
 import { theme } from "../theme"
 
@@ -27,19 +27,17 @@ const useElapsed = (active: boolean): number => {
   return now - start.current
 }
 
-const selectSummary = (s: RunStoreState) => ({
-  phase: s.lifecycle.phase,
-  requestId: s.lifecycle.requestId,
-  traceId: s.lifecycle.traceId,
-  outputDir: s.lifecycle.outputDir,
-  graphNode: s.graph.node,
-  graphPhase: s.graph.phase,
-  round: s.graph.state && "round" in s.graph.state ? (s.graph.state as { round?: number }).round : undefined,
-})
-
 export const Dashboard = ({ store }: DashboardProps) => {
-  const summary = useStoreSelector(store, selectSummary)
-  const active = summary.phase !== "complete" && summary.phase !== "error"
+  const phase = useStoreSelector(store, (s) => s.lifecycle.phase)
+  const requestId = useStoreSelector(store, (s) => s.lifecycle.requestId)
+  const traceId = useStoreSelector(store, (s) => s.lifecycle.traceId)
+  const outputDir = useStoreSelector(store, (s) => s.lifecycle.outputDir)
+  const graphNode = useStoreSelector(store, (s) => s.graph.node)
+  const round = useStoreSelector(store, (s) =>
+    s.graph.state && "round" in s.graph.state ? (s.graph.state as { round?: number }).round : undefined,
+  )
+
+  const active = phase !== "complete" && phase !== "error"
   const elapsed = useElapsed(active)
 
   return (
@@ -48,24 +46,24 @@ export const Dashboard = ({ store }: DashboardProps) => {
         <ascii-font font="tiny" text="QUORUM" />
         <box flexDirection="column">
           <text>
-            <span fg={theme.accent}>{summary.phase}</span>
+            <span fg={theme.accent}>{phase}</span>
             <span fg={theme.dim}>  ·  node </span>
-            <span>{summary.graphNode ?? "-"}</span>
+            <span>{graphNode ?? "-"}</span>
             <span fg={theme.dim}>  ·  round </span>
-            <span>{summary.round ?? "-"}</span>
+            <span>{round ?? "-"}</span>
           </text>
           <text>
             <span fg={theme.dim}>req </span>
-            <span>{shortId(summary.requestId)}</span>
+            <span>{shortId(requestId)}</span>
             <span fg={theme.dim}>  ·  trace </span>
-            <span>{shortId(summary.traceId)}</span>
+            <span>{shortId(traceId)}</span>
             <span fg={theme.dim}>  ·  </span>
             <span>{formatElapsed(elapsed)}</span>
           </text>
         </box>
       </box>
-      {summary.outputDir ? (
-        <text fg={theme.dim}>out: {summary.outputDir}</text>
+      {outputDir ? (
+        <text fg={theme.dim}>out: {outputDir}</text>
       ) : null}
     </box>
   )

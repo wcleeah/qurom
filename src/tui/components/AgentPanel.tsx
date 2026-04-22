@@ -45,16 +45,9 @@ const PanelScrollback = ({ store, roleKey, focused }: { store: RunStore; roleKey
 }
 
 export const AgentPanel = ({ store, roleKey, title, isDrafter, focused }: AgentPanelProps) => {
-  const header = useStoreSelector(store, (s) => {
-    const agent = s.agents[roleKey]
-    return {
-      exists: agent !== undefined,
-      status: agent?.status ?? "idle",
-      activeTool: agent?.activeTool?.tool,
-    }
-  })
+  const agent = useStoreSelector(store, (s) => s.agents[roleKey])
 
-  if (!header.exists) {
+  if (!agent) {
     return (
       <box border title={title} borderStyle="single" flexGrow={1}>
         <text fg={theme.dim}>(no agent slot)</text>
@@ -76,8 +69,8 @@ export const AgentPanel = ({ store, roleKey, title, isDrafter, focused }: AgentP
       paddingRight={1}
     >
       <box flexDirection="row" gap={1}>
-        <text fg={statusColor(header.status)}>{statusDot(header.status)}</text>
-        <text>{header.activeTool ?? "-"}</text>
+        <text fg={statusColor(agent.status)}>{statusDot(agent.status)}</text>
+        <text>{agent.activeTool?.tool ?? "-"}</text>
         {focused ? <text fg={theme.accent}>[focus]</text> : null}
       </box>
       <PanelScrollback store={store} roleKey={roleKey} focused={focused} />

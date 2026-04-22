@@ -9,7 +9,7 @@ Replace the current line-printing CLI of `research-qurom` with a true terminal U
 - a startup prompt for the input (topic or file)
 - a post-run summary with re-run / new-input / quit actions
 
-End state: `bun run dev` opens the TUI directly, the user picks an input mode (topic or compose-document), watches the four agents stream their reasoning and tool calls in a 2x2 grid with the drafter highlighted, and on completion picks one of {Re-run same input, New topic, New document, Quit}. No CLI flags. No plain log fallback. Document input is composed in the user's `$EDITOR` (full markdown editing, not a file path picker).
+End state: `bun run dev` opens the TUI directly, the user picks an input mode (topic or compose-document), watches the run in a drafter-primary split view inspired by `reference/opencode` (main drafter pane + compact auditor rail + metadata/status surfaces), and on completion picks one of {Re-run same input, New topic, New document, Quit}. No CLI flags. No plain log fallback. Document input is composed in the user's `$EDITOR` (full markdown editing, not a file path picker).
 
 ## 2. Starting point, driving problem, and finish line
 
@@ -21,8 +21,8 @@ A second, smaller problem: the file `src/telemetry-enrichment.ts` is misnamed. I
 
 **Finish line.** A single TUI process where:
 
-- a top dashboard shows phase, round, run id, output dir, trace id, and per-agent token/tool counters
-- a 2x2 grid below shows one panel per agent with live streaming reasoning and tool activity, drafter visually highlighted top-left
+- a thin status/header strip shows phase, round, run id, output dir, trace id, and compact live counters
+- a running screen below uses a drafter-primary split layout: the drafter owns the main reading surface, auditors live in a compact rail that can still stream live reasoning/tool activity, and secondary metadata moves into lighter side/footer surfaces
 - the user is prompted for input on startup (no flags); document input opens `$EDITOR` so the user composes the source markdown in their normal editor
 - a post-run screen offers Re-run / New topic / New document / Quit and the same process keeps running across runs
 - the TUI is the only UI; no plain mode
@@ -43,10 +43,10 @@ The plan must connect the existing event sources (graph node observer, session e
 
 **Assumptions (labelled).**
 
-- *Confirmed*: the four roles in the UI come from `config.quorumConfig.designatedDrafter` + `config.quorumConfig.auditors` (`quorum.config.json:1-7`, surfaced by `src/index.ts:64-69`). The plan hard-wires "1 drafter + N auditors" but renders the grid as 2x2 because today N=3.
+- *Confirmed*: the four roles in the UI come from `config.quorumConfig.designatedDrafter` + `config.quorumConfig.auditors` (`quorum.config.json:1-7`, surfaced by `src/index.ts:64-69`). The plan hard-wires "1 drafter + N auditors". The ambitious UI pass (new Phase 07.5) changes the presentation from an equal 2x2 grid to a drafter-primary split view while still keeping all four agents visible.
 - *Confirmed*: every agent has exactly one opencode session, registered through `observer.onSessionCreated({ sessionID, role })` in `src/graph.ts:1244-1255`, and `role` is one of `"root" | "drafter" | "auditor:<name>"`.
 - *Inferred*: the runner only ever runs one quorum at a time (graph state and checkpointer are per-thread keyed on `requestId` at `src/index.ts:124-128`). The TUI assumes serial runs.
-- *Speculative*: the user's terminal is at least ~100 cols x 30 rows. Below that, a 2x2 grid of useful panels does not fit; we add a single-stack fallback.
+- *Speculative*: the user's terminal is at least ~100 cols x 30 rows. Below that, a drafter-primary split view loses too much horizontal room, so we collapse to a vertical stack with the drafter first and auditors below; at very small sizes we still need a dedicated "Terminal too small" banner.
 - *Confirmed*: opentui's `CliRenderer` exposes `suspend()` and `resume()` (`reference/opentui/packages/core/src/renderer.ts:2107-2165`). `suspend()` pauses the render loop, disables mouse + raw mode, releases the stdin listener, and calls the native `suspendRenderer`; `resume()` restores raw mode, drains buffered stdin, re-attaches the listener, and re-clears the back buffer. This is exactly the lifecycle needed to hand the terminal to `$EDITOR` and take it back. The TUI's `$EDITOR` integration (Step 5) calls these directly — no destroy/recreate.
 
 **Why this changes the plan.** The "no double subscriber" and "console.log is invisible" constraints force two structural decisions: (a) the event subscriber must be owned by the runner and stopped/awaited between runs, and (b) we cannot leave any `logProgress` calls; every existing log site must become a typed event on a bus.
@@ -289,34 +289,53 @@ Files: `src/tui/state/runStore.ts`, `src/tui/state/eventBindings.ts`.
 - The reducer is a pure function `reduce(state, event) -> state`. This is what makes Step 11 testable.
 - Roles map: incoming `role` is one of `"root" | "drafter" | "auditor:<name>"`; the store maps that to an internal role key matching `quorumConfig.designatedDrafter` and `quorumConfig.auditors[i]`. Root events go to the dashboard, not to a panel.
 
-### Step 7 — Components
+### Step 7 — Functional components
 
 Files under `src/tui/components/`.
 
-- `Dashboard.tsx` — two rows:
-  - row 1: `<ascii-font font="tiny" text="QUORUM"/>`, phase badge, round, request id (short), trace id (short), elapsed
-  - row 2: per-agent compact stats `[role | tools | errors | last event]`, output dir
-- `AgentGrid.tsx` — `flexDirection: "column"`, two rows of two `AgentPanel`s. Drafter is row 0 col 0. Layout falls back to a single column when terminal width < 100.
-- `AgentPanel.tsx` — `<box border title="...">` containing a `<scrollbox focused={isFocused}>` of `Entry`s; header shows status dot, current tool name (if any), and "v new" indicator when the user has scrolled up and new content has arrived. Drafter passes `borderStyle="double"` and a brighter `borderColor` from the theme.
-- `PromptScreen.tsx` — `<select>` for "Topic" vs "Compose document". Topic mode shows a single-line `<input>`. Compose-document mode shows a one-line summary card (`runs/.drafts/<requestId>.md  ·  <N> chars  ·  press e to edit`) and three actions: `e` open `$EDITOR` (calls `openInEditor` from `src/tui/editor.ts`), `Enter` submit (disabled while content is empty), `Esc` back to mode select. On submit, calls a passed `onSubmit({ inputMode: "topic" | "document", topic?, document? })` from `App` — `document` is the in-memory string returned from the editor, plus the path for display.
-- `SummaryScreen.tsx` — summary card (outcome, round, approved agents, unresolved findings, output path, trace id) plus a `<select>` of `["Re-run same input", "New topic", "New document", "Quit"]`.
-- `Footer.tsx` — vim keybinding hints: `h/j/k/l focus  ·  j/k scroll  ·  C-d/C-u half-page  ·  gg/G top/bot  ·  q quit  ·  r re-run`.
+- `Dashboard.tsx` — the initial functional version can still be a simple two-row header, but treat it as temporary scaffolding: phase badge, round, request id, trace id, elapsed, compact per-agent stats, output dir. The ambitious layout pass moves the final hierarchy work to Step 7.5.
+- `AgentGrid.tsx` — the initial functional version may still render all agents in a straightforward equal-weight layout so Phase 07 can prove the event/store plumbing. Do not over-invest in chrome here; the ambitious layout pass happens in Step 7.5.
+- `AgentPanel.tsx` — functional bordered panel with a `<scrollbox focused={isFocused}>` of `Entry`s; header shows status dot, current tool name (if any), and a temporary "v new" indicator when the user has scrolled up and new content has arrived.
+- `PromptScreen.tsx` — functional startup screen for "Topic" vs "Compose document". Topic mode shows a single-line `<input>`. Compose-document mode shows a one-line summary card (`runs/.drafts/<requestId>.md  ·  <N> chars  ·  press e to edit`) and three actions: `e` open `$EDITOR`, `Enter` submit (disabled while content is empty), `Esc` back to mode select. On submit, calls a passed `onSubmit({ inputMode: "topic" | "document", topic?, document? })` from `App` — `document` is the in-memory string returned from the editor, plus the path for display.
+- `SummaryScreen.tsx` — functional summary card (outcome, round, approved agents, unresolved findings, output path, trace id) plus a `<select>` of `["Re-run same input", "New topic", "New document", "Quit"]`.
+- `Footer.tsx` — temporary footer text. In the ambitious path, this should only show controls that are actually implemented at the current phase; do not treat the Phase 07 hint string as final UX.
+
+### Step 7.5 — UI hierarchy and layout polish (ambitious)
+
+Files under `src/tui/components/`, plus `src/tui/theme.ts` and possibly a small new layout helper under `src/tui/state/`.
+
+- Replace the equal-weight running-screen layout with a drafter-primary split view inspired by `reference/opencode/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx` and `sidebar.tsx`:
+  - main column: thin status strip + large drafter surface + footer
+  - secondary rail: one compact card per auditor, stacked vertically on wide terminals
+  - optional metadata sidebar or compact inspector for output dir, trace id, system status, and future telemetry
+- Redesign `PromptScreen.tsx` to be prompt-first instead of form-first, taking cues from `reference/opencode/packages/opencode/src/cli/cmd/tui/routes/home.tsx`: one dominant composer, compact mode switch, clearer document summary card.
+- Redesign `SummaryScreen.tsx` to be outcome-first instead of a generic result box: prominent status/outcome, approved agents / unresolved findings, artifact location, and next actions with stronger hierarchy.
+- Expand `theme.ts` from role/status accents into real surface tokens: `background`, `backgroundPanel`, `backgroundElement`, `borderSubtle`, `borderActive`, `text`, `textMuted`, `accent`, `success`, `warning`, `error`. The goal is to support lighter chrome and better contrast rather than more colors.
+- Replace heavy full-box chrome where possible with lighter separators, split borders, section gutters, or shaded panels. Use `reference/opencode/packages/opencode/src/cli/cmd/tui/component/border.tsx` as a structural reference, not a copy target.
+- Add a transient system-status surface for warnings and runner/bridge failures. This can be a toast/overlay or a reserved banner region; the goal is to stop burying operational status in the main content flow.
+- Responsive behavior changes:
+  - `width >= 120`: drafter-primary split view with stacked auditor rail
+  - `100 <= width < 120`: compressed split view, reduced metadata, auditor cards remain visible
+  - `width < 100`: vertical stack with drafter first, auditors below
+  - `width < 60 || height < 20`: `TooSmallBanner`
+
+This step is intentionally before keybindings. Once the layout hierarchy is stable, Phase 08 can wire focus order, scroll semantics, and footer hints against the final screen shape instead of a temporary 2x2 grid.
 
 ### Step 8 — Vim-style keyboard and focus
 
-The keymap mirrors vim conventions so muscle memory transfers. Two layers: focus navigation across panels (always active), and scroll commands inside the focused panel.
+The keymap mirrors vim conventions so muscle memory transfers. Two layers: focus navigation across the final running-screen regions (always active), and scroll commands inside the focused pane.
 
 **Focus navigation (always active when not in a text input):**
 
-- `h` — focus left in the grid (drafter ↔ source, logic ↔ clarity); from dashboard wraps to leftmost agent on the same row
-- `l` — focus right in the grid
-- `j` — focus down (drafter → logic, source → clarity); from a panel on the bottom row goes to dashboard
-- `k` — focus up (logic → drafter, clarity → source); from dashboard goes to drafter
+- `h` — move toward the primary pane or previous region in reading order
+- `l` — move toward the secondary rail or next region in reading order
+- `j` — move down through stacked regions (`dashboard -> drafter -> source -> logic -> clarity` on the wide split layout)
+- `k` — move up through stacked regions
 - `Tab` / `Shift+Tab` — fallback cycle (kept for non-vim users)
 
 **Scroll commands (when an agent panel is focused):**
 
-- `j` — scroll down one line (overrides focus-down while panel is focused; focus-down requires `Esc` first to release the panel, then `j`)
+- `j` — scroll down one line (overrides focus-down while a pane is focused; focus-down requires `Esc` first to release the pane, then `j`)
 - `k` — scroll up one line
 - `Ctrl+d` — half page down
 - `Ctrl+u` — half page up
@@ -326,7 +345,7 @@ The keymap mirrors vim conventions so muscle memory transfers. Two layers: focus
 - `G` (shift+g) — scroll to bottom and re-enable auto-scroll
 - `Esc` — release panel focus back to dashboard (so `h/j/k/l` resume focus-navigation semantics)
 
-The intentional ambiguity on `j`/`k` (focus vs scroll) is resolved by which element holds focus: a panel "captures" `j/k` for scrolling; dashboard does not. `Esc` is the explicit "give focus back" gesture, matching vim's modal feel without a real mode line.
+The intentional ambiguity on `j`/`k` (focus vs scroll) is resolved by which element holds focus: a focused pane "captures" `j/k` for scrolling; dashboard and other non-scrolling regions do not. `Esc` is the explicit "give focus back" gesture, matching vim's modal feel without a real mode line.
 
 **Global commands (any screen):**
 
@@ -336,7 +355,7 @@ The intentional ambiguity on `j`/`k` (focus vs scroll) is resolved by which elem
 - `n` — on summary screen: new topic
 - `f` — on summary screen: new document (opens `$EDITOR` immediately on a fresh empty file)
 - `Ctrl+C` — always: cancel the in-flight run (via `AbortController`), then exit when the runner's `finally` resolves
-- `?` — toggle a help overlay listing every binding (small `<box>` over the grid)
+- `?` — toggle a help overlay listing every binding (small `<box>` over the running screen)
 
 **Prompt screen:**
 
@@ -354,74 +373,78 @@ The intentional ambiguity on `j`/`k` (focus vs scroll) is resolved by which elem
 
 ## 11. UI sketch and component map
 
-ASCII mock at ~120 cols x 36 rows during a run:
+ASCII mock at ~120 cols x 36 rows during a run (after Phase 07.5):
 
 ```
 +--------------------------------------------------------------------------------------------------------------------+
-|  QURM   phase: auditing   round: 2/4   req: 3f8e..   trace: 9b21..   elapsed: 02:14                                |
-|  drafter   tools 7  err 0  last 00:01    src     tools 3  err 0  last 00:02    logic  tools 4  err 1  last 00:00   |
-|  clarity  tools 2  err 0  last 00:03                                            out: runs/3f8e..                   |
-+--------------------------------------------------------------------------------------------------------------------+
-| =[ research-drafter ]=========================== | -[ source-auditor ]------------------------------               |
-| status: running   tool: webfetch                  | status: running   tool: exa.search                             |
-| > thinking the draft needs a recent benchmark...  | > thinking checking the cited paper for...                     |
-| > tool webfetch running                           | > tool exa.search completed                                    |
-| > tool webfetch completed                         | > thinking the citation is consistent with...                  |
-|                                                   |                                                                |
-| -[ logic-auditor ]------------------------------- | -[ clarity-auditor ]---------------------------                |
-| status: error     tool: -                         | status: idle       tool: -                                     |
-| > tool grepapp failed (rate limit)                | > assistant started                                            |
-| > thinking retrying with smaller scope...         | > thinking the structure follows the rubric...                 |
-+--------------------------------------------------------------------------------------------------------------------+
-| h/j/k/l focus  j/k scroll  C-d/C-u half  gg/G top/bot  Esc release  ? help  C-c cancel                             |
+| auditing  ·  round 2/4  ·  node runParallelAudits  ·  req 3f8e..  ·  trace 9b21..  ·  02:14  ·  out runs/3f8e.. |
++------------------------------------------------------------------------------------------------+-------------------+
+| =[ research-drafter ]======================================================================= | source-auditor    |
+| tool: webfetch · status: running · latest activity 00:01                                     | ● running         |
+|                                                                                               | tool exa.search   |
+| > thinking the draft needs a recent benchmark and cleaner structure...                        | > citation check  |
+| > webfetch running                                                                            | > tool completed  |
+| > webfetch completed                                                                          | > consistent      |
+| > integrating source notes into the next revision...                                          +-------------------+
+|                                                                                               | logic-auditor     |
+|                                                                                               | ✗ error           |
+|                                                                                               | tool grepapp      |
+|                                                                                               | > rate limit      |
+|                                                                                               | > retrying scope  |
+|                                                                                               +-------------------+
+|                                                                                               | clarity-auditor   |
+|                                                                                               | ○ idle            |
+|                                                                                               | > waiting turn    |
++------------------------------------------------------------------------------------------------+-------------------+
+| Tab focus  ·  j/k scroll focused pane  ·  ? help  ·  C-c cancel  ·  / later: metadata, findings, system notices   |
 +--------------------------------------------------------------------------------------------------------------------+
 ```
 
-ASCII mock of the prompt screen (topic mode):
+ASCII mock of the prompt screen (topic mode, after Phase 07.5):
 
 ```
-+----------------------------------------------------+
-|  QURM    new run                                   |
-|                                                    |
-|  Input mode:  (*) Topic   ( ) Compose document     |
-|                                                    |
-|  Topic:       [_________________________________]  |
-|                                                    |
-|  i edit   Enter run   Esc back   Ctrl-c quit       |
-+----------------------------------------------------+
++--------------------------------------------------------------+
+|                           research-qurom                     |
+|                                                              |
+|  [ topic ]   compose document                                |
+|                                                              |
+|  Ask a research question or paste a topic:                   |
+|  [________________________________________________________]  |
+|                                                              |
+|  Enter run   ·   e compose document   ·   q quit             |
++--------------------------------------------------------------+
 ```
 
 ASCII mock of the prompt screen (compose-document mode, after editor returns):
 
 ```
-+----------------------------------------------------+
-|  QURM    new run                                   |
-|                                                    |
-|  Input mode:  ( ) Topic   (*) Compose document     |
-|                                                    |
-|  Document:    runs/.drafts/3f8e..md  ·  1.4 KB     |
-|               first line: "# Notes on convex opt." |
-|                                                    |
-|  e edit   Enter run   Esc back   Ctrl-c quit       |
-+----------------------------------------------------+
++--------------------------------------------------------------+
+|                           research-qurom                     |
+|                                                              |
+|  topic   [ compose document ]                                |
+|                                                              |
+|  runs/.drafts/3f8e..md   ·   1.4 KB                          |
+|  # Notes on convex optimization                              |
+|                                                              |
+|  e edit   ·   Enter run   ·   Esc back                       |
++--------------------------------------------------------------+
 ```
 
-ASCII mock of the summary screen:
+ASCII mock of the summary screen (after Phase 07.5):
 
 ```
-+----------------------------------------------------+
-|  QURM    run complete                              |
-|                                                    |
-|  outcome: approved      round: 2     unresolved: 0 |
-|  approved: source, logic, clarity                  |
-|  output:  runs/3f8e../draft.md                     |
-|  trace:   9b21..                                   |
-|                                                    |
-|  r  Re-run same input                              |
-|  n  New topic                                      |
-|  f  New document                                   |
-|  q  Quit                                           |
-+----------------------------------------------------+
++--------------------------------------------------------------+
+|  APPROVED                                                    |
+|                                                              |
+|  Round 2   ·   3 auditors approved   ·   0 unresolved        |
+|  Artifact: runs/3f8e../draft.md                              |
+|  Trace:    9b21..                                            |
+|                                                              |
+|  Re-run same input                                           |
+|  New topic                                                   |
+|  New document                                                |
+|  Quit                                                        |
++--------------------------------------------------------------+
 ```
 
 Component map:
@@ -434,11 +457,14 @@ graph TD
   App --> Footer
 
   RunningScreen --> Dashboard
-  RunningScreen --> AgentGrid
-  AgentGrid --> AgentPanel_drafter[AgentPanel: drafter]
-  AgentGrid --> AgentPanel_source[AgentPanel: source-auditor]
-  AgentGrid --> AgentPanel_logic[AgentPanel: logic-auditor]
-  AgentGrid --> AgentPanel_clarity[AgentPanel: clarity-auditor]
+  RunningScreen --> DrafterPane
+  RunningScreen --> AuditorRail
+  RunningScreen --> Footer
+  AuditorRail --> AgentPanel_source[AgentPanel: source-auditor]
+  AuditorRail --> AgentPanel_logic[AgentPanel: logic-auditor]
+  AuditorRail --> AgentPanel_clarity[AgentPanel: clarity-auditor]
+  DrafterPane --> AgentPanel_drafter[AgentPanel: research-drafter]
+  RunningScreen --> SystemStatusSurface
 
   Dashboard -. reads .-> RunStore
   AgentPanel_drafter -. reads .-> RunStore
@@ -457,8 +483,9 @@ State ownership:
 
 Responsive behaviour:
 
-- `width >= 100`: 2x2 grid as drawn.
-- `width < 100`: vertical stack, drafter first; user scrolls the outer container with `Ctrl+d`/`Ctrl+u` while focused on the dashboard.
+- `width >= 120`: drafter-primary split view as drawn.
+- `100 <= width < 120`: compressed split view, drafter still primary, metadata collapsed.
+- `width < 100`: vertical stack, drafter first; auditors follow below; user scrolls the outer container with `Ctrl+d`/`Ctrl+u` while focused on the dashboard.
 - `height < 30`: dashboard collapses to one row (phase + round + request id only); per-agent stats move to panel headers.
 
 ## 12. Risks and failure modes
@@ -466,7 +493,7 @@ Responsive behaviour:
 - **Double-subscribe on re-run.** If `runQuorum` returns before `bridge.stop()` has been awaited, a second `Run` will open a second `client.event.subscribe` stream. The bus will then receive every event twice and counters will visibly double. Mitigation: `bridge.stop()` is awaited inside the `finally` of `runQuorum`; a unit-style smoke test (Section 13) runs two runs back-to-back and checks that `agent.tool` events for the second run are not duplicated.
 - **Render storm from reasoning bursts.** `message.part.delta` arrives faster than the terminal can repaint. Without batching, the renderer thrashes and the UI feels frozen. Mitigation: 50ms tick coalescing in `runStore`. If still too jittery, drop to per-frame `requestAnimationFrame`-style throttling.
 - **Stray `console.warn` from config/zod/telemetry corrupts the alt-screen.** The renderer captures stdout but unrelated libs may write to stderr or via process events. Mitigation: at TUI startup, install a temporary `console.warn`/`console.error` interceptor that buffers to a hidden "system" log surfaced only on `?` keypress (or a dedicated `D` key in debug builds), then restore on exit.
-- **Tiny terminal.** Below ~100x30 the 2x2 grid is unusable. Mitigation: `useTerminalDimensions()` (`reference/opentui/packages/react/README.md:265-285`) drives a single-column fallback and a "Terminal too small" banner if `width < 60` or `height < 20`.
+- **Tiny terminal.** Below ~100x30 the drafter-primary split view is unusable. Mitigation: `useTerminalDimensions()` (`reference/opentui/packages/react/README.md:265-285`) drives a vertical-stack fallback and a "Terminal too small" banner if `width < 60` or `height < 20`.
 - **Ctrl+C while a run is in flight.** The opencode SDK call is mid-stream; if we just exit, the SDK process may be left running. Mitigation: `App` passes an `AbortController.signal` to `runQuorum`; on `Ctrl+C` we abort, await the run promise (which will short-circuit through the `finally` and stop the subscriber), then call `process.exit`.
 - **Drafter highlighted slot wrong when auditor count != 3.** Today N=3, but `quorum.config.json` could change. Mitigation: `AgentGrid` lays out as `1 + N` cells, takes ceil sqrt, and always pins drafter to (0,0); below 4 cells it stays a single row.
 - **Vim `j`/`k` ambiguity (focus vs scroll) confuses non-vim users.** Mitigation: footer always shows the current binding semantics; `Tab` keeps working as a non-vim fallback; `?` opens a help overlay listing every binding.
@@ -514,9 +541,9 @@ The runner and reducer are pure-function shaped, so they are cheap to test witho
 1. `bun install` then `bunx tsc --noEmit` (the existing `typecheck` script). Must pass with the new `tsx` files included and no references to `telemetry-enrichment`.
 2. `bun test` — all unit + binding tests pass.
 3. `bun run dev`. Expect the prompt screen. Type a short topic ("Capital of France") and hit Enter. Expect:
-   - dashboard phase moves through `drafting -> auditing -> reviewing_findings -> aggregating -> approved`
-   - all four agent panels show activity, drafter top-left with double border
-   - tool events appear with `running` then `completed` per agent
+    - dashboard phase moves through `drafting -> auditing -> reviewing_findings -> aggregating -> approved`
+    - the running screen shows a drafter-primary main pane plus a visible auditor rail, with all four agents still represented
+    - tool events appear with `running` then `completed` per agent
 4. Press `l` then `j` then `k` then `h`: focus border highlight moves drafter → source → clarity → logic → drafter (or equivalent depending on layout). `Tab` cycles in the same order as a fallback.
 5. Focus a panel, press `j`/`k`: scroll one line at a time. `Ctrl+d`/`Ctrl+u`: half-page. `gg`: top. `G`: bottom and "v new" indicator clears. While scrolled up, fresh entries trigger the indicator. `Esc` releases panel focus.
 6. After completion, summary screen shows `outcome`, output path, and trace id matching the JSON that the old `src/index.ts:160-175` would have printed (capture from a side log to compare).
@@ -524,7 +551,7 @@ The runner and reducer are pure-function shaped, so they are cheap to test witho
 8. Press `f` from the summary. `$EDITOR` opens immediately on a fresh empty file under `runs/.drafts/`. Type a few paragraphs of markdown, save, exit. The TUI returns to the prompt screen with the document summary card showing the path and size. Press `Enter` to run.
 9. Repeat step 8 but exit the editor with a non-zero status (`:cq` in vi) — the prompt screen stays in compose mode with no document loaded and shows a "cancelled" hint. Repeat with an empty save — same behaviour with an "empty" hint.
 10. Press `?` mid-run: help overlay appears listing every binding. Press `?` again to dismiss.
-11. Resize the terminal narrower than 100 cols mid-run. Layout switches to single-column without crashing.
+11. Resize the terminal narrower than 100 cols mid-run. Layout switches to vertical stack without crashing.
 12. `Ctrl+C` mid-run: process exits within 1-2s, no orphan opencode session warnings.
 
 **Regression checks:**

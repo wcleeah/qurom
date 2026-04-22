@@ -1,4 +1,4 @@
-import type { RunStore, RunStoreState } from "../state/runStore"
+import type { RunStore } from "../state/runStore"
 import { useStoreSelector } from "../state/useStore"
 import { theme } from "../theme"
 
@@ -9,25 +9,40 @@ export interface SummaryScreenProps {
   onAction: (action: SummaryAction) => void
 }
 
-const selectSummary = (s: RunStoreState) => ({
-  phase: s.lifecycle.phase,
-  outputDir: s.lifecycle.outputDir,
-  traceId: s.lifecycle.traceId,
-  error: s.lifecycle.error,
-  result: s.result,
-  approved: Object.entries(s.agents)
-    .filter(([, a]) => a.status === "complete" && !a.pendingPermission)
-    .map(([k]) => k),
-})
+const NEXT_OPTIONS = [
+  { name: "Re-run same input", description: "(stub) returns to prompt", value: "rerun" },
+  { name: "New topic", description: "compose a new topic prompt", value: "new-topic" },
+  { name: "New document", description: "compose a new document", value: "new-document" },
+  { name: "Quit", description: "exit research-qurom", value: "quit" },
+]
+
+const NEXT_STYLE = { height: 8 }
 
 const shortId = (id?: string): string => (id ? `${id.slice(0, 8)}..` : "----")
 
 export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
-  const summary = useStoreSelector(store, selectSummary)
-  const result = summary.result as { outcome?: string; outputPath?: string } | undefined
-  const outcome = result?.outcome ?? (summary.phase === "error" ? "error" : "(unknown)")
-  const outputPath = result?.outputPath ?? summary.outputDir ?? "(none)"
-  const errorMessage = summary.error instanceof Error ? summary.error.message : summary.error ? String(summary.error) : undefined
+  const phase = useStoreSelector(store, (s) => s.lifecycle.phase)
+  const outputDir = useStoreSelector(store, (s) => s.lifecycle.outputDir)
+  const traceId = useStoreSelector(store, (s) => s.lifecycle.traceId)
+  const error = useStoreSelector(store, (s) => s.lifecycle.error)
+  const result = useStoreSelector(store, (s) => s.result) as
+    | {
+        outcome?: string
+        outputPath?: string
+        raw?: { approvedAgents?: string[] }
+      }
+    | undefined
+  const agents = useStoreSelector(store, (s) => s.agents)
+
+  const approved =
+    result?.raw?.approvedAgents ??
+    Object.entries(agents)
+      .filter(([, agent]) => agent.status === "complete" && !agent.pendingPermission)
+      .map(([key]) => key)
+
+  const outcome = result?.outcome ?? (phase === "error" ? "error" : "(unknown)")
+  const outputPath = result?.outputPath ?? outputDir ?? "(none)"
+  const errorMessage = error instanceof Error ? error.message : error ? String(error) : undefined
 
   return (
     <box flexDirection="column" padding={1} flexGrow={1}>
@@ -38,7 +53,7 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
         </text>
         <text>
           <span fg={theme.dim}>approved </span>
-          <span>{summary.approved.length > 0 ? summary.approved.join(", ") : "(none)"}</span>
+          <span>{approved.length > 0 ? approved.join(", ") : "(none)"}</span>
         </text>
         <text>
           <span fg={theme.dim}>output   </span>
@@ -46,7 +61,7 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
         </text>
         <text>
           <span fg={theme.dim}>trace    </span>
-          <span>{shortId(summary.traceId)}</span>
+          <span>{shortId(traceId)}</span>
         </text>
         {errorMessage ? (
           <text fg={theme.system}>error: {errorMessage}</text>
@@ -56,19 +71,14 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
       <box border title="next" padding={1}>
         <select
           focused
-          options={[
-            { name: "Re-run same input", description: "(stub) returns to prompt", value: "rerun" },
-            { name: "New topic", description: "compose a new topic prompt", value: "new-topic" },
-            { name: "New document", description: "compose a new document", value: "new-document" },
-            { name: "Quit", description: "exit research-qurom", value: "quit" },
-          ]}
+          options={NEXT_OPTIONS}
           onChange={(_, option) => {
             const v = option?.value
             if (v === "rerun" || v === "new-topic" || v === "new-document" || v === "quit") {
               onAction(v)
             }
           }}
-          style={{ height: 8 }}
+          style={NEXT_STYLE}
         />
       </box>
     </box>

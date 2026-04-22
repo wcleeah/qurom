@@ -9,12 +9,12 @@ Source plan: `docs/tui-implementation-plan.md` §10 Step 7, §11 (UI sketch + co
 - Readiness: **Blocked** on Phase 05 (TUI shell + `editor.ts`) and Phase 06 (`createRunStore` + `bindBusToStore`).
 - Primary deliverable: a complete component tree under `src/tui/components/` plus an updated `src/tui/App.tsx` that switches between `PromptScreen` → `RunningScreen` → `SummaryScreen`, owns the bus + store + binding lifecycle, and calls `runQuorum` from Phase 02.
 - Blocking dependencies: Phases 05 and 06.
-- Target measurements: visible 2x2 grid at ≥100 cols with drafter top-left + double border; single-column fallback at <100 cols; "Terminal too small" banner at <60×20; per-panel scrollback renders without overflowing the box; "v new" indicator appears when scrolled up while new entries arrive.
-- Next phase: 08 — Vim keymap and focus.
+- Target measurements: all functional screens mount and run end-to-end; all four agents are visible during a run; single-column fallback exists at narrow widths; "Terminal too small" banner appears at <60×20; per-panel scrollback renders without overflowing the box; `PromptScreen` and `SummaryScreen` are walkable. Visual hierarchy is intentionally provisional because the ambitious layout pass lands in Phase 07.5.
+- Next phase: 07.5 — UI hierarchy and layout polish.
 
 ## Why This Phase Exists
 
-Phases 02–06 produced the data plane. Nothing is on screen yet. This phase puts pixels on the terminal: it composes the opentui primitives (`<box>`, `<scrollbox>`, `<ascii-font>`, `<select>`, `<input>`) into the layout from §11, wires each component to a store selector so panels do not all re-render on every event, and ties the prompt → run → summary state machine together inside `App`. After this phase the TUI runs end-to-end with mouse-style focus only — vim keys arrive in Phase 08, re-run flow in Phase 09.
+Phases 02–06 produced the data plane. Nothing is on screen yet. This phase puts the first functional pixels on the terminal: it composes the opentui primitives (`<box>`, `<scrollbox>`, `<ascii-font>`, `<select>`, `<input>`) into a working prompt → run → summary flow, wires each component to a store selector so panels do not all re-render on every event, and ties the state machine together inside `App`. The goal here is correctness and basic usability, not final hierarchy. The ambitious layout pass lands immediately after this in Phase 07.5; vim keys arrive in Phase 08, re-run flow in Phase 09.
 
 ## Start Criteria
 
@@ -65,6 +65,7 @@ Exit gates:
 
 ## Out Of Scope
 
+- Running-screen hierarchy polish and the drafter-primary split layout: Phase 07.5.
 - Vim keybindings (`useKeyboard` for `j/k`, `h/l`, `gg`, `G`, `Ctrl-d`, `?` overlay, `Esc` release): all Phase 08.
 - Re-run flow (`r`, `n`, `f` from `SummaryScreen`): Phase 09.
 - Mid-run `Ctrl-C` cancellation wiring: Phase 08.
@@ -117,23 +118,23 @@ Components must call this with a narrow selector (e.g. `(s) => s.agents["source-
 
 ### `Dashboard.tsx`
 
-Two rows. Row 1: `<ascii-font font="tiny" text="QUORUM"/>` left-aligned, then phase badge, round, short request id (first 4 hex chars + `..`), short trace id, elapsed time `mm:ss`. Row 2: per-agent compact stats `[role | tools | errors | last]` plus output dir.
+Two rows for the functional baseline. Row 1: `<ascii-font font="tiny" text="QUORUM"/>` left-aligned, then phase badge, round, short request id (first 4 hex chars + `..`), short trace id, elapsed time `mm:ss`. Row 2: per-agent compact stats `[role | tools | errors | last]` plus output dir.
 
 Selector reads `lifecycle`, `graph`, and a slim per-agent summary (`{ status, toolsTotal, toolsErrored, lastEventAt }`) — not full scrollback.
 
 Elapsed time: a tiny `useElapsed(startedAt)` hook using `useState` + `setInterval(1000)`; pauses when `lifecycle.phase === "complete"`.
 
-Responsive: when `height < 30`, collapse to a single row showing only phase + round + short request id. Per-agent stats then move into each `AgentPanel` header (the panel already has room).
+Responsive: when `height < 30`, collapse to a single row showing only phase + round + short request id. Per-agent stats then move into each `AgentPanel` header (the panel already has room). Phase 07.5 may remove or demote the wordmark entirely during active runs.
 
 ### `AgentGrid.tsx`
 
-Reads `quorumConfig` to know the slot order: `[drafter, ...auditors]`. Computes layout via `useTerminalDimensions()`:
+Reads `quorumConfig` to know the slot order: `[drafter, ...auditors]`. Computes a simple functional layout via `useTerminalDimensions()`:
 
-- `width >= 100 && height >= 30`: 2x2 grid using `flexDirection: "column"` of two rows, each a `flexDirection: "row"` of two panels. Drafter at row 0 col 0.
+- `width >= 100 && height >= 30`: equal-weight wide layout so all agents are visible.
 - `width < 100`: single column (`flexDirection: "column"` only), drafter first.
 - `width < 60 || height < 20`: render `<TooSmallBanner/>` instead of the grid.
 
-For `1 + N` cells where N != 3, take `Math.ceil(Math.sqrt(1 + N))` columns; below 4 cells stay single row (plan §12 mitigation). Today N=3 so the 2x2 is the live path.
+For `1 + N` cells where N != 3, take `Math.ceil(Math.sqrt(1 + N))` columns; below 4 cells stay single row. Today N=3 so the equal-weight wide layout is enough to prove plumbing. Phase 07.5 replaces this with the drafter-primary split view.
 
 Passes `focused: false` to every panel (Phase 08 will lift focus state up to `App`).
 
@@ -203,7 +204,7 @@ The `<select>` `onChange` handler is wired to `props.onAction("rerun" | "new-top
 
 ### `Footer.tsx`
 
-A single `<text>` line with the binding hints from §11: `h/j/k/l focus  ·  j/k scroll  ·  C-d/C-u half-page  ·  gg/G top/bot  ·  q quit  ·  r re-run`. Phase 08 may extend it with mode-aware hints.
+A single `<text>` line with minimal hints. Keep it truthful: only show controls that actually work in Phase 07. Phase 07.5 redesigns the footer hierarchy; Phase 08 makes it mode-aware.
 
 ### `TooSmallBanner.tsx`
 

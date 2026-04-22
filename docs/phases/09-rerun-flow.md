@@ -6,9 +6,9 @@ Source plan: `docs/tui-implementation-plan.md` §10 Step 9, §12 (double-subscri
 
 - Phase: 09 / 09 (final)
 - Source plan: `docs/tui-implementation-plan.md`
-- Readiness: **Blocked** on Phases 02 (`runQuorum` + bus), 05 (`openInEditor`), 06 (`createRunStore` + `bindBusToStore`), 07 (`App`'s screen state machine + `lastRequest` retention), 08 (`SummaryScreen.onAction` keyboard wiring).
+- Readiness: **Blocked** on Phases 02 (`runQuorum` + bus), 05 (`openInEditor`), 06 (`createRunStore` + `bindBusToStore`), 07 (`App`'s screen state machine + `lastRequest` retention), 07.5 (final screen hierarchy), 08 (`SummaryScreen.onAction` keyboard wiring).
 - Primary deliverable: real implementations for `App`'s three summary actions — `rerun`, `new-topic`, `new-document` — plus the guarantee that the per-run store/bus/binding lifecycle is recreated cleanly between runs with no double-subscribers and no leftover scrollback.
-- Blocking dependencies: all prior phases.
+- Blocking dependencies: all prior phases, including 07.5.
 - Target measurements: two back-to-back runs produce no duplicated `agent.tool` events in any panel; `r` re-runs with the cached document content (refreshed from disk if the file still exists); `f` opens `$EDITOR` immediately on a fresh `requestId`; `n` returns to topic mode with empty input. This is the final phase, so the broader rollout/validation from plan §13 also lives here.
 - Next phase: none. This phase ships the feature.
 
@@ -24,6 +24,7 @@ This is also the natural place to do the full plan §13 manual verification beca
 - Phase 05 done: `openInEditor({ requestId, renderer })` returns `{ ok, content, path } | { ok: false, reason }` and creates `runs/.drafts/<requestId>.md`.
 - Phase 06 done: `createRunStore` + `bindBusToStore` + `unbind()`.
 - Phase 07 done: `App.tsx` retains `lastRequest`, owns `runCtx = { bus, store, unbind, ac, promise }` per run, and recreates the store per run (so reset is a side effect of "run again").
+- Phase 07.5 done: final running/prompt/summary layout hierarchy is stable.
 - Phase 08 done: `SummaryScreen.onAction("rerun" | "new-topic" | "new-document")` is wired to a callback in `App` (currently a stub: `setScreen("prompt")`).
 
 ## Dependencies And How To Check Them
@@ -213,7 +214,7 @@ This is the automated complement to plan §13 step 7.
     - Step 8: `f` from the summary; editor opens immediately; save and exit; document summary card appears; `Enter` runs.
     - Step 9: repeat step 8 but exit editor with `:cq` (non-zero status) and again with empty save; correct hints appear.
     - Step 10: `?` overlay toggles mid-run.
-    - Step 11: resize narrower than 100 cols mid-run; layout switches without crash.
+    - Step 11: resize narrower than 100 cols mid-run; the final layout collapses cleanly to its narrow-screen fallback without crash.
     - Step 12: `Ctrl-C` mid-run; clean exit within 1–2 s; no orphan opencode warning in next shell.
 11. **Failed-quorum scenario:** craft an input that you know will fail audits (e.g. a deliberately ambiguous topic), run it through, confirm the summary screen shows `outcome: rejected` (or whichever string the runner emits), unresolved findings count > 0, and `r`/`n`/`f` still work afterward.
 12. Regression checks (plan §13):

@@ -6,19 +6,20 @@ Source plan: `docs/tui-implementation-plan.md` §10 Step 8, §11 (footer hints),
 
 - Phase: 08 / 09
 - Source plan: `docs/tui-implementation-plan.md`
-- Readiness: **Blocked** on Phase 07 (component tree + `App.tsx` focus prop placeholder + `SummaryScreen.onAction` stub).
+- Readiness: **Blocked** on Phase 07 (component tree + `App.tsx` focus prop placeholder + `SummaryScreen.onAction` stub) and Phase 07.5 (final running-screen hierarchy).
 - Primary deliverable: a complete keyboard layer — global `useKeyboard` at `App` for focus navigation + global commands, per-`AgentPanel` `useKeyboard` (gated on `focused`) for scroll commands, a `?` help overlay, mid-run `Ctrl-C` cancellation via `AbortController`, and `r/n/f/q` on `SummaryScreen`.
-- Blocking dependencies: Phase 07.
+- Blocking dependencies: Phase 07 and Phase 07.5.
 - Target measurements: every binding from §10 Step 8 + §11 footer works; `j`/`k` ambiguity is resolved by which element holds focus; `Esc` releases panel focus; `Ctrl-C` mid-run aborts cleanly within 1–2 s; `?` overlay toggles.
 - Next phase: 09 — Re-run flow.
 
 ## Why This Phase Exists
 
-The TUI is walkable after Phase 07 but not usable without keys: no panel focus, no scroll, no cancellation, no way to drive the summary actions. This phase installs the entire keyboard contract from the plan in one place so the bindings stay coherent — in particular, the `j`/`k` "focus vs scroll" ambiguity is resolved deterministically (panel captures `j/k` only while focused; `Esc` releases). It also closes the orphan-process risk on `Ctrl-C` mid-run.
+The TUI is walkable after Phase 07 but not usable without keys: no panel focus, no scroll, no cancellation, no way to drive the summary actions. Phase 07.5 then stabilizes the final screen hierarchy. This phase installs the keyboard contract against that final layout so the bindings stay coherent — in particular, the `j`/`k` "focus vs scroll" ambiguity is resolved deterministically (panel captures `j/k` only while focused; `Esc` releases). It also closes the orphan-process risk on `Ctrl-C` mid-run.
 
 ## Start Criteria
 
-- Phase 07 done: all components mount, real runs drive the grid, `App.tsx` already carries a `focused: "dashboard" | "<roleKey>"` state and passes `focused` into each `AgentPanel`.
+- Phase 07 done: all components mount, real runs drive the provisional layout, `App.tsx` already carries a `focused: "dashboard" | "<roleKey>"` state and passes `focused` into each `AgentPanel`.
+- Phase 07.5 done: the running screen hierarchy is stable (drafter-primary split view on wide terminals, vertical fallback on narrow terminals).
 - `App.tsx` already passes an `AbortController.signal` into `runQuorum` (Phase 07 added this).
 - `SummaryScreen` already accepts an `onAction(action)` callback (Phase 07 added this stub).
 
@@ -34,11 +35,11 @@ The TUI is walkable after Phase 07 but not usable without keys: no panel focus, 
 
 ## Target Measurements And Gates
 
-Entry gate: `bun run dev` from Phase 07 boots and a topic run completes.
+Entry gate: `bun run dev` from Phase 07.5 boots and a topic run completes.
 
 Exit gates (manual unless noted):
 
-- `h/l` move focus across panels in row order; `j/k` move focus across rows when no panel is focused; `Tab`/`Shift+Tab` cycle as fallback.
+- `h/l` move focus across the final running-screen regions in reading order; `j/k` move between stacked regions when no pane is focused; `Tab`/`Shift+Tab` cycle as fallback.
 - Focusing a panel highlights its border (e.g. brighter `borderColor` from `theme.ts`); `Esc` returns focus to dashboard.
 - While a panel is focused: `j`/`k` scroll one line, `Ctrl-d`/`Ctrl-u` half-page, `Ctrl-f`/`Ctrl-b` full page, `gg` (within 500 ms) top, `G` bottom (and clears the "v new" indicator from Phase 07).
 - `?` toggles a centered help overlay listing every binding.
@@ -53,7 +54,7 @@ Exit gates (manual unless noted):
 - New `src/tui/keymap/` module:
   - `useGlobalKeymap.ts` — global `useKeyboard` mounted once in `App`. Routes by current `screen` and `focused` state.
   - `usePanelKeymap.ts` — per-`AgentPanel` hook; only fires when `focused === roleKey`.
-  - `gridNav.ts` — pure helpers `nextFocus(current, dir, layout)` for `h/j/k/l/Tab/Shift+Tab` over the cell list.
+  - `gridNav.ts` — pure helpers `nextFocus(current, dir, layout)` for `h/j/k/l/Tab/Shift+Tab` over the final focus graph.
 - New `src/tui/components/HelpOverlay.tsx` (mounted from `App`, position absolute centered when `showHelp`).
 - New `src/tui/components/QuitConfirm.tsx` (mounted from `App` when `pendingForceQuit`).
 - Edits to:
@@ -72,17 +73,18 @@ Exit gates (manual unless noted):
 
 ### Layout-aware focus
 
-`gridNav.ts` works over a cell list `["dashboard", "drafter", ...auditors]` plus the current layout (rows × cols from Phase 07's `AgentGrid`). For 2x2 with N=3 auditors:
+`gridNav.ts` works over the final running-screen focus graph instead of the provisional 2x2 grid. On wide terminals after Phase 07.5 the natural reading order is:
 
 ```
-[ drafter      | source-auditor  ]
-[ logic-auditor| clarity-auditor ]
-[          dashboard             ]
+[ dashboard ]
+[ drafter pane | source-auditor ]
+[               logic-auditor   ]
+[               clarity-auditor ]
 ```
 
-`nextFocus("source-auditor", "h")` → `"drafter"`. `nextFocus(panel-on-bottom-row, "j")` → `"dashboard"`. `nextFocus("dashboard", "k")` → `"drafter"`. `Tab` cycles in reading order. Single-column layout (Phase 07 fallback) collapses to a vertical list and `h/l` become no-ops.
+`nextFocus("dashboard", "j")` → `"drafter"`. `nextFocus("drafter", "l")` → `"source-auditor"`. `nextFocus("source-auditor", "j")` → `"logic-auditor"`. `nextFocus("clarity-auditor", "h")` → `"drafter"`. `Tab` cycles in reading order. Single-column layout (Phase 07.5 fallback) collapses to a vertical list and `h/l` become no-ops.
 
-The layout descriptor is shared between `AgentGrid` and `gridNav` via a small `computeLayout(width, height, slotOrder)` helper (place in `src/tui/state/layout.ts` so both phases agree).
+The layout descriptor is shared between the final running-screen layout and `gridNav` via a small `computeLayout(width, height, slotOrder)` helper (place in `src/tui/state/layout.ts` so both phases agree).
 
 ### `useGlobalKeymap`
 
@@ -107,7 +109,7 @@ useKeyboard((ev) => {
     if (ev.shift && ev.name === "q") return setPendingForceQuit(true)
 
     if (focused === "dashboard") {
-      // h/j/k/l move focus into the grid
+      // h/j/k/l move focus into the running-screen regions
       const next = nextFocus(focused, ev.name, layout)
       if (next) return setFocused(next)
     } else {
@@ -195,8 +197,8 @@ opentui's `<input>` already captures keys when focused. Verify that `useKeyboard
 
 ## Execution Checklist
 
-1. Add `src/tui/state/layout.ts` exporting `computeLayout(width, height, slotOrder)` shared by `AgentGrid` and `gridNav`. Refactor `AgentGrid` to use it (small Phase 07 follow-up).
-2. Add `src/tui/keymap/gridNav.ts` with `nextFocus` + a unit test under `src/tui/keymap/gridNav.test.ts` covering 2x2 and single-column layouts and `h/j/k/l/Tab/Shift+Tab`.
+1. Add `src/tui/state/layout.ts` exporting `computeLayout(width, height, slotOrder)` shared by the final running-screen layout and `gridNav`.
+2. Add `src/tui/keymap/gridNav.ts` with `nextFocus` + a unit test under `src/tui/keymap/gridNav.test.ts` covering wide split-view and single-column fallback layouts and `h/j/k/l/Tab/Shift+Tab`.
 3. Add `src/tui/keymap/usePanelKeymap.ts`.
 4. Add `src/tui/keymap/useGlobalKeymap.ts` (or inline the hook in `App.tsx` if it stays small).
 5. Add `src/tui/components/HelpOverlay.tsx` listing every binding from §10 Step 8.
@@ -212,7 +214,7 @@ opentui's `<input>` already captures keys when focused. Verify that `useKeyboard
 11. `bunx tsc --noEmit`. Fix.
 12. `bun test src/tui/keymap/`. All tests green.
 13. Manual walk-through (plan §13 step 4 + step 5):
-    - `l/j/k/h` cycle focus through drafter → source → clarity → logic → drafter (or row order).
+    - `l/j/k/h` cycle focus through the final running-screen regions in the order defined above.
     - Focus a panel; `j/k/Ctrl-d/Ctrl-u/gg/G` scroll; `Esc` releases.
     - `?` toggles help overlay; help dismisses on `?`.
     - `Ctrl-C` mid-run exits within 1–2 s with no warnings.
@@ -231,7 +233,7 @@ opentui's `<input>` already captures keys when focused. Verify that `useKeyboard
 - `src/tui/keymap/gridNav.test.ts` (new)
 - `src/tui/keymap/useGlobalKeymap.ts` (new)
 - `src/tui/keymap/usePanelKeymap.ts` (new)
-- `src/tui/state/layout.ts` (new; small refactor to `AgentGrid` to consume it)
+- `src/tui/state/layout.ts` (new; shared by the final running-screen layout and keymap helpers)
 
 ## Verification
 
@@ -249,7 +251,7 @@ opentui's `<input>` already captures keys when focused. Verify that `useKeyboard
 - `?` help overlay lists every binding currently active.
 - `j/k` ambiguity is deterministically resolved by panel focus, with `Esc` as the documented release.
 - Footer hints reflect the current screen + mode (and the `g`-pending state surfaces as a subtle hint such as `…g`).
-- `gridNav` has unit coverage proving the navigation rules; visual confirmation matches.
+- `gridNav` has unit coverage proving the navigation rules for the final split layout; visual confirmation matches.
 
 ## Handoff To Next Phase
 
