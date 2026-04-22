@@ -1,8 +1,9 @@
-import { useKeyboard } from "@opentui/react"
-import { useCallback, useRef, useState } from "react"
+import { useKeyboard, useRenderer } from "@opentui/react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { RuntimeConfig } from "../config"
 import { createEventBus, runQuorum, type EventBus, type RuntimePrerequisites } from "../runner"
 import type { InputRequest } from "../schema"
+import { copy } from "./clipboard"
 import { PromptScreen } from "./components/PromptScreen"
 import { RunningScreen } from "./components/RunningScreen"
 import { SummaryScreen, type SummaryAction } from "./components/SummaryScreen"
@@ -16,6 +17,7 @@ export interface AppProps {
   config: RuntimeConfig
   prerequisites: RuntimePrerequisites
   systemStatus: SystemStatusStore
+  onExit: () => void
 }
 
 interface RunCtx {
@@ -25,15 +27,41 @@ interface RunCtx {
   ac: AbortController
 }
 
-export const App = ({ config, prerequisites, systemStatus }: AppProps) => {
+export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) => {
+  const renderer = useRenderer()
   const [screen, setScreen] = useState<Screen>("prompt")
   const [runCtx, setRunCtx] = useState<RunCtx | undefined>(undefined)
   const lastRequestRef = useRef<InputRequest | undefined>(undefined)
 
+  useEffect(() => {
+    const onSelection = (selection: { getSelectedText: () => string; isDragging?: boolean } | null) => {
+      if (!selection || selection.isDragging) return
+      const text = selection.getSelectedText()
+      if (!text) return
+      void copy(text)
+        .then(() => renderer.clearSelection())
+        .catch(() => {})
+    }
+
+    renderer.on("selection", onSelection)
+    return () => {
+      renderer.off("selection", onSelection)
+    }
+  }, [renderer])
+
   useKeyboard((key) => {
+    if (key.name === "y") {
+      const text = renderer.getSelection()?.getSelectedText()
+      if (!text) return
+      void copy(text)
+        .then(() => renderer.clearSelection())
+        .catch(() => {})
+      return
+    }
+
     if (key.name === "c" && key.ctrl) {
       runCtx?.ac.abort()
-      process.exit(0)
+      onExit()
     }
   })
 
@@ -70,7 +98,7 @@ export const App = ({ config, prerequisites, systemStatus }: AppProps) => {
   const handleSummaryAction = useCallback(
     (action: SummaryAction) => {
       if (action === "quit") {
-        process.exit(0)
+        onExit()
       } else if (action === "rerun" && lastRequestRef.current) {
         startRun(lastRequestRef.current)
       } else {
@@ -78,7 +106,7 @@ export const App = ({ config, prerequisites, systemStatus }: AppProps) => {
         setScreen("prompt")
       }
     },
-    [startRun],
+    [onExit, startRun],
   )
 
   if (screen === "prompt") {

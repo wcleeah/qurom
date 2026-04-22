@@ -205,17 +205,30 @@ describe("createOpencodeEventBridge", () => {
 
     expect(events.filter((e) => e.kind === "agent.reasoning")).toHaveLength(0)
 
-    // Trailing period should trigger one flush.
+    // Trailing period should trigger one update.
     controller.push({
       type: "message.part.delta",
       properties: { sessionID: "s1", messageID: "m1", partID: "r1", field: "text", delta: "done." },
     })
     await flush()
 
+    const interimReasoning = events.filter((e) => e.kind === "agent.reasoning")
+    expect(interimReasoning).toHaveLength(1)
+    expect(interimReasoning.at(-1)).toMatchObject({ kind: "agent.reasoning", sessionID: "s1", key: "s1:m1:r1", done: false })
+
+    // End of reasoning should mark the final emission done.
+    controller.push({
+      type: "message.part.updated",
+      properties: {
+        sessionID: "s1",
+        part: { type: "reasoning", messageID: "m1", id: "r1", time: { end: Date.now() } },
+      },
+    })
+    await flush()
+
     const reasoningEvents = events.filter((e) => e.kind === "agent.reasoning")
-    expect(reasoningEvents).toHaveLength(1)
-    expect(reasoningEvents[0]).toMatchObject({ kind: "agent.reasoning", sessionID: "s1" })
-    expect(reasoningEvents[0]).not.toHaveProperty("role")
+    expect(reasoningEvents.at(-1)).toMatchObject({ kind: "agent.reasoning", sessionID: "s1", key: "s1:m1:r1", done: true })
+    expect(reasoningEvents.at(-1)).not.toHaveProperty("role")
 
     await bridge.stop()
   })

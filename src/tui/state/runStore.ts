@@ -9,6 +9,8 @@ export type ScrollbackEntry = {
   kind: ScrollbackKind
   text: string
   ts: number
+  key?: string
+  done?: boolean
 }
 
 export type AgentStatus = "idle" | "running" | "error" | "complete"
@@ -102,6 +104,22 @@ function appendScrollback(agent: AgentState, entry: ScrollbackEntry): AgentState
   return { ...agent, scrollback: trimmed, lastEventAt: entry.ts }
 }
 
+function upsertReasoning(agent: AgentState, entry: ScrollbackEntry): AgentState {
+  const index = agent.scrollback.findLastIndex((candidate) => candidate.kind === "reasoning" && candidate.key === entry.key)
+  if (index === -1) {
+    return appendScrollback(agent, entry)
+  }
+
+  const scrollback = [...agent.scrollback]
+  scrollback[index] = {
+    ...scrollback[index],
+    text: entry.text,
+    ts: entry.ts,
+    done: entry.done,
+  }
+  return { ...agent, scrollback, lastEventAt: entry.ts }
+}
+
 const SCROLLBACK_LIMIT = 500
 
 function withAgent(state: RunStoreState, key: string, mutate: (agent: AgentState) => AgentState): RunStoreState {
@@ -167,7 +185,9 @@ export function reduce(state: RunStoreState, event: RunnerEvent, config: Runtime
       const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
       if (!entry) return state
       const [key] = entry
-      return withAgent(state, key, (agent) => appendScrollback(agent, { kind: "reasoning", text: event.text, ts }))
+      return withAgent(state, key, (agent) =>
+        upsertReasoning(agent, { kind: "reasoning", text: event.text, ts, key: event.key, done: event.done }),
+      )
     }
     case "agent.tool": {
       const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)

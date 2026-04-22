@@ -134,13 +134,16 @@ describe("reduce", () => {
     expect(state.agents["research-drafter"]?.scrollback.at(-1)?.text).toBe("assistant started")
   })
 
-  test("agent.reasoning appends a reasoning entry", () => {
+  test("agent.reasoning upserts by reasoning key", () => {
     let state = createInitialState(config)
     state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(state, { kind: "agent.reasoning", sessionID: "d-s", text: "thinking" }, config)
+    state = reduce(state, { kind: "agent.reasoning", sessionID: "d-s", key: "k-1", text: "thinking", done: false }, config)
+    state = reduce(state, { kind: "agent.reasoning", sessionID: "d-s", key: "k-1", text: "thinking more", done: true }, config)
     const entry = state.agents["research-drafter"]!.scrollback.at(-1)!
     expect(entry.kind).toBe("reasoning")
-    expect(entry.text).toBe("thinking")
+    expect(entry.key).toBe("k-1")
+    expect(entry.done).toBe(true)
+    expect(entry.text).toBe("thinking more")
   })
 
   test("agent.tool running sets activeTool and appends a tool entry (no counter)", () => {

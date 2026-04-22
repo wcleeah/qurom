@@ -104,7 +104,7 @@ describe("createEventBus", () => {
       { kind: "session.status", sessionID: "s", status: "active" },
       { kind: "session.error", sessionID: "s", name: "X" },
       { kind: "agent.message.start", sessionID: "s", messageID: "m" },
-      { kind: "agent.reasoning", sessionID: "s", text: "hmm" },
+      { kind: "agent.reasoning", sessionID: "s", key: "part-1", text: "hmm" },
       {
         kind: "agent.tool",
         tool: "read",

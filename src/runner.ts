@@ -21,7 +21,7 @@ export type RunnerEvent =
   | { kind: "session.status"; sessionID: string; status: string }
   | { kind: "session.error"; sessionID: string; name: string; message?: string }
   | { kind: "agent.message.start"; sessionID: string; messageID: string }
-  | { kind: "agent.reasoning"; sessionID: string; text: string }
+  | { kind: "agent.reasoning"; sessionID: string; key: string; text: string; done?: boolean }
   | {
       kind: "agent.tool"
       tool: string

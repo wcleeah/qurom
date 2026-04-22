@@ -55,6 +55,7 @@ export const PromptScreen = ({ config, onSubmit }: PromptScreenProps) => {
   const requestId = useMemo(generateRequestId, [])
   const columnWidth = centeredColumnWidth(width, 84, 68)
   const topBias = height >= 34 ? 2 : 1
+  const topicInputWidth = Math.max(24, columnWidth - 6)
 
   const submitTopic = () => {
     const trimmed = topic.trim()
@@ -145,12 +146,13 @@ export const PromptScreen = ({ config, onSubmit }: PromptScreenProps) => {
                   borderStyle="single"
                   borderColor={theme.borderSubtle}
                   backgroundColor={theme.backgroundElement}
+                  width={topicInputWidth}
                   paddingLeft={1}
-                  paddingRight={1}
                 >
                   <input
                     placeholder="e.g. effects of Mediterranean diet on cardiovascular outcomes"
                     focused
+                    width="100%"
                     onInput={setTopic}
                     onSubmit={submitTopic}
                   />

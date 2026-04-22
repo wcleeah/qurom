@@ -1,3 +1,4 @@
+import type { ResearchState } from "../../schema"
 import { useTerminalDimensions } from "@opentui/react"
 import { useEffect, useRef, useState } from "react"
 import type { RunStore } from "../state/runStore"
@@ -40,6 +41,21 @@ const formatElapsed = (ms: number): string => {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
+const abbreviateDocumentPath = (value?: string): string => {
+  if (!value) return "-"
+  const parts = value.split("/").filter(Boolean)
+  if (parts.length <= 2) return value
+  return `${parts.at(-2)}/${parts.at(-1)}`
+}
+
+const formatInputLabel = (state?: ResearchState): string | undefined => {
+  if (!state) return undefined
+  if (state.inputMode === "topic") {
+    return state.topic ? `prompt  ${state.topic}` : undefined
+  }
+  return `document  ${abbreviateDocumentPath(state.documentPath)}`
+}
+
 const useElapsed = (active: boolean): number => {
   const start = useRef<number>(Date.now())
   const [now, setNow] = useState(Date.now())
@@ -59,6 +75,7 @@ export const Dashboard = ({ store }: DashboardProps) => {
   const outputDir = useStoreSelector(store, (s) => s.lifecycle.outputDir)
   const graphNode = useStoreSelector(store, (s) => s.graph.node)
   const graphPhase = useStoreSelector(store, (s) => s.graph.phase)
+  const graphState = useStoreSelector(store, (s) => s.graph.state as ResearchState | undefined)
   const agents = useStoreSelector(store, (s) => s.agents)
   const round = useStoreSelector(store, (s) =>
     s.graph.state && "round" in s.graph.state ? (s.graph.state as { round?: number }).round : undefined,
@@ -68,6 +85,14 @@ export const Dashboard = ({ store }: DashboardProps) => {
   const elapsed = useElapsed(active)
   const wide = width >= 120
   const medium = width >= 95
+  const voteApproveCount = graphState?.audits.filter((audit) => audit.vote === "approve").length ?? 0
+  const voteReviseCount = graphState?.audits.filter((audit) => audit.vote === "revise").length ?? 0
+  const acceptedCount = Math.max(0, voteReviseCount - Object.keys(graphState?.activeRebuttals ?? {}).length)
+  const rebuttalCount = Object.keys(graphState?.activeRebuttals ?? {}).length
+  const rebuttalResponseCount = Object.keys(graphState?.currentRebuttalResponsesByFinding ?? {}).length
+  const unresolvedCount = graphState?.unresolvedFindings.length ?? 0
+  const approvedCount = graphState?.approvedAgents.length ?? 0
+  const inputLabel = formatInputLabel(graphState)
 
   return (
     <box
@@ -84,28 +109,59 @@ export const Dashboard = ({ store }: DashboardProps) => {
       flexShrink={0}
     >
       <box flexDirection="column" gap={wide ? 1 : 0}>
-        <text wrapMode="word">
+        <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
           <span fg={phaseColor(phase)}>{phase}</span>
           <span fg={theme.textMuted}>{`  ·  round ${round ?? "-"}`}</span>
-          {graphNode ? <span fg={theme.textMuted}>{`  ·  node ${graphNode}`}</span> : null}
-          {graphPhase ? <span fg={theme.textMuted}>{`  ·  ${graphPhase}`}</span> : null}
+          {graphNode ? <span fg={theme.accent}>{`  ·  node ${graphNode}`}</span> : null}
+          {graphPhase ? <span fg={theme.accent}>{`  ·  ${graphPhase}`}</span> : null}
           <span fg={theme.textMuted}>{`  ·  ${formatElapsed(elapsed)}`}</span>
         </text>
-        {medium ? <text wrapMode="word">request {requestId ?? "-"}</text> : null}
-        {medium ? <text wrapMode="word">trace   {traceId ?? "-"}</text> : null}
-        {wide && outputDir ? <text wrapMode="word">output  {outputDir}</text> : null}
+        {medium ? (
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            request {requestId ?? "-"}
+          </text>
+        ) : null}
+        {medium ? (
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            trace   {traceId ?? "-"}
+          </text>
+        ) : null}
+        {inputLabel ? (
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            <span fg={theme.accent}>{inputLabel}</span>
+          </text>
+        ) : null}
+        {wide && outputDir ? (
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            output  {outputDir}
+          </text>
+        ) : null}
+        {graphState ? (
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            <span fg={theme.accent}>{`findings ${unresolvedCount}`}</span>
+            <span fg={theme.textMuted}>{`  ·  votes ${voteApproveCount} approve / ${voteReviseCount} revise`}</span>
+            <span fg={theme.textMuted}>{`  ·  rebuttals ${rebuttalCount}`}</span>
+            <span fg={theme.textMuted}>{`  ·  responses ${rebuttalResponseCount}`}</span>
+            <span fg={theme.textMuted}>{`  ·  accepted ${acceptedCount}`}</span>
+            <span fg={theme.textMuted}>{`  ·  approved ${approvedCount}`}</span>
+          </text>
+        ) : null}
         <box flexDirection={wide ? "row" : "column"} gap={wide ? 2 : 0}>
           {Object.entries(agents).map(([roleKey, agent]) => (
-            <text key={roleKey} wrapMode="word">
+            <text key={roleKey} wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
               <span fg={statusColor(agent.status)}>{statusDot(agent.status)}</span>
               <span fg={theme.textMuted}>{` ${roleLabel(roleKey)}`}</span>
               <span fg={theme.textMuted}>{`  ${agent.status}`}</span>
               {agent.activeTool ? <span fg={theme.textMuted}>{`  ·  ${agent.activeTool.tool}`}</span> : null}
-              {agent.pendingPermission ? <span fg={theme.warning}>{`  ·  permission ${agent.pendingPermission}`}</span> : null}
+              {agent.pendingPermission ? <span fg={theme.accent}>{`  ·  permission ${agent.pendingPermission}`}</span> : null}
             </text>
           ))}
         </box>
-        {!wide && outputDir ? <text wrapMode="word">output  {outputDir}</text> : null}
+        {!wide && outputDir ? (
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            output  {outputDir}
+          </text>
+        ) : null}
       </box>
     </box>
   )

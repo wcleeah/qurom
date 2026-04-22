@@ -80,9 +80,15 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
               padding={1}
               flexDirection="column"
             >
-              <text fg={outcomeColor(outcome)}>{outcomeLabel(outcome)}</text>
-              <text fg={theme.textMuted}>{`Round ${round ?? "-"}  ·  ${approved.length} approved  ·  ${unresolvedCount} unresolved`}</text>
-              <text wrapMode="word">{approved.length > 0 ? approved.join(", ") : "(no approvals recorded)"}</text>
+              <text fg={outcomeColor(outcome)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                {outcomeLabel(outcome)}
+              </text>
+              <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                {`Round ${round ?? "-"}  ·  ${approved.length} approved  ·  ${unresolvedCount} unresolved`}
+              </text>
+              <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                {approved.length > 0 ? approved.join(", ") : "(no approvals recorded)"}
+              </text>
             </box>
 
             <box
@@ -93,11 +99,25 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
               padding={1}
               flexDirection="column"
             >
-              <text fg={theme.textMuted}>artifact</text>
-              <text wrapMode="word">{outputPath}</text>
-              <text fg={theme.textMuted}>{`trace ${shortId(traceId)}`}</text>
-              {failureReason ? <text fg={theme.warning}>{`failure: ${failureReason}`}</text> : null}
-              {errorMessage ? <text fg={theme.error}>{`error: ${errorMessage}`}</text> : null}
+              <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                artifact
+              </text>
+              <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                {outputPath}
+              </text>
+              <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                {`trace ${shortId(traceId)}`}
+              </text>
+              {failureReason ? (
+                <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                  {`failure: ${failureReason}`}
+                </text>
+              ) : null}
+              {errorMessage ? (
+                <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                  {`error: ${errorMessage}`}
+                </text>
+              ) : null}
             </box>
           </box>
 
@@ -110,8 +130,12 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
             padding={1}
             flexDirection="column"
           >
-            <text fg={theme.textMuted}>what next</text>
-            <text fg={theme.textMuted}>use arrow keys and Enter</text>
+            <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              what next
+            </text>
+            <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              use arrow keys and Enter
+            </text>
             <select
               focused
               options={NEXT_OPTIONS}

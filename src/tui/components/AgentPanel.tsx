@@ -8,6 +8,7 @@ export interface AgentPanelProps {
   title: string
   isDrafter: boolean
   compact?: boolean
+  emphasize?: boolean
 }
 
 const statusDot = (status: AgentState["status"]): string => {
@@ -41,15 +42,33 @@ const PanelScrollback = ({ store, roleKey }: { store: RunStore; roleKey: string 
   if (scrollback.length === 0) {
     return (
       <box flexGrow={1} paddingTop={1}>
-        <text fg={theme.textMuted}>(waiting for activity)</text>
+        <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          (waiting for activity)
+        </text>
       </box>
     )
   }
 
   return (
-    <scrollbox flexGrow={1} stickyScroll stickyStart="bottom">
+    <scrollbox
+      flexGrow={1}
+      stickyScroll
+      stickyStart="bottom"
+      verticalScrollbarOptions={{
+        trackOptions: {
+          backgroundColor: theme.backgroundElement,
+          foregroundColor: theme.borderSubtle,
+        },
+      }}
+    >
       {scrollback.map((entry, i) => (
-        <text key={i} fg={kindColor(entry.kind)} wrapMode="word">
+        <text
+          key={i}
+          fg={kindColor(entry.kind)}
+          wrapMode="word"
+          selectionBg={theme.selectionBg}
+          selectionFg={theme.selectionFg}
+        >
           {`> ${entry.text}`}
         </text>
       ))}
@@ -57,7 +76,7 @@ const PanelScrollback = ({ store, roleKey }: { store: RunStore; roleKey: string 
   )
 }
 
-export const AgentPanel = ({ store, roleKey, title, isDrafter, compact = false }: AgentPanelProps) => {
+export const AgentPanel = ({ store, roleKey, title, isDrafter, compact = false, emphasize = false }: AgentPanelProps) => {
   const agent = useStoreSelector(store, (s) => s.agents[roleKey])
 
   if (!agent) {
@@ -78,27 +97,39 @@ export const AgentPanel = ({ store, roleKey, title, isDrafter, compact = false }
 
   const borderColor = isDrafter ? theme.drafter.borderColor : theme.auditor.borderColor
   const borderStyle = isDrafter ? theme.drafter.borderStyle : theme.auditor.borderStyle
-  const toolLabel = agent.activeTool?.tool ?? (agent.pendingPermission ? "awaiting permission" : "listening")
+  const toolLabel = agent.activeTool?.tool
 
   return (
     <box
       border
       borderStyle={borderStyle}
       borderColor={borderColor}
-      backgroundColor={isDrafter ? theme.backgroundPanel : compact ? theme.backgroundElement : theme.backgroundPanel}
+      backgroundColor={isDrafter || emphasize ? theme.backgroundPanel : compact ? theme.backgroundElement : theme.backgroundPanel}
       flexGrow={1}
       flexDirection="column"
       paddingLeft={1}
-      paddingRight={1}
+      paddingRight={2}
       paddingTop={1}
       paddingBottom={1}
     >
-      <box flexDirection="row" justifyContent="space-between" gap={1}>
-        <text fg={roleColor(isDrafter)}>{title}</text>
-        <text fg={statusColor(agent.status)}>{`${statusDot(agent.status)} ${agent.status}`}</text>
+      <box flexDirection="row" gap={1}>
+        <text fg={roleColor(isDrafter)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          {title}
+        </text>
+        <text fg={statusColor(agent.status)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          {`${statusDot(agent.status)} ${agent.status}`}
+        </text>
       </box>
-      <text fg={theme.textMuted}>{toolLabel}</text>
-      {agent.pendingPermission ? <text fg={theme.warning}>permission: {agent.pendingPermission}</text> : null}
+      {toolLabel ? (
+        <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          {toolLabel}
+        </text>
+      ) : null}
+      {agent.pendingPermission ? (
+        <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          permission: {agent.pendingPermission}
+        </text>
+      ) : null}
       <PanelScrollback store={store} roleKey={roleKey} />
     </box>
   )

@@ -95,8 +95,14 @@ export const SystemStatusSurface = ({ store, systemStatus }: SystemStatusSurface
       flexDirection="column"
       zIndex={10}
     >
-      <text fg={surface.level === "error" ? theme.error : theme.warning}>{surface.title}</text>
-      <text fg={theme.text} wrapMode="word">
+      <text
+        fg={surface.level === "error" ? theme.error : theme.accent}
+        selectionBg={theme.selectionBg}
+        selectionFg={theme.selectionFg}
+      >
+        {surface.title}
+      </text>
+      <text fg={theme.text} wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
         {surface.text}
       </text>
     </box>

@@ -36,7 +36,7 @@ describe("bindBusToStore", () => {
     // Seed drafter session so reasoning events are routed.
     bus.emit({ kind: "session.created", sessionID: "d-s", role: "drafter" })
     for (let i = 0; i < 100; i += 1) {
-      bus.emit({ kind: "agent.reasoning", sessionID: "d-s", text: `r-${i}` })
+      bus.emit({ kind: "agent.reasoning", sessionID: "d-s", key: `k-${i}`, text: `r-${i}` })
     }
 
     expect(setCount).toBe(0) // nothing dispatched yet
@@ -65,7 +65,7 @@ describe("bindBusToStore", () => {
     expect(setCount).toBe(1)
 
     unbind()
-    bus.emit({ kind: "agent.reasoning", sessionID: "d-s", text: "after unbind" })
+    bus.emit({ kind: "agent.reasoning", sessionID: "d-s", key: "after", text: "after unbind" })
     await delay(20)
     expect(setCount).toBe(1)
     const reasoning = store.getState().agents["research-drafter"]!.scrollback.filter((s) => s.kind === "reasoning")

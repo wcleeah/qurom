@@ -54,7 +54,7 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
     if (!normalized) return false
     if (buffer.includes("\n")) return true
     if (/[.!?:]["')\]]?\s*$/.test(buffer)) return true
-    return normalized.length >= 140
+    return normalized.length >= 220
   }
 
   // Pure: returns the normalized buffer text (or undefined if nothing to flush).
@@ -165,10 +165,8 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
         const nextBuffer = `${reasoningBuffers.get(key) ?? ""}${event.properties.delta}`
         reasoningBuffers.set(key, nextBuffer)
         if (!shouldFlushReasoning(nextBuffer)) continue
-
         const text = takeReasoning(key)
-        reasoningBuffers.set(key, "")
-        if (text) bus.emit({ kind: "agent.reasoning", sessionID, text })
+        if (text) bus.emit({ kind: "agent.reasoning", sessionID, key, text, done: false })
         continue
       }
 
@@ -188,7 +186,7 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
         const text = takeReasoning(key)
         reasoningBuffers.delete(key)
         activeReasoningParts.delete(key)
-        if (text) bus.emit({ kind: "agent.reasoning", sessionID, text })
+        if (text) bus.emit({ kind: "agent.reasoning", sessionID, key, text, done: true })
         continue
       }
 
