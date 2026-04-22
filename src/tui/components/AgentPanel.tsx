@@ -7,7 +7,7 @@ export interface AgentPanelProps {
   roleKey: string
   title: string
   isDrafter: boolean
-  focused: boolean
+  compact?: boolean
 }
 
 const statusDot = (status: AgentState["status"]): string => {
@@ -31,12 +31,25 @@ const kindColor = (kind: ScrollbackEntry["kind"]): string => {
   return theme.reasoning
 }
 
-const PanelScrollback = ({ store, roleKey, focused }: { store: RunStore; roleKey: string; focused: boolean }) => {
+const roleColor = (isDrafter: boolean): string => {
+  if (isDrafter) return theme.drafter.labelColor
+  return theme.text
+}
+
+const PanelScrollback = ({ store, roleKey }: { store: RunStore; roleKey: string }) => {
   const scrollback = useStoreSelector(store, (s) => s.agents[roleKey]?.scrollback ?? [])
+  if (scrollback.length === 0) {
+    return (
+      <box flexGrow={1} paddingTop={1}>
+        <text fg={theme.textMuted}>(waiting for activity)</text>
+      </box>
+    )
+  }
+
   return (
-    <scrollbox focused={focused} flexGrow={1}>
+    <scrollbox flexGrow={1} stickyScroll stickyStart="bottom">
       {scrollback.map((entry, i) => (
-        <text key={i} fg={kindColor(entry.kind)}>
+        <text key={i} fg={kindColor(entry.kind)} wrapMode="word">
           {`> ${entry.text}`}
         </text>
       ))}
@@ -44,36 +57,49 @@ const PanelScrollback = ({ store, roleKey, focused }: { store: RunStore; roleKey
   )
 }
 
-export const AgentPanel = ({ store, roleKey, title, isDrafter, focused }: AgentPanelProps) => {
+export const AgentPanel = ({ store, roleKey, title, isDrafter, compact = false }: AgentPanelProps) => {
   const agent = useStoreSelector(store, (s) => s.agents[roleKey])
 
   if (!agent) {
     return (
-      <box border title={title} borderStyle="single" flexGrow={1}>
-        <text fg={theme.dim}>(no agent slot)</text>
+      <box
+        border
+        borderStyle="single"
+        borderColor={theme.borderSubtle}
+        backgroundColor={theme.backgroundPanel}
+        flexGrow={1}
+        paddingLeft={1}
+        paddingRight={1}
+      >
+        <text fg={theme.textMuted}>(no agent slot)</text>
       </box>
     )
   }
-  const borderColor = isDrafter ? theme.drafterColor : theme.panel
-  const borderStyle = isDrafter ? "double" : "single"
+
+  const borderColor = isDrafter ? theme.drafter.borderColor : theme.auditor.borderColor
+  const borderStyle = isDrafter ? theme.drafter.borderStyle : theme.auditor.borderStyle
+  const toolLabel = agent.activeTool?.tool ?? (agent.pendingPermission ? "awaiting permission" : "listening")
 
   return (
     <box
       border
-      title={title}
       borderStyle={borderStyle}
       borderColor={borderColor}
+      backgroundColor={isDrafter ? theme.backgroundPanel : compact ? theme.backgroundElement : theme.backgroundPanel}
       flexGrow={1}
       flexDirection="column"
       paddingLeft={1}
       paddingRight={1}
+      paddingTop={1}
+      paddingBottom={1}
     >
-      <box flexDirection="row" gap={1}>
-        <text fg={statusColor(agent.status)}>{statusDot(agent.status)}</text>
-        <text>{agent.activeTool?.tool ?? "-"}</text>
-        {focused ? <text fg={theme.accent}>[focus]</text> : null}
+      <box flexDirection="row" justifyContent="space-between" gap={1}>
+        <text fg={roleColor(isDrafter)}>{title}</text>
+        <text fg={statusColor(agent.status)}>{`${statusDot(agent.status)} ${agent.status}`}</text>
       </box>
-      <PanelScrollback store={store} roleKey={roleKey} focused={focused} />
+      <text fg={theme.textMuted}>{toolLabel}</text>
+      {agent.pendingPermission ? <text fg={theme.warning}>permission: {agent.pendingPermission}</text> : null}
+      <PanelScrollback store={store} roleKey={roleKey} />
     </box>
   )
 }

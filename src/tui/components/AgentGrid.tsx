@@ -7,51 +7,45 @@ import { TooSmallBanner } from "./TooSmallBanner"
 export interface AgentGridProps {
   store: RunStore
   config: RuntimeConfig
-  focused: string
 }
 
-export const AgentGrid = ({ store, config, focused }: AgentGridProps) => {
+export const AgentGrid = ({ store, config }: AgentGridProps) => {
   const { width, height } = useTerminalDimensions()
   const drafter = config.quorumConfig.designatedDrafter
-  const slots = [drafter, ...config.quorumConfig.auditors]
+  const auditors = config.quorumConfig.auditors
 
   if (width < 60 || height < 20) {
     return <TooSmallBanner />
   }
 
-  const renderPanel = (key: string) => (
+  const renderPanel = (key: string, compact = false) => (
     <AgentPanel
       key={key}
       store={store}
       roleKey={key}
       title={key}
       isDrafter={key === drafter}
-      focused={focused === key}
+      compact={compact}
     />
   )
 
   if (width < 100) {
     return (
-      <box flexDirection="column" flexGrow={1}>
-        {slots.map(renderPanel)}
+      <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingRight={1} paddingBottom={1} gap={1}>
+        {renderPanel(drafter)}
+        {auditors.map((auditor) => renderPanel(auditor, true))}
       </box>
     )
   }
 
-  // 2x2 grid for the live N=3 path; for arbitrary N use ceil(sqrt(1+N)) columns.
-  const cols = slots.length === 4 ? 2 : Math.max(1, Math.ceil(Math.sqrt(slots.length)))
-  const rows: string[][] = []
-  for (let i = 0; i < slots.length; i += cols) {
-    rows.push(slots.slice(i, i + cols))
-  }
+  const railWidth = width >= 120 ? 36 : 30
 
   return (
-    <box flexDirection="column" flexGrow={1}>
-      {rows.map((row, ri) => (
-        <box key={ri} flexDirection="row" flexGrow={1}>
-          {row.map(renderPanel)}
-        </box>
-      ))}
+    <box flexDirection="row" flexGrow={1} paddingLeft={1} paddingRight={1} paddingBottom={1} gap={1}>
+      <box flexGrow={1}>{renderPanel(drafter)}</box>
+      <box width={railWidth} flexDirection="column" gap={1}>
+        {auditors.map((auditor) => renderPanel(auditor, true))}
+      </box>
     </box>
   )
 }

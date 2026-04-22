@@ -8,15 +8,14 @@ import { RunningScreen } from "./components/RunningScreen"
 import { SummaryScreen, type SummaryAction } from "./components/SummaryScreen"
 import { bindBusToStore } from "./state/eventBindings"
 import { createRunStore, type RunStore } from "./state/runStore"
+import type { SystemStatusStore } from "./state/systemStatus"
 
 export type Screen = "prompt" | "running" | "summary"
-
-export type SystemLogEntry = { level: "warn" | "error"; text: string }
 
 export interface AppProps {
   config: RuntimeConfig
   prerequisites: RuntimePrerequisites
-  systemLog: SystemLogEntry[]
+  systemStatus: SystemStatusStore
 }
 
 interface RunCtx {
@@ -26,10 +25,9 @@ interface RunCtx {
   ac: AbortController
 }
 
-export const App = ({ config, prerequisites }: AppProps) => {
+export const App = ({ config, prerequisites, systemStatus }: AppProps) => {
   const [screen, setScreen] = useState<Screen>("prompt")
   const [runCtx, setRunCtx] = useState<RunCtx | undefined>(undefined)
-  const [focused, _setFocused] = useState<string>("dashboard")
   const lastRequestRef = useRef<InputRequest | undefined>(undefined)
 
   useKeyboard((key) => {
@@ -87,7 +85,7 @@ export const App = ({ config, prerequisites }: AppProps) => {
     return <PromptScreen config={config} onSubmit={startRun} />
   }
   if (screen === "running" && runCtx) {
-    return <RunningScreen store={runCtx.store} config={config} focused={focused} />
+    return <RunningScreen store={runCtx.store} config={config} systemStatus={systemStatus} />
   }
   if (screen === "summary" && runCtx) {
     return <SummaryScreen store={runCtx.store} onAction={handleSummaryAction} />

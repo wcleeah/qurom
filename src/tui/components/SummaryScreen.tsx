@@ -1,3 +1,5 @@
+import { useTerminalDimensions } from "@opentui/react"
+import { TMUX_TOP_INSET, centeredColumnWidth } from "../layout"
 import type { RunStore } from "../state/runStore"
 import { useStoreSelector } from "../state/useStore"
 import { theme } from "../theme"
@@ -10,9 +12,9 @@ export interface SummaryScreenProps {
 }
 
 const NEXT_OPTIONS = [
-  { name: "Re-run same input", description: "(stub) returns to prompt", value: "rerun" },
-  { name: "New topic", description: "compose a new topic prompt", value: "new-topic" },
-  { name: "New document", description: "compose a new document", value: "new-document" },
+  { name: "Re-run same input", description: "start the same request again", value: "rerun" },
+  { name: "New topic", description: "return to a fresh topic prompt", value: "new-topic" },
+  { name: "New document", description: "open a fresh document draft", value: "new-document" },
   { name: "Quit", description: "exit research-qurom", value: "quit" },
 ]
 
@@ -20,67 +22,111 @@ const NEXT_STYLE = { height: 8 }
 
 const shortId = (id?: string): string => (id ? `${id.slice(0, 8)}..` : "----")
 
+const outcomeColor = (outcome: string): string => {
+  if (outcome === "approved") return theme.success
+  if (outcome === "error" || outcome === "failed") return theme.error
+  return theme.warning
+}
+
+const outcomeLabel = (outcome: string): string => outcome.replace(/_/g, " ").toUpperCase()
+
 export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
+  const { width, height } = useTerminalDimensions()
   const phase = useStoreSelector(store, (s) => s.lifecycle.phase)
   const outputDir = useStoreSelector(store, (s) => s.lifecycle.outputDir)
   const traceId = useStoreSelector(store, (s) => s.lifecycle.traceId)
   const error = useStoreSelector(store, (s) => s.lifecycle.error)
   const result = useStoreSelector(store, (s) => s.result) as
     | {
-        outcome?: string
+        status?: string
         outputPath?: string
-        raw?: { approvedAgents?: string[] }
+        round?: number
+        approvedAgents?: string[]
+        unresolvedFindings?: unknown[]
+        failureReason?: string
       }
     | undefined
   const agents = useStoreSelector(store, (s) => s.agents)
 
   const approved =
-    result?.raw?.approvedAgents ??
+    result?.approvedAgents ??
     Object.entries(agents)
       .filter(([, agent]) => agent.status === "complete" && !agent.pendingPermission)
       .map(([key]) => key)
 
-  const outcome = result?.outcome ?? (phase === "error" ? "error" : "(unknown)")
+  const outcome = phase === "error" ? "error" : result?.status ?? "(unknown)"
+  const round = result?.round
+  const unresolvedCount = result?.unresolvedFindings?.length ?? 0
+  const failureReason = result?.failureReason
   const outputPath = result?.outputPath ?? outputDir ?? "(none)"
   const errorMessage = error instanceof Error ? error.message : error ? String(error) : undefined
+  const wide = width >= 100
+  const outerWidth = wide ? 100 : centeredColumnWidth(width, 92, 72)
+  const topBias = height >= 34 ? 1 : 0
 
   return (
-    <box flexDirection="column" padding={1} flexGrow={1}>
-      <box border title="result" padding={1} flexDirection="column">
-        <text>
-          <span fg={theme.dim}>outcome  </span>
-          <span fg={theme.accent}>{outcome}</span>
-        </text>
-        <text>
-          <span fg={theme.dim}>approved </span>
-          <span>{approved.length > 0 ? approved.join(", ") : "(none)"}</span>
-        </text>
-        <text>
-          <span fg={theme.dim}>output   </span>
-          <span>{outputPath}</span>
-        </text>
-        <text>
-          <span fg={theme.dim}>trace    </span>
-          <span>{shortId(traceId)}</span>
-        </text>
-        {errorMessage ? (
-          <text fg={theme.system}>error: {errorMessage}</text>
-        ) : null}
-      </box>
+    <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingRight={2} backgroundColor={theme.background}>
+      {TMUX_TOP_INSET > 0 ? <box height={TMUX_TOP_INSET} flexShrink={0} /> : null}
+      <box flexGrow={1} minHeight={0} />
+      {topBias > 0 ? <box height={topBias} flexShrink={0} /> : null}
+      <box alignItems="center" flexShrink={0}>
+        <box width={outerWidth} flexDirection={wide ? "row" : "column"} gap={1}>
+          <box flexGrow={1} flexDirection="column" gap={1}>
+            <box
+              border
+              borderStyle="double"
+              borderColor={outcomeColor(outcome)}
+              backgroundColor={theme.backgroundPanel}
+              padding={1}
+              flexDirection="column"
+            >
+              <text fg={outcomeColor(outcome)}>{outcomeLabel(outcome)}</text>
+              <text fg={theme.textMuted}>{`Round ${round ?? "-"}  ·  ${approved.length} approved  ·  ${unresolvedCount} unresolved`}</text>
+              <text wrapMode="word">{approved.length > 0 ? approved.join(", ") : "(no approvals recorded)"}</text>
+            </box>
 
-      <box border title="next" padding={1}>
-        <select
-          focused
-          options={NEXT_OPTIONS}
-          onChange={(_, option) => {
-            const v = option?.value
-            if (v === "rerun" || v === "new-topic" || v === "new-document" || v === "quit") {
-              onAction(v)
-            }
-          }}
-          style={NEXT_STYLE}
-        />
+            <box
+              border
+              borderStyle="single"
+              borderColor={theme.borderSubtle}
+              backgroundColor={theme.backgroundElement}
+              padding={1}
+              flexDirection="column"
+            >
+              <text fg={theme.textMuted}>artifact</text>
+              <text wrapMode="word">{outputPath}</text>
+              <text fg={theme.textMuted}>{`trace ${shortId(traceId)}`}</text>
+              {failureReason ? <text fg={theme.warning}>{`failure: ${failureReason}`}</text> : null}
+              {errorMessage ? <text fg={theme.error}>{`error: ${errorMessage}`}</text> : null}
+            </box>
+          </box>
+
+          <box
+            width={wide ? 34 : "100%"}
+            border
+            borderStyle="single"
+            borderColor={theme.borderSubtle}
+            backgroundColor={theme.backgroundPanel}
+            padding={1}
+            flexDirection="column"
+          >
+            <text fg={theme.textMuted}>what next</text>
+            <text fg={theme.textMuted}>use arrow keys and Enter</text>
+            <select
+              focused
+              options={NEXT_OPTIONS}
+              onChange={(_, option) => {
+                const v = option?.value
+                if (v === "rerun" || v === "new-topic" || v === "new-document" || v === "quit") {
+                  onAction(v)
+                }
+              }}
+              style={NEXT_STYLE}
+            />
+          </box>
+        </box>
       </box>
+      <box flexGrow={1} minHeight={0} />
     </box>
   )
 }
