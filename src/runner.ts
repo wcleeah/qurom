@@ -7,6 +7,8 @@ import type { RuntimeConfig } from "./config"
 import type { GraphInput, InputRequest, ResearchState } from "./schema"
 import type { validateRuntimePrerequisites } from "./opencode"
 
+export type GraphFactory = typeof createGraph
+
 export type RunnerEvent =
   | {
       kind: "lifecycle"
@@ -90,6 +92,7 @@ export type RunQuorumArgs = {
   request: InputRequest
   bus: EventBus
   signal?: AbortSignal
+  graphFactory?: GraphFactory
   bridgeFactory?: BridgeFactory
   telemetryFactory?: (
     config: RuntimeConfig,
@@ -247,6 +250,7 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
 
 export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
   const { config, prerequisites, request, bus, signal } = args
+  const graphFactory = args.graphFactory ?? createGraph
   const bridgeFactory = args.bridgeFactory ?? createOpencodeEventBridge
   const telemetryFactory = args.telemetryFactory ?? createTelemetry
 
@@ -290,7 +294,7 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
     const runResult = await telemetry.runWithRootObservation(async () => {
       bus.emit({ kind: "lifecycle", phase: "running", requestId, traceId: telemetry.traceId })
 
-      const graph = createGraph(config, prerequisites.skill.content, {
+      const graph = graphFactory(config, prerequisites.skill.content, {
         observer: {
           onNodeStart(node, state) {
             bus.emit({ kind: "graph.node", node, phase: "start", state: structuredClone(state) })

@@ -6,10 +6,10 @@ Source plan: `docs/tui-implementation-plan.md` §10 Step 9, §12 (double-subscri
 
 - Phase: 09 / 09 (final)
 - Source plan: `docs/tui-implementation-plan.md`
-- Readiness: **Blocked** on Phases 02 (`runQuorum` + bus), 05 (`openInEditor`), 06 (`createRunStore` + `bindBusToStore`), 07 (`App`'s screen state machine + `lastRequest` retention), 07.5 (final screen hierarchy), 08 (`SummaryScreen.onAction` keyboard wiring).
+- Readiness: **Ready**. Prior phases are in place, including Phase 08 summary action wiring and the controlled `onExit` shutdown path.
 - Primary deliverable: real implementations for `App`'s three summary actions — `rerun`, `new-topic`, `new-document` — plus the guarantee that the per-run store/bus/binding lifecycle is recreated cleanly between runs with no double-subscribers and no leftover scrollback.
 - Blocking dependencies: all prior phases, including 07.5.
-- Target measurements: two back-to-back runs produce no duplicated `agent.tool` events in any panel; `r` re-runs with the cached document content (refreshed from disk if the file still exists); `f` opens `$EDITOR` immediately on a fresh `requestId`; `n` returns to topic mode with empty input. This is the final phase, so the broader rollout/validation from plan §13 also lives here.
+- Target measurements: two back-to-back runs produce no duplicated `agent.tool` events in any panel; `r` re-runs with document content refreshed from disk when possible and cached text as fallback; `f` opens `$EDITOR` immediately on a fresh `requestId` and returns to the prompt in document mode with the draft loaded; `n` returns to topic mode with empty input. This is the final phase, so the broader rollout/validation from plan §13 also lives here.
 - Next phase: none. This phase ships the feature.
 
 ## Why This Phase Exists
@@ -23,16 +23,16 @@ This is also the natural place to do the full plan §13 manual verification beca
 - Phase 02 done: `runQuorum(request, bus, opts)` resolves cleanly, awaits its own `bridge.stop()` in `finally`.
 - Phase 05 done: `openInEditor({ requestId, renderer })` returns `{ ok, content, path } | { ok: false, reason }` and creates `runs/.drafts/<requestId>.md`.
 - Phase 06 done: `createRunStore` + `bindBusToStore` + `unbind()`.
-- Phase 07 done: `App.tsx` retains `lastRequest`, owns `runCtx = { bus, store, unbind, ac, promise }` per run, and recreates the store per run (so reset is a side effect of "run again").
+- Phase 07 done: `App.tsx` retains `lastRequestRef`, owns `runCtx = { bus, store, unbind, ac, promise }` per run, and recreates the store per run (so reset is a side effect of "run again").
 - Phase 07.5 done: final running/prompt/summary layout hierarchy is stable.
-- Phase 08 done: `SummaryScreen.onAction("rerun" | "new-topic" | "new-document")` is wired to a callback in `App` (currently a stub: `setScreen("prompt")`).
+- Phase 08 done: `SummaryScreen.onAction("rerun" | "new-topic" | "new-document")` is wired to a callback in `App`; the current implementation is still topic-biased and needs the real rerun/new-document flows.
 
 ## Dependencies And How To Check Them
 
 | Dependency | Why | How to verify | Status |
 |---|---|---|---|
 | `runQuorum` awaits bridge teardown | No leaked subscribers between runs | `grep -n "bridge.stop\\|finally" src/runner.ts` | Done after Phase 02/03 |
-| `App` has `lastRequest` state | `r` can replay it | `grep -n "lastRequest" src/tui/App.tsx` | Done after Phase 07 |
+| `App` has `lastRequestRef` | `r` can replay it | `grep -n "lastRequestRef" src/tui/App.tsx` | Done |
 | `App` recreates store per run | Reset between runs | `grep -n "createRunStore" src/tui/App.tsx` | Done after Phase 07 |
 | `SummaryScreen.onAction` plumbed | Action dispatch | `grep -n "onAction" src/tui/components/SummaryScreen.tsx src/tui/App.tsx` | Done after Phase 08 |
 | `openInEditor` honours an explicit `requestId` | `f` opens a fresh file | `grep -n "requestId" src/tui/editor.ts` | Done after Phase 05 |
@@ -40,16 +40,16 @@ This is also the natural place to do the full plan §13 manual verification beca
 
 ## Target Measurements And Gates
 
-Entry gate: all prior phases green; `bunx tsc --noEmit` exit 0; `bun test` exit 0.
+Entry gate: all prior phases green; `bun run typecheck` exit 0; `bun run test` exit 0.
 
 Exit gates:
 
 - `r` from a topic-mode summary re-runs with the same topic; counters reset to zero before the second run starts; no `agent.tool` event duplicates in any panel during the second run (plan §13 step 7).
-- `r` from a document-mode summary re-reads `runs/.drafts/<requestId>.md` from disk before invoking `runQuorum`. If the file is missing or unreadable, fall back to the cached `document.content` from `lastRequest` and surface a footer hint (`"using cached document"`).
+- `r` from a document-mode summary re-reads `runs/.drafts/<requestId>.md` from disk before invoking `runQuorum`. If the file is missing or unreadable, fall back to cached `documentText` retained from the previous successful edit/run and surface a prompt hint (`"using cached document"`).
 - `n` returns to `PromptScreen` in topic mode with an empty topic input.
-- `f` returns to `PromptScreen` in document mode with a freshly generated `requestId`, immediately invokes `openInEditor` (renderer suspends), then returns to the prompt with the new document loaded. If the editor is cancelled (`{ ok: false, reason }`), the user lands on the prompt screen in document mode with no document and a hint matching the failure reason.
+- `f` returns to `PromptScreen` in document mode with a freshly generated `requestId`, immediately invokes `openInEditor` (renderer suspends), then returns to the prompt with the new document loaded and waiting for explicit `Enter` to run. If the editor is cancelled (`{ ok: false, reason }`), the user lands on the prompt screen in document mode with no document and a hint matching the failure reason.
 - After any of the above, the previous run's `bus`, `store`, and `unbind` are no longer referenced by `App` (verifiable manually by checking that the new run uses a different store identity in DevTools-equivalent: log the store reference into the system log buffer at run start and confirm it changes).
-- The integration test from plan §13 (`src/runner.integration.test.ts`, gated on `RUN_INTEGRATION=1`) passes: two back-to-back runs produce exactly twice the events with no duplicates.
+- The integration test from plan §13 (`tests/runner.integration.test.ts`, gated on `RUN_INTEGRATION=1`) passes: two back-to-back runs produce exactly twice the events with no duplicates.
 - `grep -r telemetry-enrichment src/` returns no results (regression check from plan §13).
 - The full plan §13 manual verification passes for both an approved and a failed-quorum scenario.
 
@@ -59,8 +59,9 @@ Exit gates:
   - `handleRerun()`
   - `handleNewTopic()`
   - `handleNewDocument()`
-- A small helper `startRun(request)` in `App.tsx` that encapsulates "create bus + store + binding + AbortController, call `runQuorum`, store `runCtx`, transition to running, transition to summary on resolve/reject, unbind in finally". Phase 07 already had a version of this — Phase 09 just hardens it.
-- A "stale subscriber" smoke test (`src/runner.integration.test.ts`) gated on `RUN_INTEGRATION=1`.
+- A small helper `startRun(request)` in `App.tsx` that encapsulates "create bus + store + binding + AbortController, call `runQuorum`, store `runCtx`, transition to running, transition to summary on resolve/reject, unbind in finally". Current code already has this; Phase 09 hardens it for back-to-back runs and prompt-state resets.
+- A small prompt-entry state contract between `App` and `PromptScreen` (`initialMode`, initial topic/document state, initial hint`) so `n`/`f` land deterministically.
+- A "stale subscriber" smoke test (`tests/runner.integration.test.ts`) gated on `RUN_INTEGRATION=1`.
 - A `.gitignore` recheck (no change expected — Phase 01 already added `runs/.drafts/`).
 - This README/handoff section is replaced with a **Rollout And Validation** section (per phase-execution-briefs skill rule for the final phase).
 
@@ -111,26 +112,26 @@ Key invariants:
 
 - `bus` and `store` are recreated per run, so all per-agent scrollback and counters start at zero.
 - `unbind()` is called both inside `.finally` and inside the defensive `if (runCtx)` block — both are idempotent (Phase 06 must guarantee this; if it does not, retroactively patch).
-- `lastRequest` is set on every `startRun`, not before, so a failed `runQuorum` invocation does not corrupt the cached request.
+- `lastRequestRef` is set on every `startRun`, not before, so a failed `runQuorum` invocation does not corrupt the cached request.
 
 ### `handleRerun()`
 
 ```ts
 async function handleRerun() {
-  if (!lastRequest) return // defensive; r should be disabled when no run yet
-  if (lastRequest.mode === "document" && lastRequest.document) {
-    const draftsPath = lastRequest.document.path
-    let content = lastRequest.document.content
+  if (!lastRequestRef.current) return // defensive; r should be disabled when no run yet
+  if (lastRequestRef.current.inputMode === "document") {
+    const draftsPath = lastRequestRef.current.documentPath
+    let content = lastRequestRef.current.documentText ?? ""
     try {
       const fresh = await fs.readFile(draftsPath, "utf8")
       if (fresh.trim().length > 0) content = fresh
-      else setFooterHint("draft empty on disk — using cached document")
+      else setPromptState({ mode: "document", hint: "draft empty on disk — using cached document" })
     } catch {
-      setFooterHint("draft missing on disk — using cached document")
+      setPromptState({ mode: "document", hint: "draft missing on disk — using cached document" })
     }
-    return startRun({ mode: "document", document: { path: draftsPath, content } })
+    return startRun({ inputMode: "document", documentPath: draftsPath, documentText: content })
   }
-  return startRun(lastRequest)
+  return startRun(lastRequestRef.current)
 }
 ```
 
@@ -140,33 +141,33 @@ async function handleRerun() {
 
 ```ts
 function handleNewTopic() {
-  setLastRequest(undefined) // optional — keeps PromptScreen pristine
   setScreen("prompt")
-  // PromptScreen reads an `initialMode` prop or its own state; ensure it lands in "topic" mode.
+  setPromptState({ mode: "topic", topic: "", document: undefined, hint: "" })
 }
 ```
 
-Add an `initialMode?: "topic" | "document"` prop to `PromptScreen` so `App` can force the mode on entry.
+Add prompt-entry props/state to `PromptScreen` so `App` can force mode and initial content on entry.
 
 ### `handleNewDocument()`
 
 ```ts
 async function handleNewDocument() {
   setScreen("prompt")
-  // Switch PromptScreen to document mode, then auto-trigger openInEditor on a fresh requestId.
+  // Switch PromptScreen to document mode, then open the editor on a fresh requestId.
   const requestId = crypto.randomUUID()
   const renderer = rendererRef.current
   if (!renderer) return
   const result = await openInEditor({ requestId, renderer })
   if (result.ok) {
-    return startRun({ mode: "document", document: { path: result.path, content: result.content } })
+    setPromptState({ mode: "document", document: { path: result.path, content: result.content }, hint: "" })
+    return
   }
   // Stay on prompt screen in document mode with a hint matching the failure reason.
-  setComposeHint(result.reason === "empty" ? "(empty — nothing saved)" : "(cancelled)")
+  setPromptState({ mode: "document", document: undefined, hint: result.reason === "empty" ? "(empty — nothing saved)" : "(cancelled)" })
 }
 ```
 
-Open the editor synchronously from the action handler so the renderer's `suspend()` happens immediately and the user does not see the prompt screen flicker. The Phase 05 `openInEditor` already wraps `suspend/resume` in a `try/finally`, so cancellation is safe.
+Open the editor synchronously from the action handler so the renderer's `suspend()` happens immediately and the user does not see the prompt screen flicker. The Phase 05 `openInEditor` already wraps `suspend/resume` in a `try/finally`, so cancellation is safe. Keep the user on the prompt afterward; do not auto-start the run.
 
 `rendererRef`: Phase 07 already exposes `useRenderer()` inside components; in `App.tsx` we need a renderer reference reachable from an action handler. Either store it in a ref via `useRenderer()` at the top of `App`, or move `handleNewDocument` into a child component that has access to `useRenderer()`. The first approach keeps the action handlers co-located.
 
@@ -179,7 +180,7 @@ function onSummaryAction(action: SummaryAction) {
   if (action === "rerun") return handleRerun()
   if (action === "new-topic") return handleNewTopic()
   if (action === "new-document") return handleNewDocument()
-  if (action === "quit") return process.exit(0)
+  if (action === "quit") return onExit()
 }
 ```
 
@@ -187,7 +188,7 @@ function onSummaryAction(action: SummaryAction) {
 
 If a user mashes `r` while the previous run's `.finally` has not yet fired (rare on local hardware but possible if `bridge.stop()` blocks on a slow network), `startRun`'s defensive `unbind()` covers it. The single-subscriber guard inside the bridge (Phase 03, line 144 of the renamed file) is the second line of defense and the reason this is not a critical bug.
 
-### Integration test (`src/runner.integration.test.ts`)
+### Integration test (`tests/runner.integration.test.ts`)
 
 Gated on `RUN_INTEGRATION=1` (per plan §13). Wires the real `runQuorum` with a stub `createGraph` that yields a scripted sequence of node start/end + session-created events, and a stub bridge that emits a small handful of `agent.tool` events. Asserts:
 
@@ -202,12 +203,12 @@ This is the automated complement to plan §13 step 7.
 1. Refactor `App.tsx` `startRun` per Implementation Details (idempotent unbind, store recreation, `runCtx.promise`).
 2. Implement `handleRerun`, `handleNewTopic`, `handleNewDocument` in `App.tsx`.
 3. Wire `onSummaryAction` to the three handlers + `quit`.
-4. Add an `initialMode?: "topic" | "document"` prop to `PromptScreen` so `handleNewTopic` and `handleNewDocument` can land the user in the right place.
-5. Add a `composeHint` mechanism to `PromptScreen` so `handleNewDocument`'s cancel/empty footer hint can be shown.
-6. Add `src/runner.integration.test.ts` per spec.
-7. `bunx tsc --noEmit`. Fix.
-8. `bun test`. All green.
-9. `RUN_INTEGRATION=1 bun test src/runner.integration.test.ts`. Green.
+4. Add prompt-entry props/state to `PromptScreen` so `handleNewTopic` and `handleNewDocument` can land the user in the right place.
+5. Add a `composeHint`/initial hint mechanism to `PromptScreen` so `handleNewDocument`'s cancel/empty hint can be shown.
+6. Add `tests/runner.integration.test.ts` per spec.
+7. `bun run typecheck`. Fix.
+8. `bun run test`. All green.
+9. `RUN_INTEGRATION=1 bun test ./tests/runner.integration.test.ts`. Green.
 10. **Full manual verification (plan §13 steps 1–12).** Capture observations:
     - Step 6: confirm `outcome`, `output`, `trace` on `SummaryScreen` match what the old `src/index.ts:160-175` would have printed (compare against a captured side log from a pre-removal commit if possible).
     - Step 7: re-run after a topic-mode run; visually confirm zero duplicate `tool ... completed` lines.
@@ -225,15 +226,15 @@ This is the automated complement to plan §13 step 7.
 ## Files And Systems Likely Affected
 
 - `src/tui/App.tsx` (action handlers, `startRun` hardening, `rendererRef`)
-- `src/tui/components/PromptScreen.tsx` (add `initialMode`, `composeHint`)
-- `src/runner.integration.test.ts` (new)
+- `src/tui/components/PromptScreen.tsx` (add prompt-entry props/state)
+- `tests/runner.integration.test.ts` (new)
 - (No changes expected to `runner.ts`, `opencode-event-bridge.ts`, store, or editor — if any are needed they indicate a missing guarantee in an earlier phase and should be fixed there.)
 
 ## Verification
 
-- `bunx tsc --noEmit` → exit 0.
-- `bun test` → all suites green.
-- `RUN_INTEGRATION=1 bun test src/runner.integration.test.ts` → green.
+- `bun run typecheck` → exit 0.
+- `bun run test` → all suites green.
+- `RUN_INTEGRATION=1 bun test ./tests/runner.integration.test.ts` → green.
 - Full plan §13 manual checklist passes for both approved and failed-quorum scenarios.
 - `grep -r telemetry-enrichment src/` returns nothing.
 - `runs/<requestId>/` contents are byte-identical in shape to a pre-TUI control run for the same input (small diffs in timestamps are fine).
@@ -260,7 +261,7 @@ This is the final phase. There is nothing to hand off. Instead:
 ## Open Questions Or Blockers
 
 - The exact return shape of `runQuorum` (`runResult` vs side-channel artifacts) determines what `SummaryScreen` reads to compute "approved agents". Confirmed via Phase 02's `RunnerEvent.kind = "result"` payload; if details slipped, retroactively widen the type and re-test the summary computation.
-- Whether the integration test's stub `createGraph` interface matches the real one closely enough to catch a real subscriber leak. Inferred — if the real `createGraph` evolves, the test must be kept in sync. Note this in `src/runner.integration.test.ts`.
+- Whether the integration test's stub `createGraph` interface matches the real one closely enough to catch a real subscriber leak. Inferred — if the real `createGraph` evolves, the test must be kept in sync. Note this in `tests/runner.integration.test.ts`.
 - Whether `crypto.randomUUID()` is acceptable as the `requestId` source (vs the existing one in `src/index.ts:9-179`). Inferred from the rest of the plan; if `runQuorum` requires a specific shape, mirror it.
 
 ## Follow-up: re-introduce `agent.telemetry` (tokens-only)

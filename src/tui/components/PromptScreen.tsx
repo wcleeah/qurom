@@ -1,5 +1,5 @@
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { RuntimeConfig } from "../../config"
 import type { InputRequest } from "../../schema"
 import { openInEditor } from "../editor"
@@ -11,6 +11,10 @@ export type PromptMode = "topic" | "document"
 export interface PromptScreenProps {
   config: RuntimeConfig
   onSubmit: (request: InputRequest) => void
+  initialMode?: PromptMode
+  initialTopic?: string
+  initialDocument?: { path: string; content: string }
+  initialHint?: string
 }
 
 const generateRequestId = (): string => {
@@ -44,18 +48,41 @@ const ModeChip = ({ active, label }: { active: boolean; label: string }) => (
   </box>
 )
 
-export const PromptScreen = ({ config, onSubmit }: PromptScreenProps) => {
+export const PromptScreen = ({
+  config,
+  onSubmit,
+  initialMode = "topic",
+  initialTopic = "",
+  initialDocument,
+  initialHint = "",
+}: PromptScreenProps) => {
   const { width, height } = useTerminalDimensions()
   const renderer = useRenderer()
-  const [mode, setMode] = useState<PromptMode>("topic")
-  const [topic, setTopic] = useState("")
-  const [doc, setDoc] = useState<{ path: string; content: string } | undefined>(undefined)
-  const [hint, setHint] = useState<string>("")
+  const [mode, setMode] = useState<PromptMode>(initialMode)
+  const [topic, setTopic] = useState(initialTopic)
+  const [doc, setDoc] = useState<{ path: string; content: string } | undefined>(initialDocument)
+  const [hint, setHint] = useState<string>(initialHint)
   const [busy, setBusy] = useState(false)
   const requestId = useMemo(generateRequestId, [])
   const columnWidth = centeredColumnWidth(width, 84, 68)
   const topBias = height >= 34 ? 2 : 1
   const topicInputWidth = Math.max(24, columnWidth - 6)
+
+  useEffect(() => {
+    setMode(initialMode)
+  }, [initialMode])
+
+  useEffect(() => {
+    setTopic(initialTopic)
+  }, [initialTopic])
+
+  useEffect(() => {
+    setDoc(initialDocument)
+  }, [initialDocument])
+
+  useEffect(() => {
+    setHint(initialHint)
+  }, [initialHint])
 
   const submitTopic = () => {
     const trimmed = topic.trim()
@@ -71,7 +98,8 @@ export const PromptScreen = ({ config, onSubmit }: PromptScreenProps) => {
     setBusy(true)
     try {
       const result = await openInEditor({
-        requestId,
+        requestId: doc ? undefined : requestId,
+        path: doc?.path,
         renderer,
         artifactRoot: config.quorumConfig.artifactDir,
       })
@@ -95,7 +123,7 @@ export const PromptScreen = ({ config, onSubmit }: PromptScreenProps) => {
       setHint("compose a document first (press e)")
       return
     }
-    onSubmit({ inputMode: "document", documentPath: doc.path })
+    onSubmit({ inputMode: "document", documentPath: doc.path, documentText: doc.content })
   }
 
   useKeyboard((key) => {

@@ -5,6 +5,7 @@ import {
   aggregateConsensus,
   dedupeFindings,
   effectiveResponsesByFinding,
+  ingestRequest,
   routeAfterAggregate,
   routeAfterDrafterReview,
   routeAfterRebuttalResponses,
@@ -251,5 +252,29 @@ describe("graph helpers", () => {
     expect(routeAfterAggregate(baseState({ status: "approved" }))).toBe("finalizeApprovedDraft")
     expect(routeAfterAggregate(baseState({ status: "failed" }))).toBe("finalizeFailedRun")
     expect(routeAfterAggregate(baseState({ status: "revising" }))).toBe("reviseDraft")
+  })
+
+  test("ingestRequest prefers cached documentText over rereading the file", async () => {
+    const originalFile = Bun.file
+    let fileRead = false
+
+    Bun.file = ((path: string | URL) => {
+      fileRead = true
+      return originalFile(path)
+    }) as typeof Bun.file
+
+    try {
+      const state = await ingestRequest({
+        inputMode: "document",
+        documentPath: "missing.md",
+        documentText: "cached draft",
+        requestId: "req-cached",
+      })
+
+      expect(state.documentText).toBe("cached draft")
+      expect(fileRead).toBe(false)
+    } finally {
+      Bun.file = originalFile
+    }
   })
 })

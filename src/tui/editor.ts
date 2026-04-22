@@ -35,7 +35,8 @@ const defaultDeps: EditorDeps = {
 }
 
 export interface OpenInEditorArgs {
-  requestId: string
+  requestId?: string
+  path?: string
   renderer: RendererLike
   artifactRoot: string
   deps?: Partial<EditorDeps>
@@ -46,18 +47,19 @@ export const resolveEditorCommand = (env: NodeJS.ProcessEnv): string => env.VISU
 export const draftPathFor = (artifactRoot: string, requestId: string): string =>
   join(artifactRoot, ".drafts", `${requestId}.md`)
 
-export const openInEditor = async ({ requestId, renderer, artifactRoot, deps }: OpenInEditorArgs): Promise<EditorResult> => {
+export const openInEditor = async ({ requestId, path, renderer, artifactRoot, deps }: OpenInEditorArgs): Promise<EditorResult> => {
   const d: EditorDeps = { ...defaultDeps, ...deps }
   const cmd = resolveEditorCommand(d.env)
-  const path = draftPathFor(artifactRoot, requestId)
-  d.mkdirSync(dirname(path), { recursive: true })
-  if (!d.existsSync(path)) d.writeFileSync(path, "")
+  const draftPath = path ?? (requestId ? draftPathFor(artifactRoot, requestId) : undefined)
+  if (!draftPath) throw new Error("openInEditor requires requestId or path")
+  d.mkdirSync(dirname(draftPath), { recursive: true })
+  if (!d.existsSync(draftPath)) d.writeFileSync(draftPath, "")
 
   await renderer.suspend()
   let status: number | null = 0
   let spawnError: Error | undefined
   try {
-    const result = d.spawnSync(cmd, [path], { stdio: "inherit", shell: false })
+    const result = d.spawnSync(cmd, [draftPath], { stdio: "inherit", shell: false })
     status = result.status
     if (result.error) spawnError = result.error
   } catch (err) {
@@ -68,7 +70,7 @@ export const openInEditor = async ({ requestId, renderer, artifactRoot, deps }: 
 
   if (spawnError) return { ok: false, reason: "exit-code" }
   if (status !== 0) return { ok: false, reason: "exit-code", code: status ?? undefined }
-  const content = d.readFileSync(path, "utf8")
+  const content = d.readFileSync(draftPath, "utf8")
   if (content.trim().length === 0) return { ok: false, reason: "empty" }
-  return { ok: true, content, path }
+  return { ok: true, content, path: draftPath }
 }

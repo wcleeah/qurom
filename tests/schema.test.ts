@@ -72,6 +72,17 @@ describe("schema validation", () => {
     expect(documentInput.success).toBe(true)
   })
 
+  test("accepts graph input with cached documentText", () => {
+    const result = graphInputSchema.safeParse({
+      inputMode: "document",
+      documentPath: "docs/input.md",
+      documentText: "cached draft",
+      requestId: "req-3",
+    })
+
+    expect(result.success).toBe(true)
+  })
+
   test("requires topic for topic-mode research state", () => {
     const result = researchStateSchema.safeParse({
       requestId: "req-1",

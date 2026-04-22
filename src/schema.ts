@@ -30,6 +30,7 @@ const topicInputSchema = z.object({
 const documentInputSchema = z.object({
   inputMode: z.literal("document"),
   documentPath: nonEmptyStringSchema,
+  documentText: nonEmptyStringSchema.optional(),
 })
 
 export const inputRequestSchema = z.discriminatedUnion("inputMode", [topicInputSchema, documentInputSchema])
@@ -38,6 +39,7 @@ export const graphInputSchema = z.object({
   inputMode: inputModeSchema,
   topic: nonEmptyStringSchema.optional(),
   documentPath: nonEmptyStringSchema.optional(),
+  documentText: nonEmptyStringSchema.optional(),
   requestId: nonEmptyStringSchema.optional(),
 })
 

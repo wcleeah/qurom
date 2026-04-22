@@ -83,6 +83,12 @@ describe("openInEditor", () => {
     expect(calls.spawn[0]?.args[0]).toBe("/data/runs/.drafts/abc-123.md")
   })
 
+  test("reopens an existing draft path when provided", async () => {
+    const { renderer, deps, calls } = makeDeps({ fileExists: true, fileContent: "saved draft" })
+    await openInEditor({ path: "/data/runs/.drafts/existing.md", renderer, artifactRoot: "/data/runs", deps })
+    expect(calls.spawn[0]?.args[0]).toBe("/data/runs/.drafts/existing.md")
+  })
+
   test("suspends before spawn and resumes after, even when spawn throws", async () => {
     const order: string[] = []
     const { deps } = makeDeps()

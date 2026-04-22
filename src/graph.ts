@@ -388,7 +388,7 @@ function buildRunSummary(state: ResearchState, outcome: AggregatedFindings["outc
   })
 }
 
-async function ingestRequest(input: GraphInput) {
+export async function ingestRequest(input: GraphInput) {
   const parsed = inputRequestSchema.parse(input)
   const requestId = input.requestId ?? randomUUID()
   const baseState = {
@@ -421,7 +421,7 @@ async function ingestRequest(input: GraphInput) {
     ...baseState,
     inputMode: "document",
     documentPath: parsed.documentPath,
-    documentText: await Bun.file(parsed.documentPath).text(),
+    documentText: parsed.documentText ?? (await Bun.file(parsed.documentPath).text()),
   })
 }
 
