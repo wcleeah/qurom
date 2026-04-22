@@ -1,0 +1,5 @@
+- start opencode server from the app.
+- restore session using langgraph's checkpointer.
+  - if it is in between run, restore opencode session as well, and continue with a followup prompt
+- one more agent for asking questions to confirm understanding, after writing the final draft, wait for user prompt, then generate and ask questions.
+- write the final md locally and optionally to tome using research-tome mcp.

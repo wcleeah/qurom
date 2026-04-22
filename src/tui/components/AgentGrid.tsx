@@ -1,3 +1,4 @@
+import type { FocusRegion } from "../state/layout"
 import type { ResearchState } from "../../schema"
 import { useTerminalDimensions } from "@opentui/react"
 import type { RuntimeConfig } from "../../config"
@@ -9,12 +10,14 @@ import { TooSmallBanner } from "./TooSmallBanner"
 export interface AgentGridProps {
   store: RunStore
   config: RuntimeConfig
+  focused: FocusRegion
+  onGPendingChange: (pending: boolean) => void
 }
 
-export const AgentGrid = ({ store, config }: AgentGridProps) => {
+export const AgentGrid = ({ store, config, focused, onGPendingChange }: AgentGridProps) => {
   const { width, height } = useTerminalDimensions()
-  const drafter = config.quorumConfig.designatedDrafter
-  const auditors = config.quorumConfig.auditors
+  const drafter = config.quorumConfig.designatedDrafter as Exclude<FocusRegion, "dashboard">
+  const auditors = config.quorumConfig.auditors as Array<Exclude<FocusRegion, "dashboard">>
   const graphState = useStoreSelector(store, (s) => s.graph.state as ResearchState | undefined)
   const auditHeavy =
     graphState?.status === "auditing" ||
@@ -26,7 +29,7 @@ export const AgentGrid = ({ store, config }: AgentGridProps) => {
     return <TooSmallBanner />
   }
 
-  const renderPanel = (key: string, compact = false, emphasize = false) => (
+  const renderPanel = (key: Exclude<FocusRegion, "dashboard">, compact = false, emphasize = false) => (
     <AgentPanel
       key={key}
       store={store}
@@ -35,6 +38,8 @@ export const AgentGrid = ({ store, config }: AgentGridProps) => {
       isDrafter={key === drafter}
       compact={compact}
       emphasize={emphasize}
+      focused={focused === key}
+      onGPendingChange={onGPendingChange}
     />
   )
 

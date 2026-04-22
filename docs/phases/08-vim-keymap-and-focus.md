@@ -6,7 +6,7 @@ Source plan: `docs/tui-implementation-plan.md` §10 Step 8, §11 (footer hints),
 
 - Phase: 08 / 09
 - Source plan: `docs/tui-implementation-plan.md`
-- Readiness: **Blocked** on Phase 07 (component tree + `App.tsx` focus prop placeholder + `SummaryScreen.onAction` stub) and Phase 07.5 (final running-screen hierarchy).
+- Readiness: **Ready**. Phase 07 shipped the component tree and run wiring; Phase 07.5 stabilized the final drafter-primary layout and removed the old placeholder focus prop.
 - Primary deliverable: a complete keyboard layer — global `useKeyboard` at `App` for focus navigation + global commands, per-`AgentPanel` `useKeyboard` (gated on `focused`) for scroll commands, a `?` help overlay, mid-run `Ctrl-C` cancellation via `AbortController`, and `r/n/f/q` on `SummaryScreen`.
 - Blocking dependencies: Phase 07 and Phase 07.5.
 - Target measurements: every binding from §10 Step 8 + §11 footer works; `j`/`k` ambiguity is resolved by which element holds focus; `Esc` releases panel focus; `Ctrl-C` mid-run aborts cleanly within 1–2 s; `?` overlay toggles.
@@ -18,20 +18,21 @@ The TUI is walkable after Phase 07 but not usable without keys: no panel focus, 
 
 ## Start Criteria
 
-- Phase 07 done: all components mount, real runs drive the provisional layout, `App.tsx` already carries a `focused: "dashboard" | "<roleKey>"` state and passes `focused` into each `AgentPanel`.
+- Phase 07 done: all components mount, real runs drive the TUI, and `App.tsx` already owns run lifecycle plus `SummaryScreen` action routing.
 - Phase 07.5 done: the running screen hierarchy is stable (drafter-primary split view on wide terminals, vertical fallback on narrow terminals).
 - `App.tsx` already passes an `AbortController.signal` into `runQuorum` (Phase 07 added this).
 - `SummaryScreen` already accepts an `onAction(action)` callback (Phase 07 added this stub).
+- Controlled shutdown already exists via `onExit` from `src/tui/index.tsx`; Phase 08 should route every quit path through it rather than calling `process.exit(...)` directly.
 
 ## Dependencies And How To Check Them
 
 | Dependency | Why | How to verify | Status |
 |---|---|---|---|
-| `App.tsx` `focused` state + prop drilling | Per-panel scroll keys gate on it | `grep -n "focused" src/tui/App.tsx src/tui/components/AgentPanel.tsx` | Done after Phase 07 |
+| `App.tsx` run lifecycle + `onExit` callback | Global key routing and clean cancellation/quit | `grep -n "onExit\|AbortController" src/tui/App.tsx src/tui/index.tsx` | Done |
 | `runCtx.ac` (`AbortController`) reachable from `App` | `Ctrl-C` handler aborts | `grep -n "AbortController" src/tui/App.tsx` | Done after Phase 07 |
 | `SummaryScreen.onAction` stub | `r/n/f/q` route through it | `grep -n "onAction" src/tui/components/SummaryScreen.tsx` | Done after Phase 07 |
 | `useKeyboard` from opentui/react | All bindings | `reference/opentui/packages/react/README.md:184-240` | Confirmed |
-| `<scrollbox>` ref for programmatic scroll | `gg`, `G`, `Ctrl-d/u/f/b` | `reference/opentui/packages/react/README.md:407-449` | Confirmed (verify ref API exposes `scrollTo` / `scrollBy` / dimensions) |
+| `<scrollbox>` underlying scroll API | `gg`, `G`, `Ctrl-d/u/f/b` | `reference/opentui/packages/core/src/renderables/ScrollBox.ts` + tests | Confirmed (`scrollTop` + `scrollBy`) |
 
 ## Target Measurements And Gates
 
@@ -43,7 +44,7 @@ Exit gates (manual unless noted):
 - Focusing a panel highlights its border (e.g. brighter `borderColor` from `theme.ts`); `Esc` returns focus to dashboard.
 - While a panel is focused: `j`/`k` scroll one line, `Ctrl-d`/`Ctrl-u` half-page, `Ctrl-f`/`Ctrl-b` full page, `gg` (within 500 ms) top, `G` bottom (and clears the "v new" indicator from Phase 07).
 - `?` toggles a centered help overlay listing every binding.
-- `Ctrl-C` mid-run: `App` calls `ac.abort()`, awaits the `runQuorum` promise (which short-circuits via `finally`), then exits the renderer cleanly within 1–2 s. No orphan opencode session warning in the next shell.
+- `Ctrl-C` mid-run: `App` calls `ac.abort()`, awaits the in-flight `runQuorum` promise, then routes through `onExit()` so `root.unmount()` and `renderer.destroy()` restore the terminal cleanly within 1–2 s. No orphan opencode session warning in the next shell.
 - On `RunningScreen`: `q` is ignored (footer hints "use Q to force quit"); `Q` (shift-Q) opens a small confirmation `<box>` with `y/n`; `y` quits.
 - On `PromptScreen` and `SummaryScreen`: `q` quits immediately. On `SummaryScreen`: `r/n/f` invoke `onAction("rerun" | "new-topic" | "new-document")`.
 - Inside `<input>` (topic mode): `i` and `Enter` enter insert; `Esc` leaves; `Enter` inside the input submits — no global key intercepts fire while the input is focused.
@@ -58,14 +59,14 @@ Exit gates (manual unless noted):
 - New `src/tui/components/HelpOverlay.tsx` (mounted from `App`, position absolute centered when `showHelp`).
 - New `src/tui/components/QuitConfirm.tsx` (mounted from `App` when `pendingForceQuit`).
 - Edits to:
-  - `src/tui/App.tsx` — wire `useGlobalKeymap`, manage `focused`, `showHelp`, `pendingForceQuit`, and `Ctrl-C` handler.
+  - `src/tui/App.tsx` — wire `useGlobalKeymap`, manage `focused`, `showHelp`, `pendingForceQuit`, and store the active run promise for cancellation.
   - `src/tui/components/AgentPanel.tsx` — wire `usePanelKeymap` on a ref, surface a `focused` border style.
   - `src/tui/components/SummaryScreen.tsx` — add `useKeyboard` for `r/n/f/q`.
   - `src/tui/components/Footer.tsx` — surface mode-aware hint (different text on running vs prompt vs summary, and during a `g` partial sequence).
 
 ## Out Of Scope
 
-- Re-run flow logic (`r` action wiring inside `App`): Phase 09. This phase only fires the `onAction("rerun")` callback — `App`'s implementation can still be the Phase 07 stub (`setScreen("prompt")`) until Phase 09 replaces it.
+- Re-run flow logic (`r` action wiring inside `App`): Phase 09. This phase only fires the `onAction("rerun")` callback — `App` may continue to reuse `lastRequestRef` directly until Phase 09 replaces it with the full re-run flow.
 - Per-panel `<input>` editing inside the prompt screen — already shipped in Phase 07.
 - Cancellation UX polish beyond "abort + exit": the run's `finally` already tears down subscribers (Phase 03).
 
@@ -84,11 +85,11 @@ Exit gates (manual unless noted):
 
 `nextFocus("dashboard", "j")` → `"drafter"`. `nextFocus("drafter", "l")` → `"source-auditor"`. `nextFocus("source-auditor", "j")` → `"logic-auditor"`. `nextFocus("clarity-auditor", "h")` → `"drafter"`. `Tab` cycles in reading order. Single-column layout (Phase 07.5 fallback) collapses to a vertical list and `h/l` become no-ops.
 
-The layout descriptor is shared between the final running-screen layout and `gridNav` via a small `computeLayout(width, height, slotOrder)` helper (place in `src/tui/state/layout.ts` so both phases agree).
+The layout descriptor is shared between the final running-screen layout and `gridNav` via a small `computeLayout(width, slotOrder)` helper (place in `src/tui/state/layout.ts` so both phases agree). Height is not needed for focus order; only the wide-vs-stacked breakpoint matters.
 
 ### `useGlobalKeymap`
 
-Mounted once at the top of `App.tsx`. Reads `screen`, `focused`, `pendingForceQuit`, `showHelp`, plus refs to `runCtx.ac` and the `gPending` timeout id.
+Mounted once at the top of `App.tsx`. Reads `screen`, `focused`, `pendingForceQuit`, `showHelp`, plus refs to `runCtx.ac`, `runCtx.promise`, and the `gPending` timeout id.
 
 Pseudocode:
 
@@ -98,7 +99,7 @@ useKeyboard((ev) => {
   if (showHelp) return // swallow other keys while help is open
 
   if (screen === "prompt") {
-    if (ev.name === "q") return process.exit(0)
+    if (ev.name === "q") return onExit()
     return // PromptScreen owns the rest
   }
 
@@ -126,7 +127,7 @@ useKeyboard((ev) => {
   }
 
   if (screen === "summary") {
-    if (ev.name === "q") return process.exit(0)
+    if (ev.name === "q") return onExit()
     if (ev.name === "r") return summaryAction("rerun")
     if (ev.name === "n") return summaryAction("new-topic")
     if (ev.name === "f") return summaryAction("new-document")
@@ -134,27 +135,26 @@ useKeyboard((ev) => {
 })
 ```
 
-`pendingForceQuit` rendering: `App` mounts `<QuitConfirm onYes={() => process.exit(0)} onNo={() => setPendingForceQuit(false)} />` which itself uses `useKeyboard` to capture `y` / `n`.
+`pendingForceQuit` rendering: `App` mounts `<QuitConfirm onYes={onExit} onNo={() => setPendingForceQuit(false)} />` which itself uses `useKeyboard` to capture `y` / `n`.
 
 ### `usePanelKeymap`
 
-Mounted inside `AgentPanel.tsx`. The hook receives the `<scrollbox>` ref and the `focused` flag.
+Mounted inside `AgentPanel.tsx`. The hook receives a scroll adapter around the `<scrollbox>` instance and the `focused` flag.
 
 ```ts
-function usePanelKeymap({ focused, scrollRef }: { focused: boolean; scrollRef: ScrollboxRef }) {
+function usePanelKeymap({ focused, scrollRef }: { focused: boolean; scrollRef: ScrollAdapter }) {
   const gPendingRef = useRef<NodeJS.Timeout | undefined>(undefined)
   useKeyboard((ev) => {
     if (!focused) return
     if (ev.name === "j") return scrollRef.current?.scrollBy(1)
     if (ev.name === "k") return scrollRef.current?.scrollBy(-1)
-    if (ev.ctrl && ev.name === "d") return scrollRef.current?.scrollByPage(0.5)
-    if (ev.ctrl && ev.name === "u") return scrollRef.current?.scrollByPage(-0.5)
-    if (ev.ctrl && ev.name === "f") return scrollRef.current?.scrollByPage(1)
-    if (ev.ctrl && ev.name === "b") return scrollRef.current?.scrollByPage(-1)
+    if (ev.ctrl && ev.name === "d") return scrollRef.current?.scrollViewport(0.5)
+    if (ev.ctrl && ev.name === "u") return scrollRef.current?.scrollViewport(-0.5)
+    if (ev.ctrl && ev.name === "f") return scrollRef.current?.scrollContent(1)
+    if (ev.ctrl && ev.name === "b") return scrollRef.current?.scrollContent(-1)
     if (ev.shift && ev.name === "g") {
       scrollRef.current?.scrollToBottom()
-      // signal AgentPanel to clear its "v new" indicator (Phase 07 left this open)
-      return scrollRef.current?.markSeen?.()
+      return
     }
     if (ev.name === "g") {
       if (gPendingRef.current) {
@@ -168,7 +168,7 @@ function usePanelKeymap({ focused, scrollRef }: { focused: boolean; scrollRef: S
 }
 ```
 
-The `scrollRef` API names above are Inferred from `<scrollbox>` ergonomics. If opentui's actual API differs (e.g. exposes `scrollTop` getter/setter on the underlying container), wrap it in a small adapter inside `AgentPanel.tsx` so this hook stays stable. Confirm by reading `reference/opentui/packages/react/README.md:407-449` and the underlying `scrollbox` core file before writing the hook.
+OpenTUI's React README does not document a rich scrollbox ref API. The underlying core `ScrollBox` exposes `scrollTop` and `scrollBy(delta, unit?)`, so Phase 08 should wrap that in a tiny adapter inside `AgentPanel.tsx` instead of assuming helper methods already exist.
 
 ### `Ctrl-C` cancellation
 
@@ -176,16 +176,15 @@ The `scrollRef` API names above are Inferred from `<scrollbox>` ergonomics. If o
 
 ```ts
 async function cancelRun() {
-  if (!runCtx) return process.exit(130)
+  if (!runCtx) return onExit()
   runCtx.ac.abort()
   // The runQuorum promise's .finally already calls unbind(); we just wait for it.
-  // App's run-driver promise chain will resolve and transition to summary; on cancel we exit instead.
   try { await runCtx.promise } catch {}
-  process.exit(130)
+  onExit()
 }
 ```
 
-`runCtx` should also carry the `runQuorum` promise itself (Phase 07 stored only `bus + store + unbind + ac` — extend it here to also store the promise).
+`runCtx` should also carry the `runQuorum` promise itself. Current code stores `bus + store + unbind + ac`; extend it here to also store the active promise.
 
 ### Footer hints
 
@@ -197,7 +196,7 @@ opentui's `<input>` already captures keys when focused. Verify that `useKeyboard
 
 ## Execution Checklist
 
-1. Add `src/tui/state/layout.ts` exporting `computeLayout(width, height, slotOrder)` shared by the final running-screen layout and `gridNav`.
+1. Add `src/tui/state/layout.ts` exporting `computeLayout(width, slotOrder)` shared by the final running-screen layout and `gridNav`.
 2. Add `src/tui/keymap/gridNav.ts` with `nextFocus` + a unit test under `src/tui/keymap/gridNav.test.ts` covering wide split-view and single-column fallback layouts and `h/j/k/l/Tab/Shift+Tab`.
 3. Add `src/tui/keymap/usePanelKeymap.ts`.
 4. Add `src/tui/keymap/useGlobalKeymap.ts` (or inline the hook in `App.tsx` if it stays small).
@@ -241,7 +240,7 @@ opentui's `<input>` already captures keys when focused. Verify that `useKeyboard
 - `bun test src/tui/keymap/` → all `gridNav` cases pass.
 - `bun test` → previous suites still green.
 - Manual checklist above.
-- Quick check: `grep -n "process.exit" src/tui/` shows only `App.tsx` (and `QuitConfirm` callback) — no stray `process.exit` from inside hooks.
+- Quick check: `grep -n "process.exit" src/tui/` shows only `src/tui/index.tsx` (inside the controlled shutdown helper) — no stray `process.exit` from inside hooks/components.
 - `grep -rn "useKeyboard" src/tui/` lists exactly: one `App.tsx` global mount, one per-panel mount, `SummaryScreen.tsx`, `HelpOverlay.tsx`, `QuitConfirm.tsx`. Plus `<input>` and `<select>` internal usage from opentui.
 
 ## Done Criteria
@@ -264,7 +263,7 @@ opentui's `<input>` already captures keys when focused. Verify that `useKeyboard
 
 ## Open Questions Or Blockers
 
-- Exact `<scrollbox>` ref API for programmatic scroll (`scrollBy`, `scrollByPage`, `scrollToBottom`, `scrollToTop`, "mark seen"): Inferred. Verify against `reference/opentui/packages/react/README.md:407-449` and the underlying core source before locking the `usePanelKeymap` shape. Adapter pattern in `AgentPanel.tsx` keeps this contained.
+- Exact React-side `<scrollbox>` ref plumbing: the core `ScrollBox` supports `scrollTop` + `scrollBy(delta, unit?)`, but the React wrapper does not document a ref helper API. Phase 08 should confirm the instance/ref shape during implementation and keep the adapter logic local to `AgentPanel.tsx`.
 - Whether opentui's `useKeyboard` is suppressed while a child `<input>` is focused: Inferred from typical alt-screen UI conventions. If not, add an `isInputFocused` context exposed by `PromptScreen` and `SummaryScreen` and gate the global handler on it.
 - `Ctrl-C` delivery via `useKeyboard` vs Node's `SIGINT`: opentui's `CliRenderer` typically intercepts raw mode and surfaces it as a `key` event. If it instead lets `SIGINT` through to Node, attach a `process.on("SIGINT", cancelRun)` in `App`'s mount effect and remove the `useKeyboard` `Ctrl-C` branch. Confirm during execution.
 - The "vim insert-mode entry" (`i` in topic mode) was already specified in plan §10 Step 8. Phase 07 wired `Enter` and `Esc` for the input but not `i`. Add `i` here as a small extension to `PromptScreen` (treat `i` as "focus the input").

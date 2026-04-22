@@ -7,6 +7,7 @@ import { theme } from "../theme"
 
 export interface DashboardProps {
   store: RunStore
+  focused?: boolean
 }
 
 const roleLabel = (roleKey: string): string => {
@@ -67,7 +68,7 @@ const useElapsed = (active: boolean): number => {
   return now - start.current
 }
 
-export const Dashboard = ({ store }: DashboardProps) => {
+export const Dashboard = ({ store, focused = false }: DashboardProps) => {
   const { width } = useTerminalDimensions()
   const phase = useStoreSelector(store, (s) => s.lifecycle.phase)
   const requestId = useStoreSelector(store, (s) => s.lifecycle.requestId)
@@ -98,7 +99,7 @@ export const Dashboard = ({ store }: DashboardProps) => {
     <box
       border
       borderStyle="single"
-      borderColor={theme.borderSubtle}
+      borderColor={focused ? theme.borderActive : theme.borderSubtle}
       backgroundColor={theme.backgroundElement}
       paddingLeft={1}
       paddingRight={1}

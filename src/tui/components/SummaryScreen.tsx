@@ -1,4 +1,4 @@
-import { useTerminalDimensions } from "@opentui/react"
+import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import { TMUX_TOP_INSET, centeredColumnWidth } from "../layout"
 import type { RunStore } from "../state/runStore"
 import { useStoreSelector } from "../state/useStore"
@@ -63,6 +63,13 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
   const wide = width >= 100
   const outerWidth = wide ? 100 : centeredColumnWidth(width, 92, 72)
   const topBias = height >= 34 ? 1 : 0
+
+  useKeyboard((key) => {
+    if (key.name === "q") onAction("quit")
+    else if (key.name === "r") onAction("rerun")
+    else if (key.name === "n") onAction("new-topic")
+    else if (key.name === "f") onAction("new-document")
+  })
 
   return (
     <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingRight={2} backgroundColor={theme.background}>

@@ -1,14 +1,19 @@
+import { useRef } from "react"
+import type { FocusRegion } from "../state/layout"
+import { usePanelKeymap } from "../keymap/usePanelKeymap"
 import type { AgentState, RunStore, ScrollbackEntry } from "../state/runStore"
 import { useStoreSelector } from "../state/useStore"
 import { theme } from "../theme"
 
 export interface AgentPanelProps {
   store: RunStore
-  roleKey: string
+  roleKey: Exclude<FocusRegion, "dashboard">
   title: string
   isDrafter: boolean
   compact?: boolean
   emphasize?: boolean
+  focused?: boolean
+  onGPendingChange?: (pending: boolean) => void
 }
 
 const statusDot = (status: AgentState["status"]): string => {
@@ -37,7 +42,15 @@ const roleColor = (isDrafter: boolean): string => {
   return theme.text
 }
 
-const PanelScrollback = ({ store, roleKey }: { store: RunStore; roleKey: string }) => {
+const PanelScrollback = ({
+  store,
+  roleKey,
+  scrollRef,
+}: {
+  store: RunStore
+  roleKey: Exclude<FocusRegion, "dashboard">
+  scrollRef: { current: { scrollTop: number; scrollHeight: number; viewport?: { height: number }; scrollBy: (delta: number, unit?: string) => void; scrollTo: (value: number) => void } | null }
+}) => {
   const scrollback = useStoreSelector(store, (s) => s.agents[roleKey]?.scrollback ?? [])
   if (scrollback.length === 0) {
     return (
@@ -51,6 +64,9 @@ const PanelScrollback = ({ store, roleKey }: { store: RunStore; roleKey: string 
 
   return (
     <scrollbox
+      ref={(node) => {
+        scrollRef.current = node as typeof scrollRef.current
+      }}
       flexGrow={1}
       stickyScroll
       stickyStart="bottom"
@@ -76,8 +92,52 @@ const PanelScrollback = ({ store, roleKey }: { store: RunStore; roleKey: string 
   )
 }
 
-export const AgentPanel = ({ store, roleKey, title, isDrafter, compact = false, emphasize = false }: AgentPanelProps) => {
+export const AgentPanel = ({
+  store,
+  roleKey,
+  title,
+  isDrafter,
+  compact = false,
+  emphasize = false,
+  focused = false,
+  onGPendingChange,
+}: AgentPanelProps) => {
   const agent = useStoreSelector(store, (s) => s.agents[roleKey])
+  const scrollRef = useRef<{
+    scrollTop: number
+    scrollHeight: number
+    viewport?: { height: number }
+    scrollBy: (delta: number, unit?: string) => void
+    scrollTo: (value: number) => void
+  } | null>(null)
+
+  usePanelKeymap({
+    focused,
+    onGPendingChange,
+    scroll: {
+      scrollBy(delta) {
+        scrollRef.current?.scrollBy(delta)
+      },
+      scrollViewport(multiplier) {
+        const viewportHeight = scrollRef.current?.viewport?.height ?? 0
+        if (!viewportHeight) return
+        scrollRef.current?.scrollBy(Math.round(viewportHeight * multiplier), "absolute")
+      },
+      scrollContent(multiplier) {
+        const viewportHeight = scrollRef.current?.viewport?.height ?? 0
+        if (!viewportHeight) return
+        scrollRef.current?.scrollBy(Math.round(viewportHeight * multiplier), "content")
+      },
+      scrollToTop() {
+        if (!scrollRef.current) return
+        scrollRef.current.scrollTop = 0
+      },
+      scrollToBottom() {
+        if (!scrollRef.current) return
+        scrollRef.current.scrollTo(scrollRef.current.scrollHeight)
+      },
+    },
+  })
 
   if (!agent) {
     return (
@@ -95,7 +155,7 @@ export const AgentPanel = ({ store, roleKey, title, isDrafter, compact = false, 
     )
   }
 
-  const borderColor = isDrafter ? theme.drafter.borderColor : theme.auditor.borderColor
+  const borderColor = focused ? theme.borderActive : isDrafter ? theme.drafter.borderColor : theme.auditor.borderColor
   const borderStyle = isDrafter ? theme.drafter.borderStyle : theme.auditor.borderStyle
   const toolLabel = agent.activeTool?.tool
 
@@ -130,7 +190,7 @@ export const AgentPanel = ({ store, roleKey, title, isDrafter, compact = false, 
           permission: {agent.pendingPermission}
         </text>
       ) : null}
-      <PanelScrollback store={store} roleKey={roleKey} />
+      <PanelScrollback store={store} roleKey={roleKey} scrollRef={scrollRef} />
     </box>
   )
 }

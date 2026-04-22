@@ -1,3 +1,4 @@
+import type { FocusRegion } from "../state/layout"
 import type { RuntimeConfig } from "../../config"
 import { TMUX_TOP_INSET } from "../layout"
 import type { RunStore } from "../state/runStore"
@@ -12,14 +13,17 @@ export interface RunningScreenProps {
   store: RunStore
   config: RuntimeConfig
   systemStatus: SystemStatusStore
+  focused: FocusRegion
+  gPending?: boolean
+  onGPendingChange: (pending: boolean) => void
 }
 
-export const RunningScreen = ({ store, config, systemStatus }: RunningScreenProps) => (
+export const RunningScreen = ({ store, config, systemStatus, focused, gPending = false, onGPendingChange }: RunningScreenProps) => (
   <box flexDirection="column" flexGrow={1} position="relative" backgroundColor={theme.background} gap={1}>
     {TMUX_TOP_INSET > 0 ? <box height={TMUX_TOP_INSET} flexShrink={0} /> : null}
-    <Dashboard store={store} />
-    <AgentGrid store={store} config={config} />
-    <Footer />
+    <Dashboard store={store} focused={focused === "dashboard"} />
+    <AgentGrid store={store} config={config} focused={focused} onGPendingChange={onGPendingChange} />
+    <Footer screen="running" focused={focused} gPending={gPending} />
     <SystemStatusSurface store={store} systemStatus={systemStatus} />
   </box>
 )
