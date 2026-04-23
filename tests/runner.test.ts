@@ -1,15 +1,19 @@
 import { describe, expect, mock, test } from "bun:test"
+import { mkdtemp, readdir } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
   type Bridge,
   type BridgeFactory,
   type EventBus,
   type GraphFactory,
+  type RunResearchPipelineArgs,
   type RunnerEvent,
   attachTelemetryListener,
   createEventBus,
   describeRunnerEvent,
-  runQuorum,
+  runResearchPipeline,
 } from "../src/runner.ts"
 import type { RuntimeConfig } from "../src/config.ts"
 import type { TelemetryRun, TraceObservation } from "../src/telemetry.ts"
@@ -28,6 +32,7 @@ const config: RuntimeConfig = {
   quorumConfig: {
     designatedDrafter: "research-drafter",
     auditors: ["source-auditor"],
+    summarizerAgent: "markdown-summarizer",
     maxRounds: 1,
     maxRebuttalTurnsPerFinding: 1,
     requireUnanimousApproval: true,
@@ -44,6 +49,20 @@ function disabledTelemetry(): TelemetryRun {
     endObservation: async () => {},
     updateTrace: async () => {},
     shutdown: async () => {},
+  }
+}
+
+async function makeConfigWithTempArtifacts() {
+  const artifactDir = await mkdtemp(join(tmpdir(), "qurom-runner-"))
+  return {
+    config: {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        artifactDir,
+      },
+    } satisfies RuntimeConfig,
+    artifactDir,
   }
 }
 
@@ -124,8 +143,9 @@ describe("createEventBus", () => {
   })
 })
 
-describe("runQuorum", () => {
+describe("runResearchPipeline", () => {
   test("emits lifecycle:starting before invoking the graph and runs bridge.start before the graph", async () => {
+    const { config: configWithTempArtifacts } = await makeConfigWithTempArtifacts()
     const events: RunnerEvent[] = []
     const bus: EventBus = createEventBus()
     bus.on((event) => events.push(event))
@@ -147,12 +167,12 @@ describe("runQuorum", () => {
     const prerequisites = {
       skill: { name: "research", content: "skill" },
       agents: [],
-    } as unknown as Parameters<typeof runQuorum>[0]["prerequisites"]
+    } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
 
     let threw: unknown
     try {
-      await runQuorum({
-        config,
+      await runResearchPipeline({
+        config: configWithTempArtifacts,
         prerequisites,
         request: { inputMode: "topic", topic: "abort-fast" },
         bus,
@@ -176,6 +196,7 @@ describe("runQuorum", () => {
   })
 
   test("calls telemetry.shutdown and bridge.stop even when the run errors", async () => {
+    const { config: configWithTempArtifacts } = await makeConfigWithTempArtifacts()
     const bus = createEventBus()
     let telemetryShutdownCalled = false
     let bridgeStopCalled = false
@@ -203,11 +224,11 @@ describe("runQuorum", () => {
     const prerequisites = {
       skill: { name: "research", content: "skill" },
       agents: [],
-    } as unknown as Parameters<typeof runQuorum>[0]["prerequisites"]
+    } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
 
     await expect(
-      runQuorum({
-        config,
+      runResearchPipeline({
+        config: configWithTempArtifacts,
         prerequisites,
         request: { inputMode: "topic", topic: "fail" },
         bus,
@@ -220,7 +241,41 @@ describe("runQuorum", () => {
     expect(bridgeStopCalled).toBe(true)
   })
 
+  test("cleans up a still-empty run directory after an early failure", async () => {
+    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
+    const bus = createEventBus()
+    let bridgeRunDir: string | undefined
+
+    const prerequisites = {
+      skill: { name: "research", content: "skill" },
+      agents: [],
+    } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
+
+    await expect(
+      runResearchPipeline({
+        config: configWithTempArtifacts,
+        prerequisites,
+        request: { inputMode: "topic", topic: "abort before artifacts" },
+        bus,
+        bridgeFactory: (_, { getRunDir }) => {
+          bridgeRunDir = getRunDir()
+          return { async start() {}, async stop() {} }
+        },
+        telemetryFactory: async () => disabledTelemetry(),
+        graphFactory: (() => ({
+          invoke: async () => {
+            throw new Error("boom")
+          },
+        })) as GraphFactory,
+      }),
+    ).rejects.toThrow("boom")
+
+    expect(bridgeRunDir).toBeUndefined()
+    expect(await readdir(artifactDir)).toEqual([])
+  })
+
   test("aborts created OpenCode sessions when the run signal is aborted", async () => {
+    const { config: configWithTempArtifacts } = await makeConfigWithTempArtifacts()
     const bus = createEventBus()
     const ac = new AbortController()
     const abortSession = mock(() => Promise.resolve())
@@ -237,11 +292,11 @@ describe("runQuorum", () => {
     const prerequisites = {
       skill: { name: "research", content: "skill" },
       agents: [],
-    } as unknown as Parameters<typeof runQuorum>[0]["prerequisites"]
+    } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
 
     await expect(
-      runQuorum({
-        config,
+      runResearchPipeline({
+        config: configWithTempArtifacts,
         prerequisites,
         request: { inputMode: "topic", topic: "cancel" },
         bus,
@@ -254,8 +309,48 @@ describe("runQuorum", () => {
     ).rejects.toThrow("cancelled")
 
     expect(abortSession).toHaveBeenCalledTimes(2)
-    expect(abortSession).toHaveBeenCalledWith(config, "root-1")
-    expect(abortSession).toHaveBeenCalledWith(config, "drafter-1")
+    expect(abortSession).toHaveBeenCalledWith(configWithTempArtifacts, "root-1")
+    expect(abortSession).toHaveBeenCalledWith(configWithTempArtifacts, "drafter-1")
+  })
+
+  test("reads the late-bound run directory from graph output", async () => {
+    const { config: configWithTempArtifacts } = await makeConfigWithTempArtifacts()
+    const bus = createEventBus()
+    let bridgeRunDir: string | undefined
+
+    const prerequisites = {
+      skill: { name: "research", content: "skill" },
+      agents: [{ name: "markdown-summarizer" }],
+    } as unknown as RunResearchPipelineArgs["prerequisites"]
+
+    await runResearchPipeline({
+      config: configWithTempArtifacts,
+      prerequisites,
+      request: { inputMode: "document", documentPath: "/tmp/doc.md", documentText: "# Hybrid reranking in Qdrant\n" },
+      bus,
+      bridgeFactory: (_, { getRunDir }) => {
+        return {
+          async start() {},
+          async stop() {
+            bridgeRunDir = getRunDir()
+          },
+        }
+      },
+      telemetryFactory: async () => disabledTelemetry(),
+      graphFactory: (() => ({
+        invoke: async () => ({
+          requestId: "req-1",
+          status: "approved",
+          round: 0,
+          approvedAgents: ["source-auditor"],
+          unresolvedFindings: [],
+          failureReason: undefined,
+          outputPath: join(configWithTempArtifacts.quorumConfig.artifactDir, "hybrid-reranking-in-qdrant-req-1"),
+        }),
+      })) as GraphFactory,
+    })
+
+    expect(bridgeRunDir).toContain("hybrid-reranking-in-qdrant-req-1")
   })
 })
 

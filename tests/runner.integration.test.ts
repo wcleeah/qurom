@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
-import { createEventBus, type BridgeFactory, type GraphFactory, type RunQuorumArgs, runQuorum } from "../src/runner.ts"
+import { createEventBus, type BridgeFactory, type GraphFactory, type RunResearchPipelineArgs, runResearchPipeline } from "../src/runner.ts"
 import type { RuntimeConfig } from "../src/config.ts"
 import type { TelemetryRun } from "../src/telemetry.ts"
+import { resolveRunDir } from "../src/output.ts"
 
 const shouldRun = process.env.RUN_INTEGRATION === "1"
 
@@ -22,6 +26,7 @@ const config: RuntimeConfig = {
   quorumConfig: {
     designatedDrafter: "research-drafter",
     auditors: ["source-auditor"],
+    summarizerAgent: "markdown-summarizer",
     maxRounds: 1,
     maxRebuttalTurnsPerFinding: 1,
     requireUnanimousApproval: true,
@@ -33,7 +38,7 @@ const config: RuntimeConfig = {
 const prerequisites = {
   skill: { name: "research", content: "skill" },
   agents: [],
-} as unknown as RunQuorumArgs["prerequisites"]
+} as unknown as RunResearchPipelineArgs["prerequisites"]
 
 function disabledTelemetry(): TelemetryRun {
   return {
@@ -46,10 +51,19 @@ function disabledTelemetry(): TelemetryRun {
   }
 }
 
-describe("runQuorum integration", () => {
+describe("runResearchPipeline integration", () => {
   testIfIntegration("two back-to-back runs do not duplicate bridge events", async () => {
+    const artifactDir = await mkdtemp(join(tmpdir(), "qurom-runner-int-"))
     const graphStarts: string[] = []
     let bridgeStartCalls = 0
+
+    const configWithTempArtifacts: RuntimeConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        artifactDir,
+      },
+    }
 
     const graphFactory: GraphFactory = ((_, __, input) => ({
       invoke: async (request) => {
@@ -73,7 +87,13 @@ describe("runQuorum integration", () => {
           approvedAgents: ["source-auditor"],
           unresolvedFindings: [],
           failureReason: undefined,
-          outputPath: `runs/${request.requestId}`,
+          outputPath: resolveRunDir(artifactDir, {
+            requestId: request.requestId,
+            inputMode: request.inputMode,
+            topic: request.inputMode === "topic" ? request.topic : undefined,
+            documentPath: request.inputMode === "document" ? request.documentPath : undefined,
+            documentText: request.inputMode === "document" ? request.documentText : undefined,
+          }),
         }
       },
     })) as GraphFactory
@@ -93,8 +113,8 @@ describe("runQuorum integration", () => {
       const events: string[] = []
       bus.on((event) => events.push(event.kind === "agent.tool" ? `${event.kind}:${event.tool}:${event.status}` : event.kind))
 
-      await runQuorum({
-        config,
+      await runResearchPipeline({
+        config: configWithTempArtifacts,
         prerequisites,
         request: { inputMode: "topic", topic: "test" },
         bus,

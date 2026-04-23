@@ -8,6 +8,7 @@ const config: RuntimeConfig = {
   quorumConfig: {
     designatedDrafter: "research-drafter",
     auditors: ["source-auditor", "logic-auditor", "clarity-auditor"],
+    summarizerAgent: "markdown-summarizer",
     maxRounds: 3,
     maxRebuttalTurnsPerFinding: 2,
     requireUnanimousApproval: true,

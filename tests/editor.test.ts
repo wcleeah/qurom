@@ -89,6 +89,18 @@ describe("openInEditor", () => {
     expect(calls.spawn[0]?.args[0]).toBe("/data/runs/.drafts/existing.md")
   })
 
+  test("view mode uses readonly flags for vim-like editors", async () => {
+    const { renderer, deps, calls } = makeDeps({ fileExists: true, fileContent: "saved draft", env: { EDITOR: "vim" } })
+    await openInEditor({ path: "/data/runs/.drafts/existing.md", renderer, artifactRoot: "/data/runs", mode: "view", deps })
+    expect(calls.spawn[0]).toEqual({ cmd: "vim", args: ["-R", "/data/runs/.drafts/existing.md"] })
+  })
+
+  test("view mode falls back to less for unknown editors", async () => {
+    const { renderer, deps, calls } = makeDeps({ fileExists: true, fileContent: "saved draft", env: { EDITOR: "code" } })
+    await openInEditor({ path: "/data/runs/.drafts/existing.md", renderer, artifactRoot: "/data/runs", mode: "view", deps })
+    expect(calls.spawn[0]).toEqual({ cmd: "less", args: ["/data/runs/.drafts/existing.md"] })
+  })
+
   test("suspends before spawn and resumes after, even when spawn throws", async () => {
     const order: string[] = []
     const { deps } = makeDeps()

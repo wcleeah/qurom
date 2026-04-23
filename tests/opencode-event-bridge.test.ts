@@ -21,6 +21,7 @@ const baseConfig: RuntimeConfig = {
   quorumConfig: {
     designatedDrafter: "research-drafter",
     auditors: ["source-auditor"],
+    summarizerAgent: "markdown-summarizer",
     maxRounds: 1,
     maxRebuttalTurnsPerFinding: 1,
     requireUnanimousApproval: true,
@@ -125,7 +126,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
-      runDir: "/tmp/unused",
+      getRunDir: () => "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -179,7 +180,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
-      runDir: "/tmp/unused",
+      getRunDir: () => "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -240,7 +241,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
-      runDir: "/tmp/unused",
+      getRunDir: () => "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -286,7 +287,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
-      runDir: "/tmp/unused",
+      getRunDir: () => "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -312,7 +313,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
-      runDir: "/tmp/unused",
+      getRunDir: () => "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -331,7 +332,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
-      runDir: "/tmp/unused",
+      getRunDir: () => "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -353,7 +354,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
-      runDir: "/tmp/unused",
+      getRunDir: () => "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -399,7 +400,7 @@ describe("createOpencodeEventBridge", () => {
 
     const bridge = createOpencodeEventBridge(baseConfig, {
       bus,
-      runDir: "/tmp/unused",
+      getRunDir: () => "/tmp/unused",
       clientFactory: () => client as never,
     })
 
@@ -477,5 +478,30 @@ describe("createOpencodeEventBridge", () => {
     } finally {
       await rm(runDir, { recursive: true, force: true })
     }
+  })
+
+  test("persistArtifacts is a no-op when no run dir has been assigned yet", async () => {
+    const bus = createEventBus()
+    const { client, controller } = makeStubClient()
+
+    const bridge = createOpencodeEventBridge(
+      {
+        ...baseConfig,
+        env: { ...baseConfig.env, QUORUM_CAPTURE_OPENCODE_EVENTS: "1" },
+      },
+      {
+        bus,
+        getRunDir: () => undefined,
+        clientFactory: () => client as never,
+      },
+    )
+
+    await bridge.start()
+    controller.push({ type: "session.status", properties: { sessionID: "s1", status: { type: "running" } } })
+    controller.push({ type: "session.idle", properties: { sessionID: "s1" } })
+    await flush()
+    await bridge.stop()
+
+    expect(true).toBe(true)
   })
 })

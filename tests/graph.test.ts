@@ -3,14 +3,19 @@ import { describe, expect, test } from "bun:test"
 import type { RuntimeConfig } from "../src/config.ts"
 import {
   aggregateConsensus,
+  auditScopeGuidance,
   dedupeFindings,
   effectiveResponsesByFinding,
   ingestRequest,
+  prepareOutputPath,
   routeAfterAggregate,
   routeAfterDrafterReview,
   routeAfterRebuttalResponses,
+  summarizeInputDocument,
+  summarizeOutputArtifact,
 } from "../src/graph.ts"
 import type { AggregatedFinding, AuditResultRecord, RebuttalResponseRecord, ResearchState } from "../src/schema.ts"
+import { resolveRunDir } from "../src/output.ts"
 
 const config = {
   env: {
@@ -26,6 +31,7 @@ const config = {
   quorumConfig: {
     designatedDrafter: "research-drafter",
     auditors: ["source-auditor", "logic-auditor", "clarity-auditor"],
+    summarizerAgent: "markdown-summarizer",
     maxRounds: 2,
     maxRebuttalTurnsPerFinding: 2,
     requireUnanimousApproval: true,
@@ -276,5 +282,88 @@ describe("graph helpers", () => {
     } finally {
       Bun.file = originalFile
     }
+  })
+
+  test("auditScopeGuidance keeps source and logic auditor lanes distinct", () => {
+    const sourceGuidance = auditScopeGuidance("source-auditor").join("\n")
+    const logicGuidance = auditScopeGuidance("logic-auditor").join("\n")
+
+    expect(sourceGuidance).toContain("citation quality")
+    expect(sourceGuidance).toContain("Do not raise missing-step or incomplete-example findings")
+    expect(logicGuidance).toContain("missing prerequisites")
+    expect(logicGuidance).toContain("Do not raise citation-quality findings")
+  })
+
+  test("resolveRunDir builds a slugged document-mode path from the first heading", () => {
+    const state = baseState({
+      inputMode: "document",
+      documentPath: "/tmp/generated.md",
+      documentText: "# Hybrid reranking in Qdrant\n\nbody",
+    })
+
+    const runDir = resolveRunDir(config.quorumConfig.artifactDir, {
+      requestId: state.requestId,
+      inputMode: state.inputMode,
+      topic: undefined,
+      documentPath: state.documentPath,
+      documentText: state.documentText,
+    })
+
+    expect(runDir).toBe("runs/hybrid-reranking-in-qdrant-req-1")
+  })
+
+  test("ingestRequest preserves a runner-provided outputPath", async () => {
+    const state = await ingestRequest({
+      inputMode: "topic",
+      topic: "How Raft leader election works",
+      requestId: "req-out",
+    })
+
+    expect(state.outputPath).toBeUndefined()
+  })
+
+  test("prepareOutputPath uses the input summary slug hint when present", async () => {
+    const state = await prepareOutputPath(
+      config,
+      baseState({
+        status: "drafting",
+        round: 0,
+        inputMode: "document",
+        documentPath: "/tmp/doc.md",
+        documentText: "# ignored",
+        inputSummary: {
+          title: "Hybrid reranking in Qdrant",
+          summary: "Dense and sparse retrieval feed reranking.",
+          slugHint: "Hybrid reranking in Qdrant",
+          sourcePath: "/tmp/doc.md",
+        },
+      }),
+    )
+
+    expect(state.outputPath).toBe("runs/hybrid-reranking-in-qdrant-req-1")
+  })
+
+  test("summarizeInputDocument is a no-op for topic runs", async () => {
+    const state = await summarizeInputDocument(
+      config,
+      baseState({
+        status: "drafting",
+        round: 0,
+      }),
+    )
+
+    expect(state.inputSummary).toBeUndefined()
+  })
+
+  test("summarizeOutputArtifact preserves state when the artifact file is missing", async () => {
+    const state = await summarizeOutputArtifact(
+      config,
+      baseState({
+        status: "approved",
+        outputPath: "runs/does-not-exist-req-1",
+      }),
+    )
+
+    expect(state.artifactSummary).toBeUndefined()
   })
 })
