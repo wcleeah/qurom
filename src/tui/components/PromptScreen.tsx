@@ -28,7 +28,7 @@ const PromptHint = ({ mode }: { mode: PromptMode }) => (
         selectionBg={theme.selectionBg}
         selectionFg={theme.selectionFg}
     >
-        Tab: switch modes | Enter: run | q: Quit
+        Tab: switch modes | Enter: run | Ctrl-C: quit
         {mode === "topic" ? "" : " | e: open editor"}
     </text>
 );

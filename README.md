@@ -84,6 +84,7 @@ bun run test
 
 - `Tab`: switch between topic and document modes
 - `Enter`: run
+- `Ctrl-C`: quit
 - document mode only: `e` opens the editor
 - document mode only: `Esc` switches back to topics
 
@@ -108,7 +109,7 @@ bun run test
 - `r`: rerun same input
 - `n`: new topic
 - `f`: new document
-- `q`: quit
+- `Ctrl-C`: quit
 
 ## Project Layout
 

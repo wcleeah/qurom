@@ -117,12 +117,12 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
     }
 
     if (screen === "prompt") {
-      if (key.name === "q") onExit()
+      if (key.name === "c" && key.ctrl) onExit()
       return
     }
 
     if (screen === "summary") {
-      if (key.name === "q") onExit()
+      if (key.name === "c" && key.ctrl) onExit()
       return
     }
 

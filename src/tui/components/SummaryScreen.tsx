@@ -86,7 +86,7 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
   const inputSummaryText = result?.inputSummary?.summary ?? "(summary unavailable)"
 
   useKeyboard((key) => {
-    if (key.name === "q") onAction("quit")
+    if (key.name === "c" && key.ctrl) onAction("quit")
     else if (key.name === "r") onAction("rerun")
     else if (key.name === "n") onAction("new-topic")
     else if (key.name === "f") onAction("new-document")
