@@ -9,6 +9,7 @@ import type { InputRequest } from "../../schema";
 import { openInEditor } from "../editor";
 import { TMUX_TOP_INSET, centeredColumnWidth } from "../layout";
 import { theme } from "../theme";
+import { randomUUID } from "node:crypto"
 
 export type PromptMode = "topic" | "document";
 
@@ -74,7 +75,7 @@ export const PromptScreen = ({
     >(initialDocument);
     const [hint, setHint] = useState<string>(initialHint);
     const [busy, setBusy] = useState(false);
-    const requestId = useMemo(crypto.randomUUID, []);
+    const requestId = useMemo(randomUUID, []);
     const columnWidth = centeredColumnWidth(width, 84, 68);
     const topBias = height >= 34 ? 2 : 1;
 
