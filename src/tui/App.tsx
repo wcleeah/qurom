@@ -37,6 +37,7 @@ interface RunCtx {
   bus: EventBus
   store: RunStore
   unbind: () => void
+  flushAndUnbind: () => void
   ac: AbortController
   promise: Promise<unknown>
   request: InputRequest
@@ -63,6 +64,7 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
   const [active, setActive] = useState<FocusRegion | undefined>(undefined)
   const [showHelp, setShowHelp] = useState(false)
   const [pendingForceQuit, setPendingForceQuit] = useState(false)
+  const [pendingAbortExit, setPendingAbortExit] = useState(false)
   const [gPending, setGPending] = useState(false)
   const [promptState, setPromptState] = useState<PromptState>({ mode: "topic", topic: "", hint: "" })
   const lastRequestRef = useRef<InputRequest | undefined>(undefined)
@@ -125,8 +127,15 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
 
     if (key.name === "c" && key.ctrl) {
       if (!runCtx) return onExit()
+      if (pendingAbortExit) return
+
+      setPendingAbortExit(true)
+      pushSystemStatus(systemStatus, { level: "warn", text: "Cancelling run..." })
       runCtx.ac.abort()
-      void runCtx.promise.finally(onExit)
+      void Promise.race([
+        runCtx.promise.catch(() => undefined),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
+      ]).finally(onExit)
       return
     }
 
@@ -245,15 +254,24 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
       })
       const bus = createEventBus()
       const store = createRunStore({ config, initial: { agents: initialAgents.current } })
-      const unbind = bindBusToStore({ bus, store, config })
+      const binding = bindBusToStore({ bus, store, config })
       const ac = new AbortController()
       const promise = runResearchPipeline({ config, prerequisites, request, bus, signal: ac.signal })
-      const ctx: RunCtx = { bus, store, unbind, ac, promise, request }
+      const ctx: RunCtx = {
+        bus,
+        store,
+        unbind: binding.unbind,
+        flushAndUnbind: binding.flushAndUnbind,
+        ac,
+        promise,
+        request,
+      }
       setRunCtx(ctx)
       setSelected("dashboard")
       setActive(undefined)
       setShowHelp(false)
       setPendingForceQuit(false)
+      setPendingAbortExit(false)
       setGPending(false)
       setScreen("running")
 
@@ -269,7 +287,8 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
           }
         })
         .finally(() => {
-          unbind()
+          binding.flushAndUnbind()
+          setPendingAbortExit(false)
           setScreen("summary")
         })
     },

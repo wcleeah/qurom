@@ -9,9 +9,15 @@ export type BindBusToStoreInput = {
   flushIntervalMs?: number
 }
 
+export type BoundBusStore = {
+  unbind: () => void
+  flush: () => void
+  flushAndUnbind: () => void
+}
+
 const DEFAULT_FLUSH_MS = 50
 
-export function bindBusToStore(input: BindBusToStoreInput): () => void {
+export function bindBusToStore(input: BindBusToStoreInput): BoundBusStore {
   const { bus, store, config } = input
   const flushMs = input.flushIntervalMs ?? DEFAULT_FLUSH_MS
 
@@ -50,12 +56,23 @@ export function bindBusToStore(input: BindBusToStoreInput): () => void {
     }
   })
 
-  return () => {
+  function unbind() {
     off()
     if (timer !== undefined) {
       clearTimeout(timer)
       timer = undefined
     }
     pending = []
+  }
+
+  function flushAndUnbind() {
+    flush()
+    unbind()
+  }
+
+  return {
+    unbind,
+    flush,
+    flushAndUnbind,
   }
 }
