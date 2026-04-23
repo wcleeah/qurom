@@ -1,7 +1,0 @@
-- moving towards to an actual cli that can be used system wide
-  - config stays in XDG_CONFIG_HOME
-  - build and bundle to an executable
-  - configurable model and variant in the tui, cache the config to ~/.local
-  - any other things worth considering?
-- topic prompt / document history
-- add prompt management in langfuse
