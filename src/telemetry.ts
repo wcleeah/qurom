@@ -12,6 +12,8 @@ import {
     startActiveObservation,
     startObservation,
 } from "@langfuse/tracing";
+import { resourceFromAttributes } from "@opentelemetry/resources";
+import { SEMRESATTRS_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 
 import type { RuntimeConfig } from "./config";
@@ -96,7 +98,7 @@ function traceMetadata(input: {
     inputMode: "topic" | "document";
 }) {
     return {
-        requestId: input.requestId,
+        sessionId: input.requestId,
         inputMode: input.inputMode,
     };
 }
@@ -219,6 +221,9 @@ export async function createTelemetry(
     if (!langfuseEnabled(config)) return disabledTelemetry();
 
     const provider = new NodeTracerProvider({
+        resource: resourceFromAttributes({
+            [SEMRESATTRS_SERVICE_NAME]: "research-qurom",
+        }),
         spanProcessors: [
             new LangfuseSpanProcessor({
                 publicKey: config.env.LANGFUSE_PUBLIC_KEY,
