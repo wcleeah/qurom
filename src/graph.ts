@@ -3,8 +3,9 @@ import { END, START, StateGraph } from "@langchain/langgraph"
 
 import { BunSqliteSaver } from "./checkpointer"
 import type { RuntimeConfig } from "./config"
-import { ensureRunDir, writeApprovedArtifacts, writeFailedArtifacts } from "./output"
+import { ensureRunDirPath, resolveRunDir, writeApprovedArtifacts, writeFailedArtifacts } from "./output"
 import { createSession, promptAgent } from "./opencode"
+import { summarizeMarkdown } from "./summarizer"
 import {
   aggregatedFindingSchema,
   aggregatedFindingsSchema,
@@ -21,6 +22,7 @@ import {
   type AggregatedFindings,
   type AuditResultRecord,
   type GraphInput,
+  type RunDisplaySummary,
   type Rebuttal,
   type RebuttalResponseRecord,
   type ResearchState,
@@ -79,6 +81,25 @@ function researchToolBlock(config: RuntimeConfig) {
   return lines.join("\n")
 }
 
+export function auditScopeGuidance(agent: string) {
+  const scopeGuidance: Record<string, string[]> = {
+    "source-auditor": [
+      "Stay in lane: raise findings about citation quality, claim support, overstatement relative to sources, and primary-vs-secondary sourcing.",
+      "Do not raise missing-step or incomplete-example findings unless the actual problem is that the cited evidence does not support the claim.",
+    ],
+    "logic-auditor": [
+      "Stay in lane: raise findings about contradictions, invalid inferences, missing prerequisites, incomplete end-to-end examples, and scope/coherence gaps.",
+      "Do not raise citation-quality findings unless the reasoning problem depends on a source gap.",
+    ],
+    "clarity-auditor": [
+      "Stay in lane: raise findings about reader comprehension, throughline, jargon load, and section structure.",
+      "Do not raise source-support or implementation-completeness findings unless they materially create a clarity problem for the reader.",
+    ],
+  }
+
+  return scopeGuidance[agent] ?? []
+}
+
 function draftPrompt(config: RuntimeConfig, state: ResearchState, skillContent: string) {
   const sections = [
     skillBlock(skillContent),
@@ -102,6 +123,7 @@ function auditPrompt(config: RuntimeConfig, agent: string, request: string, draf
     "Return only JSON that matches the requested schema.",
     "Vote approve only if there are no material issues in your review scope.",
     "Vote revise if you find any material problem.",
+    ...auditScopeGuidance(agent),
     "Draft:",
     draft,
   ].join("\n\n")
@@ -215,6 +237,61 @@ function revisionPrompt(config: RuntimeConfig, state: ResearchState, skillConten
     "Unresolved findings:",
     JSON.stringify(state.unresolvedFindings, null, 2),
   ].join("\n\n")
+}
+
+export async function summarizeInputDocument(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
+  assertStatus(state, "drafting", "summarizeInputDocument")
+
+  if (state.inputMode !== "document" || !state.documentText?.trim()) {
+    return researchStateSchema.parse(state)
+  }
+
+  try {
+    const summary = await summarizeMarkdown({
+      config,
+      title: `summary-input:${state.requestId}`,
+      markdown: state.documentText,
+      mode: "input",
+      telemetry: !telemetry
+        ? undefined
+        : {
+            run: telemetry.run,
+            parentObservation: telemetry.currentNode,
+            trackSessionObservation: telemetry.trackSessionObservation,
+            name: "agent.summarizeInputDocument",
+            metadata: {
+              requestId: state.requestId,
+              round: state.round,
+            },
+          },
+    })
+
+    return researchStateSchema.parse({
+      ...state,
+      inputSummary: {
+        ...summary,
+        sourcePath: state.documentPath,
+      },
+    })
+  } catch {
+    return researchStateSchema.parse(state)
+  }
+}
+
+export async function prepareOutputPath(config: RuntimeConfig, state: ResearchState) {
+  assertStatus(state, "drafting", "prepareOutputPath")
+
+  return researchStateSchema.parse({
+    ...state,
+    outputPath: resolveRunDir(config.quorumConfig.artifactDir, {
+      requestId: state.requestId,
+      inputMode: state.inputMode,
+      topic: state.inputMode === "topic" ? state.topic : undefined,
+      documentPath: state.inputMode === "document" ? state.documentPath : undefined,
+      documentText: state.inputMode === "document" ? state.documentText : undefined,
+      slugHint: state.inputSummary?.slugHint,
+    }),
+  })
 }
 
 function findingStateKey(input: { findingId: string }) {
@@ -428,10 +505,8 @@ export async function ingestRequest(input: GraphInput) {
 async function bootstrapRun(config: RuntimeConfig, state: ResearchState) {
   assertStatus(state, "drafting", "bootstrapRun")
 
-  const [rootSession, runDir] = await Promise.all([
-    createSession(config, `research-quorum:${state.requestId}`),
-    ensureRunDir(config.quorumConfig.artifactDir, state.requestId),
-  ])
+  const rootSession = await createSession(config, `research-quorum:${state.requestId}`)
+  if (!state.outputPath) throw new Error("Missing outputPath during bootstrapRun")
 
   const childSessionPromises = [createSession(config, `research-drafter:${state.requestId}`, rootSession.id)]
   for (const agent of config.quorumConfig.auditors) {
@@ -453,7 +528,6 @@ async function bootstrapRun(config: RuntimeConfig, state: ResearchState) {
     rootSessionId: rootSession.id,
     drafterSessionId: drafterSession.id,
     auditSessionIds,
-    outputPath: runDir,
   })
 }
 
@@ -1018,6 +1092,8 @@ function summarizeNodeResult(result: unknown) {
       requestId: state.requestId,
       round: state.round,
       status: state.status,
+      inputSummary: state.inputSummary?.title,
+      artifactSummary: state.artifactSummary?.title,
       approvedAgents: state.approvedAgents.length,
       audits: state.audits.length,
       activeRebuttals: Object.keys(state.activeRebuttals).length,
@@ -1036,6 +1112,8 @@ async function reviseDraft(config: RuntimeConfig, skillContent: string, state: R
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviseDraft")
   if (!state.outputPath) throw new Error("Missing outputPath during reviseDraft")
 
+  // Ensure the run dir exists before persisting intermediate drafts for a revision round.
+  await ensureRunDirPath(state.outputPath)
   await Bun.write(`${state.outputPath}/draft-round-${state.round}.md`, state.draft)
 
   const response = await promptAgent({
@@ -1092,6 +1170,50 @@ async function finalizeFailedRun(_config: RuntimeConfig, state: ResearchState) {
   })
 
   return researchStateSchema.parse(state)
+}
+
+export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
+  if (state.status !== "approved" && state.status !== "failed") {
+    throw new Error(`Invalid status for summarizeOutputArtifact: ${state.status}`)
+  }
+  if (!state.outputPath) throw new Error("Missing outputPath during summarizeOutputArtifact")
+
+  const artifactPath = state.status === "approved" ? `${state.outputPath}/final.md` : `${state.outputPath}/latest-draft.md`
+  const artifactFile = Bun.file(artifactPath)
+  if (!(await artifactFile.exists())) {
+    return researchStateSchema.parse(state)
+  }
+
+  try {
+    const summary = await summarizeMarkdown({
+      config,
+      title: `summary-artifact:${state.requestId}`,
+      markdown: await artifactFile.text(),
+      mode: "artifact",
+      telemetry: !telemetry
+        ? undefined
+        : {
+            run: telemetry.run,
+            parentObservation: telemetry.currentNode,
+            trackSessionObservation: telemetry.trackSessionObservation,
+            name: "agent.summarizeOutputArtifact",
+            metadata: {
+              requestId: state.requestId,
+              round: state.round,
+            },
+          },
+    })
+
+    return researchStateSchema.parse({
+      ...state,
+      artifactSummary: {
+        ...summary,
+        sourcePath: artifactPath,
+      } satisfies RunDisplaySummary,
+    })
+  } catch {
+    return researchStateSchema.parse(state)
+  }
 }
 
 export function routeAfterDrafterReview(config: RuntimeConfig, state: ResearchState) {
@@ -1210,6 +1332,12 @@ export function createGraph(
       async (input) => withNodeTelemetry("ingestRequest", input, () => ingestRequest(input)),
       { input: graphInputSchema },
     )
+    .addNode("summarizeInputDocument", async (state) =>
+      withNodeTelemetry("summarizeInputDocument", state, () => summarizeInputDocument(config, state, graphTelemetry)),
+    )
+    .addNode("prepareOutputPath", async (state) =>
+      withNodeTelemetry("prepareOutputPath", state, () => prepareOutputPath(config, state)),
+    )
     .addNode("bootstrapRun", async (state) =>
       withNodeTelemetry("bootstrapRun", state, async () => {
         const nextState = await bootstrapRun(config, state)
@@ -1256,8 +1384,13 @@ export function createGraph(
     .addNode("finalizeFailedRun", async (state) =>
       withNodeTelemetry("finalizeFailedRun", state, () => finalizeFailedRun(config, state)),
     )
+    .addNode("summarizeOutputArtifact", async (state) =>
+      withNodeTelemetry("summarizeOutputArtifact", state, () => summarizeOutputArtifact(config, state, graphTelemetry)),
+    )
     .addEdge(START, "ingestRequest")
-    .addEdge("ingestRequest", "bootstrapRun")
+    .addEdge("ingestRequest", "summarizeInputDocument")
+    .addEdge("summarizeInputDocument", "prepareOutputPath")
+    .addEdge("prepareOutputPath", "bootstrapRun")
     .addEdge("bootstrapRun", "draftInitial")
     .addEdge("draftInitial", "runParallelAudits")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
@@ -1276,8 +1409,9 @@ export function createGraph(
       "finalizeFailedRun",
     ])
     .addEdge("reviseDraft", "runParallelAudits")
-    .addEdge("finalizeApprovedDraft", END)
-    .addEdge("finalizeFailedRun", END)
+    .addEdge("finalizeApprovedDraft", "summarizeOutputArtifact")
+    .addEdge("finalizeFailedRun", "summarizeOutputArtifact")
+    .addEdge("summarizeOutputArtifact", END)
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),
       name: "research-quorum",

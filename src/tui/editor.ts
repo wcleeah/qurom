@@ -39,15 +39,35 @@ export interface OpenInEditorArgs {
   path?: string
   renderer: RendererLike
   artifactRoot: string
+  mode?: OpenInEditorMode
   deps?: Partial<EditorDeps>
 }
 
+export type OpenInEditorMode = "edit" | "view"
+
 export const resolveEditorCommand = (env: NodeJS.ProcessEnv): string => env.VISUAL ?? env.EDITOR ?? "vi"
+
+function editorArgsForMode(command: string, path: string, mode: OpenInEditorMode): { cmd: string; args: string[] } {
+  if (mode === "edit") return { cmd: command, args: [path] }
+
+  const normalized = command.trim()
+  if (normalized === "vi" || normalized === "vim" || normalized === "nvim") {
+    return { cmd: normalized, args: ["-R", path] }
+  }
+  if (normalized === "nano") {
+    return { cmd: normalized, args: ["-v", path] }
+  }
+  if (normalized === "hx") {
+    return { cmd: normalized, args: ["--readonly", path] }
+  }
+
+  return { cmd: "less", args: [path] }
+}
 
 export const draftPathFor = (artifactRoot: string, requestId: string): string =>
   join(artifactRoot, ".drafts", `${requestId}.md`)
 
-export const openInEditor = async ({ requestId, path, renderer, artifactRoot, deps }: OpenInEditorArgs): Promise<EditorResult> => {
+export const openInEditor = async ({ requestId, path, renderer, artifactRoot, mode = "edit", deps }: OpenInEditorArgs): Promise<EditorResult> => {
   const d: EditorDeps = { ...defaultDeps, ...deps }
   const cmd = resolveEditorCommand(d.env)
   const draftPath = path ?? (requestId ? draftPathFor(artifactRoot, requestId) : undefined)
@@ -59,7 +79,8 @@ export const openInEditor = async ({ requestId, path, renderer, artifactRoot, de
   let status: number | null = 0
   let spawnError: Error | undefined
   try {
-    const result = d.spawnSync(cmd, [draftPath], { stdio: "inherit", shell: false })
+    const launch = editorArgsForMode(cmd, draftPath, mode)
+    const result = d.spawnSync(launch.cmd, launch.args, { stdio: "inherit", shell: false })
     status = result.status
     if (result.error) spawnError = result.error
   } catch (err) {

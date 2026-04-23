@@ -2,7 +2,7 @@ import { useKeyboard, useRenderer } from "@opentui/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { readFile } from "node:fs/promises"
 import type { RuntimeConfig } from "../config"
-import { createEventBus, runQuorum, type EventBus, type RuntimePrerequisites } from "../runner"
+import { createEventBus, runResearchPipeline, type EventBus, type RuntimePrerequisites } from "../runner"
 import type { InputRequest } from "../schema"
 import { copy } from "./clipboard"
 import { HelpOverlay } from "./components/HelpOverlay"
@@ -10,12 +10,12 @@ import { PromptScreen } from "./components/PromptScreen"
 import { QuitConfirm } from "./components/QuitConfirm"
 import { RunningScreen } from "./components/RunningScreen"
 import { SummaryScreen, type SummaryAction } from "./components/SummaryScreen"
-import { openInEditor } from "./editor"
+import { openInEditor, type OpenInEditorMode } from "./editor"
 import { nextFocus } from "./keymap/gridNav"
 import { computeLayout, type FocusRegion } from "./state/layout"
 import { bindBusToStore } from "./state/eventBindings"
 import { createRunStore, type RunStore, type RunStoreInitialState } from "./state/runStore"
-import type { SystemStatusStore } from "./state/systemStatus"
+import { pushSystemStatus, type SystemStatusStore } from "./state/systemStatus"
 
 export type Screen = "prompt" | "running" | "summary"
 
@@ -39,6 +39,7 @@ interface RunCtx {
   unbind: () => void
   ac: AbortController
   promise: Promise<unknown>
+  request: InputRequest
 }
 
 function buildAgentInitialState(prerequisites: RuntimePrerequisites, config: RuntimeConfig): RunStoreInitialState["agents"] {
@@ -128,6 +129,12 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
       return
     }
 
+    if (key.name === "e") {
+      if (!runCtx) return
+      void viewCurrentMarkdown(runCtx.request)
+      return
+    }
+
     if (key.shift && key.name === "/") {
       setShowHelp(true)
       return
@@ -173,6 +180,56 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
     }
   })
 
+  const viewCurrentMarkdown = useCallback(
+    async (request: InputRequest) => {
+      const graphState = runCtx?.store.getState().graph.state as
+        | { outputPath?: string; artifactSummary?: { sourcePath?: string } }
+        | undefined
+      const result = runCtx?.store.getState().result as
+        | { outputPath?: string; artifactSummary?: { sourcePath?: string } }
+        | undefined
+
+      const candidates =
+        request.inputMode === "document"
+          ? [
+              graphState?.artifactSummary?.sourcePath,
+              graphState?.outputPath ? `${graphState.outputPath}/final.md` : undefined,
+              graphState?.outputPath ? `${graphState.outputPath}/latest-draft.md` : undefined,
+              result?.artifactSummary?.sourcePath,
+              result?.outputPath ? `${result.outputPath}/final.md` : undefined,
+              result?.outputPath ? `${result.outputPath}/latest-draft.md` : undefined,
+              request.documentPath,
+            ]
+          : [
+              graphState?.artifactSummary?.sourcePath,
+              graphState?.outputPath ? `${graphState.outputPath}/final.md` : undefined,
+              graphState?.outputPath ? `${graphState.outputPath}/latest-draft.md` : undefined,
+              result?.artifactSummary?.sourcePath,
+              result?.outputPath ? `${result.outputPath}/final.md` : undefined,
+              result?.outputPath ? `${result.outputPath}/latest-draft.md` : undefined,
+            ]
+
+      const path = candidates.find((candidate) => typeof candidate === "string" && candidate.length > 0)
+      if (!path) {
+        pushSystemStatus(systemStatus, { level: "warn", text: "Nothing viewable yet" })
+        return
+      }
+
+      const mode: OpenInEditorMode = "view"
+      const resultOpen = await openInEditor({
+        path,
+        renderer,
+        artifactRoot: config.quorumConfig.artifactDir,
+        mode,
+      })
+
+      if (!resultOpen.ok && resultOpen.reason === "exit-code") {
+        pushSystemStatus(systemStatus, { level: "warn", text: `viewer exit ${resultOpen.code ?? "?"}` })
+      }
+    },
+    [config.quorumConfig.artifactDir, renderer, runCtx, systemStatus],
+  )
+
   const startRun = useCallback(
     (request: InputRequest) => {
       lastRequestRef.current = request
@@ -189,8 +246,8 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
       const store = createRunStore({ config, initial: { agents: initialAgents.current } })
       const unbind = bindBusToStore({ bus, store, config })
       const ac = new AbortController()
-      const promise = runQuorum({ config, prerequisites, request, bus, signal: ac.signal })
-      const ctx: RunCtx = { bus, store, unbind, ac, promise }
+      const promise = runResearchPipeline({ config, prerequisites, request, bus, signal: ac.signal })
+      const ctx: RunCtx = { bus, store, unbind, ac, promise, request }
       setRunCtx(ctx)
       setSelected("dashboard")
       setActive(undefined)
@@ -237,7 +294,11 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
         hint = "draft missing on disk — using cached document"
       }
 
-      setPromptState({ mode: "document", document: { path, content }, hint })
+      setPromptState({
+        mode: "document",
+        document: { path, content },
+        hint,
+      })
       startRun({ inputMode: "document", documentPath: path, documentText: content })
       return
     }
@@ -261,6 +322,7 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
       requestId,
       renderer,
       artifactRoot: config.quorumConfig.artifactDir,
+      mode: "edit",
     })
 
     if (result.ok) {
@@ -332,10 +394,10 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
   }
   if (screen === "summary" && runCtx) {
     return (
-      <box flexGrow={1} position="relative">
-        <SummaryScreen store={runCtx.store} onAction={handleSummaryAction} />
-      </box>
-    )
+        <box flexGrow={1} position="relative">
+          <SummaryScreen store={runCtx.store} onAction={handleSummaryAction} />
+        </box>
+      )
   }
   return (
     <box border title="research-qurom" padding={1}>

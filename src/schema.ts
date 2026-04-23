@@ -43,6 +43,16 @@ export const graphInputSchema = z.object({
   requestId: nonEmptyStringSchema.optional(),
 })
 
+export const markdownSummarySchema = z.object({
+  title: nonEmptyStringSchema,
+  summary: nonEmptyStringSchema,
+  slugHint: nonEmptyStringSchema.optional(),
+})
+
+export const runDisplaySummarySchema = markdownSummarySchema.extend({
+  sourcePath: nonEmptyStringSchema.optional(),
+})
+
 const auditFindingSchema = z.object({
   severity: findingSeveritySchema,
   category: findingCategorySchema,
@@ -236,6 +246,8 @@ export const researchStateObjectSchema = z.object({
   topic: nonEmptyStringSchema.optional(),
   documentPath: nonEmptyStringSchema.optional(),
   documentText: nonEmptyStringSchema.optional(),
+  inputSummary: runDisplaySummarySchema.optional(),
+  artifactSummary: runDisplaySummarySchema.optional(),
   round: z.number().int().nonnegative(),
   draft: z.string(),
   audits: z.array(auditResultRecordSchema),
@@ -283,6 +295,8 @@ export const researchStateSchema = researchStateObjectSchema.superRefine((value,
 
 export type InputRequest = z.infer<typeof inputRequestSchema>
 export type GraphInput = z.infer<typeof graphInputSchema>
+export type MarkdownSummary = z.infer<typeof markdownSummarySchema>
+export type RunDisplaySummary = z.infer<typeof runDisplaySummarySchema>
 export type AuditResult = z.infer<typeof auditResultSchema>
 export type AuditResultRecord = z.infer<typeof auditResultRecordSchema>
 export type Rebuttal = z.infer<typeof rebuttalSchema>

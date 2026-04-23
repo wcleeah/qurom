@@ -416,7 +416,11 @@ export async function loadRequiredSkill(config: RuntimeConfig) {
 
 export async function validateRuntimePrerequisites(config: RuntimeConfig) {
   const [agents, skill] = await Promise.all([listAgents(config), loadRequiredSkill(config)])
-  const required = [config.quorumConfig.designatedDrafter, ...config.quorumConfig.auditors]
+  const required = [
+    config.quorumConfig.designatedDrafter,
+    ...config.quorumConfig.auditors,
+    config.quorumConfig.summarizerAgent,
+  ]
   const names = new Set(agents.map((entry) => entry.name))
   const missing = required.filter((name) => !names.has(name))
 

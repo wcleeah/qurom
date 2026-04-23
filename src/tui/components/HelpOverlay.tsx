@@ -20,6 +20,7 @@ export const HelpOverlay = () => (
     <text fg={theme.textMuted}>Enter focus selected panel</text>
     <text fg={theme.textMuted}>Esc leave focused panel</text>
     <text fg={theme.textMuted}>focused panel: j/k | Ctrl-d/u | Ctrl-f/b | gg | G</text>
+    <text fg={theme.textMuted}>e view current document or artifact</text>
     <text fg={theme.textMuted}>? toggle help</text>
     <text fg={theme.textMuted}>Ctrl-C cancel run</text>
     <text fg={theme.textMuted}>Q force-quit confirm</text>

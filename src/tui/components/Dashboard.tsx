@@ -119,6 +119,18 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
               <span fg={theme.text}>{inputLabel}</span>
             </text>
           ) : null}
+          {graphState?.inputSummary?.title ? (
+            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              <span fg={theme.textMuted}>title: </span>
+              <span fg={theme.text}>{graphState?.inputSummary?.title}</span>
+            </text>
+          ) : null}
+          {graphState?.inputSummary?.summary ? (
+            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              <span fg={theme.textMuted}>summary: </span>
+              <span fg={theme.text}>{graphState?.inputSummary?.summary}</span>
+            </text>
+          ) : null}
           {medium ? (
             <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
               <span fg={theme.textMuted}>request: </span>
@@ -167,6 +179,10 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
               <span fg={theme.text}>{outputDir}</span>
             </text>
           ) : null}
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            <span fg={theme.textMuted}>view: </span>
+            <span fg={theme.text}>press e</span>
+          </text>
         </box>
       </box>
     </box>

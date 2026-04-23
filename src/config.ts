@@ -17,6 +17,7 @@ const envSchema = z.object({
 const quorumConfigSchema = z.object({
   designatedDrafter: z.string().min(1),
   auditors: z.array(z.string().min(1)).min(1),
+  summarizerAgent: z.string().min(1),
   maxRounds: z.number().int().positive(),
   maxRebuttalTurnsPerFinding: z.number().int().positive(),
   requireUnanimousApproval: z.boolean(),

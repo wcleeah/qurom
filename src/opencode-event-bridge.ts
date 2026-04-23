@@ -1,13 +1,15 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 
 import type { RuntimeConfig } from "./config"
+import { ensureRunDirPath } from "./output"
 import type { Bridge, EventBus } from "./runner"
 
 type OpencodeClient = ReturnType<typeof createOpencodeClient>
 
 export type OpencodeBridgeOptions = {
   bus: EventBus
-  runDir: string
+  runDir?: string
+  getRunDir?: () => string | undefined
   // Test seam: inject a stub client. Defaults to the real opencode SDK client.
   clientFactory?: (config: RuntimeConfig) => OpencodeClient
   // Invoked when the SDK event stream errors out unexpectedly (e.g. opencode server died).
@@ -28,7 +30,7 @@ function defaultClientFactory(config: RuntimeConfig): OpencodeClient {
 }
 
 export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeBridgeOptions): Bridge {
-  const { bus, runDir } = opts
+  const { bus } = opts
   const captureEvents = config.env.QUORUM_CAPTURE_OPENCODE_EVENTS === "1"
   const captureSyncHistory = config.env.QUORUM_CAPTURE_SYNC_HISTORY === "1"
 
@@ -46,6 +48,10 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
 
   let abortController = new AbortController()
   let streamTask: Promise<void> | undefined
+
+  function currentRunDir() {
+    return opts.getRunDir?.() ?? opts.runDir
+  }
 
   function reasoningPartKey(sessionID: string, messageID: string, partID: string) {
     return `${sessionID}:${messageID}:${partID}`
@@ -86,12 +92,17 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
   }
 
   async function persistArtifacts() {
+    const runDir = currentRunDir()
+    if (!runDir) return
+
     if (captureEvents && capturedEvents.length > 0) {
+      await ensureRunDirPath(runDir)
       await Bun.write(`${runDir}/opencode-events.json`, JSON.stringify(capturedEvents, null, 2))
     }
 
     if (!captureSyncHistory) return
 
+    await ensureRunDirPath(runDir)
     await Bun.write(
       `${runDir}/opencode-sync-history.json`,
       JSON.stringify(

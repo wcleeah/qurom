@@ -37,14 +37,16 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
   const traceId = useStoreSelector(store, (s) => s.lifecycle.traceId)
   const error = useStoreSelector(store, (s) => s.lifecycle.error)
   const result = useStoreSelector(store, (s) => s.result) as
-    | {
-        status?: string
-        outputPath?: string
-        round?: number
-        approvedAgents?: string[]
-        unresolvedFindings?: unknown[]
-        failureReason?: string
-      }
+      | {
+          status?: string
+          outputPath?: string
+          round?: number
+          approvedAgents?: string[]
+          unresolvedFindings?: unknown[]
+          failureReason?: string
+          inputSummary?: { title?: string; summary?: string }
+          artifactSummary?: { title?: string; summary?: string }
+        }
     | undefined
   const agents = useStoreSelector(store, (s) => s.agents)
 
@@ -126,6 +128,44 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
                 </text>
               ) : null}
             </box>
+
+            {result?.artifactSummary ? (
+              <box
+                border
+                borderStyle="single"
+                borderColor={theme.borderSubtle}
+                backgroundColor={theme.backgroundElement}
+                padding={1}
+                flexDirection="column"
+              >
+                <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                  artifact summary
+                </text>
+                <text selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>{result.artifactSummary.title}</text>
+                <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                  {result.artifactSummary.summary}
+                </text>
+              </box>
+            ) : null}
+
+            {result?.inputSummary ? (
+              <box
+                border
+                borderStyle="single"
+                borderColor={theme.borderSubtle}
+                backgroundColor={theme.backgroundElement}
+                padding={1}
+                flexDirection="column"
+              >
+                <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                  input summary
+                </text>
+                <text selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>{result.inputSummary.title}</text>
+                <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                  {result.inputSummary.summary}
+                </text>
+              </box>
+            ) : null}
           </box>
 
           <box

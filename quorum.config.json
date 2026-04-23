@@ -5,6 +5,7 @@
     "logic-auditor",
     "clarity-auditor"
   ],
+  "summarizerAgent": "markdown-summarizer",
   "maxRounds": 4,
   "maxRebuttalTurnsPerFinding": 2,
   "requireUnanimousApproval": true,

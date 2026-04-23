@@ -1,7 +1,7 @@
 import { createGraph } from "./graph"
 import { createOpencodeEventBridge } from "./opencode-event-bridge"
 import { abortSession } from "./opencode"
-import { ensureRunDir } from "./output"
+import { removeEmptyRunDir } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
 
 import type { RuntimeConfig } from "./config"
@@ -83,11 +83,11 @@ export type Bridge = {
   stop: () => Promise<void>
 }
 
-export type BridgeFactory = (config: RuntimeConfig, opts: { bus: EventBus; runDir: string }) => Bridge
+export type BridgeFactory = (config: RuntimeConfig, opts: { bus: EventBus; getRunDir: () => string | undefined }) => Bridge
 
 export type RuntimePrerequisites = Awaited<ReturnType<typeof validateRuntimePrerequisites>>
 
-export type RunQuorumArgs = {
+export type RunResearchPipelineArgs = {
   config: RuntimeConfig
   prerequisites: RuntimePrerequisites
   request: InputRequest
@@ -107,7 +107,11 @@ export type RunResult = {
   traceId?: string
   outputPath?: string
   outcome: string
-  raw: unknown
+  raw: unknown & {
+    inputSummary?: unknown
+    artifactSummary?: unknown
+    outputPath?: string
+  }
 }
 
 function toolKey(event: { sessionID: string; messageID: string; partID: string }) {
@@ -250,7 +254,7 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
   return { trackSessionObservation, dispose }
 }
 
-export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
+export async function runResearchPipeline(args: RunResearchPipelineArgs): Promise<RunResult> {
   const { config, prerequisites, request, bus, signal } = args
   const graphFactory = args.graphFactory ?? createGraph
   const bridgeFactory = args.bridgeFactory ?? createOpencodeEventBridge
@@ -258,7 +262,7 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
   const telemetryFactory = args.telemetryFactory ?? createTelemetry
 
   const requestId = crypto.randomUUID()
-  const runDir = await ensureRunDir(config.quorumConfig.artifactDir, requestId)
+  let runDir: string | undefined
 
   const telemetry = await telemetryFactory(config, {
     requestId,
@@ -276,7 +280,7 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
 
   const bridge = bridgeFactory(config, {
     bus,
-    runDir,
+    getRunDir: () => runDir,
     onStreamError: (error) => {
       bridgeStreamError = error
       bridgeAbort.abort(error)
@@ -325,6 +329,8 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
         { configurable: { thread_id: requestId }, signal: bridgeAbort.signal },
       )
 
+      runDir = invocation.outputPath
+
       const traceMetadata = {
         requestId: invocation.requestId,
         status: invocation.status,
@@ -333,6 +339,8 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
         unresolvedFindings: invocation.unresolvedFindings.length,
         failureReason: invocation.failureReason,
         outputPath: invocation.outputPath,
+        inputSummaryTitle: invocation.inputSummary?.title,
+        artifactSummaryTitle: invocation.artifactSummary?.title,
         traced: telemetry.enabled,
       }
 
@@ -345,6 +353,8 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
           unresolvedFindings: invocation.unresolvedFindings.length,
           failureReason: invocation.failureReason,
           outputPath: invocation.outputPath,
+          inputSummary: invocation.inputSummary,
+          artifactSummary: invocation.artifactSummary,
         },
         metadata: traceMetadata,
       })
@@ -396,9 +406,14 @@ export async function runQuorum(args: RunQuorumArgs): Promise<RunResult> {
     try {
       await bridge.stop()
     } catch {
-      // Bridge shutdown errors must not mask the original failure.
-    }
-  }
+       // Bridge shutdown errors must not mask the original failure.
+     }
+     try {
+       if (runDir) await removeEmptyRunDir(runDir)
+      } catch {
+        // Empty-run cleanup errors must not mask the original failure.
+      }
+   }
 }
 
 // Compile-time exhaustiveness check: missing a RunnerEvent kind here fails `tsc`.
