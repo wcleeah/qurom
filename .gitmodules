@@ -1,9 +1,6 @@
 [submodule "reference/opencode"]
 	path = reference/opencode
 	url = https://github.com/anomalyco/opencode.git
-[submodule "langfuse"]
-	path = langfuse
-	url = https://github.com/langfuse/langfuse.git
 [submodule "reference/langfuse-skill"]
 	path = reference/langfuse-skill
 	url = https://github.com/langfuse/skills.git
