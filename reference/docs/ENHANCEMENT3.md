@@ -1,0 +1,4 @@
+- moving towards to an actual cli that can be used system wide
+  - config stays in XDG_CONFIG_HOME
+  - build and bundle to an executable
+  - any other things worth considering?
