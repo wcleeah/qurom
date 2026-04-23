@@ -9,7 +9,13 @@ const findingSeveritySchema = z.enum(["blocker", "major", "minor"])
 const findingCategorySchema = z.enum(["sources", "coherence", "clarity", "structure", "scope"])
 const rebuttalResolutionSchema = z.enum(["withdraw", "soften", "reclassify", "withdraw_or_reclassify"])
 const aggregateOutcomeSchema = z.enum(["approved", "needs_revision", "failed_non_convergent"])
-const failureReasonSchema = z.enum(["max_rounds_exhausted", "stagnated_findings"])
+const failureReasonSchema = z.enum([
+  "max_rounds_exhausted",
+  "stagnated_findings",
+  "recursion_limit_exhausted",
+  "runtime_error",
+  "stream_error",
+])
 const researchStatusSchema = z.enum([
   "drafting",
   "auditing",
@@ -51,6 +57,26 @@ export const markdownSummarySchema = z.object({
 
 export const runDisplaySummarySchema = markdownSummarySchema.extend({
   sourcePath: nonEmptyStringSchema.optional(),
+})
+
+const draftOutlineSectionSchema = z.object({
+  heading: nonEmptyStringSchema,
+  question: nonEmptyStringSchema,
+  keyPoints: z.array(nonEmptyStringSchema).min(1).max(4),
+})
+
+export const draftOutlineSchema = z.object({
+  shortAnswer: nonEmptyStringSchema,
+  startingPoint: nonEmptyStringSchema,
+  drivingQuestion: nonEmptyStringSchema,
+  finishLine: nonEmptyStringSchema,
+  runningExample: nonEmptyStringSchema.optional(),
+  sections: z.array(draftOutlineSectionSchema).min(3).max(8),
+})
+
+export const sectionDraftSchema = z.object({
+  heading: nonEmptyStringSchema,
+  markdown: nonEmptyStringSchema,
 })
 
 const auditFindingSchema = z.object({
@@ -118,33 +144,26 @@ export const auditResultRecordSchema = auditResultRecordBaseSchema
   .superRefine(validateAuditResult)
 
 export const rebuttalSchema = z.object({
-  targetAgent: agentNameSchema,
   findingId: findingIdSchema,
-  findingCategory: findingCategorySchema,
-  findingIssue: nonEmptyStringSchema,
   position: z.literal("rebut"),
   argument: nonEmptyStringSchema,
   evidence: z.array(nonEmptyStringSchema).min(1),
   requestedResolution: rebuttalResolutionSchema,
 })
 
-const findingReferenceSchema = z.object({
+export const activeRebuttalSchema = rebuttalSchema.extend({
   targetAgent: agentNameSchema,
-  findingId: findingIdSchema,
   findingCategory: findingCategorySchema,
   findingIssue: nonEmptyStringSchema,
 })
 
 export const drafterFindingReviewSchema = z.object({
-  acceptedFindings: z.array(findingReferenceSchema),
+  acceptedFindingIds: z.array(findingIdSchema),
   rebuttals: z.array(rebuttalSchema),
 })
 
 const rebuttalResponseBaseSchema = z.object({
-  targetAgent: agentNameSchema,
   findingId: findingIdSchema,
-  findingCategory: findingCategorySchema,
-  findingIssue: nonEmptyStringSchema,
   argument: nonEmptyStringSchema,
 })
 
@@ -189,7 +208,7 @@ const rebuttalHistoryEntrySchema = z.object({
   findingKey: findingKeySchema,
   round: z.number().int().nonnegative(),
   turn: z.number().int().positive(),
-  rebuttal: rebuttalSchema,
+  rebuttal: activeRebuttalSchema,
 })
 
 const rebuttalResponseHistoryEntrySchema = z.object({
@@ -249,10 +268,12 @@ export const researchStateObjectSchema = z.object({
   inputSummary: runDisplaySummarySchema.optional(),
   artifactSummary: runDisplaySummarySchema.optional(),
   round: z.number().int().nonnegative(),
+  outline: draftOutlineSchema.optional(),
+  sectionDrafts: z.array(sectionDraftSchema),
   draft: z.string(),
   audits: z.array(auditResultRecordSchema),
   auditSessionIds: z.record(agentNameSchema, nonEmptyStringSchema),
-  activeRebuttals: z.record(findingKeySchema, rebuttalSchema),
+  activeRebuttals: z.record(findingKeySchema, activeRebuttalSchema),
   currentRebuttalResponsesByFinding: z.record(findingKeySchema, rebuttalResponseRecordSchema),
   rebuttalTurnCounts: z.record(findingKeySchema, z.number().int().positive()),
   rebuttalHistory: z.array(rebuttalHistoryEntrySchema),
@@ -297,9 +318,13 @@ export type InputRequest = z.infer<typeof inputRequestSchema>
 export type GraphInput = z.infer<typeof graphInputSchema>
 export type MarkdownSummary = z.infer<typeof markdownSummarySchema>
 export type RunDisplaySummary = z.infer<typeof runDisplaySummarySchema>
+export type DraftOutline = z.infer<typeof draftOutlineSchema>
+export type DraftOutlineSection = z.infer<typeof draftOutlineSectionSchema>
+export type SectionDraft = z.infer<typeof sectionDraftSchema>
 export type AuditResult = z.infer<typeof auditResultSchema>
 export type AuditResultRecord = z.infer<typeof auditResultRecordSchema>
 export type Rebuttal = z.infer<typeof rebuttalSchema>
+export type ActiveRebuttal = z.infer<typeof activeRebuttalSchema>
 export type RebuttalResponseRecord = z.infer<typeof rebuttalResponseRecordSchema>
 export type AggregatedFinding = z.infer<typeof aggregatedFindingSchema>
 export type AggregatedFindings = z.infer<typeof aggregatedFindingsSchema>

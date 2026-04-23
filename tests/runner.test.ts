@@ -35,11 +35,34 @@ const config: RuntimeConfig = {
     summarizerAgent: "markdown-summarizer",
     maxRounds: 1,
     maxRebuttalTurnsPerFinding: 1,
+    recursionLimit: 80,
     requireUnanimousApproval: true,
     artifactDir: "runs",
+    promptAssetsDir: "assets/prompts",
+    promptManagement: {
+      source: "local",
+      label: "production",
+    },
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
   },
 }
+
+const promptBundle = {
+  source: "local",
+  label: "test",
+  dir: "/tmp/prompts",
+  assets: {
+    deepDiveContract: "contract",
+    draftOutline: "outline",
+    draftSection: "section",
+    stitchDraft: "stitch",
+    reviseDraft: "revise",
+    audit: "audit",
+    reviewFindings: "review-findings",
+    rebuttal: "rebuttal",
+    reviewRebuttalResponses: "review-rebuttal-responses",
+  },
+} as const
 
 function disabledTelemetry(): TelemetryRun {
   return {
@@ -165,7 +188,6 @@ describe("runResearchPipeline", () => {
     ac.abort()
 
     const prerequisites = {
-      skill: { name: "research", content: "skill" },
       agents: [],
     } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
 
@@ -174,6 +196,7 @@ describe("runResearchPipeline", () => {
       await runResearchPipeline({
         config: configWithTempArtifacts,
         prerequisites,
+        promptBundle,
         request: { inputMode: "topic", topic: "abort-fast" },
         bus,
         signal: ac.signal,
@@ -222,7 +245,6 @@ describe("runResearchPipeline", () => {
     })
 
     const prerequisites = {
-      skill: { name: "research", content: "skill" },
       agents: [],
     } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
 
@@ -230,6 +252,7 @@ describe("runResearchPipeline", () => {
       runResearchPipeline({
         config: configWithTempArtifacts,
         prerequisites,
+        promptBundle,
         request: { inputMode: "topic", topic: "fail" },
         bus,
         bridgeFactory,
@@ -247,7 +270,6 @@ describe("runResearchPipeline", () => {
     let bridgeRunDir: string | undefined
 
     const prerequisites = {
-      skill: { name: "research", content: "skill" },
       agents: [],
     } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
 
@@ -255,6 +277,7 @@ describe("runResearchPipeline", () => {
       runResearchPipeline({
         config: configWithTempArtifacts,
         prerequisites,
+        promptBundle,
         request: { inputMode: "topic", topic: "abort before artifacts" },
         bus,
         bridgeFactory: (_, { getRunDir }) => {
@@ -290,7 +313,6 @@ describe("runResearchPipeline", () => {
     })) as GraphFactory
 
     const prerequisites = {
-      skill: { name: "research", content: "skill" },
       agents: [],
     } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
 
@@ -298,6 +320,7 @@ describe("runResearchPipeline", () => {
       runResearchPipeline({
         config: configWithTempArtifacts,
         prerequisites,
+        promptBundle,
         request: { inputMode: "topic", topic: "cancel" },
         bus,
         signal: ac.signal,
@@ -319,13 +342,13 @@ describe("runResearchPipeline", () => {
     let bridgeRunDir: string | undefined
 
     const prerequisites = {
-      skill: { name: "research", content: "skill" },
       agents: [{ name: "markdown-summarizer" }],
     } as unknown as RunResearchPipelineArgs["prerequisites"]
 
     await runResearchPipeline({
       config: configWithTempArtifacts,
       prerequisites,
+      promptBundle,
       request: { inputMode: "document", documentPath: "/tmp/doc.md", documentText: "# Hybrid reranking in Qdrant\n" },
       bus,
       bridgeFactory: (_, { getRunDir }) => {

@@ -5,10 +5,13 @@ import { BunSqliteSaver } from "./checkpointer"
 import type { RuntimeConfig } from "./config"
 import { ensureRunDirPath, resolveRunDir, writeApprovedArtifacts, writeFailedArtifacts } from "./output"
 import { createSession, promptAgent } from "./opencode"
+import type { PromptBundle } from "./prompt-assets"
 import { summarizeMarkdown } from "./summarizer"
 import {
+  draftOutlineSchema,
   aggregatedFindingSchema,
   aggregatedFindingsSchema,
+  type ActiveRebuttal,
   auditResultRecordSchema,
   auditResultSchema,
   drafterFindingReviewSchema,
@@ -21,11 +24,13 @@ import {
   type AggregatedFinding,
   type AggregatedFindings,
   type AuditResultRecord,
+  type DraftOutlineSection,
   type GraphInput,
   type RunDisplaySummary,
   type Rebuttal,
   type RebuttalResponseRecord,
   type ResearchState,
+  type SectionDraft,
 } from "./schema"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
@@ -66,10 +71,6 @@ function assertStatus(state: ResearchState, expected: ResearchState["status"], n
   }
 }
 
-function skillBlock(content: string) {
-  return [`<skill_content name="deep-dive-research">`, content.trim(), `</skill_content>`].join("\n")
-}
-
 function researchToolBlock(config: RuntimeConfig) {
   const lines = ["Tool preferences:"]
 
@@ -100,24 +101,94 @@ export function auditScopeGuidance(agent: string) {
   return scopeGuidance[agent] ?? []
 }
 
-function draftPrompt(config: RuntimeConfig, state: ResearchState, skillContent: string) {
-  const sections = [
-    skillBlock(skillContent),
-    researchToolBlock(config),
-    `Write a source-backed deep dive for ${requestLabel(state)}.`,
-    "Return markdown only.",
-    "The final draft must include a Sources section.",
-  ]
+function requestContextBlock(state: ResearchState, options?: { includeDocumentText?: boolean }) {
+  if (state.inputMode === "topic") {
+    return [`Topic:`, state.topic ?? ""].join("\n")
+  }
 
-  if (state.inputMode === "document") {
+  const sections = []
+
+  if (state.inputSummary) {
+    sections.push(
+      `Input summary:\n${JSON.stringify(
+        {
+          title: state.inputSummary.title,
+          summary: state.inputSummary.summary,
+        },
+        null,
+        2,
+      )}`,
+    )
+  }
+
+  if (options?.includeDocumentText) {
     sections.push(`Document text:\n${state.documentText ?? ""}`)
+  } else if (state.documentPath) {
+    sections.push(`Document path: ${state.documentPath}`)
   }
 
   return sections.join("\n\n")
 }
 
-function auditPrompt(config: RuntimeConfig, agent: string, request: string, draft: string) {
+function outlinePrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
   return [
+    promptBundle.assets.deepDiveContract,
+    promptBundle.assets.draftOutline,
+    researchToolBlock(config),
+    `Plan a source-backed deep dive for ${requestLabel(state)}.`,
+    "Return only JSON that matches the requested schema.",
+    requestContextBlock(state, { includeDocumentText: true }),
+  ].join("\n\n")
+}
+
+function sectionPrompt(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  section: DraftOutlineSection,
+  sectionIndex: number,
+) {
+  return [
+    promptBundle.assets.deepDiveContract,
+    promptBundle.assets.draftSection,
+    researchToolBlock(config),
+    `Write section ${sectionIndex + 1} of ${state.outline?.sections.length ?? 0} for ${requestLabel(state)}.`,
+    `Document scaffold:\n${JSON.stringify(
+      {
+        shortAnswer: state.outline?.shortAnswer,
+        startingPoint: state.outline?.startingPoint,
+        drivingQuestion: state.outline?.drivingQuestion,
+        finishLine: state.outline?.finishLine,
+        runningExample: state.outline?.runningExample,
+      },
+      null,
+      2,
+    )}`,
+    `Section plan:\n${JSON.stringify(section, null, 2)}`,
+    state.sectionDrafts.length > 0
+      ? `Completed sections so far:\n${JSON.stringify(state.sectionDrafts.map((entry) => entry.heading), null, 2)}`
+      : "",
+    requestContextBlock(state),
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+function stitchPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
+  return [
+    promptBundle.assets.deepDiveContract,
+    promptBundle.assets.stitchDraft,
+    researchToolBlock(config),
+    `Assemble the full draft for ${requestLabel(state)}.`,
+    requestContextBlock(state),
+    `Approved outline:\n${JSON.stringify(state.outline, null, 2)}`,
+    `Section drafts:\n${state.sectionDrafts.map((entry) => entry.markdown.trim()).join("\n\n")}`,
+  ].join("\n\n")
+}
+
+function auditPrompt(config: RuntimeConfig, promptBundle: PromptBundle, agent: string, request: string, draft: string) {
+  return [
+    promptBundle.assets.audit,
     researchToolBlock(config),
     `Review this ${request} draft as the ${agent}.`,
     "Return only JSON that matches the requested schema.",
@@ -131,6 +202,7 @@ function auditPrompt(config: RuntimeConfig, agent: string, request: string, draf
 
 function drafterReviewPrompt(
   config: RuntimeConfig,
+  promptBundle: PromptBundle,
   request: string,
   draft: string,
   audits: AuditResultRecord[],
@@ -160,10 +232,11 @@ function drafterReviewPrompt(
   }
 
   return [
+    promptBundle.assets.reviewFindings,
     researchToolBlock(config),
     `Review the auditor findings for this ${request}.`,
     "Return only JSON that matches the requested schema.",
-    "Put findings you accept into acceptedFindings.",
+    "Put accepted finding IDs into acceptedFindingIds.",
     "Put only evidence-backed challenges into rebuttals.",
     `Do not rebut a finding that has already hit the rebuttal cap of ${config.quorumConfig.maxRebuttalTurnsPerFinding}.`,
     "Current draft:",
@@ -175,8 +248,9 @@ function drafterReviewPrompt(
   ].join("\n\n")
 }
 
-function rebuttalPrompt(config: RuntimeConfig, request: string, draft: string, rebuttals: Rebuttal[]) {
+function rebuttalPrompt(config: RuntimeConfig, promptBundle: PromptBundle, request: string, draft: string, rebuttals: ActiveRebuttal[]) {
   return [
+    promptBundle.assets.rebuttal,
     researchToolBlock(config),
     `Respond to the disputed findings for this ${request}.`,
     "Return only JSON that matches the requested schema.",
@@ -191,9 +265,10 @@ function rebuttalPrompt(config: RuntimeConfig, request: string, draft: string, r
 
 function rebuttalReviewPrompt(
   config: RuntimeConfig,
+  promptBundle: PromptBundle,
   request: string,
   draft: string,
-  disputed: Array<{ findingId: string; rebuttal: Rebuttal; response: RebuttalResponseRecord }>,
+  disputed: Array<{ findingId: string; rebuttal: ActiveRebuttal; response: RebuttalResponseRecord }>,
   rebuttalTurnCounts: Record<string, number>,
 ) {
   const promptDisputed = []
@@ -210,6 +285,7 @@ function rebuttalReviewPrompt(
   }
 
   return [
+    promptBundle.assets.reviewRebuttalResponses,
     researchToolBlock(config),
     `Review the auditor rebuttal responses for this ${request}.`,
     "Return only JSON that matches the requested schema.",
@@ -224,9 +300,10 @@ function rebuttalReviewPrompt(
   ].join("\n\n")
 }
 
-function revisionPrompt(config: RuntimeConfig, state: ResearchState, skillContent: string) {
+function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
   return [
-    skillBlock(skillContent),
+    promptBundle.assets.deepDiveContract,
+    promptBundle.assets.reviseDraft,
     researchToolBlock(config),
     `Revise this draft for ${requestLabel(state)}.`,
     "Return markdown only.",
@@ -379,7 +456,7 @@ function toAggregatedFindings(audits: AuditResultRecord[]) {
   return findings
 }
 
-function appendRebuttalHistory(state: ResearchState, rebuttals: Record<string, Rebuttal>) {
+function appendRebuttalHistory(state: ResearchState, rebuttals: Record<string, ActiveRebuttal>) {
   const history = [...state.rebuttalHistory]
 
   for (const [key, rebuttal] of Object.entries(rebuttals)) {
@@ -409,7 +486,7 @@ function appendRebuttalResponseHistory(state: ResearchState, responses: Record<s
   return history
 }
 
-function nextRebuttalTurnCounts(state: ResearchState, rebuttals: Record<string, Rebuttal>) {
+function nextRebuttalTurnCounts(state: ResearchState, rebuttals: Record<string, ActiveRebuttal>) {
   const nextTurnCounts = { ...state.rebuttalTurnCounts }
 
   for (const key of Object.keys(rebuttals)) {
@@ -465,12 +542,43 @@ function buildRunSummary(state: ResearchState, outcome: AggregatedFindings["outc
   })
 }
 
+function nextSectionToDraft(state: ResearchState) {
+  const planned = state.outline?.sections ?? []
+  return planned[state.sectionDrafts.length]
+}
+
+function buildActiveRebuttalMap(audits: AuditResultRecord[], rebuttals: Rebuttal[]) {
+  const findingsById = new Map<string, AggregatedFinding>()
+
+  for (const finding of toAggregatedFindings(audits)) {
+    findingsById.set(finding.findingId, finding)
+  }
+
+  const activeRebuttals: Record<string, ActiveRebuttal> = {}
+
+  for (const rebuttal of rebuttals) {
+    const finding = findingsById.get(rebuttal.findingId)
+    if (!finding) continue
+
+    activeRebuttals[rebuttal.findingId] = {
+      ...rebuttal,
+      targetAgent: finding.agent,
+      findingCategory: finding.category,
+      findingIssue: finding.issue,
+    }
+  }
+
+  return activeRebuttals
+}
+
 export async function ingestRequest(input: GraphInput) {
   const parsed = inputRequestSchema.parse(input)
   const requestId = input.requestId ?? randomUUID()
   const baseState = {
     requestId,
     round: 0,
+    outline: undefined,
+    sectionDrafts: [],
     draft: "",
     audits: [],
     auditSessionIds: {},
@@ -531,27 +639,112 @@ async function bootstrapRun(config: RuntimeConfig, state: ResearchState) {
   })
 }
 
-async function draftInitial(config: RuntimeConfig, skillContent: string, state: ResearchState, telemetry?: GraphTelemetry) {
-  assertStatus(state, "drafting", "draftInitial")
-  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during draftInitial")
+async function draftOutline(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
+  assertStatus(state, "drafting", "draftOutline")
+  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during draftOutline")
 
   const response = await promptAgent({
     config,
     sessionID: state.drafterSessionId,
     agent: config.quorumConfig.designatedDrafter,
-    prompt: draftPrompt(config, state, skillContent),
+    prompt: outlinePrompt(config, promptBundle, state),
+    schema: draftOutlineSchema,
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
-      name: "agent.draftInitial",
+      name: "agent.draftOutline",
       agentName: config.quorumConfig.designatedDrafter,
       sessionId: state.drafterSessionId,
     }),
   })
 
+  if (!response.structured) {
+    throw new Error("Missing structured outline from designated drafter")
+  }
+
   return researchStateSchema.parse({
     ...state,
-    draft: response.text ?? "",
+    outline: response.structured,
+    sectionDrafts: [],
+  })
+}
+
+async function draftNextSection(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+) {
+  assertStatus(state, "drafting", "draftNextSection")
+  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during draftNextSection")
+  if (!state.outline) throw new Error("Missing outline during draftNextSection")
+
+  const section = nextSectionToDraft(state)
+  if (!section) {
+    return researchStateSchema.parse(state)
+  }
+
+  const response = await promptAgent({
+    config,
+    sessionID: state.drafterSessionId,
+    agent: config.quorumConfig.designatedDrafter,
+    prompt: sectionPrompt(config, promptBundle, state, section, state.sectionDrafts.length),
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.draftSection",
+      agentName: config.quorumConfig.designatedDrafter,
+      sessionId: state.drafterSessionId,
+      input: {
+        requestId: state.requestId,
+        round: state.round,
+        heading: section.heading,
+        sectionIndex: state.sectionDrafts.length,
+      },
+    }),
+  })
+
+  const nextSectionDrafts: SectionDraft[] = [
+    ...state.sectionDrafts,
+    {
+      heading: section.heading,
+      markdown: response.text ?? `## ${section.heading}`,
+    },
+  ]
+
+  return researchStateSchema.parse({
+    ...state,
+    sectionDrafts: nextSectionDrafts,
+  })
+}
+
+async function stitchDraft(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
+  assertStatus(state, "drafting", "stitchDraft")
+  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during stitchDraft")
+  if (!state.outline) throw new Error("Missing outline during stitchDraft")
+
+  const response = await promptAgent({
+    config,
+    sessionID: state.drafterSessionId,
+    agent: config.quorumConfig.designatedDrafter,
+    prompt: stitchPrompt(config, promptBundle, state),
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.stitchDraft",
+      agentName: config.quorumConfig.designatedDrafter,
+      sessionId: state.drafterSessionId,
+      input: {
+        requestId: state.requestId,
+        round: state.round,
+        sectionCount: state.sectionDrafts.length,
+      },
+    }),
+  })
+
+  return researchStateSchema.parse({
+    ...state,
+    draft: response.text ?? state.draft,
     status: "auditing",
   })
 }
@@ -590,7 +783,7 @@ function graphAgentTelemetry(input: {
   }
 }
 
-async function runParallelAudits(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
+async function runParallelAudits(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "auditing", "runParallelAudits")
   const request = requestLabel(state)
   const auditPromises: Promise<AuditResultRecord>[] = []
@@ -604,7 +797,7 @@ async function runParallelAudits(config: RuntimeConfig, state: ResearchState, te
         config,
         sessionID,
         agent,
-        prompt: auditPrompt(config, agent, request, state.draft),
+        prompt: auditPrompt(config, promptBundle, agent, request, state.draft),
         schema: auditResultSchema,
         telemetry: graphAgentTelemetry({
           telemetry,
@@ -664,7 +857,12 @@ async function runParallelAudits(config: RuntimeConfig, state: ResearchState, te
   })
 }
 
-async function reviewFindingsByDrafter(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
+async function reviewFindingsByDrafter(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+) {
   assertStatus(state, "reviewing_findings", "reviewFindingsByDrafter")
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviewFindingsByDrafter")
 
@@ -689,7 +887,7 @@ async function reviewFindingsByDrafter(config: RuntimeConfig, state: ResearchSta
     config,
     sessionID: state.drafterSessionId,
     agent: config.quorumConfig.designatedDrafter,
-    prompt: drafterReviewPrompt(config, requestLabel(state), state.draft, findingsOnly, state.rebuttalTurnCounts),
+    prompt: drafterReviewPrompt(config, promptBundle, requestLabel(state), state.draft, findingsOnly, state.rebuttalTurnCounts),
     schema: drafterFindingReviewSchema,
     telemetry: graphAgentTelemetry({
       telemetry,
@@ -718,20 +916,17 @@ async function reviewFindingsByDrafter(config: RuntimeConfig, state: ResearchSta
     }
   }
 
-  for (const entry of response.structured.acceptedFindings) {
-    const key = findingStateKey(entry)
+  for (const key of response.structured.acceptedFindingIds) {
     if (!currentFindingIds.has(key)) continue
     accepted.add(key)
   }
 
   const capped = cappedFindingKeys(config, state)
-  const activeRebuttals: Record<string, Rebuttal> = {}
-  for (const rebuttal of response.structured.rebuttals) {
-    const key = findingStateKey(rebuttal)
-    if (!currentFindingIds.has(key)) continue
-    if (accepted.has(key)) continue
-    if (capped.has(key)) continue
-    activeRebuttals[key] = rebuttal
+  const activeRebuttals = buildActiveRebuttalMap(findingsOnly, response.structured.rebuttals)
+  for (const key of Object.keys(activeRebuttals)) {
+    if (!currentFindingIds.has(key) || accepted.has(key) || capped.has(key)) {
+      delete activeRebuttals[key]
+    }
   }
 
   const nextTurnCounts = nextRebuttalTurnCounts(state, activeRebuttals)
@@ -757,13 +952,18 @@ async function reviewFindingsByDrafter(config: RuntimeConfig, state: ResearchSta
   return researchStateSchema.parse(nextState)
 }
 
-async function runTargetedRebuttals(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
+async function runTargetedRebuttals(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+) {
   assertStatus(state, "awaiting_auditor_rebuttal", "runTargetedRebuttals")
   if (!hasEligibleRebuttalTurn(config, state)) {
     throw new Error("No eligible rebuttal turns remain for runTargetedRebuttals")
   }
 
-  const rebuttalsByAgent: Record<string, Rebuttal[]> = {}
+  const rebuttalsByAgent: Record<string, ActiveRebuttal[]> = {}
   for (const rebuttal of Object.values(state.activeRebuttals)) {
     if (!rebuttalsByAgent[rebuttal.targetAgent]) {
       rebuttalsByAgent[rebuttal.targetAgent] = []
@@ -775,7 +975,7 @@ async function runTargetedRebuttals(config: RuntimeConfig, state: ResearchState,
 
   async function runAgentRebuttal(
     agent: string,
-    rebuttals: Rebuttal[],
+    rebuttals: ActiveRebuttal[],
     sessionID: string,
   ): Promise<Array<[string, RebuttalResponseRecord]>> {
     const chainObservation = await telemetry?.run.startObservation({
@@ -801,7 +1001,7 @@ async function runTargetedRebuttals(config: RuntimeConfig, state: ResearchState,
         config,
         sessionID,
         agent,
-        prompt: rebuttalPrompt(config, requestLabel(state), state.draft, rebuttals),
+        prompt: rebuttalPrompt(config, promptBundle, requestLabel(state), state.draft, rebuttals),
         schema: rebuttalBatchResponseSchema,
         telemetry: !telemetry
           ? undefined
@@ -910,12 +1110,17 @@ async function runTargetedRebuttals(config: RuntimeConfig, state: ResearchState,
   })
 }
 
-async function reviewRebuttalResponses(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
+async function reviewRebuttalResponses(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+) {
   assertStatus(state, "reviewing_rebuttal_responses", "reviewRebuttalResponses")
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviewRebuttalResponses")
 
   const capped = cappedFindingKeys(config, state)
-  const disputed: Array<{ findingId: string; rebuttal: Rebuttal; response: RebuttalResponseRecord }> = []
+  const disputed: Array<{ findingId: string; rebuttal: ActiveRebuttal; response: RebuttalResponseRecord }> = []
 
   for (const [findingId, rebuttal] of Object.entries(state.activeRebuttals)) {
     const response = state.currentRebuttalResponsesByFinding[findingId]
@@ -943,7 +1148,14 @@ async function reviewRebuttalResponses(config: RuntimeConfig, state: ResearchSta
     config,
     sessionID: state.drafterSessionId,
     agent: config.quorumConfig.designatedDrafter,
-    prompt: rebuttalReviewPrompt(config, requestLabel(state), state.draft, disputed, state.rebuttalTurnCounts),
+    prompt: rebuttalReviewPrompt(
+      config,
+      promptBundle,
+      requestLabel(state),
+      state.draft,
+      disputed,
+      state.rebuttalTurnCounts,
+    ),
     schema: drafterFindingReviewSchema,
     telemetry: graphAgentTelemetry({
       telemetry,
@@ -969,20 +1181,17 @@ async function reviewRebuttalResponses(config: RuntimeConfig, state: ResearchSta
   }
 
   const accepted = new Set<string>()
-  for (const entry of response.structured.acceptedFindings) {
-    const key = findingStateKey(entry)
+  for (const key of response.structured.acceptedFindingIds) {
     if (allowed.has(key)) {
       accepted.add(key)
     }
   }
 
-  const activeRebuttals: Record<string, Rebuttal> = {}
-  for (const rebuttal of response.structured.rebuttals) {
-    const key = findingStateKey(rebuttal)
-    if (!allowed.has(key)) continue
-    if (accepted.has(key)) continue
-    if (capped.has(key)) continue
-    activeRebuttals[key] = rebuttal
+  const activeRebuttals = buildActiveRebuttalMap(state.audits, response.structured.rebuttals)
+  for (const key of Object.keys(activeRebuttals)) {
+    if (!allowed.has(key) || accepted.has(key) || capped.has(key)) {
+      delete activeRebuttals[key]
+    }
   }
 
   const nextTurnCounts = nextRebuttalTurnCounts(state, activeRebuttals)
@@ -1107,7 +1316,7 @@ function summarizeNodeResult(result: unknown) {
   return result
 }
 
-async function reviseDraft(config: RuntimeConfig, skillContent: string, state: ResearchState, telemetry?: GraphTelemetry) {
+async function reviseDraft(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "revising", "reviseDraft")
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviseDraft")
   if (!state.outputPath) throw new Error("Missing outputPath during reviseDraft")
@@ -1120,7 +1329,7 @@ async function reviseDraft(config: RuntimeConfig, skillContent: string, state: R
     config,
     sessionID: state.drafterSessionId,
     agent: config.quorumConfig.designatedDrafter,
-    prompt: revisionPrompt(config, state, skillContent),
+    prompt: revisionPrompt(config, promptBundle, state),
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
@@ -1258,7 +1467,7 @@ export function routeAfterAggregate(state: ResearchState) {
 
 export function createGraph(
   config: RuntimeConfig,
-  skillContent: string,
+  promptBundle: PromptBundle,
   input?: {
     observer?: RunObserver
     telemetry?: GraphTelemetry
@@ -1357,26 +1566,38 @@ export function createGraph(
         return nextState
       }),
     )
-    .addNode("draftInitial", async (state) =>
-      withNodeTelemetry("draftInitial", state, () => draftInitial(config, skillContent, state, graphTelemetry)),
+    .addNode("draftOutline", async (state) =>
+      withNodeTelemetry("draftOutline", state, () => draftOutline(config, promptBundle, state, graphTelemetry)),
+    )
+    .addNode("draftNextSection", async (state) =>
+      withNodeTelemetry("draftNextSection", state, () => draftNextSection(config, promptBundle, state, graphTelemetry)),
+    )
+    .addNode("stitchDraft", async (state) =>
+      withNodeTelemetry("stitchDraft", state, () => stitchDraft(config, promptBundle, state, graphTelemetry)),
     )
     .addNode("runParallelAudits", async (state) =>
-      withNodeTelemetry("runParallelAudits", state, () => runParallelAudits(config, state, graphTelemetry)),
+      withNodeTelemetry("runParallelAudits", state, () => runParallelAudits(config, promptBundle, state, graphTelemetry)),
     )
     .addNode("reviewFindingsByDrafter", async (state) =>
-      withNodeTelemetry("reviewFindingsByDrafter", state, () => reviewFindingsByDrafter(config, state, graphTelemetry)),
+      withNodeTelemetry("reviewFindingsByDrafter", state, () =>
+        reviewFindingsByDrafter(config, promptBundle, state, graphTelemetry),
+      ),
     )
     .addNode("runTargetedRebuttals", async (state) =>
-      withNodeTelemetry("runTargetedRebuttals", state, () => runTargetedRebuttals(config, state, graphTelemetry)),
+      withNodeTelemetry("runTargetedRebuttals", state, () =>
+        runTargetedRebuttals(config, promptBundle, state, graphTelemetry),
+      ),
     )
     .addNode("reviewRebuttalResponses", async (state) =>
-      withNodeTelemetry("reviewRebuttalResponses", state, () => reviewRebuttalResponses(config, state, graphTelemetry)),
+      withNodeTelemetry("reviewRebuttalResponses", state, () =>
+        reviewRebuttalResponses(config, promptBundle, state, graphTelemetry),
+      ),
     )
     .addNode("aggregateConsensus", async (state) =>
       withNodeTelemetry("aggregateConsensus", state, () => aggregateConsensus(config, state)),
     )
     .addNode("reviseDraft", async (state) =>
-      withNodeTelemetry("reviseDraft", state, () => reviseDraft(config, skillContent, state, graphTelemetry)),
+      withNodeTelemetry("reviseDraft", state, () => reviseDraft(config, promptBundle, state, graphTelemetry)),
     )
     .addNode("finalizeApprovedDraft", async (state) =>
       withNodeTelemetry("finalizeApprovedDraft", state, () => finalizeApprovedDraft(config, state)),
@@ -1391,8 +1612,14 @@ export function createGraph(
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
     .addEdge("prepareOutputPath", "bootstrapRun")
-    .addEdge("bootstrapRun", "draftInitial")
-    .addEdge("draftInitial", "runParallelAudits")
+    .addEdge("bootstrapRun", "draftOutline")
+    .addEdge("draftOutline", "draftNextSection")
+    .addConditionalEdges(
+      "draftNextSection",
+      (state) => ((state.outline?.sections.length ?? 0) > state.sectionDrafts.length ? "draftNextSection" : "stitchDraft"),
+      ["draftNextSection", "stitchDraft"],
+    )
+    .addEdge("stitchDraft", "runParallelAudits")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
     .addConditionalEdges("reviewFindingsByDrafter", (state) => routeAfterDrafterReview(config, state), [
       "runTargetedRebuttals",

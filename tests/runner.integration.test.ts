@@ -29,16 +29,38 @@ const config: RuntimeConfig = {
     summarizerAgent: "markdown-summarizer",
     maxRounds: 1,
     maxRebuttalTurnsPerFinding: 1,
+    recursionLimit: 80,
     requireUnanimousApproval: true,
     artifactDir: "runs",
+    promptAssetsDir: "assets/prompts",
+    promptManagement: {
+      source: "local",
+      label: "production",
+    },
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
   },
 }
 
 const prerequisites = {
-  skill: { name: "research", content: "skill" },
   agents: [],
 } as unknown as RunResearchPipelineArgs["prerequisites"]
+
+const promptBundle = {
+  source: "local",
+  label: "test",
+  dir: "/tmp/prompts",
+  assets: {
+    deepDiveContract: "contract",
+    draftOutline: "outline",
+    draftSection: "section",
+    stitchDraft: "stitch",
+    reviseDraft: "revise",
+    audit: "audit",
+    reviewFindings: "review-findings",
+    rebuttal: "rebuttal",
+    reviewRebuttalResponses: "review-rebuttal-responses",
+  },
+} as const
 
 function disabledTelemetry(): TelemetryRun {
   return {
@@ -116,6 +138,7 @@ describe("runResearchPipeline integration", () => {
       await runResearchPipeline({
         config: configWithTempArtifacts,
         prerequisites,
+        promptBundle,
         request: { inputMode: "topic", topic: "test" },
         bus,
         graphFactory,

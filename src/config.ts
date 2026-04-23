@@ -20,8 +20,16 @@ const quorumConfigSchema = z.object({
   summarizerAgent: z.string().min(1),
   maxRounds: z.number().int().positive(),
   maxRebuttalTurnsPerFinding: z.number().int().positive(),
+  recursionLimit: z.number().int().positive().default(80),
   requireUnanimousApproval: z.boolean(),
   artifactDir: z.string().min(1),
+  promptAssetsDir: z.string().min(1).default("assets/prompts"),
+  promptManagement: z
+    .object({
+      source: z.enum(["local", "langfuse"]).default("local"),
+      label: z.string().min(1).default("production"),
+    })
+    .default({ source: "local", label: "production" }),
   researchTools: z.object({
     prefer: z.array(z.string().min(1)).min(1),
     webSearchProvider: z.string().min(1),

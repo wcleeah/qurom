@@ -24,8 +24,14 @@ const baseConfig: RuntimeConfig = {
     summarizerAgent: "markdown-summarizer",
     maxRounds: 1,
     maxRebuttalTurnsPerFinding: 1,
+    recursionLimit: 80,
     requireUnanimousApproval: true,
     artifactDir: "runs",
+    promptAssetsDir: "assets/prompts",
+    promptManagement: {
+      source: "local",
+      label: "production",
+    },
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
   },
 }

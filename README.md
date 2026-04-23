@@ -3,7 +3,7 @@ A agent loop that generate a research document on a specific topic powered by Op
 
 ## What It Does
 - Accepts either a topic prompt or a topic document.
-- Runs a designated drafter to produce a draft.
+- Plans an outline, drafts sections, stitches a full draft, then runs revision rounds when needed.
 - Runs three auditors in parallel to review the draft from different perspective. 
 - Aggregates findings, rebuttals, and approvals until the run is approved or fails.
 - Streams live activity into a TUI with per-agent panels, dashboard and a summary screen after run.
@@ -20,7 +20,9 @@ These are configured in `quorum.config.json` and backed by local agent definitio
 ## Requirements
 - Bun
 - An OpenCode server reachable at `OPENCODE_BASE_URL`
-- Local agent and skill definitions available to that OpenCode instance
+- Local agent definitions available to that OpenCode instance
+
+Prompt contracts are repo-owned and loaded from `assets/prompts/`.
 
 Optional:
 
@@ -29,6 +31,12 @@ Optional:
 ## Configuration
 
 Runtime config is loaded from environment variables and `quorum.config.json`.
+
+Important `quorum.config.json` fields:
+
+- `recursionLimit`: LangGraph superstep limit for a run.
+- `promptAssetsDir`: repo-local prompt asset directory.
+- `promptManagement`: currently `local` only; the app loads prompt files from disk at startup.
 
 Main environment variables:
 
@@ -108,8 +116,10 @@ bun run test
 - `src/runner.ts`: run orchestration, lifecycle, telemetry listener, abort handling
 - `src/graph.ts`: LangGraph workflow and state transitions
 - `src/opencode.ts`: OpenCode client helpers
+- `src/prompt-assets.ts`: local prompt bundle loader
 - `src/opencode-event-bridge.ts`: event stream bridge into runner events
 - `src/schema.ts`: zod schemas for run input and graph state
+- `assets/prompts/`: app-owned drafting and audit prompt assets
 - `tests/`: repo tests
 - `docs/`: implementation docs and phase briefs
 
@@ -118,3 +128,4 @@ bun run test
 - The repo may contain large `reference/` and `langfuse/` directories used as local references; the active app code is under `src/` and `tests/`.
 - Draft documents created from the TUI are stored under `runs/.drafts/`.
 - The runner now aborts created OpenCode sessions when a run is cancelled.
+- Failed runs attempt to recover the latest checkpointed state and write failure artifacts when possible.

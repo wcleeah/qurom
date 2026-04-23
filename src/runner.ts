@@ -1,12 +1,14 @@
 import { createGraph } from "./graph"
 import { createOpencodeEventBridge } from "./opencode-event-bridge"
 import { abortSession } from "./opencode"
-import { removeEmptyRunDir } from "./output"
+import { removeEmptyRunDir, writeFailedArtifacts } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
+import { GraphRecursionError } from "@langchain/langgraph"
 
 import type { RuntimeConfig } from "./config"
-import type { GraphInput, InputRequest, ResearchState } from "./schema"
+import { researchStateSchema, type GraphInput, type InputRequest, type ResearchState } from "./schema"
 import type { validateRuntimePrerequisites } from "./opencode"
+import type { PromptBundle } from "./prompt-assets"
 
 export type GraphFactory = typeof createGraph
 
@@ -83,13 +85,23 @@ export type Bridge = {
   stop: () => Promise<void>
 }
 
-export type BridgeFactory = (config: RuntimeConfig, opts: { bus: EventBus; getRunDir: () => string | undefined }) => Bridge
+export type BridgeFactory = (
+  config: RuntimeConfig,
+  opts: {
+    bus: EventBus
+    getRunDir: () => string | undefined
+    onStreamError?: (error: unknown) => void
+  },
+) => Bridge
 
 export type RuntimePrerequisites = Awaited<ReturnType<typeof validateRuntimePrerequisites>>
+
+export type RuntimePromptBundle = PromptBundle
 
 export type RunResearchPipelineArgs = {
   config: RuntimeConfig
   prerequisites: RuntimePrerequisites
+  promptBundle: RuntimePromptBundle
   request: InputRequest
   bus: EventBus
   signal?: AbortSignal
@@ -120,6 +132,46 @@ function toolKey(event: { sessionID: string; messageID: string; partID: string }
 
 function permissionKey(input: { sessionID: string; messageID?: string; callID?: string }) {
   return `${input.sessionID}:${input.messageID ?? ""}:${input.callID ?? ""}`
+}
+
+function normalizeFailure(error: unknown, bridgeStreamError: unknown) {
+  const surfaced = bridgeStreamError ?? error
+
+  if (bridgeStreamError) {
+    return {
+      surfaced,
+      failureReason: "stream_error" as const,
+      message: surfaced instanceof Error ? surfaced.message : String(surfaced),
+    }
+  }
+
+  if (error instanceof GraphRecursionError) {
+    return {
+      surfaced,
+      failureReason: "recursion_limit_exhausted" as const,
+      message: error.message,
+    }
+  }
+
+  return {
+    surfaced,
+    failureReason: "runtime_error" as const,
+    message: surfaced instanceof Error ? surfaced.message : String(surfaced),
+  }
+}
+
+function salvageStateOutput(state: ResearchState) {
+  return {
+    requestId: state.requestId,
+    outcome: state.status,
+    round: state.round,
+    approvedAgents: state.approvedAgents,
+    unresolvedFindings: state.unresolvedFindings.length,
+    failureReason: state.failureReason,
+    outputPath: state.outputPath,
+    inputSummary: state.inputSummary,
+    artifactSummary: state.artifactSummary,
+  }
 }
 
 // Subscribes to bus.agent.tool / bus.agent.permission and owns Langfuse Tool span lifecycle.
@@ -255,7 +307,8 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
 }
 
 export async function runResearchPipeline(args: RunResearchPipelineArgs): Promise<RunResult> {
-  const { config, prerequisites, request, bus, signal } = args
+  const { config, prerequisites, promptBundle, request, bus, signal } = args
+  void prerequisites
   const graphFactory = args.graphFactory ?? createGraph
   const bridgeFactory = args.bridgeFactory ?? createOpencodeEventBridge
   const abortSessionFn = args.abortSessionFn ?? abortSession
@@ -303,13 +356,13 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
     traceId: telemetry.traceId,
   })
 
-  await bridge.start()
-
   try {
+    await bridge.start()
+
     const runResult = await telemetry.runWithRootObservation(async () => {
       bus.emit({ kind: "lifecycle", phase: "running", requestId, traceId: telemetry.traceId })
 
-      const graph = graphFactory(config, prerequisites.skill.content, {
+      const graph = graphFactory(config, promptBundle, {
         observer: {
           onNodeStart(node, state) {
             bus.emit({ kind: "graph.node", node, phase: "start", state: structuredClone(state) })
@@ -329,7 +382,11 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
 
       const invocation = await graph.invoke(
         { ...request, requestId },
-        { configurable: { thread_id: requestId }, signal: bridgeAbort.signal },
+        {
+          configurable: { thread_id: requestId },
+          recursionLimit: config.quorumConfig.recursionLimit,
+          signal: bridgeAbort.signal,
+        },
       )
 
       runDir = invocation.outputPath
@@ -381,20 +438,77 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
       outcome: runResult.status,
       raw: runResult,
     }
-   } catch (error) {
-    const surfaced = bridgeStreamError ?? error
+  } catch (error) {
+    const graph = graphFactory(config, promptBundle)
+    const failure = normalizeFailure(error, bridgeStreamError)
+    const checkpoint =
+      typeof graph.getState === "function"
+        ? await graph.getState({ configurable: { thread_id: requestId } }).catch(() => undefined)
+        : undefined
+    const recovered =
+      checkpoint && researchStateSchema.safeParse(checkpoint.values).success
+        ? researchStateSchema.parse(checkpoint.values)
+        : undefined
+
+    if (recovered) {
+      if (recovered.outputPath) {
+        runDir = recovered.outputPath
+      }
+
+      const salvagedState = researchStateSchema.parse({
+        ...recovered,
+        failureReason: failure.failureReason,
+        status: "failed",
+      })
+
+      if (salvagedState.outputPath) {
+        await writeFailedArtifacts(salvagedState.outputPath, {
+          draft: salvagedState.draft,
+          summary: {
+            requestId: salvagedState.requestId,
+            outcome: "failed_non_convergent",
+            round: salvagedState.round,
+            approvedAgents: salvagedState.approvedAgents,
+            unresolvedFindings: salvagedState.unresolvedFindings,
+            rebuttalTurnCounts: salvagedState.rebuttalTurnCounts,
+            rebuttalHistory: salvagedState.rebuttalHistory,
+            rebuttalResponseHistory: salvagedState.rebuttalResponseHistory,
+            failureReason: salvagedState.failureReason,
+            recoveredFromCheckpoint: true,
+            error: failure.message,
+          },
+        })
+      }
+
+      bus.emit({ kind: "result", runResult: salvagedState })
+      await telemetry.updateTrace({
+        output: salvageStateOutput(salvagedState),
+        metadata: {
+          requestId: salvagedState.requestId,
+          status: salvagedState.status,
+          round: salvagedState.round,
+          approvedAgents: salvagedState.approvedAgents,
+          unresolvedFindings: salvagedState.unresolvedFindings.length,
+          failureReason: salvagedState.failureReason,
+          outputPath: salvagedState.outputPath,
+          recoveredFromCheckpoint: true,
+          traced: telemetry.enabled,
+        },
+      })
+    }
+
     bus.emit({
       kind: "lifecycle",
       phase: "error",
       requestId,
       traceId: telemetry.traceId,
-      error: surfaced,
+      error: failure.surfaced,
     })
-    throw surfaced
-   } finally {
-     offSessionCreated()
-     if (bridgeAbort.signal.aborted && sessionIDs.size > 0) {
-       await Promise.allSettled([...sessionIDs].map((sessionID) => abortSessionFn(config, sessionID)))
+    throw failure.surfaced
+  } finally {
+      offSessionCreated()
+      if (bridgeAbort.signal.aborted && sessionIDs.size > 0) {
+        await Promise.allSettled([...sessionIDs].map((sessionID) => abortSessionFn(config, sessionID)))
      }
      try {
        await telemetryListener.dispose()
@@ -411,12 +525,12 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
     } catch {
        // Bridge shutdown errors must not mask the original failure.
      }
-     try {
-       if (runDir) await removeEmptyRunDir(runDir)
+      try {
+        if (runDir) await removeEmptyRunDir(runDir)
       } catch {
         // Empty-run cleanup errors must not mask the original failure.
       }
-   }
+  }
 }
 
 // Compile-time exhaustiveness check: missing a RunnerEvent kind here fails `tsc`.

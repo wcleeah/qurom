@@ -34,8 +34,14 @@ const config = {
     summarizerAgent: "markdown-summarizer",
     maxRounds: 2,
     maxRebuttalTurnsPerFinding: 2,
+    recursionLimit: 80,
     requireUnanimousApproval: true,
     artifactDir: "runs",
+    promptAssetsDir: "assets/prompts",
+    promptManagement: {
+      source: "local",
+      label: "production",
+    },
     researchTools: {
       prefer: ["context7", "exa"],
       webSearchProvider: "exa",
@@ -74,6 +80,7 @@ function baseState(overrides: Partial<ResearchState> = {}): ResearchState {
     inputMode: "topic",
     topic: "How Raft leader election works",
     round: 1,
+    sectionDrafts: [],
     draft: "Draft",
     audits: [],
     auditSessionIds: {},

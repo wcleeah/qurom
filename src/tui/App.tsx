@@ -2,7 +2,7 @@ import { useKeyboard, useRenderer } from "@opentui/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { readFile } from "node:fs/promises"
 import type { RuntimeConfig } from "../config"
-import { createEventBus, runResearchPipeline, type EventBus, type RuntimePrerequisites } from "../runner"
+import { createEventBus, runResearchPipeline, type EventBus, type RuntimePrerequisites, type RuntimePromptBundle } from "../runner"
 import type { InputRequest } from "../schema"
 import { copy } from "./clipboard"
 import { HelpOverlay } from "./components/HelpOverlay"
@@ -22,6 +22,7 @@ export type Screen = "prompt" | "running" | "summary"
 export interface AppProps {
   config: RuntimeConfig
   prerequisites: RuntimePrerequisites
+  promptBundle: RuntimePromptBundle
   systemStatus: SystemStatusStore
   onExit: () => void
 }
@@ -56,7 +57,7 @@ function buildAgentInitialState(prerequisites: RuntimePrerequisites, config: Run
   )
 }
 
-export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) => {
+export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit }: AppProps) => {
   const renderer = useRenderer()
   const [screen, setScreen] = useState<Screen>("prompt")
   const [runCtx, setRunCtx] = useState<RunCtx | undefined>(undefined)
@@ -256,7 +257,7 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
       const store = createRunStore({ config, initial: { agents: initialAgents.current } })
       const binding = bindBusToStore({ bus, store, config })
       const ac = new AbortController()
-      const promise = runResearchPipeline({ config, prerequisites, request, bus, signal: ac.signal })
+      const promise = runResearchPipeline({ config, prerequisites, promptBundle, request, bus, signal: ac.signal })
       const ctx: RunCtx = {
         bus,
         store,
@@ -292,7 +293,7 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
           setScreen("summary")
         })
     },
-    [config, prerequisites, promptState.document?.content],
+    [config, prerequisites, promptBundle, promptState.document?.content],
   )
 
   const handleRerun = useCallback(async () => {
