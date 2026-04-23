@@ -12,10 +12,10 @@ export interface SummaryScreenProps {
 }
 
 const NEXT_OPTIONS = [
-  { name: "Re-run same input", description: "start the same request again", value: "rerun" },
-  { name: "New topic", description: "return to a fresh topic prompt", value: "new-topic" },
-  { name: "New document", description: "open a fresh document draft", value: "new-document" },
-  { name: "Quit", description: "exit research-qurom", value: "quit" },
+  { name: "Re-run same input", description: "run again", value: "rerun" },
+  { name: "New topic", description: "fresh prompt", value: "new-topic" },
+  { name: "New document", description: "fresh draft", value: "new-document" },
+  { name: "Quit", description: "exit", value: "quit" },
 ]
 
 const NEXT_STYLE = { height: 8 }
@@ -55,6 +55,21 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
     Object.entries(agents)
       .filter(([, agent]) => agent.status === "complete" && !agent.pendingPermission)
       .map(([key]) => key)
+  const audits = Array.isArray((result as { audits?: unknown[] } | undefined)?.audits)
+    ? ((result as { audits?: Array<{ agent: string; vote: string }> }).audits ?? [])
+    : []
+  const approveVotes = audits.filter((audit) => audit.vote === "approve").length
+  const reviseVotes = audits.filter((audit) => audit.vote === "revise").length
+  const findingsByAgent = Object.entries(
+    (result?.unresolvedFindings ?? []).reduce<Record<string, number>>((acc, finding) => {
+      const agent =
+        finding && typeof finding === "object" && "agent" in finding && typeof finding.agent === "string"
+          ? finding.agent
+          : "unknown"
+      acc[agent] = (acc[agent] ?? 0) + 1
+      return acc
+    }, {}),
+  )
 
   const outcome = phase === "error" ? "error" : result?.status ?? "(unknown)"
   const round = result?.round
@@ -65,6 +80,10 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
   const wide = width >= 100
   const outerWidth = wide ? 100 : centeredColumnWidth(width, 92, 72)
   const topBias = height >= 34 ? 1 : 0
+  const artifactSummaryTitle = result?.artifactSummary?.title ?? "(not available)"
+  const artifactSummaryText = result?.artifactSummary?.summary ?? "(summary unavailable)"
+  const inputSummaryTitle = result?.inputSummary?.title ?? "(not available)"
+  const inputSummaryText = result?.inputSummary?.summary ?? "(summary unavailable)"
 
   useKeyboard((key) => {
     if (key.name === "q") onAction("quit")
@@ -129,47 +148,64 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
               ) : null}
             </box>
 
-            {result?.artifactSummary ? (
-              <box
-                border
-                borderStyle="single"
-                borderColor={theme.borderSubtle}
-                backgroundColor={theme.backgroundElement}
-                padding={1}
-                flexDirection="column"
-              >
-                <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-                  artifact summary
-                </text>
-                <text selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>{result.artifactSummary.title}</text>
-                <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-                  {result.artifactSummary.summary}
-                </text>
-              </box>
-            ) : null}
+            <box
+              border
+              borderStyle="single"
+              borderColor={theme.borderSubtle}
+              backgroundColor={theme.backgroundElement}
+              padding={1}
+              flexDirection="column"
+            >
+              <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                distribution
+              </text>
+              <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                {`votes: ${approveVotes} approve / ${reviseVotes} revise`}
+              </text>
+              <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                {findingsByAgent.length > 0
+                  ? `findings: ${findingsByAgent.map(([agent, count]) => `${agent} ${count}`).join(" · ")}`
+                  : "findings: none unresolved"}
+              </text>
+            </box>
 
-            {result?.inputSummary ? (
-              <box
-                border
-                borderStyle="single"
-                borderColor={theme.borderSubtle}
-                backgroundColor={theme.backgroundElement}
-                padding={1}
-                flexDirection="column"
-              >
-                <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-                  input summary
-                </text>
-                <text selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>{result.inputSummary.title}</text>
-                <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-                  {result.inputSummary.summary}
-                </text>
-              </box>
-            ) : null}
+            <box
+              border
+              borderStyle="single"
+              borderColor={theme.borderSubtle}
+              backgroundColor={theme.backgroundElement}
+              padding={1}
+              flexDirection="column"
+            >
+              <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                artifact summary
+              </text>
+              <text selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>{artifactSummaryTitle}</text>
+              <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                {artifactSummaryText}
+              </text>
+            </box>
+
+            <box
+              border
+              borderStyle="single"
+              borderColor={theme.borderSubtle}
+              backgroundColor={theme.backgroundElement}
+              padding={1}
+              flexDirection="column"
+            >
+              <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                input summary
+              </text>
+              <text selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>{inputSummaryTitle}</text>
+              <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                {inputSummaryText}
+              </text>
+            </box>
           </box>
 
           <box
-            width={wide ? 34 : "100%"}
+            width={wide ? 38 : "100%"}
             border
             borderStyle="single"
             borderColor={theme.borderSubtle}

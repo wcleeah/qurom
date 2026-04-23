@@ -68,8 +68,11 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
   const rebuttalResponseCount = Object.keys(graphState?.currentRebuttalResponsesByFinding ?? {}).length
   const unresolvedCount = graphState?.unresolvedFindings.length ?? 0
   const approvedCount = graphState?.approvedAgents.length ?? 0
+  const isDocumentRun = graphState?.inputMode === "document"
+  const titleText = graphState?.inputSummary?.title ?? (isDocumentRun ? "(summarizing...)" : undefined)
+  const summaryText = graphState?.inputSummary?.summary ?? (isDocumentRun ? "(waiting for summary)" : undefined)
   const inputLabel = formatInputLabel(graphState)
-  const borderColor = active ? theme.borderActive : selected ? theme.selectionBorder : theme.borderSubtle
+  const borderColor = active || selected ? theme.selectionBorder : theme.borderSubtle
   const focusLabel = active ? "focus" : selected ? "selected" : undefined
 
   return (
@@ -86,17 +89,15 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
       marginRight={1}
       flexShrink={0}
     >
-      <box flexDirection={wide ? "row" : "column"} gap={wide ? 4 : 2}>
-        <box flexGrow={2} flexDirection="column" gap={1}>
+      <box flexDirection={wide ? "row" : "column"} gap={wide ? 3 : 1}>
+        <box flexGrow={2} flexDirection="column" gap={0}>
           <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             Run{focusLabel ? `: ${focusLabel}` : ""}
           </text>
           <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             <span fg={theme.textMuted}>phase: </span>
             <span fg={theme.text}>{phase}</span>
-          </text>
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.textMuted}>round: </span>
+            <span fg={theme.textMuted}>{" | round: "}</span>
             <span fg={theme.text}>{round ?? "-"}</span>
             <span fg={theme.textMuted}>{" | node: "}</span>
             <span fg={theme.text}>{graphNode ?? "-"}</span>
@@ -109,7 +110,7 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
           </text>
         </box>
 
-        <box flexGrow={2} flexDirection="column" gap={1}>
+        <box flexGrow={2} flexDirection="column" gap={0}>
           <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             Input
           </text>
@@ -117,40 +118,38 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
             <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
               <span fg={theme.textMuted}>input: </span>
               <span fg={theme.text}>{inputLabel}</span>
+              {medium ? (
+                <>
+                  <span fg={theme.textMuted}>{" | request: "}</span>
+                  <span fg={theme.text}>{requestId ?? "-"}</span>
+                </>
+              ) : null}
             </text>
           ) : null}
-          {graphState?.inputSummary?.title ? (
+          {titleText ? (
             <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
               <span fg={theme.textMuted}>title: </span>
-              <span fg={theme.text}>{graphState?.inputSummary?.title}</span>
+              <span fg={theme.text}>{titleText}</span>
             </text>
           ) : null}
-          {graphState?.inputSummary?.summary ? (
+          {summaryText ? (
             <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
               <span fg={theme.textMuted}>summary: </span>
-              <span fg={theme.text}>{graphState?.inputSummary?.summary}</span>
-            </text>
-          ) : null}
-          {medium ? (
-            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-              <span fg={theme.textMuted}>request: </span>
-              <span fg={theme.text}>{requestId ?? "-"}</span>
+              <span fg={theme.text}>{summaryText}</span>
             </text>
           ) : null}
         </box>
 
-        <box flexGrow={2} flexDirection="column" gap={1}>
+        <box flexGrow={2} flexDirection="column" gap={0}>
           <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             Progress
           </text>
-          {graphState ? (
-            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-              <span fg={theme.textMuted}>findings: </span>
-              <span fg={theme.text}>{unresolvedCount}</span>
-              <span fg={theme.textMuted}>{" | votes: "}</span>
-              <span fg={theme.text}>{`${voteApproveCount} approve / ${voteReviseCount} revise`}</span>
-            </text>
-          ) : null}
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            <span fg={theme.textMuted}>findings: </span>
+            <span fg={theme.text}>{unresolvedCount}</span>
+            <span fg={theme.textMuted}>{" | votes: "}</span>
+            <span fg={theme.text}>{`${voteApproveCount} approve / ${voteReviseCount} revise`}</span>
+          </text>
           <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             <span fg={theme.textMuted}>rebuttals: </span>
             <span fg={theme.text}>{rebuttalCount}</span>
@@ -163,22 +162,18 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
           </text>
         </box>
 
-        <box flexGrow={2} flexDirection="column" gap={1}>
+        <box flexGrow={2} flexDirection="column" gap={0}>
           <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             Artifacts
           </text>
-          {traceId ? (
-            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-              <span fg={theme.textMuted}>trace: </span>
-              <span fg={theme.text}>{traceId}</span>
-            </text>
-          ) : null}
-          {outputDir ? (
-            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-              <span fg={theme.textMuted}>output: </span>
-              <span fg={theme.text}>{outputDir}</span>
-            </text>
-          ) : null}
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            <span fg={theme.textMuted}>trace: </span>
+            <span fg={theme.text}>{traceId ?? "-"}</span>
+          </text>
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            <span fg={theme.textMuted}>output: </span>
+            <span fg={theme.text}>{outputDir ?? "(pending)"}</span>
+          </text>
           <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             <span fg={theme.textMuted}>view: </span>
             <span fg={theme.text}>press e</span>

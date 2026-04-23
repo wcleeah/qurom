@@ -60,7 +60,7 @@ const PanelScrollback = ({
   const scrollback = useStoreSelector(store, (s) => s.agents[roleKey]?.scrollback ?? [])
   if (scrollback.length === 0) {
     return (
-      <box flexGrow={1} paddingTop={1}>
+      <box flexGrow={1} minHeight={0} paddingTop={1}>
         <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
           (waiting for activity)
         </text>
@@ -74,6 +74,7 @@ const PanelScrollback = ({
         scrollRef.current = node as typeof scrollRef.current
       }}
       flexGrow={1}
+      minHeight={0}
       stickyScroll
       stickyStart="bottom"
       verticalScrollbarOptions={{
@@ -154,6 +155,7 @@ export const AgentPanel = ({
         borderColor={theme.borderSubtle}
         backgroundColor={theme.backgroundPanel}
         flexGrow={1}
+        minHeight={0}
         paddingLeft={1}
         paddingRight={1}
       >
@@ -162,16 +164,8 @@ export const AgentPanel = ({
     )
   }
 
-  const borderColor = selected
-    ? theme.selectionBorder
-    : agent.status === "running"
-      ? theme.runningBorder
-      : isDrafter
-        ? theme.drafter.borderColor
-        : theme.auditor.borderColor
+  const borderColor = selected || active ? theme.selectionBorder : theme.borderSubtle
   const borderStyle = isDrafter ? theme.drafter.borderStyle : theme.auditor.borderStyle
-  const toolLabel = agent.activeTool?.tool
-  const focusLabel = active ? "focus" : selected ? "selected" : undefined
 
   return (
     <box
@@ -180,13 +174,14 @@ export const AgentPanel = ({
       borderColor={borderColor}
       backgroundColor={isDrafter || emphasize ? theme.backgroundPanel : compact ? theme.backgroundElement : theme.backgroundPanel}
       flexGrow={1}
+      minHeight={0}
       flexDirection="column"
       paddingLeft={1}
       paddingRight={2}
       paddingTop={1}
       paddingBottom={1}
     >
-      <box flexDirection="row" justifyContent="space-between">
+      <box flexDirection="row" justifyContent="space-between" flexShrink={0}>
         <box flexDirection="column">
           <text fg={roleColor(isDrafter)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             {title}
@@ -199,24 +194,21 @@ export const AgentPanel = ({
           <text fg={statusColor(agent.status)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             {`${statusDot(agent.status)} ${agent.status}`}
           </text>
-          {focusLabel ? (
-            <text fg={theme.selectionBorder} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-              {focusLabel}
-            </text>
-          ) : null}
         </box>
       </box>
-      {toolLabel ? (
-        <text fg={theme.tool} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-          tool: {toolLabel}
-        </text>
-      ) : null}
-      {agent.pendingPermission ? (
-        <text fg={theme.permission} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-          permission: {agent.pendingPermission}
-        </text>
-      ) : null}
-      <PanelScrollback store={store} roleKey={roleKey} scrollRef={scrollRef} />
+      <box
+        border
+        borderStyle="single"
+        borderColor={theme.borderSubtle}
+        backgroundColor={theme.backgroundElement}
+        flexGrow={1}
+        minHeight={0}
+        marginTop={1}
+        paddingLeft={1}
+        paddingRight={1}
+      >
+        <PanelScrollback store={store} roleKey={roleKey} scrollRef={scrollRef} />
+      </box>
     </box>
   )
 }
