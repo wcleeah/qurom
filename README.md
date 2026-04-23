@@ -29,18 +29,18 @@ The generated document can be found in `./example/go-routine-parking.md`
   - It opens the opencode event bridge
   - It binds the telemetry handler and opencode event bridge with the bus
 6. And then the graph is invoked
-  6.1. Opencode session creation, summary agent generate summary if it is document mode, a bunch of initialization 
-  6.2. Draft agent starts to work, based on the topic:
-    6.2a. It will first generate an outline of the document
-    6.2b. By each section generate the draft for that section
-    6.2c. Stitch them together in a final prompt
-  6.3. Audit agents receive the draft, review it from different angles, vote for / against the draft, and give findings
-  6.4. Draft agents then review the findings, post a rebuttal or accept the defeat
-  6.5. Audit agents review the rebuttles, and post a re-rebuttal or accept the rebuttal
-  6.6. 4-5 loops until either they agreed or the limit is reached
-  6.7. Draft agents rewrite the draft and goes back to step 6.3
-  6.8. If everyone is happy, voted yes for the draft, everything is done!
-  6.9. Do some finalization, like write the document to an md, send telemetry and event via bus, summarize agent summarize the whole document
+- 6.1. Opencode session creation, summary agent generate summary if it is document mode, a bunch of initialization 
+- 6.2. Draft agent starts to work, based on the topic:
+  - 6.2a. It will first generate an outline of the document
+  - 6.2b. By each section generate the draft for that section
+  - 6.2c. Stitch them together in a final prompt
+- 6.3. Audit agents receive the draft, review it from different angles, vote for / against the draft, and give findings-=
+- 6.4. Draft agents then review the findings, post a rebuttal or accept the defeat
+- 6.5. Audit agents review the rebuttles, and post a re-rebuttal or accept the rebuttal
+- 6.6. 4-5 loops until either they agreed or the limit is reached
+- 6.7. Draft agents rewrite the draft and goes back to step 6.3
+- 6.8. If everyone is happy, voted yes for the draft, everything is done!
+- 6.9. Do some finalization, like write the document to an md, send telemetry and event via bus, summarize agent summarize the whole document
 7. Then the summary screen comes, showing the final verdict, summary, allow the user to review the document
 8. The user can choose to rerun, it will all go back to step 3
 
