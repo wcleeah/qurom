@@ -274,8 +274,11 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   const bridgeAbort = new AbortController()
   let bridgeStreamError: unknown
   if (signal) {
-    if (signal.aborted) bridgeAbort.abort(signal.reason)
-    else signal.addEventListener("abort", () => bridgeAbort.abort(signal.reason), { once: true })
+    if (signal.aborted) {
+        bridgeAbort.abort(signal.reason)
+    } else {
+        signal.addEventListener("abort", () => bridgeAbort.abort(signal.reason), { once: true })
+    }
   }
 
   const bridge = bridgeFactory(config, {

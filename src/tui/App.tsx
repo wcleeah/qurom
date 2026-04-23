@@ -76,6 +76,7 @@ export const App = ({ config, prerequisites, systemStatus, onExit }: AppProps) =
     "clarity-auditor",
   ])
 
+  // select to copy handling
   useEffect(() => {
     const onSelection = (selection: { getSelectedText: () => string; isDragging?: boolean } | null) => {
       if (!selection || selection.isDragging) return
