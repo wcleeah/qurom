@@ -1,18 +1,15 @@
 # research-qurom
-
-Terminal research workflow that runs one designated drafter and three auditors through a quorum review loop, with a local TUI built on `@opentui/react`.
+A agent loop that generate a research document on a specific topic powered by Opencode. It runs one designated drafter and three auditors agent through a quorum review loop, with a local TUI built on `@opentui/react`.
 
 ## What It Does
-
-- Accepts either a topic prompt or a drafted document
-- Runs a designated drafter to produce or revise the draft
-- Runs three auditors in parallel to review the draft
-- Aggregates findings, rebuttals, and approvals until the run is approved or fails
-- Streams live activity into a TUI with per-agent panels and summary screens
-- Captures optional Langfuse telemetry when configured
+- Accepts either a topic prompt or a topic document.
+- Runs a designated drafter to produce a draft.
+- Runs three auditors in parallel to review the draft from different perspective. 
+- Aggregates findings, rebuttals, and approvals until the run is approved or fails.
+- Streams live activity into a TUI with per-agent panels, dashboard and a summary screen after run.
+- Captures optional Langfuse telemetry when configured.
 
 ## Current Agent Roles
-
 - `research-drafter`
 - `source-auditor`
 - `logic-auditor`
@@ -21,7 +18,6 @@ Terminal research workflow that runs one designated drafter and three auditors t
 These are configured in `quorum.config.json` and backed by local agent definitions under `.opencode/agents/`.
 
 ## Requirements
-
 - Bun
 - An OpenCode server reachable at `OPENCODE_BASE_URL`
 - Local agent and skill definitions available to that OpenCode instance
