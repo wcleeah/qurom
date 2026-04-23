@@ -10,3 +10,6 @@
 [submodule "reference/opentui"]
 	path = reference/opentui
 	url = https://github.com/anomalyco/opentui.git
+[submodule "reference/tome"]
+	path = reference/tome
+	url = git@github.com:wcleeah/tome.git

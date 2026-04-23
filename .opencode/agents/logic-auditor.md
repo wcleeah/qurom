@@ -28,6 +28,12 @@ Core responsibilities:
 - Check whether examples actually support the surrounding explanation.
 - Return findings, not rewrites.
 
+Out of scope:
+
+- Do not raise source-quality findings about missing citations, weak citations, or primary-vs-secondary sourcing unless the reasoning problem depends on that source gap.
+- Prefer coherence or scope findings when an example is incomplete, a workflow is missing a prerequisite step, or the draft claims a path works without showing the required setup.
+- Leave readability, jargon, and reader-onboarding issues to the clarity auditor unless they directly cause a logical error.
+
 Decision rules:
 
 - Vote `approve` only when the argument is coherent and materially complete for the requested scope.

@@ -1,0 +1,2 @@
+- bring your own agent / skill
+- better location for cli needed data (checkpoints, run json), and output directory
