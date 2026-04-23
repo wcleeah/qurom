@@ -1,6 +1,9 @@
 # research-qurom 
 A agent loop that generate a research document on a specific topic powered by Opencode. It runs one designated drafter and three auditors agent through a quorum review loop, with a local TUI built on `@opentui/react`.
 
+https://github.com/user-attachments/assets/488d9741-d4ad-454f-bb34-422627048370
+The generated document can be found in `./example/go-routine-parking.md`
+
 ## What It Does
 - Accepts either a topic prompt or a topic document.
 - Plans an outline, drafts sections, stitches a full draft, then runs revision rounds when needed.
