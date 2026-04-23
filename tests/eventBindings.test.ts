@@ -32,7 +32,7 @@ describe("bindBusToStore", () => {
       setCount += 1
       realSet(next)
     }) as typeof store.setState
-    const unbind = bindBusToStore({ bus, store, config, flushIntervalMs: 25 })
+    const binding = bindBusToStore({ bus, store, config, flushIntervalMs: 25 })
 
     // Seed drafter session so reasoning events are routed.
     bus.emit({ kind: "session.created", sessionID: "d-s", role: "drafter" })
@@ -48,7 +48,7 @@ describe("bindBusToStore", () => {
     expect(reasoning).toHaveLength(100)
     expect(reasoning.map((e) => e.text)).toEqual(Array.from({ length: 100 }, (_, i) => `r-${i}`))
 
-    unbind()
+    binding.unbind()
   })
 
   test("unbind stops further dispatch", async () => {
@@ -60,12 +60,12 @@ describe("bindBusToStore", () => {
       setCount += 1
       realSet(next)
     }) as typeof store.setState
-    const unbind = bindBusToStore({ bus, store, config, flushIntervalMs: 10 })
+    const binding = bindBusToStore({ bus, store, config, flushIntervalMs: 10 })
     bus.emit({ kind: "session.created", sessionID: "d-s", role: "drafter" })
     await delay(20)
     expect(setCount).toBe(1)
 
-    unbind()
+    binding.unbind()
     bus.emit({ kind: "agent.reasoning", sessionID: "d-s", key: "after", text: "after unbind" })
     await delay(20)
     expect(setCount).toBe(1)
@@ -91,6 +91,34 @@ describe("bindBusToStore", () => {
 
     expect(setCount).toBe(2)
     expect(store.getState().lifecycle.phase).toBe("running")
-    unbind()
+    unbind.unbind()
+  })
+
+  test("flushAndUnbind preserves pending final result events", () => {
+    const bus = createEventBus()
+    const store = createRunStore({ config })
+    const binding = bindBusToStore({ bus, store, config, flushIntervalMs: 10_000 })
+
+    bus.emit({
+      kind: "result",
+      runResult: {
+        status: "approved",
+        round: 1,
+        approvedAgents: ["source-auditor", "logic-auditor", "clarity-auditor"],
+        unresolvedFindings: [],
+      },
+    })
+    bus.emit({ kind: "lifecycle", phase: "complete", requestId: "req-final", outputDir: "runs/final" })
+
+    binding.flushAndUnbind()
+
+    expect(store.getState().result).toEqual({
+      status: "approved",
+      round: 1,
+      approvedAgents: ["source-auditor", "logic-auditor", "clarity-auditor"],
+      unresolvedFindings: [],
+    })
+    expect(store.getState().lifecycle.phase).toBe("complete")
+    expect(store.getState().lifecycle.outputDir).toBe("runs/final")
   })
 })
