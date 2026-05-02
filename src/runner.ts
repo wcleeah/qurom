@@ -44,10 +44,19 @@ export type RunnerEvent =
     }
   | {
       kind: "agent.permission"
+      requestID: string
       permission: string
+      patterns: string[]
+      always: string[]
       sessionID: string
       messageID?: string
       callID?: string
+    }
+  | {
+      kind: "agent.permission.replied"
+      requestID: string
+      reply: "once" | "always" | "reject"
+      sessionID: string
     }
   | { kind: "result"; runResult: unknown }
 
@@ -570,7 +579,9 @@ export function describeRunnerEvent(event: RunnerEvent): string {
     case "agent.tool":
       return `agent.tool:${event.sessionID}:${event.tool}:${event.status}`
     case "agent.permission":
-      return `agent.permission:${event.sessionID}:${event.permission}`
+      return `agent.permission:${event.sessionID}:${event.requestID}:${event.permission}`
+    case "agent.permission.replied":
+      return `agent.permission.replied:${event.sessionID}:${event.requestID}:${event.reply}`
     case "result":
       return "result"
     default:

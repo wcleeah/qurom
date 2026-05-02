@@ -125,7 +125,7 @@ async function flush() {
 }
 
 describe("createOpencodeEventBridge", () => {
-  test("translates session.status, session.error, permission, message.updated to typed bus events without role", async () => {
+  test("translates session.status, session.error, permission, permission replies, message.updated to typed bus events without role", async () => {
     const bus = createEventBus()
     const events = collect(bus)
     const { client, controller } = makeStubClient()
@@ -146,7 +146,19 @@ describe("createOpencodeEventBridge", () => {
     })
     controller.push({
       type: "permission.asked",
-      properties: { id: "p1", sessionID: "s1", permission: "read", tool: undefined },
+      properties: {
+        id: "p1",
+        sessionID: "s1",
+        permission: "read",
+        patterns: ["src/**"],
+        metadata: {},
+        always: ["src/**"],
+        tool: undefined,
+      },
+    })
+    controller.push({
+      type: "permission.replied",
+      properties: { sessionID: "s1", requestID: "p1", reply: "once" },
     })
     controller.push({
       type: "message.updated",
@@ -160,6 +172,7 @@ describe("createOpencodeEventBridge", () => {
     expect(kinds).toContain("session.status")
     expect(kinds).toContain("session.error")
     expect(kinds).toContain("agent.permission")
+    expect(kinds).toContain("agent.permission.replied")
     expect(kinds).toContain("agent.message.start")
 
     const status = events.find((e) => e.kind === "session.status")
@@ -171,8 +184,18 @@ describe("createOpencodeEventBridge", () => {
     expect(err).not.toHaveProperty("role")
 
     const perm = events.find((e) => e.kind === "agent.permission")
-    expect(perm).toMatchObject({ kind: "agent.permission", permission: "read", sessionID: "s1" })
+    expect(perm).toMatchObject({
+      kind: "agent.permission",
+      requestID: "p1",
+      permission: "read",
+      patterns: ["src/**"],
+      always: ["src/**"],
+      sessionID: "s1",
+    })
     expect(perm).not.toHaveProperty("role")
+
+    const replied = events.find((e) => e.kind === "agent.permission.replied")
+    expect(replied).toMatchObject({ kind: "agent.permission.replied", requestID: "p1", reply: "once", sessionID: "s1" })
 
     const start = events.find((e) => e.kind === "agent.message.start")
     expect(start).toMatchObject({ kind: "agent.message.start", messageID: "m1", sessionID: "s1" })

@@ -1,5 +1,5 @@
 import { toJsonSchema } from "@langchain/core/utils/json_schema"
-import { createOpencodeClient, type Part, type Session, type TextPartInput } from "@opencode-ai/sdk/v2"
+import { createOpencodeClient, type Part, type PermissionReplyData, type Session, type TextPartInput } from "@opencode-ai/sdk/v2"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "./config"
@@ -379,6 +379,29 @@ export async function abortSession(config: RuntimeConfig, sessionID: string) {
 
   if (response.error) {
     throw new Error(`Failed to abort OpenCode session "${sessionID}": ${JSON.stringify(response.error)}`)
+  }
+}
+
+export async function replyToPermission(
+  config: RuntimeConfig,
+  input: {
+    requestID: string
+    reply: NonNullable<PermissionReplyData["body"]>["reply"]
+    message?: string
+  },
+) {
+  const response = await createOpencodeClient({
+    baseUrl: config.env.OPENCODE_BASE_URL,
+    directory: config.env.OPENCODE_DIRECTORY,
+  }).permission.reply({
+    requestID: input.requestID,
+    directory: config.env.OPENCODE_DIRECTORY,
+    reply: input.reply,
+    message: input.message,
+  })
+
+  if (response.error) {
+    throw new Error(`Failed to reply to OpenCode permission "${input.requestID}": ${JSON.stringify(response.error)}`)
   }
 }
 

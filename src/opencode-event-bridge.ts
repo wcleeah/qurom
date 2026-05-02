@@ -163,10 +163,23 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
 
         bus.emit({
           kind: "agent.permission",
+          requestID: event.properties.id,
           permission: event.properties.permission,
+          patterns: event.properties.patterns,
+          always: event.properties.always,
           sessionID: event.properties.sessionID,
           messageID: event.properties.tool?.messageID,
           callID: event.properties.tool?.callID,
+        })
+        continue
+      }
+
+      if (event.type === "permission.replied") {
+        bus.emit({
+          kind: "agent.permission.replied",
+          requestID: event.properties.requestID,
+          reply: event.properties.reply,
+          sessionID: event.properties.sessionID,
         })
         continue
       }
