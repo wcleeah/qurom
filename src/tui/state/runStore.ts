@@ -20,6 +20,7 @@ export type AgentState = {
   status: AgentStatus
   lastEventAt: number
   model?: string
+  variant?: string
   scrollback: ScrollbackEntry[]
   tokensIn: number
   tokensOut: number
@@ -202,6 +203,17 @@ export function reduce(state: RunStoreState, event: RunnerEvent, config: Runtime
           { kind: "system", text: `error: ${event.name}${event.message ? `: ${event.message}` : ""}`, ts },
         ),
       )
+    }
+    case "agent.metadata": {
+      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
+      if (!entry) return state
+      const [key] = entry
+      return withAgent(state, key, (agent) => ({
+        ...agent,
+        model: event.model ?? agent.model,
+        variant: event.variant ?? agent.variant,
+        lastEventAt: ts,
+      }))
     }
     case "agent.message.start": {
       const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)

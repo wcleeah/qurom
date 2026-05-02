@@ -33,6 +33,7 @@ export async function summarizeMarkdown(input: {
     run: TelemetryRun
     parentObservation?: TraceObservation
     trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
+    trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
     name: string
     metadata?: Record<string, unknown>
   }
@@ -49,6 +50,7 @@ export async function summarizeMarkdown(input: {
           run: input.telemetry.run,
           parentObservation: input.telemetry.parentObservation,
           trackSessionObservation: input.telemetry.trackSessionObservation,
+          trackAgentMetadata: input.telemetry.trackAgentMetadata,
           name: input.telemetry.name,
           metadata: {
             agentName: input.config.quorumConfig.summarizerAgent,

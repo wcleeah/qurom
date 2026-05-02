@@ -63,12 +63,14 @@ describe("createInitialState", () => {
   test("merges initial agent metadata into seeded agent slots", () => {
     const state = createInitialState(config, {
       agents: {
-        "research-drafter": { model: "opencode/minimax-m2.5-free" },
+        "research-drafter": { model: "opencode/minimax-m2.5-free", variant: "thinking" },
       } as never,
     })
 
     expect(state.agents["research-drafter"]?.model).toBe("opencode/minimax-m2.5-free")
+    expect(state.agents["research-drafter"]?.variant).toBe("thinking")
     expect(state.agents["source-auditor"]?.model).toBeUndefined()
+    expect(state.agents["source-auditor"]?.variant).toBeUndefined()
   })
 })
 
@@ -143,6 +145,18 @@ describe("reduce", () => {
     const agent = state.agents["research-drafter"]!
     expect(agent.status).toBe("error")
     expect(agent.scrollback.at(-1)?.text).toBe("error: Boom: kaboom")
+  })
+
+  test("agent.metadata updates model and variant for the matching session", () => {
+    let state = createInitialState(config)
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
+    state = reduce(
+      state,
+      { kind: "agent.metadata", agent: "research-drafter", sessionID: "d-s", model: "opencode/gpt-5.4", variant: "high" },
+      config,
+    )
+    expect(state.agents["research-drafter"]?.model).toBe("opencode/gpt-5.4")
+    expect(state.agents["research-drafter"]?.variant).toBe("high")
   })
 
   test("agent.message.start appends an assistant-started entry", () => {

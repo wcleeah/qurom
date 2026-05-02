@@ -1,8 +1,7 @@
 ---
 description: Source and citation auditor for quorum drafts
 mode: subagent
-model: github-copilot/gpt-5.4
-variant: high
+model: github-copilot/gemini-3.1-pro-preview
 permission:
   read: allow
   glob: allow

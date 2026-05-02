@@ -11,6 +11,7 @@ const assistantInfoSchema = z.object({
   error: z.unknown().optional(),
   modelID: z.string().optional(),
   providerID: z.string().optional(),
+  variant: z.string().optional(),
 })
 
 function extractText(parts: Part[]) {
@@ -90,6 +91,7 @@ export async function promptAgent<T>(input: {
     run: TelemetryRun
     parentObservation?: TraceObservation
     trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
+    trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
     name: string
     input?: unknown
     metadata?: unknown
@@ -125,6 +127,7 @@ export async function promptAgent<T>(input: {
   let repaired = false
   let model: string | undefined
   let provider: string | undefined
+  let variant: string | undefined
 
   async function sendPrompt(prompt: string) {
     const generationObservation =
@@ -177,6 +180,8 @@ export async function promptAgent<T>(input: {
     const info = assistantInfoSchema.parse(response.data.info)
     model = info.modelID
     provider = info.providerID
+    variant = info.variant ?? input.variant
+    input.telemetry?.trackAgentMetadata?.({ agent: input.agent, sessionID: input.sessionID, model, variant })
 
     if (info.error) {
       await input.telemetry?.run.endObservation(generationObservation, {
@@ -191,7 +196,7 @@ export async function promptAgent<T>(input: {
             agent: input.agent,
             sessionID: input.sessionID,
             provider: info.providerID,
-            variant: input.variant,
+            variant,
           }),
           model: info.modelID,
         },
@@ -211,7 +216,7 @@ export async function promptAgent<T>(input: {
           agent: input.agent,
           sessionID: input.sessionID,
           provider: info.providerID,
-          variant: input.variant,
+          variant,
         }),
         model: info.modelID,
       },
@@ -238,6 +243,7 @@ export async function promptAgent<T>(input: {
           sessionId: input.sessionID,
           model: response.model,
           provider: response.provider,
+          variant,
           repaired,
         },
       })
@@ -268,6 +274,7 @@ export async function promptAgent<T>(input: {
           sessionId: input.sessionID,
           model,
           provider,
+          variant,
           repaired,
         },
       })
@@ -333,6 +340,7 @@ export async function promptAgent<T>(input: {
         sessionId: input.sessionID,
         model,
         provider,
+        variant,
         repaired,
       },
     })

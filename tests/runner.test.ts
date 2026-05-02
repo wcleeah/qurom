@@ -146,6 +146,7 @@ describe("createEventBus", () => {
       { kind: "session.created", sessionID: "s", role: "drafter" },
       { kind: "session.status", sessionID: "s", status: "active" },
       { kind: "session.error", sessionID: "s", name: "X" },
+      { kind: "agent.metadata", agent: "research-drafter", sessionID: "s", model: "opencode/gpt-5.4", variant: "high" },
       { kind: "agent.message.start", sessionID: "s", messageID: "m" },
       { kind: "agent.reasoning", sessionID: "s", key: "part-1", text: "hmm" },
       {
@@ -374,6 +375,69 @@ describe("runResearchPipeline", () => {
     })
 
     expect(bridgeRunDir).toContain("hybrid-reranking-in-qdrant-req-1")
+  })
+
+  test("adds actual used agent variants to trace metadata", async () => {
+    const { config: configWithTempArtifacts } = await makeConfigWithTempArtifacts()
+    const bus = createEventBus()
+    const traceUpdates: Array<{ output?: unknown; metadata?: Record<string, unknown> }> = []
+
+    const telemetryFactory = async (): Promise<TelemetryRun> => ({
+      enabled: true,
+      traceId: "trace-1",
+      rootObservation: { id: "root-1", traceId: "trace-1", type: "Span", observation: {} as TraceObservation["observation"] },
+      runWithRootObservation: async (fn) => fn(),
+      startObservation: async () => undefined,
+      endObservation: async () => {},
+      async updateTrace(input) {
+        traceUpdates.push(input)
+      },
+      shutdown: async () => {},
+    })
+
+    const prerequisites = {
+      agents: [
+        { name: "research-drafter", variant: "low" },
+        { name: "source-auditor", variant: "low" },
+      ],
+    } as unknown as RunResearchPipelineArgs["prerequisites"]
+
+    const graphFactory: GraphFactory = ((_, __, input) => ({
+      invoke: async () => {
+        input?.observer?.onSessionCreated?.({ sessionID: "drafter-session", role: "drafter", requestId: "req-1" })
+        input?.telemetry?.trackAgentMetadata?.({
+          agent: "research-drafter",
+          sessionID: "drafter-session",
+          model: "opencode/gpt-5.4",
+          variant: "high",
+        })
+        return {
+          requestId: "req-1",
+          status: "approved",
+          round: 1,
+          approvedAgents: ["source-auditor"],
+          unresolvedFindings: [],
+          failureReason: undefined,
+          outputPath: join(configWithTempArtifacts.quorumConfig.artifactDir, "req-1"),
+        }
+      },
+    })) as GraphFactory
+
+    await runResearchPipeline({
+      config: configWithTempArtifacts,
+      prerequisites,
+      promptBundle,
+      request: { inputMode: "topic", topic: "trace variants" },
+      bus,
+      bridgeFactory: () => ({ async start() {}, async stop() {} }),
+      telemetryFactory,
+      graphFactory,
+    })
+
+    expect(traceUpdates).toHaveLength(1)
+    expect(traceUpdates[0]?.metadata?.agentVariants).toEqual({
+      "research-drafter": "high",
+    })
   })
 })
 

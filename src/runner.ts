@@ -25,6 +25,7 @@ export type RunnerEvent =
   | { kind: "session.created"; sessionID: string; role: string }
   | { kind: "session.status"; sessionID: string; status: string }
   | { kind: "session.error"; sessionID: string; name: string; message?: string }
+  | { kind: "agent.metadata"; agent: string; sessionID: string; model?: string; variant?: string }
   | { kind: "agent.message.start"; sessionID: string; messageID: string }
   | { kind: "agent.message.text"; sessionID: string; key: string; text: string; done?: boolean }
   | { kind: "agent.reasoning"; sessionID: string; key: string; text: string; done?: boolean }
@@ -343,6 +344,11 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
     },
   })
   const telemetryListener = attachTelemetryListener(bus, telemetry)
+  const actualAgentVariants = new Map<string, string>()
+  const trackAgentMetadata = (input: { agent: string; sessionID: string; model?: string; variant?: string }) => {
+    if (input.variant) actualAgentVariants.set(input.agent, input.variant)
+    bus.emit({ kind: "agent.metadata", ...input })
+  }
   const sessionIDs = new Set<string>()
   const offSessionCreated = bus.on((event) => {
     if (event.kind !== "session.created") return
@@ -377,6 +383,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
         telemetry: {
           run: telemetry,
           trackSessionObservation: telemetryListener.trackSessionObservation,
+          trackAgentMetadata,
         },
       })
 
@@ -401,6 +408,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
         outputPath: invocation.outputPath,
         inputSummaryTitle: invocation.inputSummary?.title,
         artifactSummaryTitle: invocation.artifactSummary?.title,
+        agentVariants: Object.fromEntries(actualAgentVariants),
         traced: telemetry.enabled,
       }
 
@@ -491,6 +499,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
           unresolvedFindings: salvagedState.unresolvedFindings.length,
           failureReason: salvagedState.failureReason,
           outputPath: salvagedState.outputPath,
+          agentVariants: Object.fromEntries(actualAgentVariants),
           recoveredFromCheckpoint: true,
           traced: telemetry.enabled,
         },
@@ -550,6 +559,8 @@ export function describeRunnerEvent(event: RunnerEvent): string {
       return `session.status:${event.sessionID}:${event.status}`
     case "session.error":
       return `session.error:${event.sessionID}:${event.name}`
+    case "agent.metadata":
+      return `agent.metadata:${event.sessionID}:${event.agent}`
     case "agent.message.start":
       return `agent.message.start:${event.sessionID}`
     case "agent.message.text":

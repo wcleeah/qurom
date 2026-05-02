@@ -1,8 +1,7 @@
 ---
 description: Reasoning and coherence auditor for quorum drafts
 mode: subagent
-model: github-copilot/gpt-5.4
-variant: high 
+model: github-copilot/gpt-5.4-mini
 permission:
   read: allow
   glob: allow

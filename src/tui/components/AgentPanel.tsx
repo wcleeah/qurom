@@ -48,6 +48,11 @@ const formatModel = (value?: string): string => {
   return value.replace(/^opencode\//, "")
 }
 
+const formatVariant = (value?: string): string | undefined => {
+  if (!value) return undefined
+  return `variant: ${value}`
+}
+
 const PanelScrollback = ({
   store,
   roleKey,
@@ -166,6 +171,7 @@ export const AgentPanel = ({
 
   const borderColor = selected || active ? theme.selectionBorder : theme.borderSubtle
   const borderStyle = isDrafter ? theme.drafter.borderStyle : theme.auditor.borderStyle
+  const variantLabel = formatVariant(agent.variant)
 
   return (
     <box
@@ -189,6 +195,11 @@ export const AgentPanel = ({
           <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
             {formatModel(agent.model)}
           </text>
+          {variantLabel ? (
+            <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+              {variantLabel}
+            </text>
+          ) : null}
         </box>
         <box flexDirection="column" alignItems="flex-end">
           <text fg={statusColor(agent.status)} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>

@@ -1,8 +1,7 @@
 ---
 description: Clarity and structure auditor for quorum drafts
 mode: subagent
-model: github-copilot/gpt-5.4
-variant: medium
+model: github-copilot/claude-sonnet-4.6
 permission:
   read: allow
   glob: allow

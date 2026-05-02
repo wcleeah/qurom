@@ -44,6 +44,7 @@ type GraphTelemetry = {
   run: TelemetryRun
   currentNode?: TraceObservation
   trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
+  trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
 }
 
 function observeNode(observer: RunObserver | undefined, node: string, state: ResearchState | GraphInput) {
@@ -780,6 +781,7 @@ function graphAgentTelemetry(input: {
       sessionId: input.sessionId,
     },
     trackSessionObservation: input.telemetry.trackSessionObservation,
+    trackAgentMetadata: input.telemetry.trackAgentMetadata,
   }
 }
 

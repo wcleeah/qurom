@@ -52,6 +52,7 @@ function buildAgentInitialState(prerequisites: RuntimePrerequisites, config: Run
       name,
       {
         model: byName.get(name)?.model?.modelID,
+        variant: byName.get(name)?.variant,
       },
     ]),
   )
