@@ -3,7 +3,15 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { buildRunDirName, buildRunDirSlug, ensureRunDirPath, removeEmptyRunDir, resolveRunDir } from "../src/output.ts"
+import {
+  buildRunDirName,
+  buildRunDirSlug,
+  ensureRunDirPath,
+  removeEmptyRunDir,
+  resolveRunDir,
+  writeRunJsonArtifact,
+  writeRunTextArtifact,
+} from "../src/output.ts"
 
 describe("output helpers", () => {
   test("buildRunDirName uses a short readable topic slug with the request id suffix", () => {
@@ -79,5 +87,19 @@ describe("output helpers", () => {
 
     expect(await Bun.file(emptyDir).exists()).toBe(false)
     expect(await Bun.file(join(nonEmptyDir, "final.md")).exists()).toBe(true)
+  })
+
+  test("writeRunTextArtifact and writeRunJsonArtifact create the run dir and write content", async () => {
+    const root = await mkdtemp(join(tmpdir(), "qurom-output-"))
+    const runDir = join(root, "artifacts")
+
+    await writeRunTextArtifact(runDir, "draft-round-1.md", "hello world")
+    await writeRunJsonArtifact(runDir, "request.json", { requestId: "req-1", inputMode: "topic" })
+
+    expect(await Bun.file(join(runDir, "draft-round-1.md")).text()).toBe("hello world")
+    expect(await Bun.file(join(runDir, "request.json")).json()).toEqual({
+      requestId: "req-1",
+      inputMode: "topic",
+    })
   })
 })

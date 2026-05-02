@@ -3,12 +3,18 @@ import { END, START, StateGraph } from "@langchain/langgraph"
 
 import { BunSqliteSaver } from "./checkpointer"
 import type { RuntimeConfig } from "./config"
-import { ensureRunDirPath, resolveRunDir, writeApprovedArtifacts, writeFailedArtifacts } from "./output"
+import {
+  ensureRunDirPath,
+  resolveRunDir,
+  writeApprovedArtifacts,
+  writeFailedArtifacts,
+  writeRunJsonArtifact,
+  writeRunTextArtifact,
+} from "./output"
 import { createSession, promptAgent } from "./opencode"
 import type { PromptBundle } from "./prompt-assets"
 import { summarizeMarkdown } from "./summarizer"
 import {
-  draftOutlineSchema,
   aggregatedFindingSchema,
   aggregatedFindingsSchema,
   type ActiveRebuttal,
@@ -129,40 +135,13 @@ function requestContextBlock(state: ResearchState, options?: { includeDocumentTe
   return sections.join("\n\n")
 }
 
-function outlinePrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
-  return [
-    promptBundle.assets.deepDiveContract,
-    promptBundle.assets.draftOutline,
-    researchToolBlock(config),
-    `Plan a source-backed deep dive for ${requestLabel(state)}.`,
-    "Return only JSON that matches the requested schema.",
-    requestContextBlock(state, { includeDocumentText: true }),
-  ].join("\n\n")
-}
-
 function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
   return [
     promptBundle.assets.deepDiveContract,
     promptBundle.assets.draftFullDraft,
     researchToolBlock(config),
-    `Write the full draft for ${requestLabel(state)}.`,
-    `Document scaffold:\n${JSON.stringify(
-      {
-        shortAnswer: state.outline?.shortAnswer,
-        startingPoint: state.outline?.startingPoint,
-        drivingQuestion: state.outline?.drivingQuestion,
-        finishLine: state.outline?.finishLine,
-        coreMisconception: state.outline?.coreMisconception,
-        lightbulbMoment: state.outline?.lightbulbMoment,
-        runningExample: state.outline?.runningExample,
-        prerequisiteTerms: state.outline?.prerequisiteTerms,
-        likelyReaderQuestions: state.outline?.likelyReaderQuestions,
-        requiredSiblingMechanisms: state.outline?.requiredSiblingMechanisms,
-      },
-      null,
-      2,
-    )}`,
-    `Approved outline:\n${JSON.stringify(state.outline, null, 2)}`,
+    `Write the initial full draft for ${requestLabel(state)}.`,
+    "Choose the structure that best fits the topic. The only required top-level heading is `## Sources`.",
     requestContextBlock(state),
   ]
     .filter(Boolean)
@@ -291,30 +270,78 @@ function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state
     `Revise this draft for ${requestLabel(state)}.`,
     "Return markdown only.",
     "Preserve correct material where it still supports a gap-free explanation, but rewrite aggressively when needed for closure.",
-    "The final draft must still include a Sources section.",
-    state.outline
-      ? `Approved outline:\n${JSON.stringify(
-          {
-            shortAnswer: state.outline.shortAnswer,
-            startingPoint: state.outline.startingPoint,
-            drivingQuestion: state.outline.drivingQuestion,
-            finishLine: state.outline.finishLine,
-            coreMisconception: state.outline.coreMisconception,
-            lightbulbMoment: state.outline.lightbulbMoment,
-            runningExample: state.outline.runningExample,
-            prerequisiteTerms: state.outline.prerequisiteTerms,
-            likelyReaderQuestions: state.outline.likelyReaderQuestions,
-            requiredSiblingMechanisms: state.outline.requiredSiblingMechanisms,
-          },
-          null,
-          2,
-        )}`
-      : "",
+    "The final draft must still include a `## Sources` section.",
     "Current draft:",
     state.draft,
     "Unresolved findings:",
     JSON.stringify(state.unresolvedFindings, null, 2),
   ].join("\n\n")
+}
+
+async function persistRequestArtifact(state: ResearchState) {
+  if (!state.outputPath) return
+
+  await writeRunJsonArtifact(state.outputPath, "request.json", {
+    requestId: state.requestId,
+    inputMode: state.inputMode,
+    topic: state.topic,
+    documentPath: state.documentPath,
+    inputSummary: state.inputSummary,
+  })
+}
+
+async function persistDraftArtifact(state: ResearchState, round: number) {
+  if (!state.outputPath) return
+  await writeRunTextArtifact(state.outputPath, `draft-round-${round}.md`, state.draft)
+}
+
+async function persistAuditsArtifact(state: ResearchState) {
+  if (!state.outputPath) return
+  await writeRunJsonArtifact(state.outputPath, `audits-round-${state.round}.json`, state.audits)
+}
+
+async function persistDrafterFindingReviewArtifact(
+  state: ResearchState,
+  review: { acceptedFindingIds: string[]; rebuttals: Rebuttal[] },
+) {
+  if (!state.outputPath) return
+  await writeRunJsonArtifact(state.outputPath, `drafter-finding-review-round-${state.round}.json`, review)
+}
+
+async function persistAuditorRebuttalResponsesArtifact(state: ResearchState) {
+  if (!state.outputPath) return
+
+  const turn = Math.max(
+    1,
+    ...Object.values(state.currentRebuttalResponsesByFinding).map((response) => response.turn),
+  )
+  await writeRunJsonArtifact(
+    state.outputPath,
+    `auditor-rebuttal-responses-round-${state.round}-turn-${turn}.json`,
+    state.currentRebuttalResponsesByFinding,
+  )
+}
+
+async function persistDrafterRebuttalReviewArtifact(
+  state: ResearchState,
+  review: { acceptedFindingIds: string[]; rebuttals: Rebuttal[] },
+) {
+  if (!state.outputPath) return
+
+  const turn = Math.max(
+    1,
+    ...Object.values(state.activeRebuttals).map((rebuttal) => state.rebuttalTurnCounts[rebuttal.findingId] ?? 1),
+  )
+  await writeRunJsonArtifact(
+    state.outputPath,
+    `drafter-rebuttal-review-round-${state.round}-turn-${turn}.json`,
+    review,
+  )
+}
+
+async function persistAggregatedFindingsArtifact(state: ResearchState, input: AggregatedFindings) {
+  if (!state.outputPath) return
+  await writeRunJsonArtifact(state.outputPath, `aggregated-findings-round-${state.round}.json`, input)
 }
 
 export async function summarizeInputDocument(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
@@ -359,7 +386,7 @@ export async function summarizeInputDocument(config: RuntimeConfig, state: Resea
 export async function prepareOutputPath(config: RuntimeConfig, state: ResearchState) {
   assertStatus(state, "drafting", "prepareOutputPath")
 
-  return researchStateSchema.parse({
+  const nextState = researchStateSchema.parse({
     ...state,
     outputPath: resolveRunDir(config.quorumConfig.artifactDir, {
       requestId: state.requestId,
@@ -370,6 +397,9 @@ export async function prepareOutputPath(config: RuntimeConfig, state: ResearchSt
       slugHint: state.inputSummary?.slugHint,
     }),
   })
+
+  await persistRequestArtifact(nextState)
+  return nextState
 }
 
 function findingStateKey(input: { findingId: string }) {
@@ -573,7 +603,6 @@ export async function ingestRequest(input: GraphInput) {
   const baseState = {
     requestId,
     round: 0,
-    outline: undefined,
     draft: "",
     audits: [],
     auditSessionIds: {},
@@ -634,39 +663,9 @@ async function bootstrapRun(config: RuntimeConfig, state: ResearchState) {
   })
 }
 
-async function draftOutline(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
-  assertStatus(state, "drafting", "draftOutline")
-  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during draftOutline")
-
-  const response = await promptAgent({
-    config,
-    sessionID: state.drafterSessionId,
-    agent: config.quorumConfig.designatedDrafter,
-    prompt: outlinePrompt(config, promptBundle, state),
-    schema: draftOutlineSchema,
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.draftOutline",
-      agentName: config.quorumConfig.designatedDrafter,
-      sessionId: state.drafterSessionId,
-    }),
-  })
-
-  if (!response.structured) {
-    throw new Error("Missing structured outline from designated drafter")
-  }
-
-  return researchStateSchema.parse({
-    ...state,
-    outline: response.structured,
-  })
-}
-
 async function draftFullDraft(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
   assertStatus(state, "drafting", "draftFullDraft")
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during draftFullDraft")
-  if (!state.outline) throw new Error("Missing outline during draftFullDraft")
 
   const response = await promptAgent({
     config,
@@ -682,16 +681,19 @@ async function draftFullDraft(config: RuntimeConfig, promptBundle: PromptBundle,
       input: {
         requestId: state.requestId,
         round: state.round,
-        sectionCount: state.outline.sections.length,
+        inputMode: state.inputMode,
       },
     }),
   })
 
-  return researchStateSchema.parse({
+  const nextState = researchStateSchema.parse({
     ...state,
     draft: response.text ?? state.draft,
     status: "auditing",
   })
+
+  await persistDraftArtifact(nextState, nextState.round)
+  return nextState
 }
 
 function graphAgentTelemetry(input: {
@@ -792,7 +794,7 @@ async function runParallelAudits(config: RuntimeConfig, promptBundle: PromptBund
     }
   }
 
-  return researchStateSchema.parse({
+  const nextState = researchStateSchema.parse({
     ...state,
     audits,
     activeRebuttals: {},
@@ -801,6 +803,9 @@ async function runParallelAudits(config: RuntimeConfig, promptBundle: PromptBund
     status: "reviewing_findings",
     failureReason: undefined,
   })
+
+  await persistAuditsArtifact(nextState)
+  return nextState
 }
 
 async function reviewFindingsByDrafter(
@@ -852,6 +857,8 @@ async function reviewFindingsByDrafter(
   if (!response.structured) {
     throw new Error("Missing structured drafter finding review")
   }
+
+  await persistDrafterFindingReviewArtifact(state, response.structured)
 
   const accepted = new Set<string>()
   const currentFindingIds = new Set<string>()
@@ -1048,12 +1055,15 @@ async function runTargetedRebuttals(
     }
   }
 
-  return researchStateSchema.parse({
+  const nextState = researchStateSchema.parse({
     ...state,
     currentRebuttalResponsesByFinding,
     rebuttalResponseHistory: appendRebuttalResponseHistory(state, currentRebuttalResponsesByFinding),
     status: "reviewing_rebuttal_responses",
   })
+
+  await persistAuditorRebuttalResponsesArtifact(nextState)
+  return nextState
 }
 
 async function reviewRebuttalResponses(
@@ -1120,6 +1130,8 @@ async function reviewRebuttalResponses(
   if (!response.structured) {
     throw new Error("Missing structured drafter rebuttal review")
   }
+
+  await persistDrafterRebuttalReviewArtifact(state, response.structured)
 
   const allowed = new Set<string>()
   for (const entry of disputed) {
@@ -1228,6 +1240,13 @@ export async function aggregateConsensus(config: RuntimeConfig, state: ResearchS
     failureReason,
   })
 
+  await persistAggregatedFindingsArtifact(state, {
+    outcome,
+    approvedAgents,
+    unresolvedFindings: unresolved,
+    failureReason,
+  })
+
   return researchStateSchema.parse({
     ...state,
     unresolvedFindings: unresolved,
@@ -1267,9 +1286,7 @@ async function reviseDraft(config: RuntimeConfig, promptBundle: PromptBundle, st
   if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviseDraft")
   if (!state.outputPath) throw new Error("Missing outputPath during reviseDraft")
 
-  // Ensure the run dir exists before persisting intermediate drafts for a revision round.
   await ensureRunDirPath(state.outputPath)
-  await Bun.write(`${state.outputPath}/draft-round-${state.round}.md`, state.draft)
 
   const response = await promptAgent({
     config,
@@ -1290,7 +1307,7 @@ async function reviseDraft(config: RuntimeConfig, promptBundle: PromptBundle, st
     }),
   })
 
-  return researchStateSchema.parse({
+  const nextState = researchStateSchema.parse({
     ...state,
     draft: response.text ?? state.draft,
     audits: [],
@@ -1301,6 +1318,9 @@ async function reviseDraft(config: RuntimeConfig, promptBundle: PromptBundle, st
     status: "auditing",
     failureReason: undefined,
   })
+
+  await persistDraftArtifact(nextState, nextState.round)
+  return nextState
 }
 
 async function finalizeApprovedDraft(_config: RuntimeConfig, state: ResearchState) {
@@ -1512,9 +1532,6 @@ export function createGraph(
         return nextState
       }),
     )
-    .addNode("draftOutline", async (state) =>
-      withNodeTelemetry("draftOutline", state, () => draftOutline(config, promptBundle, state, graphTelemetry)),
-    )
     .addNode("draftFullDraft", async (state) =>
       withNodeTelemetry("draftFullDraft", state, () => draftFullDraft(config, promptBundle, state, graphTelemetry)),
     )
@@ -1555,8 +1572,7 @@ export function createGraph(
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
     .addEdge("prepareOutputPath", "bootstrapRun")
-    .addEdge("bootstrapRun", "draftOutline")
-    .addEdge("draftOutline", "draftFullDraft")
+    .addEdge("bootstrapRun", "draftFullDraft")
     .addEdge("draftFullDraft", "runParallelAudits")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
     .addConditionalEdges("reviewFindingsByDrafter", (state) => routeAfterDrafterReview(config, state), [

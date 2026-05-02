@@ -53,7 +53,6 @@ const promptBundle = {
   dir: "/tmp/prompts",
   assets: {
     deepDiveContract: "contract",
-    draftOutline: "outline",
     draftFullDraft: "full-draft",
     reviseDraft: "revise",
     audit: "audit",

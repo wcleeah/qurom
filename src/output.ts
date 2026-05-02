@@ -132,6 +132,16 @@ export async function ensureRunDirPath(runDir: string) {
   return runDir
 }
 
+export async function writeRunTextArtifact(runDir: string, filename: string, content: string) {
+  await ensureRunDirPath(runDir)
+  await Bun.write(join(runDir, filename), content)
+}
+
+export async function writeRunJsonArtifact(runDir: string, filename: string, data: unknown) {
+  await ensureRunDirPath(runDir)
+  await Bun.write(join(runDir, filename), JSON.stringify(data, null, 2))
+}
+
 export async function removeEmptyRunDir(runDir: string) {
   try {
     const entries = await readdir(runDir)
@@ -151,9 +161,8 @@ export async function writeApprovedArtifacts(
     summary: Record<string, unknown>
   },
 ) {
-  await ensureRunDirPath(runDir)
-  await Bun.write(join(runDir, "final.md"), input.draft)
-  await Bun.write(join(runDir, "summary.json"), JSON.stringify(input.summary, null, 2))
+  await writeRunTextArtifact(runDir, "final.md", input.draft)
+  await writeRunJsonArtifact(runDir, "summary.json", input.summary)
 }
 
 export async function writeFailedArtifacts(
@@ -163,7 +172,6 @@ export async function writeFailedArtifacts(
     summary: Record<string, unknown>
   },
 ) {
-  await ensureRunDirPath(runDir)
-  await Bun.write(join(runDir, "latest-draft.md"), input.draft)
-  await Bun.write(join(runDir, "failure.json"), JSON.stringify(input.summary, null, 2))
+  await writeRunTextArtifact(runDir, "latest-draft.md", input.draft)
+  await writeRunJsonArtifact(runDir, "failure.json", input.summary)
 }

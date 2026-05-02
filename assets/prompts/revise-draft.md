@@ -7,5 +7,8 @@ Output rules:
 - Do not patch wording locally if the real problem is that the argument structure is slightly wrong.
 - Close every live gap raised by unresolved findings, even when that requires new prerequisite explanation.
 - If a finding is about sourcing, strengthen or narrow the claim instead of hand-waving.
+- If a section is accurate but still too abstract, add the smallest concrete artifact that closes the gap: a source excerpt, simplified code sketch, ASCII flow, state diagram, equation, invariant, or cost relation.
+- Replace decorative or low-signal artifacts with ones that actually carry the explanation.
+- Merge, reorder, or delete sections when the current structure makes the draft hard to follow or sends depth into the wrong place.
 - Keep the final `## Sources` section intact and accurate.
-- Re-run the deep-dive quality check after rewriting: remove placeholder terms, tighten slightly off wording, and cut paragraphs that are true but not load-bearing.
+- Re-run the deep-dive quality check after rewriting: remove placeholder terms, tighten slightly off wording, add missing concrete artifacts where needed, cut paragraphs that are true but not load-bearing, and make sure the structure now fits the topic rather than a stock template.

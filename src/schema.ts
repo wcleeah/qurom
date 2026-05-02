@@ -59,26 +59,6 @@ export const runDisplaySummarySchema = markdownSummarySchema.extend({
   sourcePath: nonEmptyStringSchema.optional(),
 })
 
-const draftOutlineSectionSchema = z.object({
-  heading: nonEmptyStringSchema,
-  question: nonEmptyStringSchema,
-  keyPoints: z.array(nonEmptyStringSchema).min(1).max(4),
-})
-
-export const draftOutlineSchema = z.object({
-  shortAnswer: nonEmptyStringSchema,
-  startingPoint: nonEmptyStringSchema,
-  drivingQuestion: nonEmptyStringSchema,
-  finishLine: nonEmptyStringSchema,
-  coreMisconception: nonEmptyStringSchema,
-  lightbulbMoment: nonEmptyStringSchema,
-  runningExample: nonEmptyStringSchema.optional(),
-  prerequisiteTerms: z.array(nonEmptyStringSchema).max(8).default([]),
-  likelyReaderQuestions: z.array(nonEmptyStringSchema).min(1).max(8),
-  requiredSiblingMechanisms: z.array(nonEmptyStringSchema).max(8).default([]),
-  sections: z.array(draftOutlineSectionSchema).min(3).max(8),
-})
-
 const auditFindingSchema = z.object({
   severity: findingSeveritySchema,
   category: findingCategorySchema,
@@ -268,7 +248,6 @@ export const researchStateObjectSchema = z.object({
   inputSummary: runDisplaySummarySchema.optional(),
   artifactSummary: runDisplaySummarySchema.optional(),
   round: z.number().int().nonnegative(),
-  outline: draftOutlineSchema.optional(),
   draft: z.string(),
   audits: z.array(auditResultRecordSchema),
   auditSessionIds: z.record(agentNameSchema, nonEmptyStringSchema),
@@ -317,7 +296,6 @@ export type InputRequest = z.infer<typeof inputRequestSchema>
 export type GraphInput = z.infer<typeof graphInputSchema>
 export type MarkdownSummary = z.infer<typeof markdownSummarySchema>
 export type RunDisplaySummary = z.infer<typeof runDisplaySummarySchema>
-export type DraftOutline = z.infer<typeof draftOutlineSchema>
 export type AuditResult = z.infer<typeof auditResultSchema>
 export type AuditResultRecord = z.infer<typeof auditResultRecordSchema>
 export type Rebuttal = z.infer<typeof rebuttalSchema>

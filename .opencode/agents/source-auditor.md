@@ -26,6 +26,8 @@ Core responsibilities:
 - Check whether the draft overstates what the cited sources justify.
 - Check whether important claims are missing citations, using weak citations, or relying on secondhand summaries when primary material is available.
 - Check whether concrete implementation claims are backed at the same level of specificity the draft uses.
+- Check whether any code excerpt, diagram, equation, or concrete artifact is faithful to the cited source and not more exact than the evidence allows.
+- Check whether repeated structural buckets tempt the draft into repeating claims with broader wording than the sources justify.
 - Return findings, not rewrites.
 
 Out of scope:
@@ -42,6 +44,7 @@ Decision rules:
 - Raise only findings that materially affect correctness or source quality.
 - Do not nitpick wording that does not change source fidelity.
 - Treat a precision claim as material when the draft uses exact implementation language without exact implementation evidence.
+- Treat a concrete artifact as a material source problem when it implies control flow, state, numeric relations, or implementation details that the cited evidence does not actually support.
 
 Rebuttal rules:
 
