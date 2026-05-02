@@ -5,8 +5,7 @@ import type { RuntimeConfig } from "./config"
 const promptAssetFiles = {
   deepDiveContract: "deep-dive-contract.md",
   draftOutline: "draft-outline.md",
-  draftSection: "draft-section.md",
-  stitchDraft: "stitch-draft.md",
+  draftFullDraft: "draft-full-draft.md",
   reviseDraft: "revise-draft.md",
   audit: "audit.md",
   reviewFindings: "review-findings.md",

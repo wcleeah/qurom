@@ -52,8 +52,7 @@ const promptBundle = {
   assets: {
     deepDiveContract: "contract",
     draftOutline: "outline",
-    draftSection: "section",
-    stitchDraft: "stitch",
+    draftFullDraft: "full-draft",
     reviseDraft: "revise",
     audit: "audit",
     reviewFindings: "review-findings",

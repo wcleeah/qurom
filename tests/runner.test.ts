@@ -54,8 +54,7 @@ const promptBundle = {
   assets: {
     deepDiveContract: "contract",
     draftOutline: "outline",
-    draftSection: "section",
-    stitchDraft: "stitch",
+    draftFullDraft: "full-draft",
     reviseDraft: "revise",
     audit: "audit",
     reviewFindings: "review-findings",
@@ -158,7 +157,15 @@ describe("createEventBus", () => {
         messageID: "m",
         partID: "p",
       },
-      { kind: "agent.permission", permission: "edit", sessionID: "s" },
+      {
+        kind: "agent.permission",
+        requestID: "perm-1",
+        permission: "edit",
+        patterns: ["src/**"],
+        always: ["src/**"],
+        sessionID: "s",
+      },
+      { kind: "agent.permission.replied", requestID: "perm-1", reply: "once", sessionID: "s" },
       { kind: "result", runResult: { ok: true } },
     ]
     const labels = samples.map(describeRunnerEvent)
@@ -635,7 +642,10 @@ describe("attachTelemetryListener", () => {
 
     bus.emit({
       kind: "agent.permission",
+      requestID: "perm-1",
       permission: "edit",
+      patterns: ["src/**"],
+      always: ["src/**"],
       sessionID: "s1",
       messageID: "m1",
       callID: "c1",

@@ -24,13 +24,11 @@ import {
   type AggregatedFinding,
   type AggregatedFindings,
   type AuditResultRecord,
-  type DraftOutlineSection,
   type GraphInput,
   type RunDisplaySummary,
   type Rebuttal,
   type RebuttalResponseRecord,
   type ResearchState,
-  type SectionDraft,
 } from "./schema"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
@@ -142,49 +140,33 @@ function outlinePrompt(config: RuntimeConfig, promptBundle: PromptBundle, state:
   ].join("\n\n")
 }
 
-function sectionPrompt(
-  config: RuntimeConfig,
-  promptBundle: PromptBundle,
-  state: ResearchState,
-  section: DraftOutlineSection,
-  sectionIndex: number,
-) {
+function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
   return [
     promptBundle.assets.deepDiveContract,
-    promptBundle.assets.draftSection,
+    promptBundle.assets.draftFullDraft,
     researchToolBlock(config),
-    `Write section ${sectionIndex + 1} of ${state.outline?.sections.length ?? 0} for ${requestLabel(state)}.`,
+    `Write the full draft for ${requestLabel(state)}.`,
     `Document scaffold:\n${JSON.stringify(
       {
         shortAnswer: state.outline?.shortAnswer,
         startingPoint: state.outline?.startingPoint,
         drivingQuestion: state.outline?.drivingQuestion,
         finishLine: state.outline?.finishLine,
+        coreMisconception: state.outline?.coreMisconception,
+        lightbulbMoment: state.outline?.lightbulbMoment,
         runningExample: state.outline?.runningExample,
+        prerequisiteTerms: state.outline?.prerequisiteTerms,
+        likelyReaderQuestions: state.outline?.likelyReaderQuestions,
+        requiredSiblingMechanisms: state.outline?.requiredSiblingMechanisms,
       },
       null,
       2,
     )}`,
-    `Section plan:\n${JSON.stringify(section, null, 2)}`,
-    state.sectionDrafts.length > 0
-      ? `Completed sections so far:\n${JSON.stringify(state.sectionDrafts.map((entry) => entry.heading), null, 2)}`
-      : "",
+    `Approved outline:\n${JSON.stringify(state.outline, null, 2)}`,
     requestContextBlock(state),
   ]
     .filter(Boolean)
     .join("\n\n")
-}
-
-function stitchPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
-  return [
-    promptBundle.assets.deepDiveContract,
-    promptBundle.assets.stitchDraft,
-    researchToolBlock(config),
-    `Assemble the full draft for ${requestLabel(state)}.`,
-    requestContextBlock(state),
-    `Approved outline:\n${JSON.stringify(state.outline, null, 2)}`,
-    `Section drafts:\n${state.sectionDrafts.map((entry) => entry.markdown.trim()).join("\n\n")}`,
-  ].join("\n\n")
 }
 
 function auditPrompt(config: RuntimeConfig, promptBundle: PromptBundle, agent: string, request: string, draft: string) {
@@ -308,8 +290,26 @@ function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state
     researchToolBlock(config),
     `Revise this draft for ${requestLabel(state)}.`,
     "Return markdown only.",
-    "Preserve correct material and address only the unresolved findings.",
+    "Preserve correct material where it still supports a gap-free explanation, but rewrite aggressively when needed for closure.",
     "The final draft must still include a Sources section.",
+    state.outline
+      ? `Approved outline:\n${JSON.stringify(
+          {
+            shortAnswer: state.outline.shortAnswer,
+            startingPoint: state.outline.startingPoint,
+            drivingQuestion: state.outline.drivingQuestion,
+            finishLine: state.outline.finishLine,
+            coreMisconception: state.outline.coreMisconception,
+            lightbulbMoment: state.outline.lightbulbMoment,
+            runningExample: state.outline.runningExample,
+            prerequisiteTerms: state.outline.prerequisiteTerms,
+            likelyReaderQuestions: state.outline.likelyReaderQuestions,
+            requiredSiblingMechanisms: state.outline.requiredSiblingMechanisms,
+          },
+          null,
+          2,
+        )}`
+      : "",
     "Current draft:",
     state.draft,
     "Unresolved findings:",
@@ -543,11 +543,6 @@ function buildRunSummary(state: ResearchState, outcome: AggregatedFindings["outc
   })
 }
 
-function nextSectionToDraft(state: ResearchState) {
-  const planned = state.outline?.sections ?? []
-  return planned[state.sectionDrafts.length]
-}
-
 function buildActiveRebuttalMap(audits: AuditResultRecord[], rebuttals: Rebuttal[]) {
   const findingsById = new Map<string, AggregatedFinding>()
 
@@ -579,7 +574,6 @@ export async function ingestRequest(input: GraphInput) {
     requestId,
     round: 0,
     outline: undefined,
-    sectionDrafts: [],
     draft: "",
     audits: [],
     auditSessionIds: {},
@@ -666,79 +660,29 @@ async function draftOutline(config: RuntimeConfig, promptBundle: PromptBundle, s
   return researchStateSchema.parse({
     ...state,
     outline: response.structured,
-    sectionDrafts: [],
   })
 }
 
-async function draftNextSection(
-  config: RuntimeConfig,
-  promptBundle: PromptBundle,
-  state: ResearchState,
-  telemetry?: GraphTelemetry,
-) {
-  assertStatus(state, "drafting", "draftNextSection")
-  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during draftNextSection")
-  if (!state.outline) throw new Error("Missing outline during draftNextSection")
-
-  const section = nextSectionToDraft(state)
-  if (!section) {
-    return researchStateSchema.parse(state)
-  }
+async function draftFullDraft(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
+  assertStatus(state, "drafting", "draftFullDraft")
+  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during draftFullDraft")
+  if (!state.outline) throw new Error("Missing outline during draftFullDraft")
 
   const response = await promptAgent({
     config,
     sessionID: state.drafterSessionId,
     agent: config.quorumConfig.designatedDrafter,
-    prompt: sectionPrompt(config, promptBundle, state, section, state.sectionDrafts.length),
+    prompt: fullDraftPrompt(config, promptBundle, state),
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
-      name: "agent.draftSection",
+      name: "agent.draftFullDraft",
       agentName: config.quorumConfig.designatedDrafter,
       sessionId: state.drafterSessionId,
       input: {
         requestId: state.requestId,
         round: state.round,
-        heading: section.heading,
-        sectionIndex: state.sectionDrafts.length,
-      },
-    }),
-  })
-
-  const nextSectionDrafts: SectionDraft[] = [
-    ...state.sectionDrafts,
-    {
-      heading: section.heading,
-      markdown: response.text ?? `## ${section.heading}`,
-    },
-  ]
-
-  return researchStateSchema.parse({
-    ...state,
-    sectionDrafts: nextSectionDrafts,
-  })
-}
-
-async function stitchDraft(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
-  assertStatus(state, "drafting", "stitchDraft")
-  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during stitchDraft")
-  if (!state.outline) throw new Error("Missing outline during stitchDraft")
-
-  const response = await promptAgent({
-    config,
-    sessionID: state.drafterSessionId,
-    agent: config.quorumConfig.designatedDrafter,
-    prompt: stitchPrompt(config, promptBundle, state),
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.stitchDraft",
-      agentName: config.quorumConfig.designatedDrafter,
-      sessionId: state.drafterSessionId,
-      input: {
-        requestId: state.requestId,
-        round: state.round,
-        sectionCount: state.sectionDrafts.length,
+        sectionCount: state.outline.sections.length,
       },
     }),
   })
@@ -1571,11 +1515,8 @@ export function createGraph(
     .addNode("draftOutline", async (state) =>
       withNodeTelemetry("draftOutline", state, () => draftOutline(config, promptBundle, state, graphTelemetry)),
     )
-    .addNode("draftNextSection", async (state) =>
-      withNodeTelemetry("draftNextSection", state, () => draftNextSection(config, promptBundle, state, graphTelemetry)),
-    )
-    .addNode("stitchDraft", async (state) =>
-      withNodeTelemetry("stitchDraft", state, () => stitchDraft(config, promptBundle, state, graphTelemetry)),
+    .addNode("draftFullDraft", async (state) =>
+      withNodeTelemetry("draftFullDraft", state, () => draftFullDraft(config, promptBundle, state, graphTelemetry)),
     )
     .addNode("runParallelAudits", async (state) =>
       withNodeTelemetry("runParallelAudits", state, () => runParallelAudits(config, promptBundle, state, graphTelemetry)),
@@ -1615,13 +1556,8 @@ export function createGraph(
     .addEdge("summarizeInputDocument", "prepareOutputPath")
     .addEdge("prepareOutputPath", "bootstrapRun")
     .addEdge("bootstrapRun", "draftOutline")
-    .addEdge("draftOutline", "draftNextSection")
-    .addConditionalEdges(
-      "draftNextSection",
-      (state) => ((state.outline?.sections.length ?? 0) > state.sectionDrafts.length ? "draftNextSection" : "stitchDraft"),
-      ["draftNextSection", "stitchDraft"],
-    )
-    .addEdge("stitchDraft", "runParallelAudits")
+    .addEdge("draftOutline", "draftFullDraft")
+    .addEdge("draftFullDraft", "runParallelAudits")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
     .addConditionalEdges("reviewFindingsByDrafter", (state) => routeAfterDrafterReview(config, state), [
       "runTargetedRebuttals",

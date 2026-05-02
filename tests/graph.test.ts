@@ -80,7 +80,6 @@ function baseState(overrides: Partial<ResearchState> = {}): ResearchState {
     inputMode: "topic",
     topic: "How Raft leader election works",
     round: 1,
-    sectionDrafts: [],
     draft: "Draft",
     audits: [],
     auditSessionIds: {},

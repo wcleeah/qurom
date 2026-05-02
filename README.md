@@ -7,7 +7,7 @@ The generated document can be found in `./example/go-routine-parking.md`
 
 ## What It Does
 - Accepts either a topic prompt or a topic document.
-- Plans an outline, drafts sections, stitches a full draft, then runs revision rounds when needed.
+- Plans an outline, writes one whole draft from that outline, then runs revision rounds when needed.
 - Runs three auditors in parallel to review the draft from different perspective. 
 - Aggregates findings, rebuttals, and approvals until the run is approved or fails.
 - Streams live activity into a TUI with per-agent panels, dashboard and a summary screen after run.
@@ -56,6 +56,7 @@ These are configured in `quorum.config.json` and backed by local agent definitio
 - An OpenCode server reachable at `OPENCODE_BASE_URL`
 - Local agent definitions available to that OpenCode instance
 Prompt contracts are repo-owned and loaded from `assets/prompts/`.
+Live quorum runs do not require the global `deep-dive-research` skill. Drafting behavior is owned by the repo prompt bundle and the repo agent definitions under `.opencode/agents/`.
 
 Optional:
 - Langfuse credentials for trace export
