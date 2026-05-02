@@ -3,10 +3,10 @@ description: Markdown summarizer for run labels and summaries
 mode: subagent
 model: opencode/minimax-m2.5-free
 permission:
-  read: allow
-  glob: allow
-  grep: allow
-  list: allow
+  read: deny
+  glob: deny
+  grep: deny
+  list: deny
   webfetch: deny
   websearch: deny
   codesearch: deny

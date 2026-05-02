@@ -6,3 +6,4 @@ Output rules:
 - Vote `revise` when you find at least one material issue.
 - Findings must be concrete, evidence-backed, and fixable.
 - Do not invent issues outside your lane.
+- Treat unresolved inferential gaps as real defects, not style preferences, when they fall within your scope.
