@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createInitialState, createRunStore, reduce, resolveRoleKey } from "../src/tui/state/runStore"
+import { createInitialState, createRunStore, reduce, resolveRoleKey, selectPendingPermission } from "../src/tui/state/runStore"
 import type { RuntimeConfig } from "../src/config"
 import type { RunnerEvent } from "../src/runner"
 
@@ -262,13 +262,112 @@ describe("reduce", () => {
     expect(agent.scrollback.at(-1)?.text).toBe("read failed: no perms")
   })
 
-  test("agent.permission stores pendingPermission and appends entry", () => {
+  test("agent.permission stores replyable pendingPermission and appends entry", () => {
     let state = createInitialState(config)
     state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(state, { kind: "agent.permission", permission: "edit", sessionID: "d-s" }, config)
+    state = reduce(
+      state,
+      {
+        kind: "agent.permission",
+        requestID: "perm-1",
+        permission: "edit",
+        patterns: ["src/**"],
+        always: ["src/**"],
+        sessionID: "d-s",
+        messageID: "m-1",
+        callID: "c-1",
+      },
+      config,
+    )
     const agent = state.agents["research-drafter"]!
-    expect(agent.pendingPermission).toBe("edit")
+    expect(agent.pendingPermission).toEqual({
+      roleKey: "research-drafter",
+      requestID: "perm-1",
+      permission: "edit",
+      patterns: ["src/**"],
+      always: ["src/**"],
+      messageID: "m-1",
+      callID: "c-1",
+      requestedAt: agent.pendingPermission?.requestedAt,
+    })
     expect(agent.scrollback.at(-1)?.text).toBe("edit")
+  })
+
+  test("agent.permission.replied clears matching pendingPermission", () => {
+    let state = createInitialState(config)
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
+    state = reduce(
+      state,
+      {
+        kind: "agent.permission",
+        requestID: "perm-1",
+        permission: "edit",
+        patterns: ["src/**"],
+        always: ["src/**"],
+        sessionID: "d-s",
+      },
+      config,
+    )
+    state = reduce(state, { kind: "agent.permission.replied", requestID: "perm-1", reply: "once", sessionID: "d-s" }, config)
+    expect(state.agents["research-drafter"]?.pendingPermission).toBeUndefined()
+  })
+
+  test("selectPendingPermission returns the oldest pending permission across agents", () => {
+    let state = createInitialState(config)
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
+    state = reduce(state, { kind: "session.created", sessionID: "s-s", role: "auditor:source-auditor" }, config)
+    state = reduce(
+      state,
+      {
+        kind: "agent.permission",
+        requestID: "perm-1",
+        permission: "edit",
+        patterns: ["src/**"],
+        always: ["src/**"],
+        sessionID: "d-s",
+      },
+      config,
+    )
+    state = reduce(
+      state,
+      {
+        kind: "agent.permission",
+        requestID: "perm-2",
+        permission: "read",
+        patterns: ["tests/**"],
+        always: ["tests/**"],
+        sessionID: "s-s",
+      },
+      config,
+    )
+
+    expect(selectPendingPermission(state)).toMatchObject({
+      roleKey: "research-drafter",
+      requestID: "perm-1",
+      permission: "edit",
+    })
+  })
+
+  test("selectPendingPermission returns the same object reference when state is unchanged", () => {
+    let state = createInitialState(config)
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
+    state = reduce(
+      state,
+      {
+        kind: "agent.permission",
+        requestID: "perm-1",
+        permission: "edit",
+        patterns: ["src/**"],
+        always: ["src/**"],
+        sessionID: "d-s",
+      },
+      config,
+    )
+
+    const first = selectPendingPermission(state)
+    const second = selectPendingPermission(state)
+
+    expect(first).toBe(second)
   })
 
   test("result stores runResult", () => {

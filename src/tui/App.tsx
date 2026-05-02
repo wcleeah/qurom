@@ -6,16 +6,19 @@ import { createEventBus, runResearchPipeline, type EventBus, type RuntimePrerequ
 import type { InputRequest } from "../schema"
 import { copy } from "./clipboard"
 import { HelpOverlay } from "./components/HelpOverlay"
+import { PermissionPrompt } from "./components/PermissionPrompt"
 import { PromptScreen } from "./components/PromptScreen"
 import { QuitConfirm } from "./components/QuitConfirm"
 import { RunningScreen } from "./components/RunningScreen"
 import { SummaryScreen, type SummaryAction } from "./components/SummaryScreen"
 import { openInEditor, type OpenInEditorMode } from "./editor"
+import { replyToPermission } from "../opencode"
 import { nextFocus } from "./keymap/gridNav"
 import { computeLayout, type FocusRegion } from "./state/layout"
 import { bindBusToStore } from "./state/eventBindings"
-import { createRunStore, type RunStore, type RunStoreInitialState } from "./state/runStore"
+import { createRunStore, selectPendingPermission, type RunStore, type RunStoreInitialState } from "./state/runStore"
 import { pushSystemStatus, type SystemStatusStore } from "./state/systemStatus"
+import { useStoreSelector } from "./state/useStore"
 
 export type Screen = "prompt" | "running" | "summary"
 
@@ -58,6 +61,27 @@ function buildAgentInitialState(prerequisites: RuntimePrerequisites, config: Run
   )
 }
 
+function PendingPermissionOverlay({
+  store,
+  submittingPermissionRequestID,
+  onReply,
+}: {
+  store: RunStore
+  submittingPermissionRequestID?: string
+  onReply: (reply: "once" | "always" | "reject") => void
+}) {
+  const pendingPermission = useStoreSelector(store, selectPendingPermission)
+  if (!pendingPermission) return null
+
+  return (
+    <PermissionPrompt
+      permission={pendingPermission}
+      submitting={submittingPermissionRequestID === pendingPermission.requestID}
+      onReply={(reply) => void onReply(reply)}
+    />
+  )
+}
+
 export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit }: AppProps) => {
   const renderer = useRenderer()
   const [screen, setScreen] = useState<Screen>("prompt")
@@ -68,6 +92,7 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
   const [pendingForceQuit, setPendingForceQuit] = useState(false)
   const [pendingAbortExit, setPendingAbortExit] = useState(false)
   const [gPending, setGPending] = useState(false)
+  const [submittingPermissionRequestID, setSubmittingPermissionRequestID] = useState<string | undefined>(undefined)
   const [promptState, setPromptState] = useState<PromptState>({ mode: "topic", topic: "", hint: "" })
   const lastRequestRef = useRef<InputRequest | undefined>(undefined)
   const initialAgents = useRef(buildAgentInitialState(prerequisites, config))
@@ -140,6 +165,9 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
       ]).finally(onExit)
       return
     }
+
+    const pendingPermission = runCtx ? selectPendingPermission(runCtx.store.getState()) : undefined
+    if (pendingPermission) return
 
     if (key.name === "e") {
       if (!runCtx) return
@@ -275,6 +303,7 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
       setPendingForceQuit(false)
       setPendingAbortExit(false)
       setGPending(false)
+      setSubmittingPermissionRequestID(undefined)
       setScreen("running")
 
       promise
@@ -383,6 +412,25 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
     [handleNewDocument, handleNewTopic, handleRerun, onExit],
   )
 
+  const handlePermissionReply = useCallback(
+    async (reply: "once" | "always" | "reject") => {
+      const pendingPermission = runCtx ? selectPendingPermission(runCtx.store.getState()) : undefined
+      if (!pendingPermission || submittingPermissionRequestID) return
+      setSubmittingPermissionRequestID(pendingPermission.requestID)
+      try {
+        await replyToPermission(config, { requestID: pendingPermission.requestID, reply })
+      } catch (error) {
+        pushSystemStatus(systemStatus, {
+          level: "error",
+          text: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        setSubmittingPermissionRequestID(undefined)
+      }
+    },
+    [config, runCtx, submittingPermissionRequestID, systemStatus],
+  )
+
   if (screen === "prompt") {
     return (
       <box flexGrow={1} position="relative">
@@ -408,6 +456,11 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
           active={active}
           gPending={gPending}
           onGPendingChange={setGPending}
+        />
+        <PendingPermissionOverlay
+          store={runCtx.store}
+          submittingPermissionRequestID={submittingPermissionRequestID}
+          onReply={handlePermissionReply}
         />
         {showHelp ? <HelpOverlay /> : null}
         {pendingForceQuit ? <QuitConfirm onYes={onExit} onNo={() => setPendingForceQuit(false)} /> : null}

@@ -13,6 +13,19 @@ export type ScrollbackEntry = {
   done?: boolean
 }
 
+export type PendingPermission = {
+  roleKey: string
+  requestID: string
+  permission: string
+  patterns: string[]
+  always: string[]
+  messageID?: string
+  callID?: string
+  requestedAt: number
+}
+
+export type PendingPermissionEntry = PendingPermission
+
 export type AgentStatus = "idle" | "running" | "error" | "complete"
 
 export type AgentState = {
@@ -25,7 +38,7 @@ export type AgentState = {
   tokensIn: number
   tokensOut: number
   activeTool?: { tool: string; callID: string; startedAt: number }
-  pendingPermission?: string
+  pendingPermission?: PendingPermission
 }
 
 export type LifecyclePhase = "starting" | "running" | "complete" | "error"
@@ -102,6 +115,20 @@ export function createInitialState(config: RuntimeConfig, initial?: RunStoreInit
     ...initial,
     agents,
   }
+}
+
+export function selectPendingPermission(state: RunStoreState): PendingPermissionEntry | undefined {
+  let currentPermission: PendingPermission | undefined
+
+  for (const [, agent] of Object.entries(state.agents)) {
+    const pending = agent.pendingPermission
+    if (!pending) continue
+    if (!currentPermission || pending.requestedAt < currentPermission.requestedAt) {
+      currentPermission = pending
+    }
+  }
+
+  return currentPermission
 }
 
 function deriveStatus(raw: string): AgentStatus {
@@ -266,8 +293,32 @@ export function reduce(state: RunStoreState, event: RunnerEvent, config: Runtime
       if (!entry) return state
       const [key] = entry
       return withAgent(state, key, (agent) =>
-        appendScrollback({ ...agent, pendingPermission: event.permission }, { kind: "permission", text: event.permission, ts }),
+        appendScrollback(
+          {
+            ...agent,
+            pendingPermission: {
+              roleKey: key,
+              requestID: event.requestID,
+              permission: event.permission,
+              patterns: event.patterns,
+              always: event.always,
+              messageID: event.messageID,
+              callID: event.callID,
+              requestedAt: ts,
+            },
+          },
+          { kind: "permission", text: event.permission, ts },
+        ),
       )
+    }
+    case "agent.permission.replied": {
+      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
+      if (!entry) return state
+      const [key] = entry
+      return withAgent(state, key, (agent) => {
+        if (agent.pendingPermission?.requestID !== event.requestID) return agent
+        return { ...agent, pendingPermission: undefined, lastEventAt: ts }
+      })
     }
     case "result":
       return { ...state, result: event.runResult }
