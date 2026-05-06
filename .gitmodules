@@ -10,3 +10,6 @@
 [submodule "reference/tome"]
 	path = reference/tome
 	url = git@github.com:wcleeah/tome.git
+[submodule "references/ghui"]
+	path = references/ghui
+	url = https://github.com/kitlangton/ghui.git

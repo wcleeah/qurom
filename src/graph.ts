@@ -66,8 +66,8 @@ function observeNodeResult<T>(
 }
 
 function requestLabel(state: ResearchState) {
-  if (state.inputMode === "topic") return `topic ${JSON.stringify(state.topic ?? "")}`
-  return `document ${JSON.stringify(state.documentPath ?? "")}`
+  if (state.inputMode === "topic") return `topic: ${JSON.stringify(state.topic ?? "")}`
+  return `topic: ${state.documentText}`
 }
 
 function assertStatus(state: ResearchState, expected: ResearchState["status"], node: string) {
@@ -87,62 +87,20 @@ function researchToolBlock(config: RuntimeConfig) {
   return lines.join("\n")
 }
 
-export function auditScopeGuidance(agent: string) {
-  const scopeGuidance: Record<string, string[]> = {
-    "source-auditor": [
-      "Stay in lane: raise findings about citation quality, claim support, overstatement relative to sources, and primary-vs-secondary sourcing.",
-      "Do not raise missing-step or incomplete-example findings unless the actual problem is that the cited evidence does not support the claim.",
-    ],
-    "logic-auditor": [
-      "Stay in lane: raise findings about contradictions, invalid inferences, missing prerequisites, incomplete end-to-end examples, and scope/coherence gaps.",
-      "Do not raise citation-quality findings unless the reasoning problem depends on a source gap.",
-    ],
-    "clarity-auditor": [
-      "Stay in lane: raise findings about reader comprehension, throughline, jargon load, and section structure.",
-      "Do not raise source-support or implementation-completeness findings unless they materially create a clarity problem for the reader.",
-    ],
-  }
-
-  return scopeGuidance[agent] ?? []
-}
-
-function requestContextBlock(state: ResearchState, options?: { includeDocumentText?: boolean }) {
+function requestContextBlock(state: ResearchState) {
   if (state.inputMode === "topic") {
     return [`Topic:`, state.topic ?? ""].join("\n")
+  } else  {
+    return [`Topic:`, state.documentText ?? ""].join("\n")
   }
-
-  const sections = []
-
-  if (state.inputSummary) {
-    sections.push(
-      `Input summary:\n${JSON.stringify(
-        {
-          title: state.inputSummary.title,
-          summary: state.inputSummary.summary,
-        },
-        null,
-        2,
-      )}`,
-    )
-  }
-
-  if (options?.includeDocumentText) {
-    sections.push(`Document text:\n${state.documentText ?? ""}`)
-  } else if (state.documentPath) {
-    sections.push(`Document path: ${state.documentPath}`)
-  }
-
-  return sections.join("\n\n")
 }
 
 function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
   return [
     promptBundle.assets.deepDiveContract,
-    promptBundle.assets.draftFullDraft,
     researchToolBlock(config),
-    `Write the initial full draft for ${requestLabel(state)}.`,
-    "Choose the structure that best fits the topic. The only required top-level heading is `## Sources`.",
     requestContextBlock(state),
+    promptBundle.assets.draftFullDraft,
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -150,13 +108,9 @@ function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, stat
 
 function auditPrompt(config: RuntimeConfig, promptBundle: PromptBundle, agent: string, request: string, draft: string) {
   return [
+    `You are the ${agent}, user requested a review on the ${request} draft.`,
     promptBundle.assets.audit,
     researchToolBlock(config),
-    `Review this ${request} draft as the ${agent}.`,
-    "Return only JSON that matches the requested schema.",
-    "Vote approve only if there are no material issues in your review scope.",
-    "Vote revise if you find any material problem.",
-    ...auditScopeGuidance(agent),
     "Draft:",
     draft,
   ].join("\n\n")
@@ -168,7 +122,6 @@ function drafterReviewPrompt(
   request: string,
   draft: string,
   audits: AuditResultRecord[],
-  rebuttalTurnCounts: Record<string, number>,
 ) {
   const promptAudits = []
 
@@ -194,17 +147,11 @@ function drafterReviewPrompt(
   }
 
   return [
+   `You are the drafter-agent, you have produced the following draft for this ${request}. And the auditors has the following comments.`,
     promptBundle.assets.reviewFindings,
     researchToolBlock(config),
-    `Review the auditor findings for this ${request}.`,
-    "Return only JSON that matches the requested schema.",
-    "Put accepted finding IDs into acceptedFindingIds.",
-    "Put only evidence-backed challenges into rebuttals.",
-    `Do not rebut a finding that has already hit the rebuttal cap of ${config.quorumConfig.maxRebuttalTurnsPerFinding}.`,
     "Current draft:",
     draft,
-    "Current rebuttal turn counts:",
-    JSON.stringify(rebuttalTurnCounts, null, 2),
     "Audits:",
     JSON.stringify(promptAudits, null, 2),
   ].join("\n\n")
@@ -267,10 +214,7 @@ function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state
     promptBundle.assets.deepDiveContract,
     promptBundle.assets.reviseDraft,
     researchToolBlock(config),
-    `Revise this draft for ${requestLabel(state)}.`,
-    "Return markdown only.",
-    "Preserve correct material where it still supports a gap-free explanation, but rewrite aggressively when needed for closure.",
-    "The final draft must still include a `## Sources` section.",
+    requestLabel(state),
     "Current draft:",
     state.draft,
     "Unresolved findings:",

@@ -6,7 +6,7 @@
     "clarity-auditor"
   ],
   "summarizerAgent": "markdown-summarizer",
-  "maxRounds": 4,
+  "maxRounds": 10,
   "maxRebuttalTurnsPerFinding": 2,
   "recursionLimit": 80,
   "requireUnanimousApproval": true,
