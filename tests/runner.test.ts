@@ -312,8 +312,8 @@ describe("runResearchPipeline", () => {
 
     const graphFactory: GraphFactory = ((_, __, input) => ({
       invoke: async () => {
-        input?.observer?.onSessionCreated?.({ sessionID: "root-1", role: "root", requestId: "req-1" })
         input?.observer?.onSessionCreated?.({ sessionID: "drafter-1", role: "drafter", requestId: "req-1" })
+        input?.observer?.onSessionCreated?.({ sessionID: "audit-1", role: "auditor:source-auditor", requestId: "req-1" })
         ac.abort(new Error("cancelled"))
         throw new Error("cancelled")
       },
@@ -339,8 +339,8 @@ describe("runResearchPipeline", () => {
     ).rejects.toThrow("cancelled")
 
     expect(abortSession).toHaveBeenCalledTimes(2)
-    expect(abortSession).toHaveBeenCalledWith(configWithTempArtifacts, "root-1")
     expect(abortSession).toHaveBeenCalledWith(configWithTempArtifacts, "drafter-1")
+    expect(abortSession).toHaveBeenCalledWith(configWithTempArtifacts, "audit-1")
   })
 
   test("reads the late-bound run directory from graph output", async () => {

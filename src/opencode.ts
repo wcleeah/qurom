@@ -128,6 +128,7 @@ export async function promptAgent<T>(input: {
   let model: string | undefined
   let provider: string | undefined
   let variant: string | undefined
+  let activeSessionID = input.sessionID
 
   async function sendPrompt(prompt: string) {
     const generationObservation =
@@ -137,23 +138,23 @@ export async function promptAgent<T>(input: {
             parentObservationId: agentObservation.id,
             name: `${input.telemetry.name}.generation`,
             type: "Generation",
-            input: {
-              prompt,
-              structured: Boolean(input.schema),
-              variant: input.variant,
-            },
-            metadata: {
-              ...generationMetadata({
-                agent: input.agent,
-                sessionID: input.sessionID,
+              input: {
+                prompt,
+                structured: Boolean(input.schema),
                 variant: input.variant,
-              }),
-            },
-          })
+              },
+              metadata: {
+                ...generationMetadata({
+                  agent: input.agent,
+                  sessionID: activeSessionID,
+                  variant: input.variant,
+                }),
+              },
+            })
         : undefined
 
     const response = await client.session.prompt({
-      sessionID: input.sessionID,
+      sessionID: activeSessionID,
       agent: input.agent,
       variant: input.variant,
       parts: [{ type: "text", text: prompt } satisfies TextPartInput],
@@ -165,7 +166,7 @@ export async function promptAgent<T>(input: {
         statusMessage: `OpenCode prompt failed: ${JSON.stringify(response.error)}`,
       })
       throw new Error(
-        `Failed to prompt agent ${input.agent} in session ${input.sessionID}: ${JSON.stringify(response.error)}`,
+        `Failed to prompt agent ${input.agent} in session ${activeSessionID}: ${JSON.stringify(response.error)}`,
       )
     }
 
@@ -174,14 +175,14 @@ export async function promptAgent<T>(input: {
         level: "ERROR",
         statusMessage: "OpenCode returned no response data",
       })
-      throw new Error(`OpenCode returned no response data for agent ${input.agent} in session ${input.sessionID}`)
+      throw new Error(`OpenCode returned no response data for agent ${input.agent} in session ${activeSessionID}`)
     }
 
     const info = assistantInfoSchema.parse(response.data.info)
     model = info.modelID
     provider = info.providerID
     variant = info.variant ?? input.variant
-    input.telemetry?.trackAgentMetadata?.({ agent: input.agent, sessionID: input.sessionID, model, variant })
+    input.telemetry?.trackAgentMetadata?.({ agent: input.agent, sessionID: activeSessionID, model, variant })
 
     if (info.error) {
       await input.telemetry?.run.endObservation(generationObservation, {
@@ -194,14 +195,14 @@ export async function promptAgent<T>(input: {
         metadata: {
           ...generationMetadata({
             agent: input.agent,
-            sessionID: input.sessionID,
+            sessionID: activeSessionID,
             provider: info.providerID,
             variant,
           }),
           model: info.modelID,
         },
       })
-      throw new Error(`OpenCode assistant call failed in session ${input.sessionID}: ${JSON.stringify(info.error)}`)
+      throw new Error(`OpenCode assistant call failed in session ${activeSessionID}: ${JSON.stringify(info.error)}`)
     }
 
     const text = extractText(response.data.parts)
@@ -211,13 +212,13 @@ export async function promptAgent<T>(input: {
         response: text,
       },
       model: info.modelID,
-      metadata: {
-        ...generationMetadata({
-          agent: input.agent,
-          sessionID: input.sessionID,
-          provider: info.providerID,
-          variant,
-        }),
+        metadata: {
+          ...generationMetadata({
+            agent: input.agent,
+            sessionID: activeSessionID,
+            provider: info.providerID,
+            variant,
+          }),
         model: info.modelID,
       },
     })
@@ -240,7 +241,7 @@ export async function promptAgent<T>(input: {
         },
         metadata: {
           agentName: input.agent,
-          sessionId: input.sessionID,
+          sessionId: activeSessionID,
           model: response.model,
           provider: response.provider,
           variant,
@@ -271,7 +272,7 @@ export async function promptAgent<T>(input: {
         },
         metadata: {
           agentName: input.agent,
-          sessionId: input.sessionID,
+          sessionId: activeSessionID,
           model,
           provider,
           variant,
@@ -287,6 +288,10 @@ export async function promptAgent<T>(input: {
       }
     } catch (initialError) {
       repaired = true
+      const repairSession = await createSession(input.config, `${input.agent}:repair`)
+      input.telemetry?.trackSessionObservation?.(repairSession.id, agentObservation)
+      const previousSessionID = activeSessionID
+      activeSessionID = repairSession.id
       const repairedResponse = await sendPrompt(
         buildStructuredRepairPrompt({
           schema: jsonSchema,
@@ -294,6 +299,7 @@ export async function promptAgent<T>(input: {
           error: initialError,
         }),
       )
+      activeSessionID = previousSessionID
 
       try {
         const structured = parseStructuredResponse(input.schema, repairedResponse.text)
@@ -307,9 +313,10 @@ export async function promptAgent<T>(input: {
           },
           metadata: {
             agentName: input.agent,
-            sessionId: input.sessionID,
+            sessionId: repairSession.id,
             model,
             provider,
+            variant,
             repaired,
           },
         })
@@ -323,7 +330,7 @@ export async function promptAgent<T>(input: {
       } catch (repairError) {
         throw new Error(
           [
-            `Structured response from agent ${input.agent} in session ${input.sessionID} remained invalid after repair.`,
+            `Structured response from agent ${input.agent} in session ${repairSession.id} remained invalid after repair.`,
             `Initial error: ${formatStructuredError(initialError)}`,
             `Repair error: ${formatStructuredError(repairError)}`,
             `Last response: ${JSON.stringify(repairedResponse.text)}`,
@@ -337,7 +344,7 @@ export async function promptAgent<T>(input: {
       statusMessage: error instanceof Error ? error.message : String(error),
       metadata: {
         agentName: input.agent,
-        sessionId: input.sessionID,
+        sessionId: activeSessionID,
         model,
         provider,
         variant,

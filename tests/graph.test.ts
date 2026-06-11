@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test"
 import type { RuntimeConfig } from "../src/config.ts"
 import {
   aggregateConsensus,
-  auditScopeGuidance,
   dedupeFindings,
   effectiveResponsesByFinding,
   ingestRequest,
@@ -82,7 +81,6 @@ function baseState(overrides: Partial<ResearchState> = {}): ResearchState {
     round: 1,
     draft: "Draft",
     audits: [],
-    auditSessionIds: {},
     activeRebuttals: {},
     currentRebuttalResponsesByFinding: {},
     rebuttalTurnCounts: {},
@@ -288,16 +286,6 @@ describe("graph helpers", () => {
     } finally {
       Bun.file = originalFile
     }
-  })
-
-  test("auditScopeGuidance keeps source and logic auditor lanes distinct", () => {
-    const sourceGuidance = auditScopeGuidance("source-auditor").join("\n")
-    const logicGuidance = auditScopeGuidance("logic-auditor").join("\n")
-
-    expect(sourceGuidance).toContain("citation quality")
-    expect(sourceGuidance).toContain("Do not raise missing-step or incomplete-example findings")
-    expect(logicGuidance).toContain("missing prerequisites")
-    expect(logicGuidance).toContain("Do not raise citation-quality findings")
   })
 
   test("resolveRunDir builds a slugged document-mode path from the first heading", () => {

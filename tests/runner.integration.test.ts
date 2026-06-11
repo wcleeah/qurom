@@ -90,11 +90,6 @@ describe("runResearchPipeline integration", () => {
         input?.observer?.onNodeStart?.("ingestRequest", request)
         input?.observer?.onNodeEnd?.("ingestRequest", request)
         input?.observer?.onSessionCreated?.({
-          sessionID: `root-${request.requestId}`,
-          role: "root",
-          requestId: request.requestId,
-        })
-        input?.observer?.onSessionCreated?.({
           sessionID: `drafter-${request.requestId}`,
           role: "drafter",
           requestId: request.requestId,

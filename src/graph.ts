@@ -65,6 +65,13 @@ function observeNodeResult<T>(
   return result
 }
 
+function observeSession(
+  observer: RunObserver | undefined,
+  input: { sessionID: string; role: string; requestId: string },
+) {
+  observer?.onSessionCreated?.(input)
+}
+
 function requestLabel(state: ResearchState) {
   if (state.inputMode === "topic") return `topic: ${JSON.stringify(state.topic ?? "")}`
   return `topic: ${state.documentText}`
@@ -147,7 +154,7 @@ function drafterReviewPrompt(
   }
 
   return [
-   `You are the drafter-agent, you have produced the following draft for this ${request}. And the auditors has the following comments.`,
+    `You are the drafter-agent reviewing auditor findings for this ${request}.`,
     promptBundle.assets.reviewFindings,
     researchToolBlock(config),
     "Current draft:",
@@ -217,7 +224,7 @@ function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state
     requestLabel(state),
     "Current draft:",
     state.draft,
-    "Unresolved findings:",
+    "Private rewrite instructions. Do not mention these in the output:",
     JSON.stringify(state.unresolvedFindings, null, 2),
   ].join("\n\n")
 }
@@ -549,7 +556,6 @@ export async function ingestRequest(input: GraphInput) {
     round: 0,
     draft: "",
     audits: [],
-    auditSessionIds: {},
     activeRebuttals: {},
     currentRebuttalResponsesByFinding: {},
     rebuttalTurnCounts: {},
@@ -578,42 +584,20 @@ export async function ingestRequest(input: GraphInput) {
   })
 }
 
-async function bootstrapRun(config: RuntimeConfig, state: ResearchState) {
-  assertStatus(state, "drafting", "bootstrapRun")
-
-  const rootSession = await createSession(config, `research-quorum:${state.requestId}`)
-  if (!state.outputPath) throw new Error("Missing outputPath during bootstrapRun")
-
-  const childSessionPromises = [createSession(config, `research-drafter:${state.requestId}`, rootSession.id)]
-  for (const agent of config.quorumConfig.auditors) {
-    childSessionPromises.push(createSession(config, `audit:${state.requestId}:${agent}`, rootSession.id))
-  }
-
-  const childSessions = await Promise.all(childSessionPromises)
-  const drafterSession = childSessions[0]
-  const auditSessionIds: Record<string, string> = {}
-
-  for (let index = 0; index < config.quorumConfig.auditors.length; index += 1) {
-    const agent = config.quorumConfig.auditors[index]
-    const session = childSessions[index + 1]
-    auditSessionIds[agent] = session.id
-  }
-
-  return researchStateSchema.parse({
-    ...state,
-    rootSessionId: rootSession.id,
-    drafterSessionId: drafterSession.id,
-    auditSessionIds,
-  })
-}
-
-async function draftFullDraft(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
+async function draftFullDraft(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
   assertStatus(state, "drafting", "draftFullDraft")
-  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during draftFullDraft")
+  const session = await createSession(config, `research-drafter:${state.requestId}:draft:${state.round}`)
+  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
 
   const response = await promptAgent({
     config,
-    sessionID: state.drafterSessionId,
+    sessionID: session.id,
     agent: config.quorumConfig.designatedDrafter,
     prompt: fullDraftPrompt(config, promptBundle, state),
     telemetry: graphAgentTelemetry({
@@ -621,7 +605,7 @@ async function draftFullDraft(config: RuntimeConfig, promptBundle: PromptBundle,
       state,
       name: "agent.draftFullDraft",
       agentName: config.quorumConfig.designatedDrafter,
-      sessionId: state.drafterSessionId,
+      sessionId: session.id,
       input: {
         requestId: state.requestId,
         round: state.round,
@@ -675,35 +659,42 @@ function graphAgentTelemetry(input: {
   }
 }
 
-async function runParallelAudits(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
+async function runParallelAudits(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
   assertStatus(state, "auditing", "runParallelAudits")
   const request = requestLabel(state)
   const auditPromises: Promise<AuditResultRecord>[] = []
 
   for (const agent of config.quorumConfig.auditors) {
-    const sessionID = state.auditSessionIds[agent]
-    if (!sessionID) throw new Error(`Missing audit session for agent ${agent}`)
-
     auditPromises.push(
-      promptAgent({
-        config,
-        sessionID,
-        agent,
-        prompt: auditPrompt(config, promptBundle, agent, request, state.draft),
-        schema: auditResultSchema,
-        telemetry: graphAgentTelemetry({
-          telemetry,
-          state,
-          name: `agent.audit.${agent}`,
-          agentName: agent,
-          sessionId: sessionID,
-          input: {
-            requestId: state.requestId,
-            round: state.round,
-            agent,
-          },
-        }),
-      }).then((response) => {
+      (async () => {
+        const session = await createSession(config, `audit:${state.requestId}:${agent}:round:${state.round}`)
+        observeSession(observer, { sessionID: session.id, role: `auditor:${agent}`, requestId: state.requestId })
+        const response = await promptAgent({
+          config,
+          sessionID: session.id,
+          agent,
+          prompt: auditPrompt(config, promptBundle, agent, request, state.draft),
+          schema: auditResultSchema,
+          telemetry: graphAgentTelemetry({
+            telemetry,
+            state,
+            name: `agent.audit.${agent}`,
+            agentName: agent,
+            sessionId: session.id,
+            input: {
+              requestId: state.requestId,
+              round: state.round,
+              agent,
+            },
+          }),
+        })
+
         if (!response.structured) {
           throw new Error(`Missing structured audit response from agent ${agent}`)
         }
@@ -725,7 +716,7 @@ async function runParallelAudits(config: RuntimeConfig, promptBundle: PromptBund
         })
 
         return record
-      }),
+      })(),
     )
   }
 
@@ -757,9 +748,9 @@ async function reviewFindingsByDrafter(
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
+  observer?: RunObserver,
 ) {
   assertStatus(state, "reviewing_findings", "reviewFindingsByDrafter")
-  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviewFindingsByDrafter")
 
   const findingsOnly: AuditResultRecord[] = []
 
@@ -778,18 +769,21 @@ async function reviewFindingsByDrafter(
     })
   }
 
+  const session = await createSession(config, `research-drafter:${state.requestId}:review-findings:${state.round}`)
+  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
+
   const response = await promptAgent({
     config,
-    sessionID: state.drafterSessionId,
+    sessionID: session.id,
     agent: config.quorumConfig.designatedDrafter,
-    prompt: drafterReviewPrompt(config, promptBundle, requestLabel(state), state.draft, findingsOnly, state.rebuttalTurnCounts),
+    prompt: drafterReviewPrompt(config, promptBundle, requestLabel(state), state.draft, findingsOnly),
     schema: drafterFindingReviewSchema,
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
       name: "agent.reviewFindingsByDrafter",
       agentName: config.quorumConfig.designatedDrafter,
-      sessionId: state.drafterSessionId,
+      sessionId: session.id,
       input: {
         requestId: state.requestId,
         round: state.round,
@@ -854,6 +848,7 @@ async function runTargetedRebuttals(
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
+  observer?: RunObserver,
 ) {
   assertStatus(state, "awaiting_auditor_rebuttal", "runTargetedRebuttals")
   if (!hasEligibleRebuttalTurn(config, state)) {
@@ -873,8 +868,10 @@ async function runTargetedRebuttals(
   async function runAgentRebuttal(
     agent: string,
     rebuttals: ActiveRebuttal[],
-    sessionID: string,
   ): Promise<Array<[string, RebuttalResponseRecord]>> {
+    const session = await createSession(config, `audit:${state.requestId}:${agent}:rebuttal:${state.round}`)
+    observeSession(observer, { sessionID: session.id, role: `auditor:${agent}`, requestId: state.requestId })
+
     const chainObservation = await telemetry?.run.startObservation({
       traceId: telemetry.run.traceId ?? "",
       parentObservationId: telemetry.currentNode?.id,
@@ -889,14 +886,14 @@ async function runTargetedRebuttals(
         requestId: state.requestId,
         round: state.round,
         agentName: agent,
-        sessionId: sessionID,
+        sessionId: session.id,
       },
     })
 
     try {
       const response = await promptAgent({
         config,
-        sessionID,
+        sessionID: session.id,
         agent,
         prompt: rebuttalPrompt(config, promptBundle, requestLabel(state), state.draft, rebuttals),
         schema: rebuttalBatchResponseSchema,
@@ -917,7 +914,7 @@ async function runTargetedRebuttals(
                 round: state.round,
                 status: state.status,
                 agentName: agent,
-                sessionId: sessionID,
+                sessionId: session.id,
               },
             },
       })
@@ -985,9 +982,7 @@ async function runTargetedRebuttals(
   }
 
   for (const [agent, rebuttals] of Object.entries(rebuttalsByAgent)) {
-    const sessionID = state.auditSessionIds[agent]
-    if (!sessionID) throw new Error(`Missing audit session for rebuttal agent ${agent}`)
-    responsePromises.push(runAgentRebuttal(agent, rebuttals, sessionID))
+    responsePromises.push(runAgentRebuttal(agent, rebuttals))
   }
 
   const responseEntries = await Promise.all(responsePromises)
@@ -1015,9 +1010,9 @@ async function reviewRebuttalResponses(
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
+  observer?: RunObserver,
 ) {
   assertStatus(state, "reviewing_rebuttal_responses", "reviewRebuttalResponses")
-  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviewRebuttalResponses")
 
   const capped = cappedFindingKeys(config, state)
   const disputed: Array<{ findingId: string; rebuttal: ActiveRebuttal; response: RebuttalResponseRecord }> = []
@@ -1044,9 +1039,12 @@ async function reviewRebuttalResponses(
     })
   }
 
+  const session = await createSession(config, `research-drafter:${state.requestId}:review-rebuttal:${state.round}`)
+  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
+
   const response = await promptAgent({
     config,
-    sessionID: state.drafterSessionId,
+    sessionID: session.id,
     agent: config.quorumConfig.designatedDrafter,
     prompt: rebuttalReviewPrompt(
       config,
@@ -1062,7 +1060,7 @@ async function reviewRebuttalResponses(
       state,
       name: "agent.reviewRebuttalResponses",
       agentName: config.quorumConfig.designatedDrafter,
-      sessionId: state.drafterSessionId,
+      sessionId: session.id,
       input: {
         requestId: state.requestId,
         round: state.round,
@@ -1225,16 +1223,24 @@ function summarizeNodeResult(result: unknown) {
   return result
 }
 
-async function reviseDraft(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, telemetry?: GraphTelemetry) {
+async function reviseDraft(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
   assertStatus(state, "revising", "reviseDraft")
-  if (!state.drafterSessionId) throw new Error("Missing drafterSessionId during reviseDraft")
   if (!state.outputPath) throw new Error("Missing outputPath during reviseDraft")
 
   await ensureRunDirPath(state.outputPath)
 
+  const session = await createSession(config, `research-drafter:${state.requestId}:revise:${state.round}`)
+  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
+
   const response = await promptAgent({
     config,
-    sessionID: state.drafterSessionId,
+    sessionID: session.id,
     agent: config.quorumConfig.designatedDrafter,
     prompt: revisionPrompt(config, promptBundle, state),
     telemetry: graphAgentTelemetry({
@@ -1242,7 +1248,7 @@ async function reviseDraft(config: RuntimeConfig, promptBundle: PromptBundle, st
       state,
       name: "agent.reviseDraft",
       agentName: config.quorumConfig.designatedDrafter,
-      sessionId: state.drafterSessionId,
+      sessionId: session.id,
       input: {
         requestId: state.requestId,
         round: state.round,
@@ -1457,51 +1463,36 @@ export function createGraph(
     .addNode("prepareOutputPath", async (state) =>
       withNodeTelemetry("prepareOutputPath", state, () => prepareOutputPath(config, state)),
     )
-    .addNode("bootstrapRun", async (state) =>
-      withNodeTelemetry("bootstrapRun", state, async () => {
-        const nextState = await bootstrapRun(config, state)
-        if (nextState.rootSessionId) {
-          observer?.onSessionCreated?.({ sessionID: nextState.rootSessionId, role: "root", requestId: nextState.requestId })
-        }
-        if (nextState.drafterSessionId) {
-          observer?.onSessionCreated?.({
-            sessionID: nextState.drafterSessionId,
-            role: "drafter",
-            requestId: nextState.requestId,
-          })
-        }
-        for (const [agent, sessionID] of Object.entries(nextState.auditSessionIds)) {
-          observer?.onSessionCreated?.({ sessionID, role: `auditor:${agent}`, requestId: nextState.requestId })
-        }
-        return nextState
-      }),
-    )
     .addNode("draftFullDraft", async (state) =>
-      withNodeTelemetry("draftFullDraft", state, () => draftFullDraft(config, promptBundle, state, graphTelemetry)),
+      withNodeTelemetry("draftFullDraft", state, () =>
+        draftFullDraft(config, promptBundle, state, graphTelemetry, observer),
+      ),
     )
     .addNode("runParallelAudits", async (state) =>
-      withNodeTelemetry("runParallelAudits", state, () => runParallelAudits(config, promptBundle, state, graphTelemetry)),
+      withNodeTelemetry("runParallelAudits", state, () =>
+        runParallelAudits(config, promptBundle, state, graphTelemetry, observer),
+      ),
     )
     .addNode("reviewFindingsByDrafter", async (state) =>
       withNodeTelemetry("reviewFindingsByDrafter", state, () =>
-        reviewFindingsByDrafter(config, promptBundle, state, graphTelemetry),
+        reviewFindingsByDrafter(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("runTargetedRebuttals", async (state) =>
       withNodeTelemetry("runTargetedRebuttals", state, () =>
-        runTargetedRebuttals(config, promptBundle, state, graphTelemetry),
+        runTargetedRebuttals(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("reviewRebuttalResponses", async (state) =>
       withNodeTelemetry("reviewRebuttalResponses", state, () =>
-        reviewRebuttalResponses(config, promptBundle, state, graphTelemetry),
+        reviewRebuttalResponses(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("aggregateConsensus", async (state) =>
       withNodeTelemetry("aggregateConsensus", state, () => aggregateConsensus(config, state)),
     )
     .addNode("reviseDraft", async (state) =>
-      withNodeTelemetry("reviseDraft", state, () => reviseDraft(config, promptBundle, state, graphTelemetry)),
+      withNodeTelemetry("reviseDraft", state, () => reviseDraft(config, promptBundle, state, graphTelemetry, observer)),
     )
     .addNode("finalizeApprovedDraft", async (state) =>
       withNodeTelemetry("finalizeApprovedDraft", state, () => finalizeApprovedDraft(config, state)),
@@ -1515,8 +1506,7 @@ export function createGraph(
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
-    .addEdge("prepareOutputPath", "bootstrapRun")
-    .addEdge("bootstrapRun", "draftFullDraft")
+    .addEdge("prepareOutputPath", "draftFullDraft")
     .addEdge("draftFullDraft", "runParallelAudits")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
     .addConditionalEdges("reviewFindingsByDrafter", (state) => routeAfterDrafterReview(config, state), [

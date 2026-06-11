@@ -250,7 +250,6 @@ export const researchStateObjectSchema = z.object({
   round: z.number().int().nonnegative(),
   draft: z.string(),
   audits: z.array(auditResultRecordSchema),
-  auditSessionIds: z.record(agentNameSchema, nonEmptyStringSchema),
   activeRebuttals: z.record(findingKeySchema, activeRebuttalSchema),
   currentRebuttalResponsesByFinding: z.record(findingKeySchema, rebuttalResponseRecordSchema),
   rebuttalTurnCounts: z.record(findingKeySchema, z.number().int().positive()),
@@ -261,8 +260,6 @@ export const researchStateObjectSchema = z.object({
   approvedAgents: z.array(agentNameSchema),
   status: researchStatusSchema,
   failureReason: failureReasonSchema.optional(),
-  rootSessionId: nonEmptyStringSchema.optional(),
-  drafterSessionId: nonEmptyStringSchema.optional(),
   outputPath: nonEmptyStringSchema.optional(),
 })
 

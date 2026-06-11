@@ -90,7 +90,6 @@ describe("schema validation", () => {
       round: 0,
       draft: "",
       audits: [],
-      auditSessionIds: {},
       activeRebuttals: {},
       currentRebuttalResponsesByFinding: {},
       rebuttalTurnCounts: {},
