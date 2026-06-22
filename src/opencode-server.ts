@@ -17,7 +17,7 @@ async function waitForServer(hostname: string, port: number, timeoutMs: number):
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    if (await isPortOpen(hostname, port)) return
+    if (await isServerReady(hostname, port)) return
     await new Promise((r) => setTimeout(r, 300))
   }
 
