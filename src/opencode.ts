@@ -436,6 +436,12 @@ export async function validateRuntimePrerequisites(config: RuntimeConfig) {
     ...config.quorumConfig.auditors,
     config.quorumConfig.summarizerAgent,
   ]
+
+  if (config.quorumConfig.designQuorum?.enabled) {
+    required.push(config.quorumConfig.designQuorum.designatedDesigner)
+    required.push(...config.quorumConfig.designQuorum.auditors)
+  }
+
   const names = new Set(agents.map((entry) => entry.name))
   const missing = required.filter((name) => !names.has(name))
 

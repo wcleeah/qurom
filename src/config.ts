@@ -34,6 +34,14 @@ const quorumConfigSchema = z.object({
     prefer: z.array(z.string().min(1)).min(1),
     webSearchProvider: z.string().min(1),
   }),
+  designQuorum: z
+    .object({
+      enabled: z.boolean(),
+      designatedDesigner: z.string().min(1),
+      auditors: z.array(z.string().min(1)).min(1),
+      maxRounds: z.number().int().positive(),
+    })
+    .optional(),
 })
 
 export async function loadRuntimeConfig() {

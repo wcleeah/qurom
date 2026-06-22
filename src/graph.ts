@@ -14,6 +14,7 @@ import {
 import { createSession, promptAgent } from "./opencode"
 import type { PromptBundle } from "./prompt-assets"
 import { summarizeMarkdown } from "./summarizer"
+import { runDesignQuorum } from "./design-quorum"
 import {
   aggregatedFindingSchema,
   aggregatedFindingsSchema,
@@ -1297,6 +1298,48 @@ async function finalizeFailedRun(_config: RuntimeConfig, state: ResearchState) {
   return researchStateSchema.parse(state)
 }
 
+async function runDesignQuorumNode(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
+  if (!state.outputPath) throw new Error("Missing outputPath during runDesignQuorum")
+  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  const artifactPath = `${state.outputPath}/final.md`
+  const artifactFile = Bun.file(artifactPath)
+  const markdown = (await artifactFile.exists()) ? await artifactFile.text() : state.draft
+
+  const topic = state.inputMode === "topic"
+    ? state.topic ?? ""
+    : state.documentText ?? state.documentPath ?? ""
+
+  const designResult = await runDesignQuorum({
+    config,
+    promptBundle,
+    markdown,
+    topic,
+    outputPath: state.outputPath,
+    observer,
+    telemetry: telemetry
+      ? {
+          run: telemetry.run,
+          parentObservation: telemetry.currentNode,
+          trackSessionObservation: telemetry.trackSessionObservation,
+          trackAgentMetadata: telemetry.trackAgentMetadata,
+        }
+      : undefined,
+  })
+
+  return researchStateSchema.parse({
+    ...state,
+    designHtml: designResult.html,
+    designStatus: designResult.status,
+  })
+}
+
 export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
   if (state.status !== "approved" && state.status !== "failed") {
     throw new Error(`Invalid status for summarizeOutputArtifact: ${state.status}`)
@@ -1379,6 +1422,13 @@ export function routeAfterAggregate(state: ResearchState) {
   if (state.status === "revising") return "reviseDraft"
 
   throw new Error(`Invalid routeAfterAggregate status: ${state.status}`)
+}
+
+export function routeAfterSummarize(config: RuntimeConfig, state: ResearchState) {
+  if (state.status === "approved" && config.quorumConfig.designQuorum?.enabled) {
+    return "runDesignQuorum"
+  }
+  return "__end__"
 }
 
 export function createGraph(
@@ -1503,6 +1553,11 @@ export function createGraph(
     .addNode("summarizeOutputArtifact", async (state) =>
       withNodeTelemetry("summarizeOutputArtifact", state, () => summarizeOutputArtifact(config, state, graphTelemetry)),
     )
+    .addNode("runDesignQuorum", async (state) =>
+      withNodeTelemetry("runDesignQuorum", state, () =>
+        runDesignQuorumNode(config, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
@@ -1526,7 +1581,11 @@ export function createGraph(
     .addEdge("reviseDraft", "runParallelAudits")
     .addEdge("finalizeApprovedDraft", "summarizeOutputArtifact")
     .addEdge("finalizeFailedRun", "summarizeOutputArtifact")
-    .addEdge("summarizeOutputArtifact", END)
+    .addConditionalEdges("summarizeOutputArtifact", (state) => routeAfterSummarize(config, state), [
+      "runDesignQuorum",
+      "__end__",
+    ])
+    .addEdge("runDesignQuorum", END)
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),
       name: "research-quorum",

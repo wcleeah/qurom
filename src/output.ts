@@ -175,3 +175,7 @@ export async function writeFailedArtifacts(
   await writeRunTextArtifact(runDir, "latest-draft.md", input.draft)
   await writeRunJsonArtifact(runDir, "failure.json", input.summary)
 }
+
+export async function writeDesignHtmlArtifact(runDir: string, html: string) {
+  await writeRunTextArtifact(runDir, "final.html", html)
+}
