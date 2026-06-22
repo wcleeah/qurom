@@ -1,7 +1,8 @@
 ---
 description: Source and citation auditor for quorum drafts
 mode: subagent
-model: github-copilot/gpt-5.4
+model: opencode-go/minimax-m3
+variant: thinking
 permission:
   read: deny
   glob: deny

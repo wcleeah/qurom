@@ -1,8 +1,8 @@
 ---
 description: Designated research drafter for quorum runs
 mode: subagent
-model: github-copilot/gpt-5.4
-variant: xhigh 
+model: opencode-go/glm-5.2
+variant: max
 permission:
   read: deny
   glob: deny
