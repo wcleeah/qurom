@@ -18,21 +18,6 @@ const formatElapsed = (ms: number): string => {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
-const abbreviateDocumentPath = (value?: string): string => {
-  if (!value) return "-"
-  const parts = value.split("/").filter(Boolean)
-  if (parts.length <= 2) return value
-  return `${parts.at(-2)}/${parts.at(-1)}`
-}
-
-const formatInputLabel = (state?: ResearchState): string | undefined => {
-  if (!state) return undefined
-  if (state.inputMode === "topic") {
-    return state.topic ? `prompt  ${state.topic}` : undefined
-  }
-  return `document  ${abbreviateDocumentPath(state.documentPath)}`
-}
-
 const useElapsed = (active: boolean): number => {
   const start = useRef<number>(Date.now())
   const [now, setNow] = useState(Date.now())
@@ -44,36 +29,272 @@ const useElapsed = (active: boolean): number => {
   return now - start.current
 }
 
+function roundBar(round: number, maxRounds: number, width: number): string {
+  const pct = Math.min(1, round / Math.max(1, maxRounds))
+  const blocks = Math.max(1, Math.floor(pct * width))
+  return "█".repeat(blocks) + "░".repeat(Math.max(0, width - blocks))
+}
+
+function severityDot(severity: string): string {
+  if (severity === "blocker") return "●"
+  if (severity === "major") return "○"
+  return "·"
+}
+
+function severityColor(severity: string): string {
+  if (severity === "blocker") return theme.error
+  if (severity === "major") return theme.warning
+  return theme.textMuted
+}
+
+function auditVerdictIcon(vote: string): string {
+  return vote === "approve" ? "✓" : "✗"
+}
+
+function auditVerdictColor(vote: string): string {
+  return vote === "approve" ? theme.success : theme.error
+}
+
+function shortStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    drafting: "Drafting",
+    auditing: "Auditing",
+    reviewing_findings: "Reviewing findings",
+    awaiting_auditor_rebuttal: "Rebuttal round",
+    reviewing_rebuttal_responses: "Reviewing rebuttals",
+    aggregating: "Aggregating",
+    revising: "Revising draft",
+    approved: "Approved",
+    failed: "Failed",
+  }
+  return labels[status] ?? status
+}
+
+function findingsBreakdown(findings: Array<{ severity: string }>): string {
+  const counts: Record<string, number> = { blocker: 0, major: 0, minor: 0 }
+  for (const f of findings) {
+    if (f.severity in counts) counts[f.severity]++
+  }
+  const parts: string[] = []
+  if (counts.blocker > 0) parts.push(`${severityDot("blocker")} ${counts.blocker}`)
+  if (counts.major > 0) parts.push(`${severityDot("major")} ${counts.major}`)
+  if (counts.minor > 0) parts.push(`${severityDot("minor")} ${counts.minor}`)
+  return parts.join("  ")
+}
+
 export const Dashboard = ({ store, selected = false, active = false }: DashboardProps) => {
   const { width } = useTerminalDimensions()
-  const phase = useStoreSelector(store, (s) => s.lifecycle.phase)
-  const requestId = useStoreSelector(store, (s) => s.lifecycle.requestId)
-  const traceId = useStoreSelector(store, (s) => s.lifecycle.traceId)
+  const lifecyclePhase = useStoreSelector(store, (s) => s.lifecycle.phase)
   const outputDir = useStoreSelector(store, (s) => s.lifecycle.outputDir)
-  const graphNode = useStoreSelector(store, (s) => s.graph.node)
-  const graphPhase = useStoreSelector(store, (s) => s.graph.phase)
   const graphState = useStoreSelector(store, (s) => s.graph.state as ResearchState | undefined)
+  const agents = useStoreSelector(store, (s) => s.agents)
   const round = useStoreSelector(store, (s) =>
     s.graph.state && "round" in s.graph.state ? (s.graph.state as { round?: number }).round : undefined,
   )
 
-  const runActive = phase !== "complete" && phase !== "error"
+  const runActive = lifecyclePhase !== "complete" && lifecyclePhase !== "error"
   const elapsed = useElapsed(runActive)
-  const wide = width >= 120
-  const medium = width >= 95
-  const voteApproveCount = graphState?.audits.filter((audit) => audit.vote === "approve").length ?? 0
-  const voteReviseCount = graphState?.audits.filter((audit) => audit.vote === "revise").length ?? 0
-  const acceptedCount = Math.max(0, voteReviseCount - Object.keys(graphState?.activeRebuttals ?? {}).length)
-  const rebuttalCount = Object.keys(graphState?.activeRebuttals ?? {}).length
-  const rebuttalResponseCount = Object.keys(graphState?.currentRebuttalResponsesByFinding ?? {}).length
-  const unresolvedCount = graphState?.unresolvedFindings.length ?? 0
-  const approvedCount = graphState?.approvedAgents.length ?? 0
-  const isDocumentRun = graphState?.inputMode === "document"
-  const titleText = graphState?.inputSummary?.title ?? (isDocumentRun ? "(summarizing...)" : undefined)
-  const summaryText = graphState?.inputSummary?.summary ?? (isDocumentRun ? "(waiting for summary)" : undefined)
-  const inputLabel = formatInputLabel(graphState)
+  const status = graphState?.status ?? ""
+  const wide = width >= 110
+
+  // Audit data
+  const audits = graphState?.audits ?? []
+  const unresolved = graphState?.unresolvedFindings ?? []
+  const rebuttals = Object.keys(graphState?.activeRebuttals ?? {}).length
+  const rebuttalResponses = Object.keys(graphState?.currentRebuttalResponsesByFinding ?? {}).length
+  const approvedAuditors = graphState?.approvedAgents?.length ?? 0
+  const maxRounds = 10 // we don't have access to config here, reasonable default
+  const currentRound = round ?? 0
+
+  // Design quorum
+  const designStatus = graphState?.designStatus
+  const designRunning = designStatus === "running" || designStatus === "pending"
+
+  // Agent activity
+  const activeAgents = Object.entries(agents)
+    .filter(([, a]) => a.status === "running")
+    .map(([name]) => name)
+
   const borderColor = active || selected ? theme.selectionBorder : theme.borderSubtle
-  const focusLabel = active ? "focus" : selected ? "selected" : undefined
+
+  // --- Phase-specific rendering helpers ---
+
+  const renderStatusLine = () => {
+    const roundText = status !== "drafting" ? `Round ${currentRound}/${maxRounds}` : ""
+    const bar = status !== "drafting" ? roundBar(currentRound, maxRounds, 8) : ""
+    const designTag = designRunning ? " 🎨 design" : ""
+
+    let icon = "⬤"
+    let label = shortStatusLabel(status)
+    let labelColor = theme.accent
+
+    if (status === "approved") { icon = "✓"; labelColor = theme.success }
+    if (status === "failed") { icon = "✗"; labelColor = theme.error }
+    if (status === "revising") labelColor = theme.warning
+
+    const agentActivity = activeAgents.length > 0
+      ? `  —  ${activeAgents.join(", ")} working`
+      : ""
+
+    return (
+      <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+        <span fg={labelColor}>{icon} {label}</span>
+        <span fg={theme.textMuted}>{designTag}</span>
+        {roundText ? (
+          <>
+            <span fg={theme.textMuted}>{"  "}{roundText}  {bar}</span>
+          </>
+        ) : null}
+        <span fg={theme.textMuted}>{"  elapsed "}{formatElapsed(elapsed)}</span>
+      </text>
+    )
+  }
+
+  const renderAuditorVerdicts = () => {
+    if (audits.length === 0) {
+      if (status === "auditing" && activeAgents.length > 0) {
+        return (
+          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+            <span fg={theme.textMuted}>auditors: </span>
+            <span fg={theme.status.running}>{activeAgents.filter(a => a !== "research-drafter").join(", ")} running...</span>
+          </text>
+        )
+      }
+      return null
+    }
+
+    return (
+      <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+        {audits.map((audit, i) => (
+          <span key={audit.agent}>
+            {i > 0 ? <span fg={theme.textMuted}>{"  "}</span> : null}
+            <span fg={auditVerdictColor(audit.vote)}>{auditVerdictIcon(audit.vote)}</span>
+            <span fg={theme.text}> {audit.agent}</span>
+            {audit.vote === "revise" && audit.findings.length > 0 ? (
+              <span fg={theme.textMuted}> ({audit.findings.length})</span>
+            ) : null}
+          </span>
+        ))}
+      </text>
+    )
+  }
+
+  const renderAuditDetail = () => {
+    if (audits.length === 0) return null
+
+    const revised = audits.filter(a => a.vote === "revise")
+    if (revised.length === 0) return null
+
+    const allFindings = revised.flatMap(a => a.findings)
+    if (allFindings.length === 0) return null
+
+    const breakdown = findingsBreakdown(allFindings)
+
+    return (
+      <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+        <span fg={theme.textMuted}>findings: </span>
+        <span fg={theme.text}>{breakdown}</span>
+      </text>
+    )
+  }
+
+  const renderUnresolved = () => {
+    if (unresolved.length === 0) return null
+
+    const breakdown = findingsBreakdown(unresolved)
+
+    return (
+      <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+        <span fg={theme.textMuted}>unresolved: </span>
+        <span fg={theme.text}>{breakdown}</span>
+      </text>
+    )
+  }
+
+  const renderRebuttalStatus = () => {
+    if (rebuttals === 0 && rebuttalResponses === 0) return null
+
+    const parts: string[] = []
+    if (rebuttals > 0) parts.push(`${rebuttals} active rebuttals`)
+    if (rebuttalResponses > 0) parts.push(`${rebuttalResponses} auditor responses`)
+
+    return (
+      <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+        <span fg={theme.textMuted}>{parts.join("  ·  ")}</span>
+      </text>
+    )
+  }
+
+  const renderVerdict = () => {
+    if (status === "approved") {
+      const n = audits.length || 3
+      const a = approvedAuditors || n
+      return (
+        <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          <span fg={theme.success}>{a}/{n} auditors approved</span>
+        </text>
+      )
+    }
+
+    if (status === "failed") {
+      const reason = graphState?.failureReason
+      const msg = reason === "max_rounds_exhausted" ? "Max rounds exhausted"
+        : reason === "stagnated_findings" ? "Findings stagnated — no progress"
+        : "Run failed"
+      return (
+        <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          <span fg={theme.error}>{msg}</span>
+          {outputDir ? <span fg={theme.textMuted}>{"  ·  "}{outputDir}</span> : null}
+        </text>
+      )
+    }
+
+    return null
+  }
+
+  const renderDesignQuorumLine = () => {
+    if (!designRunning && designStatus !== "approved" && designStatus !== "failed") return null
+
+    if (designRunning) {
+      return (
+        <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          <span fg={theme.status.running}>🎨 html-designer converting to HTML...</span>
+        </text>
+      )
+    }
+
+    if (designStatus === "approved") {
+      return (
+        <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          <span fg={theme.success}>🎨 HTML document ready → {outputDir ?? "."}/final.html</span>
+        </text>
+      )
+    }
+
+    if (designStatus === "failed") {
+      return (
+        <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+          <span fg={theme.warning}>🎨 HTML conversion finished with issues → {outputDir ?? "."}/final.html</span>
+        </text>
+      )
+    }
+
+    return null
+  }
+
+  const renderArtifactsLine = () => {
+    if (lifecyclePhase !== "complete" && lifecyclePhase !== "error") return null
+
+    return (
+      <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+        <span fg={theme.textMuted}>output: </span>
+        <span fg={theme.textMuted}>{outputDir ?? "(pending)"}</span>
+        <span fg={theme.textMuted}>{"  ·  "}press e to view draft</span>
+      </text>
+    )
+  }
+
+  // --- Main render ---
 
   return (
     <box
@@ -89,96 +310,15 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
       marginRight={1}
       flexShrink={0}
     >
-      <box flexDirection={wide ? "row" : "column"} gap={wide ? 3 : 1}>
-        <box flexGrow={2} flexDirection="column" gap={0}>
-          <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            Run{focusLabel ? `: ${focusLabel}` : ""}
-          </text>
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.textMuted}>phase: </span>
-            <span fg={theme.text}>{phase}</span>
-            <span fg={theme.textMuted}>{" | round: "}</span>
-            <span fg={theme.text}>{round ?? "-"}</span>
-            <span fg={theme.textMuted}>{" | node: "}</span>
-            <span fg={theme.text}>{graphNode ?? "-"}</span>
-          </text>
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.textMuted}>step: </span>
-            <span fg={theme.text}>{graphPhase ?? "-"}</span>
-            <span fg={theme.textMuted}>{" | elapsed: "}</span>
-            <span fg={theme.text}>{formatElapsed(elapsed)}</span>
-          </text>
-        </box>
-
-        <box flexGrow={2} flexDirection="column" gap={0}>
-          <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            Input
-          </text>
-          {inputLabel ? (
-            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-              <span fg={theme.textMuted}>input: </span>
-              <span fg={theme.text}>{inputLabel}</span>
-              {medium ? (
-                <>
-                  <span fg={theme.textMuted}>{" | request: "}</span>
-                  <span fg={theme.text}>{requestId ?? "-"}</span>
-                </>
-              ) : null}
-            </text>
-          ) : null}
-          {titleText ? (
-            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-              <span fg={theme.textMuted}>title: </span>
-              <span fg={theme.text}>{titleText}</span>
-            </text>
-          ) : null}
-          {summaryText ? (
-            <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-              <span fg={theme.textMuted}>summary: </span>
-              <span fg={theme.text}>{summaryText}</span>
-            </text>
-          ) : null}
-        </box>
-
-        <box flexGrow={2} flexDirection="column" gap={0}>
-          <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            Progress
-          </text>
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.textMuted}>findings: </span>
-            <span fg={theme.text}>{unresolvedCount}</span>
-            <span fg={theme.textMuted}>{" | votes: "}</span>
-            <span fg={theme.text}>{`${voteApproveCount} approve / ${voteReviseCount} revise`}</span>
-          </text>
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.textMuted}>rebuttals: </span>
-            <span fg={theme.text}>{rebuttalCount}</span>
-            <span fg={theme.textMuted}>{" | responses: "}</span>
-            <span fg={theme.text}>{rebuttalResponseCount}</span>
-            <span fg={theme.textMuted}>{" | accepted: "}</span>
-            <span fg={theme.text}>{acceptedCount}</span>
-            <span fg={theme.textMuted}>{" | approved: "}</span>
-            <span fg={theme.text}>{approvedCount}</span>
-          </text>
-        </box>
-
-        <box flexGrow={2} flexDirection="column" gap={0}>
-          <text fg={theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            Artifacts
-          </text>
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.textMuted}>trace: </span>
-            <span fg={theme.text}>{traceId ?? "-"}</span>
-          </text>
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.textMuted}>output: </span>
-            <span fg={theme.text}>{outputDir ?? "(pending)"}</span>
-          </text>
-          <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-            <span fg={theme.textMuted}>view: </span>
-            <span fg={theme.text}>press e</span>
-          </text>
-        </box>
+      <box flexDirection="column" gap={0}>
+        {renderStatusLine()}
+        {renderDesignQuorumLine()}
+        {!designRunning ? renderAuditorVerdicts() : null}
+        {!designRunning ? renderAuditDetail() : null}
+        {!designRunning ? renderRebuttalStatus() : null}
+        {!designRunning ? renderUnresolved() : null}
+        {renderVerdict()}
+        {renderArtifactsLine()}
       </box>
     </box>
   )
