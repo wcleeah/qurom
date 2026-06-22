@@ -1,6 +1,7 @@
 import { loadRuntimeConfig } from "./config"
 import { loadPromptBundle } from "./prompt-assets"
 import { runDesignForExistingRun } from "./design-quorum"
+import { ensureOpenCodeServer } from "./opencode-server"
 
 async function main() {
   const args = process.argv.slice(2)
@@ -20,17 +21,27 @@ async function main() {
     process.exit(1)
   }
 
-  console.log(`Loading prompt bundle...`)
-  const promptBundle = await loadPromptBundle(config)
+  const opencodePort = new URL(config.env.OPENCODE_BASE_URL).port || "4096"
+  const stopServer = await ensureOpenCodeServer({
+    port: Number(opencodePort),
+    directory: config.env.OPENCODE_DIRECTORY,
+  })
 
-  console.log(`Running design quorum for ${runDir}...`)
-  const result = await runDesignForExistingRun({ config, promptBundle, runDir })
+  try {
+    console.log(`Loading prompt bundle...`)
+    const promptBundle = await loadPromptBundle(config)
 
-  if (result.status === "approved") {
-    console.log(`✅ Design approved after ${result.round} round(s) → ${runDir}/final.html`)
-  } else {
-    console.log(`⚠️  Design pipeline finished with status: ${result.status} after ${result.round} round(s)`)
-    console.log(`   HTML written to ${runDir}/final.html`)
+    console.log(`Running design quorum for ${runDir}...`)
+    const result = await runDesignForExistingRun({ config, promptBundle, runDir })
+
+    if (result.status === "approved") {
+      console.log(`✅ Design approved after ${result.round} round(s) → ${runDir}/final.html`)
+    } else {
+      console.log(`⚠️  Design pipeline finished with status: ${result.status} after ${result.round} round(s)`)
+      console.log(`   HTML written to ${runDir}/final.html`)
+    }
+  } finally {
+    await stopServer().catch(() => {})
   }
 }
 
