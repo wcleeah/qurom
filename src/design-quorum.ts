@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import { createSession, promptAgent } from "./opencode"
 import { writeDesignHtmlArtifact } from "./output"
 import {
@@ -342,4 +343,43 @@ export async function runDesignQuorum(input: {
 
   status = "failed"
   return { html, status, round }
+}
+
+export async function runDesignForExistingRun(input: {
+  config: RuntimeConfig
+  promptBundle: PromptBundle
+  runDir: string
+}): Promise<{ html: string; status: DesignStatus; round: number }> {
+  const { config, promptBundle, runDir } = input
+
+  const finalPath = join(runDir, "final.md")
+  const latestPath = join(runDir, "latest-draft.md")
+  const requestPath = join(runDir, "request.json")
+
+  let markdown: string
+  let artifactFile = Bun.file(finalPath)
+  if (await artifactFile.exists()) {
+    markdown = await artifactFile.text()
+  } else {
+    artifactFile = Bun.file(latestPath)
+    if (!(await artifactFile.exists())) {
+      throw new Error(`No draft found in ${runDir} (expected final.md or latest-draft.md)`)
+    }
+    markdown = await artifactFile.text()
+  }
+
+  const requestFile = Bun.file(requestPath)
+  let topic = ""
+  if (await requestFile.exists()) {
+    const requestJson = await requestFile.json()
+    topic = requestJson.inputSummary?.title ?? requestJson.topic ?? ""
+  }
+
+  return runDesignQuorum({
+    config,
+    promptBundle,
+    markdown,
+    topic,
+    outputPath: runDir,
+  })
 }
