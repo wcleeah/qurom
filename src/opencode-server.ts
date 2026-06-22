@@ -3,25 +3,24 @@ import { spawn, type Subprocess } from "bun"
 let child: Subprocess | undefined
 let stopping = false
 
-async function isServerReady(hostname: string, port: number): Promise<boolean> {
+async function isServerReady(baseUrl: string): Promise<boolean> {
   try {
-    const socket = await Bun.connect({ hostname, port })
-    socket.end()
-    return true
+    const response = await fetch(`${baseUrl}/agent`, { signal: AbortSignal.timeout(1000) })
+    return response.ok
   } catch {
     return false
   }
 }
 
-async function waitForServer(hostname: string, port: number, timeoutMs: number): Promise<void> {
+async function waitForServer(baseUrl: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    if (await isServerReady(hostname, port)) return
-    await new Promise((r) => setTimeout(r, 300))
+    if (await isServerReady(baseUrl)) return
+    await new Promise((r) => setTimeout(r, 500))
   }
 
-  throw new Error(`OpenCode server did not become ready within ${timeoutMs}ms on ${hostname}:${port}`)
+  throw new Error(`OpenCode server did not become ready within ${timeoutMs}ms on ${baseUrl}`)
 }
 
 export async function ensureOpenCodeServer(input: {
@@ -35,10 +34,12 @@ export async function ensureOpenCodeServer(input: {
   const port = input.port
   const opencodeBin = input.opencodeBin ?? "opencode"
   const directory = input.directory ?? process.cwd()
-  const startupTimeoutMs = input.startupTimeoutMs ?? 15_000
+  const startupTimeoutMs = input.startupTimeoutMs ?? 30_000
+
+  const baseUrl = `http://${hostname}:${port}`
 
   // If already running, just return a no-op cleanup
-  if (await isServerReady(hostname, port)) {
+  if (await isServerReady(baseUrl)) {
     return async () => {}
   }
 
@@ -56,7 +57,7 @@ export async function ensureOpenCodeServer(input: {
   })
 
   try {
-    await waitForServer(hostname, port, startupTimeoutMs)
+    await waitForServer(baseUrl, startupTimeoutMs)
   } catch (error) {
     stopping = true
     child.kill()
