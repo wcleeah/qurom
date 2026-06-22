@@ -19,5 +19,14 @@
   "researchTools": {
     "prefer": ["context7", "exa", "grepapp"],
     "webSearchProvider": "exa"
+  },
+  "designQuorum": {
+    "enabled": true,
+    "designatedDesigner": "html-designer",
+    "auditors": [
+      "visual-layout-auditor",
+      "technical-html-auditor"
+    ],
+    "maxRounds": 2
   }
 }

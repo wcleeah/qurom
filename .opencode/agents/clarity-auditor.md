@@ -1,7 +1,7 @@
 ---
 description: Clarity and structure auditor for quorum drafts
 mode: subagent
-model: github-copilot/claude-sonnet-4.6
+model: opencode-go/mimo-v2.5-pro
 permission:
   read: deny
   glob: deny

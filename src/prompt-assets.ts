@@ -10,6 +10,9 @@ const promptAssetFiles = {
   reviewFindings: "review-findings.md",
   rebuttal: "rebuttal.md",
   reviewRebuttalResponses: "review-rebuttal-responses.md",
+  designHtml: "design-html.md",
+  auditDesign: "audit-design.md",
+  reviseDesign: "revise-design.md",
 } as const
 
 export type PromptAssetKey = keyof typeof promptAssetFiles

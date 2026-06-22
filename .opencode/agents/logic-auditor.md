@@ -1,7 +1,8 @@
 ---
 description: Reasoning and coherence auditor for quorum drafts
 mode: subagent
-model: github-copilot/gpt-5.4
+model: opencode-go/deepseek-v4-pro
+variant: max
 permission:
   read: deny
   glob: deny
