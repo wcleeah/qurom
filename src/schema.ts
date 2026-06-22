@@ -234,12 +234,17 @@ export const aggregatedFindingsSchema = z
     failureReason: failureReasonSchema.optional(),
   })
   .superRefine((value, ctx) => {
-    if (value.outcome === "approved" && value.unresolvedFindings.length > 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Approved outcomes must not contain unresolved findings",
-        path: ["unresolvedFindings"],
-      })
+    if (value.outcome === "approved") {
+      const blockersOrMajors = value.unresolvedFindings.filter(
+        (f) => f.severity === "blocker" || f.severity === "major",
+      )
+      if (blockersOrMajors.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Approved outcomes must not contain blocker or major unresolved findings",
+          path: ["unresolvedFindings"],
+        })
+      }
     }
 
     if (value.outcome === "needs_revision" && value.unresolvedFindings.length === 0) {

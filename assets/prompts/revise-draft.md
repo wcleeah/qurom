@@ -1,15 +1,19 @@
-Rewrite the current draft into a clean standalone document that resolves the unresolved findings.
+Revise the current draft to resolve the unresolved findings. Fix only what the findings identify — do not restructure the document.
 
-Output rules:
+Surgical revision rules:
 - Return markdown only.
-- Return only the rewritten document.
+- Return the revised document.
 - Use the unresolved findings as private rewrite instructions.
-- Do not mention reviewers, findings, rebuttals, unresolved issues, revision history, or that this is a revised draft.
+- Do not mention reviewers, findings, rebuttals, revision history, or that this is a revised draft.
 - Do not include sections like `Revision Notes`, `Changes Made`, `Open Issues`, `Findings`, `Reviewer Feedback`, or `Changelog`.
-- Rewrite aggressively when the current explanation is aimed at the wrong abstraction level or leaves inferential gaps.
-- Do not patch wording locally if the real problem is that the argument itself needs to be rewritten.
-- Close every live gap raised by unresolved findings, even when that requires new prerequisite explanation.
-- Preserve correct material when it still supports a gap-free explanation.
-- If a finding is about sourcing, strengthen or narrow the claim instead of hand-waving.
-- If the draft is still too abstract, add the smallest concrete artifact that closes the gap: a source excerpt, simplified code sketch, compact ASCII flow or state diagram, equation, invariant, or cost relation.
-- Replace decorative or low-signal artifacts with ones that actually carry the explanation.
+- Fix only the specific passages cited in the findings. Preserve all text that no finding criticized.
+- A finding about an undefined term → add a sentence defining it. Do not rewrite the surrounding section.
+- A finding about a contradictory statement → fix the contradiction. Leave the rest alone.
+- A finding about a missing source → add the source. Do not re-research the claim.
+- A finding about a confusing diagram → fix or clarify the diagram. Do not redraw the entire document.
+- If a finding exposes a genuine inferential gap, add the smallest possible explanation to close it — a sentence or two, not a new section.
+- Adding a concrete artifact (source excerpt, code sketch, ASCII diagram) is fine when a finding specifically calls for it.
+- Do not add new explanatory content beyond what the findings require.
+- Do not reorder sections, rename sections, or change the document's structure unless a finding explicitly demands it.
+- If two findings about the same topic conflict, prefer the more precise one.
+- If the draft was already correct and a finding is mistaken (e.g., auditor misunderstood), preserve the original text.

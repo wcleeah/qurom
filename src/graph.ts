@@ -114,10 +114,30 @@ function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, stat
     .join("\n\n")
 }
 
-function auditPrompt(config: RuntimeConfig, promptBundle: PromptBundle, agent: string, request: string, draft: string) {
+function auditPrompt(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  agent: string,
+  request: string,
+  draft: string,
+  previousUnresolved?: AggregatedFinding[],
+) {
+  const deltaContext =
+    previousUnresolved && previousUnresolved.length > 0
+      ? [
+          "This is a revision round. The draft was revised to fix these findings from the previous round:",
+          JSON.stringify(
+            previousUnresolved.map((f) => ({ severity: f.severity, category: f.category, issue: f.issue })),
+            null,
+            2,
+          ),
+          "Focus on whether these specific findings were resolved. Raise new findings only for material new problems introduced by the revision.",
+        ].join("\n\n")
+      : "This is the first audit of this draft."
+
   return [
     `You are the ${agent}, user requested a review on the ${request} draft.`,
-    promptBundle.assets.audit,
+    promptBundle.assets.audit.replace("{deltaContext}", deltaContext),
     researchToolBlock(config),
     "Draft:",
     draft,
@@ -481,9 +501,13 @@ function nextRebuttalTurnCounts(state: ResearchState, rebuttals: Record<string, 
 
 function approvedAgentsForOutcome(state: ResearchState, unresolved: AggregatedFinding[]) {
   const unresolvedAgents = new Set<string>()
+  const minorOnlyAgents = new Set<string>()
 
   for (const finding of unresolved) {
     unresolvedAgents.add(finding.agent)
+    if (finding.severity !== "blocker" && finding.severity !== "major") {
+      minorOnlyAgents.add(finding.agent)
+    }
   }
 
   const approvedAgents: string[] = []
@@ -494,7 +518,7 @@ function approvedAgentsForOutcome(state: ResearchState, unresolved: AggregatedFi
     }
   }
 
-  return approvedAgents
+  return { approvedAgents, unresolvedAgents, minorOnlyAgents }
 }
 
 export function effectiveResponsesByFinding(state: ResearchState) {
@@ -680,7 +704,7 @@ async function runParallelAudits(
           config,
           sessionID: session.id,
           agent,
-          prompt: auditPrompt(config, promptBundle, agent, request, state.draft),
+          prompt: auditPrompt(config, promptBundle, agent, request, state.draft, state.round > 0 ? state.unresolvedFindings : undefined),
           schema: auditResultSchema,
           telemetry: graphAgentTelemetry({
             telemetry,
@@ -1154,9 +1178,16 @@ export async function aggregateConsensus(config: RuntimeConfig, state: ResearchS
 
   const unresolved = dedupeFindings(unresolvedCandidates)
   const signature = unresolvedSignature(unresolved)
-  const approvedAgents = approvedAgentsForOutcome(state, unresolved)
+  const { approvedAgents, minorOnlyAgents } = approvedAgentsForOutcome(state, unresolved)
+  const hasBlockersOrMajors = unresolved.some((f) => f.severity === "blocker" || f.severity === "major")
   const allAuditorsApproved = approvedAgents.length === config.quorumConfig.auditors.length
-  const isApproved = config.quorumConfig.requireUnanimousApproval ? allAuditorsApproved : unresolved.length === 0
+  const auditorsWithOnlyMinors = config.quorumConfig.auditors.filter(
+    (a) => minorOnlyAgents.has(a) && !hasBlockersOrMajors,
+  )
+  const allAuditorsOk = approvedAgents.length + auditorsWithOnlyMinors.length >= config.quorumConfig.auditors.length
+  const isApproved = config.quorumConfig.requireUnanimousApproval
+    ? allAuditorsOk && !hasBlockersOrMajors
+    : unresolved.length === 0
   const stagnated = unresolved.length > 0 && state.lastUnresolvedSignature === signature
   const maxRoundsExhausted = unresolved.length > 0 && state.round >= config.quorumConfig.maxRounds
   let outcome: AggregatedFindings["outcome"] = "needs_revision"
