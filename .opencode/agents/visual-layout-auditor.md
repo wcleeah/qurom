@@ -2,6 +2,7 @@
 description: Visual and layout auditor for design quorum HTML output
 mode: subagent
 model: opencode-go/mimo-v2.5-pro
+variant: max
 permission:
   read: deny
   glob: deny
