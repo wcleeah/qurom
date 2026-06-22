@@ -2,7 +2,7 @@
 description: Technical HTML auditor for design quorum — validity, self-containedness, security, accessibility
 mode: subagent
 model: opencode-go/deepseek-v4-pro
-variant: thinking
+variant: max
 permission:
   read: deny
   glob: deny
