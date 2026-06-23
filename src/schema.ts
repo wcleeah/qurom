@@ -275,6 +275,7 @@ export const researchStateObjectSchema = z.object({
   artifactSummary: runDisplaySummarySchema.optional(),
   round: z.number().int().nonnegative(),
   draft: z.string(),
+  drafts: z.array(z.string()).optional(),
   audits: z.array(auditResultRecordSchema),
   activeRebuttals: z.record(findingKeySchema, activeRebuttalSchema),
   currentRebuttalResponsesByFinding: z.record(findingKeySchema, rebuttalResponseRecordSchema),
