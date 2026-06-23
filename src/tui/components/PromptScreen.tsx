@@ -6,6 +6,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { RuntimeConfig } from "../../config";
 import type { InputRequest } from "../../schema";
+import type { RunHistoryEntry } from "../runHistory";
 import { openInEditor } from "../editor";
 import { TMUX_TOP_INSET, centeredColumnWidth } from "../layout";
 import { theme } from "../theme";
@@ -16,6 +17,8 @@ export type PromptMode = "topic" | "document";
 export interface PromptScreenProps {
     config: RuntimeConfig;
     onSubmit: (request: InputRequest) => void;
+    runHistory?: RunHistoryEntry[];
+    onHistorySelect?: (entry: RunHistoryEntry) => void;
     initialMode?: PromptMode;
     initialTopic?: string;
     initialDocument?: { path: string; content: string };
@@ -61,6 +64,8 @@ const ModeChip = ({ active, label }: { active: boolean; label: string }) => (
 export const PromptScreen = ({
     config,
     onSubmit,
+    runHistory,
+    onHistorySelect,
     initialMode = "topic",
     initialTopic = "",
     initialDocument,
@@ -185,6 +190,35 @@ export const PromptScreen = ({
                             to the quorum.
                         </text>
                     </box>
+
+                    {runHistory && runHistory.length > 0 ? (
+                        <box
+                            border
+                            borderStyle="single"
+                            borderColor={theme.borderSubtle}
+                            backgroundColor={theme.backgroundPanel}
+                            padding={1}
+                            flexDirection="column"
+                            gap={0}
+                        >
+                            <text fg={theme.textMuted}>
+                                Recent runs (enter to re-run, ↓↑ to navigate)
+                            </text>
+                            <select
+                                height={Math.min(8, runHistory.length + 1)}
+                                options={runHistory.map((r) => ({
+                                    name: `${r.status === "approved" ? "✓" : r.status === "failed" ? "✗" : "⬤"} ${r.topic}${r.hasHtml ? " 🏆" : ""}  · ${r.roundCount}r · ${r.inputMode}`,
+                                    description: r.name,
+                                    value: r.name,
+                                }))}
+                                onSelect={(_, option) => {
+                                    if (!option || !onHistorySelect) return
+                                    const entry = runHistory.find((r) => r.name === option.value)
+                                    if (entry) onHistorySelect(entry)
+                                }}
+                            />
+                        </box>
+                    ) : null}
 
                     <box flexDirection="row" gap={1}>
                         <ModeChip active={mode === "topic"} label="topic" />

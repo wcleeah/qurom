@@ -11,6 +11,7 @@ import { PromptScreen } from "./components/PromptScreen"
 import { QuitConfirm } from "./components/QuitConfirm"
 import { RunningScreen } from "./components/RunningScreen"
 import { SummaryScreen, type SummaryAction } from "./components/SummaryScreen"
+import type { RunHistoryEntry } from "./runHistory"
 import { openInEditor, type OpenInEditorMode } from "./editor"
 import { replyToPermission } from "../opencode"
 import { nextFocus } from "./keymap/gridNav"
@@ -26,6 +27,7 @@ export interface AppProps {
   config: RuntimeConfig
   prerequisites: RuntimePrerequisites
   promptBundle: RuntimePromptBundle
+  runHistory: RunHistoryEntry[]
   systemStatus: SystemStatusStore
   onExit: () => void
 }
@@ -82,7 +84,7 @@ function PendingPermissionOverlay({
   )
 }
 
-export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit }: AppProps) => {
+export const App = ({ config, prerequisites, promptBundle, runHistory, systemStatus, onExit }: AppProps) => {
   const renderer = useRenderer()
   const [screen, setScreen] = useState<Screen>("prompt")
   const [runCtx, setRunCtx] = useState<RunCtx | undefined>(undefined)
@@ -308,6 +310,28 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
     [config.quorumConfig.artifactDir, renderer, runCtx, systemStatus],
   )
 
+  const handleHistoryRun = useCallback(
+    async (entry: RunHistoryEntry) => {
+      if (entry.inputMode === "topic") {
+        startRun({ inputMode: "topic", topic: entry.topic })
+      } else {
+        // Document mode — re-read the file
+        const path = entry.documentPath
+        if (!path) return
+        let content = ""
+        try {
+          content = await readFile(path, "utf8")
+        } catch {
+          pushSystemStatus(systemStatus, { level: "warn", text: `Could not read ${path}` })
+          return
+        }
+        setPromptState({ mode: "document", document: { path, content }, hint: "" })
+        startRun({ inputMode: "document", documentPath: path, documentText: content })
+      }
+    },
+    [startRun, systemStatus],
+  )
+
   const startRun = useCallback(
     (request: InputRequest) => {
       lastRequestRef.current = request
@@ -516,6 +540,8 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
         <PromptScreen
           config={config}
           onSubmit={startRun}
+          runHistory={runHistory}
+          onHistorySelect={handleHistoryRun}
           initialMode={promptState.mode}
           initialTopic={promptState.topic}
           initialDocument={promptState.document}

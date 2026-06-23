@@ -7,6 +7,7 @@ import { ensureOpenCodeServer } from "../opencode-server"
 import { loadPromptBundle } from "../prompt-assets"
 import { App } from "./App"
 import { copy } from "./clipboard"
+import { loadRunHistory } from "./runHistory"
 import { createSystemStatusStore, pushSystemStatus } from "./state/systemStatus"
 
 const config = await loadRuntimeConfig()
@@ -20,6 +21,7 @@ const stopServer = await ensureOpenCodeServer({
 await ensureArtifactDir(config.quorumConfig.artifactDir)
 const prerequisites = await validateRuntimePrerequisites(config)
 const promptBundle = await loadPromptBundle(config)
+const runHistory = await loadRunHistory(config.quorumConfig.artifactDir)
 
 const systemStatus = createSystemStatusStore()
 console.warn = (...a: unknown[]) => pushSystemStatus(systemStatus, { level: "warn", text: a.map(String).join(" ") })
@@ -57,6 +59,7 @@ root.render(
     config={config}
     prerequisites={prerequisites}
     promptBundle={promptBundle}
+    runHistory={runHistory}
     systemStatus={systemStatus}
     onExit={exitApp}
   />,
