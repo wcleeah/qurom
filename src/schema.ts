@@ -223,6 +223,21 @@ export const aggregatedFindingSchema = identifiedAuditFindingSchema.extend({
   agent: agentNameSchema,
 })
 
+export const sectionConfidenceSchema = z.object({
+  heading: z.string(),
+  confidence: z.number().min(0).max(1),
+  findings: z.number().int().nonnegative(),
+  caveat: z.string().optional(),
+})
+
+export const confidenceSchema = z.object({
+  overall: z.number().min(0).max(1),
+  sections: z.array(sectionConfidenceSchema),
+})
+
+export type SectionConfidence = z.infer<typeof sectionConfidenceSchema>
+export type Confidence = z.infer<typeof confidenceSchema>
+
 export const runSummarySchema = z.object({
   requestId: nonEmptyStringSchema,
   outcome: aggregateOutcomeSchema,
@@ -334,21 +349,6 @@ export type RebuttalResponseRecord = z.infer<typeof rebuttalResponseRecordSchema
 export type AggregatedFinding = z.infer<typeof aggregatedFindingSchema>
 export type AggregatedFindings = z.infer<typeof aggregatedFindingsSchema>
 export type ResearchState = z.infer<typeof researchStateSchema>
-
-export const sectionConfidenceSchema = z.object({
-  heading: z.string(),
-  confidence: z.number().min(0).max(1),
-  findings: z.number().int().nonnegative(),
-  caveat: z.string().optional(),
-})
-
-export const confidenceSchema = z.object({
-  overall: z.number().min(0).max(1),
-  sections: z.array(sectionConfidenceSchema),
-})
-
-export type SectionConfidence = z.infer<typeof sectionConfidenceSchema>
-export type Confidence = z.infer<typeof confidenceSchema>
 
 const designAuditFindingSchema = z.object({
   severity: designFindingSeveritySchema,
