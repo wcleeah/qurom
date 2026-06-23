@@ -14,6 +14,7 @@ const promptAssetFiles = {
   auditDesign: "audit-design.md",
   auditScriptSecurity: "audit-script-security.md",
   reviseDesign: "revise-design.md",
+  classifyComplexity: "classify-complexity.md",
 } as const
 
 export type PromptAssetKey = keyof typeof promptAssetFiles

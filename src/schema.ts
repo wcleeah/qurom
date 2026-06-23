@@ -287,6 +287,8 @@ export const researchStateObjectSchema = z.object({
   status: researchStatusSchema,
   failureReason: failureReasonSchema.optional(),
   outputPath: nonEmptyStringSchema.optional(),
+  depthTier: z.enum(["definitional", "tutorial", "analysis", "synthesis"]).optional(),
+  depthConfidence: z.number().min(0).max(1).optional(),
   designHtml: z.string().optional(),
   designStatus: designStatusSchema.optional(),
 })

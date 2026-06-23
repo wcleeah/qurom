@@ -43,6 +43,19 @@ const quorumConfigSchema = z.object({
       timeoutMs: z.number().int().positive().default(600_000),
     })
     .optional(),
+  depthTiers: z
+    .record(
+      z.string().min(1),
+      z.object({
+        auditors: z.array(z.string().min(1)).min(1),
+        maxRounds: z.number().int().positive(),
+        maxRebuttalTurnsPerFinding: z.number().int().nonnegative(),
+        requireUnanimousApproval: z.boolean(),
+        multiDrafter: z.boolean().optional(),
+      }),
+    )
+    .optional(),
+  depthTierDefault: z.enum(["definitional", "tutorial", "analysis", "synthesis"]).default("analysis"),
 })
 
 export async function loadRuntimeConfig() {

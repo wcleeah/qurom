@@ -29,5 +29,33 @@
       "script-security-auditor"
     ],
     "maxRounds": 2
-  }
+  },
+  "depthTiers": {
+    "definitional": {
+      "auditors": ["clarity-auditor"],
+      "maxRounds": 1,
+      "maxRebuttalTurnsPerFinding": 0,
+      "requireUnanimousApproval": false
+    },
+    "tutorial": {
+      "auditors": ["source-auditor", "clarity-auditor"],
+      "maxRounds": 2,
+      "maxRebuttalTurnsPerFinding": 1,
+      "requireUnanimousApproval": true
+    },
+    "analysis": {
+      "auditors": ["source-auditor", "logic-auditor", "clarity-auditor"],
+      "maxRounds": 10,
+      "maxRebuttalTurnsPerFinding": 2,
+      "requireUnanimousApproval": true
+    },
+    "synthesis": {
+      "auditors": ["source-auditor", "logic-auditor", "clarity-auditor"],
+      "maxRounds": 15,
+      "maxRebuttalTurnsPerFinding": 3,
+      "requireUnanimousApproval": false,
+      "multiDrafter": true
+    }
+  },
+  "depthTierDefault": "analysis"
 }
