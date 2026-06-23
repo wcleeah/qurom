@@ -94,16 +94,25 @@ const updatedFindingSchema = z.object({
 const validateAuditResult = (
   value: {
     vote: z.infer<typeof auditVoteSchema>
-    findings: Array<unknown>
+    findings: Array<{ severity?: unknown }>
   },
   ctx: z.RefinementCtx,
 ) => {
+  // Allow minor findings on approve — the model can honestly report nits
+  // without being forced to block the draft.  Only reject when approve carries
+  // a blocker or major finding, which is a genuine contradiction.
   if (value.vote === "approve" && value.findings.length > 0) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Approved audits must not include findings",
-      path: ["findings"],
-    })
+    const hasNonMinor = value.findings.some(
+      (f) => f.severity === "blocker" || f.severity === "major",
+    )
+    if (hasNonMinor) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Approve vote carries blocker or major findings. Either downgrade those findings to minor or change the vote to revise.",
+        path: ["findings"],
+      })
+    }
   }
 
   if (value.vote === "revise" && value.findings.length === 0) {
@@ -334,15 +343,21 @@ const designIdentifiedFindingSchema = designAuditFindingSchema.extend({
 })
 
 const validateDesignAuditResult = (
-  value: { vote: z.infer<typeof auditVoteSchema>; findings: Array<unknown> },
+  value: { vote: z.infer<typeof auditVoteSchema>; findings: Array<{ severity?: unknown }> },
   ctx: z.RefinementCtx,
 ) => {
   if (value.vote === "approve" && value.findings.length > 0) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Approved audits must not include findings",
-      path: ["findings"],
-    })
+    const hasNonMinor = value.findings.some(
+      (f) => f.severity === "blocker" || f.severity === "major",
+    )
+    if (hasNonMinor) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Approve vote carries blocker or major findings. Either downgrade those findings to minor or change the vote to revise.",
+        path: ["findings"],
+      })
+    }
   }
   if (value.vote === "revise" && value.findings.length === 0) {
     ctx.addIssue({
