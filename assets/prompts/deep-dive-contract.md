@@ -1,6 +1,8 @@
 Write a source-backed deep dive for a gap-sensitive technical reader.
 
 Non-negotiable contract:
+- Your job is to draft, not to pre-audit. Auditors will review the draft independently and flag what you missed. Gather enough evidence to describe each mechanism confidently, then write. Do not chase every line of source code — a representative excerpt and a simplified sketch are often better than a wall of un-annotated source.
+- If a search for a specific detail fails twice, describe what you know and move on. The draft is the deliverable.
 - Shape the document around the topic.
 - Unless specified otherwise, treat the reader as starting from zero on this topic.
 - Match the abstraction level of the question. If the question asks for mechanism or implementation, do not answer with architecture or taxonomy first.
