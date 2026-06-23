@@ -15,10 +15,14 @@ export interface AgentGridProps {
 }
 
 /** Determine which agent list to show based on pipeline phase. */
-function activePhase(config: RuntimeConfig, state: ResearchState | undefined): "research" | "design" {
-  // If design is running, pending, or just finished, show design panels
-  if (state?.designStatus === "pending" || state?.designStatus === "running") return "design"
-  // If research is approved and design is enabled (about to start), show design
+function activePhase(
+  config: RuntimeConfig,
+  state: ResearchState | undefined,
+  graphNode: string | undefined,
+): "research" | "design" {
+  // If the design quorum node is actively running, show design panels
+  if (graphNode === "runDesignQuorum") return "design"
+  // If research is approved and design is enabled (transitioning), show design
   if (state?.status === "approved" && config.quorumConfig.designQuorum?.enabled) return "design"
   return "research"
 }
@@ -26,7 +30,8 @@ function activePhase(config: RuntimeConfig, state: ResearchState | undefined): "
 export const AgentGrid = ({ store, config, selected, active, onGPendingChange }: AgentGridProps) => {
   const { width, height } = useTerminalDimensions()
   const graphState = useStoreSelector(store, (s) => s.graph.state as ResearchState | undefined)
-  const phase = activePhase(config, graphState)
+  const graphNode = useStoreSelector(store, (s) => s.graph.node)
+  const phase = activePhase(config, graphState, graphNode)
 
   const researchDrafter = config.quorumConfig.designatedDrafter
   const researchAuditors = config.quorumConfig.auditors

@@ -87,6 +87,8 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
   const lifecyclePhase = useStoreSelector(store, (s) => s.lifecycle.phase)
   const outputDir = useStoreSelector(store, (s) => s.lifecycle.outputDir)
   const graphState = useStoreSelector(store, (s) => s.graph.state as ResearchState | undefined)
+  const graphNode = useStoreSelector(store, (s) => s.graph.node)
+  const graphPhase = useStoreSelector(store, (s) => s.graph.phase)
   const agents = useStoreSelector(store, (s) => s.agents)
   const round = useStoreSelector(store, (s) =>
     s.graph.state && "round" in s.graph.state ? (s.graph.state as { round?: number }).round : undefined,
@@ -106,9 +108,14 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
   const maxRounds = 10 // we don't have access to config here, reasonable default
   const currentRound = round ?? 0
 
-  // Design quorum
+  // Design quorum — detect running from graph node AND from state
   const designStatus = graphState?.designStatus
-  const designRunning = designStatus === "running" || designStatus === "pending"
+  // Node is actively executing runDesignQuorum
+  const designNodeActive = graphNode === "runDesignQuorum" && graphPhase === "start"
+  // Design has completed (status set on state)
+  const designFinished = designStatus === "approved" || designStatus === "failed"
+  // Design is in-progress (node running but not yet finished)
+  const designRunning = designNodeActive && !designFinished
   const designApproved = designStatus === "approved"
   const designFailed = designStatus === "failed"
 
@@ -252,15 +259,14 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
   }
 
   const renderDesignQuorumLine = () => {
-    if (!designRunning && designStatus !== "approved" && designStatus !== "failed" && designStatus !== undefined) return null
+    // Show design status when: design node is running, or design has finished
+    if (!designRunning && !designFinished) return null
+    // Don't show during early research phases
     if (graphState?.status === "drafting" || graphState?.status === "auditing" || graphState?.status === "reviewing_findings") return null
 
     if (designRunning) {
       const designActiveAgents = Object.entries(agents)
-        .filter(([name, a]) => {
-          // Pass config as a prop; for now just show all running agents during design
-          return a.status === "running"
-        })
+        .filter(([, a]) => a.status === "running")
         .map(([name]) => name)
 
       return (

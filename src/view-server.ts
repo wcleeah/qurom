@@ -589,6 +589,9 @@ async function listRuns(): Promise<RunMeta[]> {
       } else if (designRoundCount > 0) {
         designStatus = "running"
       }
+    } else if (researchStatus === "approved") {
+      // Research passed but no design files yet — design is likely in-progress
+      designStatus = "running"
     }
 
     // Overall status: combine research + design
@@ -1693,9 +1696,16 @@ async function renderRun(name: string): Promise<Response> {
   <span class="badge ${designClass}">${designIcon} Design: ${designLabel}</span>
   <span class="phase-detail">round ${design.round}${sevStr}</span>
 </div>`
-  } else if (researchStatus === "approved") {
+  } else if (researchStatus === "approved" && !design) {
+    // Research finished, design phase expected but no design files yet
     designLine = `<div class="phase-row">
-  <span class="badge" style="background:var(--code-bg);color:var(--muted);">⏳ Design: not started</span>
+  <span class="badge badge-running">🔄 Design: running…</span>
+  <span class="phase-detail">waiting for design artifacts</span>
+</div>`
+  } else if (researchStatus === "approved" && design && !design.hasDesignFiles) {
+    designLine = `<div class="phase-row">
+  <span class="badge badge-running">🔄 Design: running…</span>
+  <span class="phase-detail">generating HTML</span>
 </div>`
   }
 
