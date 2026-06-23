@@ -1,4 +1,5 @@
 Review the following deep dive document draft.
+The draft is attached as `draft.md`.
 
 {deltaContext}
 
@@ -15,3 +16,8 @@ Revision-round rules (when this is not the first audit):
 - Raise a new finding only if the revision introduced a material new problem.
 - Minor wording quibbles in sections that were not cited in previous findings should not block approval.
 - If a previous finding was fixed but the fix created a new issue, report the new issue at one severity level lower than the original.
+
+## Output instructions
+Write your audit result as JSON to `{outputFile}`.
+Respond with only `OK` when the file is written.
+Do not include the JSON in your response.

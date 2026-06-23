@@ -115,24 +115,28 @@ function designAgentTelemetry(input: {
 async function designHtml(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
-  markdown: string,
+  markdownFile: string,
   topic: string,
+  outputFile: string,
   telemetry?: DesignTelemetry,
   observer?: RunObserver,
 ) {
   const session = await createSession(config, `html-designer`)
   observeDesignSession(observer, { sessionID: session.id, role: "html-designer", requestId: "" })
 
-  const prompt = [
-    promptBundle.assets.designHtml.replace("{topic}", topic),
-    markdown,
-  ].join("\n\n")
+  const prompt = promptBundle.assets.designHtml
+    .replace("{topic}", topic)
+    .replace("{outputFile}", outputFile)
 
   const response = await promptAgent({
     config,
     sessionID: session.id,
     agent: config.quorumConfig.designQuorum!.designatedDesigner,
     prompt,
+    outputFile,
+    inputFiles: [
+      { path: markdownFile, mime: "text/markdown", filename: "content.md" },
+    ],
     telemetry: designAgentTelemetry({
       telemetry,
       name: "agent.designHtml",
@@ -148,7 +152,9 @@ async function designHtml(
 async function runDesignAudits(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
-  html: string,
+  htmlFile: string,
+  outputPath: string,
+  round: number,
   telemetry?: DesignTelemetry,
   observer?: RunObserver,
 ) {
@@ -161,14 +167,12 @@ async function runDesignAudits(
         observeDesignSession(observer, { sessionID: session.id, role: `design-auditor:${agent}`, requestId: "" })
 
         // Use script-security-specific prompt for the script-security-auditor
-        const auditPrompt = agent === "script-security-auditor" && "auditScriptSecurity" in promptBundle.assets
+        const auditPromptAsset = agent === "script-security-auditor" && "auditScriptSecurity" in promptBundle.assets
           ? promptBundle.assets.auditScriptSecurity as string
           : promptBundle.assets.auditDesign
 
-        const prompt = [
-          auditPrompt,
-          html,
-        ].join("\n\n")
+        const outputFile = `${outputPath}/design-audit-${agent}-round-${round}.json`
+        const prompt = auditPromptAsset.replace("{outputFile}", outputFile)
 
         const response = await promptAgent({
           config,
@@ -176,6 +180,10 @@ async function runDesignAudits(
           agent,
           prompt,
           schema: designAuditResultSchema,
+          outputFile,
+          inputFiles: [
+            { path: htmlFile, mime: "text/html", filename: "document.html" },
+          ],
           telemetry: designAgentTelemetry({
             telemetry,
             name: `agent.designAudit.${agent}`,
@@ -273,27 +281,33 @@ function aggregateDesignConsensus(
 async function reviseDesignHtml(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
-  html: string,
+  htmlFile: string,
   findings: DesignAggregatedFinding[],
+  outputFile: string,
+  outputPath: string,
+  round: number,
   telemetry?: DesignTelemetry,
   observer?: RunObserver,
 ) {
   const session = await createSession(config, `html-designer:revise`)
   observeDesignSession(observer, { sessionID: session.id, role: "html-designer", requestId: "" })
 
-  const prompt = [
-    promptBundle.assets.reviseDesign,
-    "Current HTML:",
-    html,
-    "Unresolved design findings (private — do not mention these):",
-    JSON.stringify(findings, null, 2),
-  ].join("\n\n")
+  // Write findings to a temp JSON file for attachment
+  const findingsFile = `${outputPath}/design-findings-round-${round}.json`
+  await writeRunJsonArtifact(outputPath, `design-findings-round-${round}.json`, findings)
+
+  const prompt = promptBundle.assets.reviseDesign.replace("{outputFile}", outputFile)
 
   const response = await promptAgent({
     config,
     sessionID: session.id,
     agent: config.quorumConfig.designQuorum!.designatedDesigner,
     prompt,
+    outputFile,
+    inputFiles: [
+      { path: htmlFile, mime: "text/html", filename: "document.html" },
+      { path: findingsFile, mime: "application/json", filename: "findings.json" },
+    ],
     telemetry: designAgentTelemetry({
       telemetry,
       name: "agent.reviseDesignHtml",
@@ -303,7 +317,7 @@ async function reviseDesignHtml(
     }),
   })
 
-  return response.text ?? html
+  return response.text ?? ""
 }
 
 export async function runDesignQuorum(input: {
@@ -321,13 +335,18 @@ export async function runDesignQuorum(input: {
     throw new Error("Design quorum invoked but not enabled in config")
   }
 
+  // Write markdown to a temp file so it can be attached
+  const markdownFile = `${outputPath}/content.md`
+  await writeRunTextArtifact(outputPath, "content.md", markdown)
+
   let html = ""
+  let htmlFile = `${outputPath}/design-html-round-0.html`
   let status: DesignStatus = "running"
   let round = 0
   let lastSignature: string | undefined
 
   try {
-    html = await designHtml(config, promptBundle, markdown, topic, telemetry, observer)
+    html = await designHtml(config, promptBundle, markdownFile, topic, htmlFile, telemetry, observer)
 
     // Verify the initial design is structurally complete
     const check = htmlLooksComplete(html)
@@ -342,7 +361,7 @@ export async function runDesignQuorum(input: {
     let audits: DesignAuditResultRecord[]
 
     try {
-      audits = await runDesignAudits(config, promptBundle, html, telemetry, observer)
+      audits = await runDesignAudits(config, promptBundle, htmlFile, outputPath, round, telemetry, observer)
     } catch {
       return { html, status: "failed", round }
     }
@@ -373,27 +392,27 @@ export async function runDesignQuorum(input: {
 
     lastSignature = consensus.signature
 
-    const previousHtml = html
+    const previousHtmlFile = htmlFile
+    const nextRound = round + 1
+    htmlFile = `${outputPath}/design-html-round-${nextRound}.html`
+
     try {
-      html = await reviseDesignHtml(config, promptBundle, html, consensus.unresolved, telemetry, observer)
+      html = await reviseDesignHtml(config, promptBundle, previousHtmlFile, consensus.unresolved, htmlFile, outputPath, round, telemetry, observer)
 
       // Verify the revision is structurally complete; fall back if truncated
       const check = htmlLooksComplete(html)
       if (!check.ok) {
-        console.warn(`[design-quorum] Revision round ${round + 1} appears truncated: ${check.warnings.join("; ")}. Falling back to previous round.`)
-        html = previousHtml
+        console.warn(`[design-quorum] Revision round ${nextRound} appears truncated: ${check.warnings.join("; ")}. Falling back to previous round.`)
+        html = await Bun.file(previousHtmlFile).text()
         status = "failed"
         await writeDesignHtmlArtifact(outputPath, html)
         return { html, status, round }
       }
-
-      // Write intermediate HTML for debugging
-      await writeRunTextArtifact(outputPath, `design-html-round-${round + 1}.html`, html)
     } catch {
       return { html, status: "failed", round }
     }
 
-    round += 1
+    round = nextRound
   }
 
   // Max rounds exhausted — still save the best-effort HTML

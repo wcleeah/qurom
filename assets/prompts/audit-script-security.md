@@ -1,4 +1,5 @@
 Review the following HTML deep-dive document for external script security.
+The HTML to review is attached as `document.html`.
 
 General Audit Guide:
 - Findings must be concrete, evidence-backed (quote the relevant `<script src>` URL and surrounding context), and fixable.
@@ -25,4 +26,7 @@ Categories you may use:
 - `security` — known vulnerability, malicious code, or suspicious patterns
 - `self-containedness` — URL points to non-reputable CDN or uses HTTP instead of HTTPS
 
-HTML to review:
+## Output instructions
+Write your audit result as JSON to `{outputFile}`.
+Respond with only `OK` when the file is written.
+Do not include the JSON in your response.

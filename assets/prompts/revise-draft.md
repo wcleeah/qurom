@@ -1,4 +1,6 @@
 Revise the current draft to resolve the unresolved findings. Fix only what the findings identify — do not restructure the document.
+The current draft is attached as `draft.md`.
+The unresolved findings are attached as `findings.json`.
 
 Surgical revision rules:
 - Return markdown only.
@@ -17,3 +19,8 @@ Surgical revision rules:
 - Do not reorder sections, rename sections, or change the document's structure unless a finding explicitly demands it.
 - If two findings about the same topic conflict, prefer the more precise one.
 - If the draft was already correct and a finding is mistaken (e.g., auditor misunderstood), preserve the original text.
+
+## Output instructions
+Write your revised draft to `{outputFile}`.
+Respond with only `OK` when the file is written.
+Do not include the revised draft in your response.

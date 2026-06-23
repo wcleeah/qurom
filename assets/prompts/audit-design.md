@@ -1,4 +1,5 @@
 Review the following HTML deep-dive document.
+The HTML to review is attached as `document.html`.
 
 General Audit Guide:
 - Findings must be concrete, evidence-backed (quote the relevant HTML/CSS/JS), and fixable.
@@ -14,4 +15,7 @@ Additional checks for ALL auditors:
 - **Document completeness**: Does the HTML end with `</html>`? Are all script blocks syntactically complete (no unclosed functions at EOF)? If truncated, flag as blocker.
 - **Mobile readability**: At viewports as narrow as 320px, is there any horizontal overflow? Are touch targets (buttons, links) at least 44×44px? Is base font-size still readable?
 
-HTML to review:
+## Output instructions
+Write your audit result as JSON to `{outputFile}`.
+Respond with only `OK` when the file is written.
+Do not include the JSON in your response.

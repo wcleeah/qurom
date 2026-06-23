@@ -1,5 +1,5 @@
 import { toJsonSchema } from "@langchain/core/utils/json_schema"
-import { createOpencodeClient, type Part, type PermissionReplyData, type Session, type TextPartInput } from "@opencode-ai/sdk/v2"
+import { createOpencodeClient, type FilePartInput, type Part, type PermissionReplyData, type Session, type TextPartInput } from "@opencode-ai/sdk/v2"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "./config"
@@ -102,6 +102,12 @@ function isResearchAgent(agent: string, config: RuntimeConfig): boolean {
   return researchAgents.has(agent)
 }
 
+export type PromptFileInput = {
+  path: string
+  mime: string
+  filename: string
+}
+
 export async function promptAgent<T>(input: {
   config: RuntimeConfig
   sessionID: string
@@ -109,6 +115,8 @@ export async function promptAgent<T>(input: {
   prompt: string
   schema?: z.ZodType<T>
   variant?: string
+  inputFiles?: PromptFileInput[]
+  outputFile?: string
   telemetry?: {
     run: TelemetryRun
     parentObservation?: TraceObservation
@@ -169,6 +177,8 @@ export async function promptAgent<T>(input: {
                 prompt,
                 structured: Boolean(input.schema),
                 variant: input.variant,
+                inputFiles: input.inputFiles?.map((f) => f.filename),
+                outputFile: input.outputFile,
               },
               metadata: {
                 ...generationMetadata({
@@ -180,11 +190,26 @@ export async function promptAgent<T>(input: {
             })
         : undefined
 
+    const parts: Array<TextPartInput | FilePartInput> = [
+      { type: "text", text: prompt } satisfies TextPartInput,
+    ]
+
+    if (input.inputFiles) {
+      for (const f of input.inputFiles) {
+        parts.push({
+          type: "file",
+          mime: f.mime,
+          filename: f.filename,
+          url: f.path,
+        } satisfies FilePartInput)
+      }
+    }
+
     const response = await client.session.prompt({
       sessionID: activeSessionID,
       agent: input.agent,
       variant: input.variant,
-      parts: [{ type: "text", text: prompt } satisfies TextPartInput],
+      parts,
     })
 
     if (response.error) {
@@ -257,13 +282,34 @@ export async function promptAgent<T>(input: {
     }
   }
 
+  async function readOutputFile(): Promise<string | undefined> {
+    if (!input.outputFile) return undefined
+    const file = Bun.file(input.outputFile)
+    if (!(await file.exists())) {
+      console.warn(`[opencode] Output file not written by agent: ${input.outputFile}`)
+      return undefined
+    }
+    const content = await file.text()
+    if (!content.trim()) {
+      console.warn(`[opencode] Output file empty: ${input.outputFile}`)
+      return undefined
+    }
+    return content
+  }
+
   try {
     if (!input.schema) {
       const response = await sendPrompt(prompt)
 
+      // If outputFile was requested, read it back (agent wrote there instead of responding inline)
+      const fileContent = await readOutputFile()
+      const outputText = fileContent ?? response.text
+
       await input.telemetry?.run.endObservation(agentObservation, {
         output: {
           response: response.text,
+          outputFile: input.outputFile,
+          fileRead: Boolean(fileContent),
           structured: false,
         },
         metadata: {
@@ -277,7 +323,7 @@ export async function promptAgent<T>(input: {
       })
 
       return {
-        text: response.text,
+        text: outputText,
         structured: undefined,
         model: response.model,
         provider: response.provider,
@@ -287,32 +333,49 @@ export async function promptAgent<T>(input: {
     const jsonSchema = toJsonSchema(input.schema) as Record<string, unknown>
     const initialResponse = await sendPrompt(buildStructuredPrompt(prompt, jsonSchema))
 
-    try {
-      const structured = parseStructuredResponse(input.schema, initialResponse.text)
+    // If outputFile was requested, try reading it first (agent may have written structured output there)
+    const fileContent = await readOutputFile()
 
-      await input.telemetry?.run.endObservation(agentObservation, {
-        output: {
-          response: initialResponse.text,
-          parsed: structured,
-          structured: true,
-          repaired,
-        },
-        metadata: {
-          agentName: input.agent,
-          sessionId: activeSessionID,
+    async function parseAndReturn(schema: z.ZodType<T>, sourceText: string, sourceLabel: string) {
+      try {
+        const structured = parseStructuredResponse(schema, sourceText)
+        await input.telemetry?.run.endObservation(agentObservation, {
+          output: {
+            response: sourceText,
+            parsed: structured,
+            outputFile: input.outputFile,
+            structured: true,
+            repaired,
+          },
+          metadata: {
+            agentName: input.agent,
+            sessionId: activeSessionID,
+            model,
+            provider,
+            variant,
+            repaired,
+          },
+        })
+        return {
+          text: undefined,
+          structured,
           model,
           provider,
-          variant,
-          repaired,
-        },
-      })
-
-      return {
-        text: undefined,
-        structured,
-        model,
-        provider,
+        }
+      } catch (err) {
+        throw new Error(
+          `Structured response ${sourceLabel} from agent ${input.agent} could not be parsed: ${formatStructuredError(err)}`,
+        )
       }
+    }
+
+    // Prefer file output if available
+    if (fileContent) {
+      return parseAndReturn(input.schema, fileContent, `from file ${input.outputFile}`)
+    }
+
+    try {
+      return parseAndReturn(input.schema, initialResponse.text, "from inline response")
     } catch (initialError) {
       repaired = true
       const repairSession = await createSession(input.config, `${input.agent}:repair`)

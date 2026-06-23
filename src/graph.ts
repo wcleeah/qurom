@@ -10,7 +10,6 @@ import {
   writeApprovedArtifacts,
   writeFailedArtifacts,
   writeRunJsonArtifact,
-  writeRunTextArtifact,
 } from "./output"
 import { createSession, promptAgent } from "./opencode"
 import type { PromptBundle } from "./prompt-assets"
@@ -104,12 +103,12 @@ function requestContextBlock(state: ResearchState) {
   }
 }
 
-function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
+function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string) {
   return [
     promptBundle.assets.deepDiveContract,
     researchToolBlock(config),
     requestContextBlock(state),
-    promptBundle.assets.draftFullDraft,
+    promptBundle.assets.draftFullDraft.replace("{outputFile}", outputFile),
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -120,7 +119,7 @@ function auditPrompt(
   promptBundle: PromptBundle,
   agent: string,
   request: string,
-  draft: string,
+  outputFile: string,
   previousUnresolved?: AggregatedFinding[],
 ) {
   const deltaContext =
@@ -138,10 +137,8 @@ function auditPrompt(
 
   return [
     `You are the ${agent}, user requested a review on the ${request} draft.`,
-    promptBundle.assets.audit.replace("{deltaContext}", deltaContext),
+    promptBundle.assets.audit.replace("{deltaContext}", deltaContext).replace("{outputFile}", outputFile),
     researchToolBlock(config),
-    "Draft:",
-    draft,
   ].join("\n\n")
 }
 
@@ -149,55 +146,23 @@ function drafterReviewPrompt(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   request: string,
-  draft: string,
-  audits: AuditResultRecord[],
+  outputFile: string,
 ) {
-  const promptAudits = []
-
-  for (const audit of audits) {
-    const promptFindings = []
-
-    for (const finding of audit.findings) {
-      promptFindings.push({
-        findingId: finding.findingId,
-        category: finding.category,
-        issue: finding.issue,
-        severity: finding.severity,
-        required_fix: finding.required_fix,
-      })
-    }
-
-    promptAudits.push({
-      agent: audit.agent,
-      vote: audit.vote,
-      summary: audit.summary,
-      findings: promptFindings,
-    })
-  }
-
   return [
     `You are the drafter-agent reviewing auditor findings for this ${request}.`,
-    promptBundle.assets.reviewFindings,
+    promptBundle.assets.reviewFindings.replace("{outputFile}", outputFile),
     researchToolBlock(config),
-    "Current draft:",
-    draft,
-    "Audits:",
-    JSON.stringify(promptAudits, null, 2),
   ].join("\n\n")
 }
 
-function rebuttalPrompt(config: RuntimeConfig, promptBundle: PromptBundle, request: string, draft: string, rebuttals: ActiveRebuttal[]) {
+function rebuttalPrompt(config: RuntimeConfig, promptBundle: PromptBundle, request: string, outputFile: string) {
   return [
-    promptBundle.assets.rebuttal,
+    promptBundle.assets.rebuttal.replace("{outputFile}", outputFile),
     researchToolBlock(config),
     `Respond to the disputed findings for this ${request}.`,
     "Return only JSON that matches the requested schema.",
     "Answer only for the findings in the rebuttal list.",
     "Use uphold, soften, or withdraw for each response.",
-    "Current draft:",
-    draft,
-    "Rebuttals:",
-    JSON.stringify(rebuttals, null, 2),
   ].join("\n\n")
 }
 
@@ -205,50 +170,25 @@ function rebuttalReviewPrompt(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   request: string,
-  draft: string,
-  disputed: Array<{ findingId: string; rebuttal: ActiveRebuttal; response: RebuttalResponseRecord }>,
-  rebuttalTurnCounts: Record<string, number>,
+  outputFile: string,
   maxRebuttalTurns: number,
 ) {
-  const promptDisputed = []
-
-  for (const entry of disputed) {
-    promptDisputed.push({
-      findingId: entry.findingId,
-      targetAgent: entry.rebuttal.targetAgent,
-      findingCategory: entry.rebuttal.findingCategory,
-      findingIssue: entry.rebuttal.findingIssue,
-      priorRebuttal: entry.rebuttal,
-      auditorResponse: entry.response,
-    })
-  }
-
   return [
-    promptBundle.assets.reviewRebuttalResponses,
+    promptBundle.assets.reviewRebuttalResponses.replace("{outputFile}", outputFile),
     researchToolBlock(config),
     `Review the auditor rebuttal responses for this ${request}.`,
     "Return only JSON that matches the requested schema.",
     "For each disputed finding, either accept the auditor response or issue one narrower rebuttal with stronger evidence.",
     `Do not rebut a finding that has already hit the rebuttal cap of ${maxRebuttalTurns}.`,
-    "Current draft:",
-    draft,
-    "Current rebuttal turn counts:",
-    JSON.stringify(rebuttalTurnCounts, null, 2),
-    "Disputed findings:",
-    JSON.stringify(promptDisputed, null, 2),
   ].join("\n\n")
 }
 
-function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
+function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string) {
   return [
     promptBundle.assets.deepDiveContract,
-    promptBundle.assets.reviseDraft,
+    promptBundle.assets.reviseDraft.replace("{outputFile}", outputFile),
     researchToolBlock(config),
     requestLabel(state),
-    "Current draft:",
-    state.draft,
-    "Private rewrite instructions. Do not mention these in the output:",
-    JSON.stringify(state.unresolvedFindings, null, 2),
   ].join("\n\n")
 }
 
@@ -262,11 +202,6 @@ async function persistRequestArtifact(state: ResearchState) {
     documentPath: state.documentPath,
     inputSummary: state.inputSummary,
   })
-}
-
-async function persistDraftArtifact(state: ResearchState, round: number) {
-  if (!state.outputPath) return
-  await writeRunTextArtifact(state.outputPath, `draft-round-${round}.md`, state.draft)
 }
 
 async function persistAuditsArtifact(state: ResearchState) {
@@ -620,6 +555,7 @@ async function draftWithLens(
   state: ResearchState,
   lens: string,
   agentOverride: string | undefined,
+  outputFile: string,
   telemetry?: GraphTelemetry,
   observer?: RunObserver,
 ): Promise<string> {
@@ -627,7 +563,7 @@ async function draftWithLens(
   const session = await createSession(config, `research-drafter:${state.requestId}:draft:${state.round}`)
   observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
 
-  const basePrompt = fullDraftPrompt(config, promptBundle, state)
+  const basePrompt = fullDraftPrompt(config, promptBundle, state, outputFile)
   const prompt = lens ? `${basePrompt}\n\nResearch lens: ${lens}` : basePrompt
 
   const response = await promptAgent({
@@ -635,6 +571,7 @@ async function draftWithLens(
     sessionID: session.id,
     agent,
     prompt,
+    outputFile,
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
@@ -657,10 +594,11 @@ async function synthesizeDrafts(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   state: ResearchState,
-  draftA: string,
-  draftB: string,
+  draftAPath: string,
+  draftBPath: string,
   lensA: string,
   lensB: string,
+  outputFile: string,
   telemetry?: GraphTelemetry,
   observer?: RunObserver,
 ): Promise<string> {
@@ -671,14 +609,18 @@ async function synthesizeDrafts(
     .replace("{N}", "2")
     .replace("{lensA}", lensA)
     .replace("{lensB}", lensB)
-    .replace("{draftA}", draftA)
-    .replace("{draftB}", draftB)
+    .replace("{outputFile}", outputFile)
 
   const response = await promptAgent({
     config,
     sessionID: session.id,
     agent: "draft-synthesizer",
     prompt,
+    outputFile,
+    inputFiles: [
+      { path: draftAPath, mime: "text/markdown", filename: "draftA.md" },
+      { path: draftBPath, mime: "text/markdown", filename: "draftB.md" },
+    ],
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
@@ -688,7 +630,7 @@ async function synthesizeDrafts(
     }),
   })
 
-  return response.text ?? draftA
+  return response.text ?? ""
 }
 
 async function draftFullDraft(
@@ -704,15 +646,15 @@ async function draftFullDraft(
   const tierConfig = config.quorumConfig.depthTiers?.[tier]
   const useMultiDrafter = tierConfig?.multiDrafter ?? false
 
-  // Single-drafter path (current behavior, also used for non-synthesis tiers)
+  // Single-drafter path
   if (!useMultiDrafter) {
-    const draft = await draftWithLens(config, promptBundle, state, "", undefined, telemetry, observer)
+    const outputFile = `${state.outputPath}/draft-round-${state.round}.md`
+    const draft = await draftWithLens(config, promptBundle, state, "", undefined, outputFile, telemetry, observer)
     const nextState = researchStateSchema.parse({
       ...state,
       draft: draft || state.draft,
       status: "auditing",
     })
-    await persistDraftArtifact(nextState, nextState.round)
     return nextState
   }
 
@@ -720,18 +662,16 @@ async function draftFullDraft(
   const lensA = "Focus on internal mechanisms and source code evidence. Explain how it actually works. Prefer implementation-level detail and primary sources (source code, specs)."
   const lensB = "Focus on ecosystem, trade-offs, alternatives, edge cases, and common misconceptions. Prefer breadth and practical context over deep implementation detail."
 
+  const outputFileA = `${state.outputPath}/draft-round-${state.round}-vA.md`
+  const outputFileB = `${state.outputPath}/draft-round-${state.round}-vB.md`
+
   const [draftA, draftB] = await Promise.all([
-    draftWithLens(config, promptBundle, state, lensA, "research-drafter-mechanism", telemetry, observer),
-    draftWithLens(config, promptBundle, state, lensB, undefined, telemetry, observer),
+    draftWithLens(config, promptBundle, state, lensA, "research-drafter-mechanism", outputFileA, telemetry, observer),
+    draftWithLens(config, promptBundle, state, lensB, undefined, outputFileB, telemetry, observer),
   ])
 
-  // Persist intermediate drafts for debugging
-  if (state.outputPath) {
-    await writeRunTextArtifact(state.outputPath, `draft-round-${state.round}-vA.md`, draftA)
-    await writeRunTextArtifact(state.outputPath, `draft-round-${state.round}-vB.md`, draftB)
-  }
-
-  const merged = await synthesizeDrafts(config, promptBundle, state, draftA, draftB, lensA, lensB, telemetry, observer)
+  const mergedOutputFile = `${state.outputPath}/draft-round-${state.round}.md`
+  const merged = await synthesizeDrafts(config, promptBundle, state, outputFileA, outputFileB, lensA, lensB, mergedOutputFile, telemetry, observer)
 
   const nextState = researchStateSchema.parse({
     ...state,
@@ -740,7 +680,6 @@ async function draftFullDraft(
     status: "auditing",
   })
 
-  await persistDraftArtifact(nextState, nextState.round)
   return nextState
 }
 
@@ -793,17 +732,23 @@ async function runParallelAudits(
   const tierAuditors = state.depthTier && config.quorumConfig.depthTiers?.[state.depthTier]
     ? config.quorumConfig.depthTiers[state.depthTier].auditors
     : config.quorumConfig.auditors
+  const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
   for (const agent of tierAuditors) {
     auditPromises.push(
       (async () => {
         const session = await createSession(config, `audit:${state.requestId}:${agent}:round:${state.round}`)
         observeSession(observer, { sessionID: session.id, role: `auditor:${agent}`, requestId: state.requestId })
+        const outputFile = `${state.outputPath}/audit-${agent}-round-${state.round}.json`
         const response = await promptAgent({
           config,
           sessionID: session.id,
           agent,
-          prompt: auditPrompt(config, promptBundle, agent, request, state.draft, state.round > 0 ? state.unresolvedFindings : undefined),
+          prompt: auditPrompt(config, promptBundle, agent, request, outputFile, state.round > 0 ? state.unresolvedFindings : undefined),
           schema: auditResultSchema,
+          outputFile,
+          inputFiles: [
+            { path: draftFile, mime: "text/markdown", filename: "draft.md" },
+          ],
           telemetry: graphAgentTelemetry({
             telemetry,
             state,
@@ -895,12 +840,22 @@ async function reviewFindingsByDrafter(
   const session = await createSession(config, `research-drafter:${state.requestId}:review-findings:${state.round}`)
   observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
 
+  // Audits file was already written by persistAuditsArtifact in runParallelAudits
+  const auditsFile = `${state.outputPath}/audits-round-${state.round}.json`
+  const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
+  const outputFile = `${state.outputPath}/drafter-finding-review-round-${state.round}.json`
+
   const response = await promptAgent({
     config,
     sessionID: session.id,
     agent: config.quorumConfig.designatedDrafter,
-    prompt: drafterReviewPrompt(config, promptBundle, requestLabel(state), state.draft, findingsOnly),
+    prompt: drafterReviewPrompt(config, promptBundle, requestLabel(state), outputFile),
     schema: drafterFindingReviewSchema,
+    outputFile,
+    inputFiles: [
+      { path: draftFile, mime: "text/markdown", filename: "draft.md" },
+      { path: auditsFile, mime: "application/json", filename: "audits.json" },
+    ],
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
@@ -974,10 +929,12 @@ async function runTargetedRebuttals(
   observer?: RunObserver,
 ) {
   assertStatus(state, "awaiting_auditor_rebuttal", "runTargetedRebuttals")
+  if (!state.outputPath) throw new Error("Missing outputPath during runTargetedRebuttals")
   if (!hasEligibleRebuttalTurn(config, state)) {
     throw new Error("No eligible rebuttal turns remain for runTargetedRebuttals")
   }
 
+  const outputPath = state.outputPath
   const rebuttalsByAgent: Record<string, ActiveRebuttal[]> = {}
   for (const rebuttal of Object.values(state.activeRebuttals)) {
     if (!rebuttalsByAgent[rebuttal.targetAgent]) {
@@ -1014,12 +971,23 @@ async function runTargetedRebuttals(
     })
 
     try {
+      // Write rebuttals to a temp JSON file so the agent can read it as an attachment
+      const rebuttalsFile = `${outputPath}/rebuttals-${agent}-round-${state.round}.json`
+      await writeRunJsonArtifact(outputPath, `rebuttals-${agent}-round-${state.round}.json`, rebuttals)
+      const draftFile = `${outputPath}/draft-round-${state.round}.md`
+      const outputFile = `${outputPath}/auditor-rebuttal-responses-${agent}-round-${state.round}.json`
+
       const response = await promptAgent({
         config,
         sessionID: session.id,
         agent,
-        prompt: rebuttalPrompt(config, promptBundle, requestLabel(state), state.draft, rebuttals),
+        prompt: rebuttalPrompt(config, promptBundle, requestLabel(state), outputFile),
         schema: rebuttalBatchResponseSchema,
+        outputFile,
+        inputFiles: [
+          { path: draftFile, mime: "text/markdown", filename: "draft.md" },
+          { path: rebuttalsFile, mime: "application/json", filename: "rebuttals.json" },
+        ],
         telemetry: !telemetry
           ? undefined
           : {
@@ -1136,6 +1104,7 @@ async function reviewRebuttalResponses(
   observer?: RunObserver,
 ) {
   assertStatus(state, "reviewing_rebuttal_responses", "reviewRebuttalResponses")
+  if (!state.outputPath) throw new Error("Missing outputPath during reviewRebuttalResponses")
 
   const capped = cappedFindingKeys(config, state)
   const disputed: Array<{ findingId: string; rebuttal: ActiveRebuttal; response: RebuttalResponseRecord }> = []
@@ -1169,6 +1138,15 @@ async function reviewRebuttalResponses(
     ? config.quorumConfig.depthTiers[state.depthTier].maxRebuttalTurnsPerFinding
     : config.quorumConfig.maxRebuttalTurnsPerFinding
 
+  // Write disputed findings + rebuttal turn counts to a temp JSON file for attachment
+  const disputedFile = `${state.outputPath}/disputed-round-${state.round}.json`
+  await writeRunJsonArtifact(state.outputPath, `disputed-round-${state.round}.json`, {
+    disputed,
+    rebuttalTurnCounts: state.rebuttalTurnCounts,
+  })
+  const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
+  const outputFile = `${state.outputPath}/drafter-rebuttal-review-round-${state.round}.json`
+
   const response = await promptAgent({
     config,
     sessionID: session.id,
@@ -1177,12 +1155,15 @@ async function reviewRebuttalResponses(
       config,
       promptBundle,
       requestLabel(state),
-      state.draft,
-      disputed,
-      state.rebuttalTurnCounts,
+      outputFile,
       tierMaxRebuttalTurns,
     ),
     schema: drafterFindingReviewSchema,
+    outputFile,
+    inputFiles: [
+      { path: draftFile, mime: "text/markdown", filename: "draft.md" },
+      { path: disputedFile, mime: "application/json", filename: "disputed.json" },
+    ],
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
@@ -1290,7 +1271,6 @@ export async function aggregateConsensus(config: RuntimeConfig, state: ResearchS
   const effectiveRequireUnanimous = tierConfig?.requireUnanimousApproval ?? config.quorumConfig.requireUnanimousApproval
   const effectiveMaxRounds = tierConfig?.maxRounds ?? config.quorumConfig.maxRounds
 
-  const allAuditorsApproved = approvedAgents.length === effectiveAuditors.length
   const auditorsWithOnlyMinors = effectiveAuditors.filter(
     (a) => minorOnlyAgents.has(a) && !hasBlockersOrMajors,
   )
@@ -1426,7 +1406,7 @@ function mapFindingsToSections(
 }
 
 async function computeConfidenceNode(
-  config: RuntimeConfig,
+  _config: RuntimeConfig,
   state: ResearchState,
 ): Promise<ResearchState> {
   // Only compute for final states (approved, approved_with_caveats, failed)
@@ -1524,11 +1504,23 @@ async function reviseDraft(
   const session = await createSession(config, `research-drafter:${state.requestId}:revise:${state.round}`)
   observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
 
+  // Write unresolved findings to a temp JSON file for attachment
+  const findingsFile = `${state.outputPath}/unresolved-findings-round-${state.round}.json`
+  await writeRunJsonArtifact(state.outputPath, `unresolved-findings-round-${state.round}.json`, state.unresolvedFindings)
+  const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
+  const nextRound = state.round + 1
+  const outputFile = `${state.outputPath}/draft-round-${nextRound}.md`
+
   const response = await promptAgent({
     config,
     sessionID: session.id,
     agent: config.quorumConfig.designatedDrafter,
-    prompt: revisionPrompt(config, promptBundle, state),
+    prompt: revisionPrompt(config, promptBundle, state, outputFile),
+    outputFile,
+    inputFiles: [
+      { path: draftFile, mime: "text/markdown", filename: "draft.md" },
+      { path: findingsFile, mime: "application/json", filename: "findings.json" },
+    ],
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
@@ -1550,12 +1542,11 @@ async function reviseDraft(
     activeRebuttals: {},
     currentRebuttalResponsesByFinding: {},
     approvedAgents: [],
-    round: state.round + 1,
+    round: nextRound,
     status: "auditing",
     failureReason: undefined,
   })
 
-  await persistDraftArtifact(nextState, nextState.round)
   return nextState
 }
 

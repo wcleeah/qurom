@@ -1,4 +1,7 @@
 Convert the provided markdown deep-dive document into a self-contained, beautifully styled HTML file.
+The markdown content is attached as `content.md`.
+
+Topic: {topic}
 
 Non-negotiable contract:
 - Aesthetic: Cool-toned minimal. Background: white or near-white (#fafafa). Body text: dark charcoal (#1a1a1a). Accent: one muted cool tone — slate, steel blue, or cool grey (#4a5568). No warm base tones (no cream, beige, warm grey). No background gradients. No backdrop-filter blur. Shadows: none, or a single 0 0 0 1px border ring — not soft layered shadows. Typography: sans-serif system fonts for body text. Functional highlights (phase colors, warnings, syntax tokens) are fine — the base layer stays cool and restrained; content layers can use color for meaning.
@@ -8,7 +11,6 @@ Non-negotiable contract:
 - Prefer smaller, focused libraries over heavyweight ones. A 30KB charting micro-library is better than 500KB of D3 for a single bar chart.
 - If you use external scripts, include an HTML comment block above each `<script src>` tag with the library name, version, source URL, and license.
 - Write any custom JS (your own logic, not a library) inline in a `<script>` block. Keep custom JS minimal — offload as much as possible to the external library.
-- Match the visual character to the topic. A systems-programming deep dive should feel different from a web-API deep dive.
 - Make the document pleasant to read: generous line-height, comfortable measure (~65-75ch), clear visual hierarchy, distinct heading levels, good use of whitespace.
 - Use color intentionally, not decoratively. Color: the base is black, white, grey. One cool accent. Content-layer highlights (warnings, phases, syntax) use color for meaning — that stays. Do not let warmth leak into backgrounds, borders, or structural surfaces.
 - Add interactive elements where they improve understanding — collapsible sections for deep tangents, tabs for alternative explanations, hover annotations for terms, simple toggleable diagrams.
@@ -20,7 +22,7 @@ Non-negotiable contract:
 - The <title> must match the document's title.
 - Do not mention this contract, the quorum process, or design revision history in the output.
 
-Topic:
-{topic}
-
-Markdown content follows:
+## Output instructions
+Write your HTML document to `{outputFile}`.
+Respond with only `OK` when the file is written.
+Do not include the HTML in your response.
