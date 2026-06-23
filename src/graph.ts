@@ -208,6 +208,7 @@ function rebuttalReviewPrompt(
   draft: string,
   disputed: Array<{ findingId: string; rebuttal: ActiveRebuttal; response: RebuttalResponseRecord }>,
   rebuttalTurnCounts: Record<string, number>,
+  maxRebuttalTurns: number,
 ) {
   const promptDisputed = []
 
@@ -228,7 +229,7 @@ function rebuttalReviewPrompt(
     `Review the auditor rebuttal responses for this ${request}.`,
     "Return only JSON that matches the requested schema.",
     "For each disputed finding, either accept the auditor response or issue one narrower rebuttal with stronger evidence.",
-    `Do not rebut a finding that has already hit the rebuttal cap of ${config.quorumConfig.maxRebuttalTurnsPerFinding}.`,
+    `Do not rebut a finding that has already hit the rebuttal cap of ${maxRebuttalTurns}.`,
     "Current draft:",
     draft,
     "Current rebuttal turn counts:",
@@ -387,9 +388,12 @@ function turnForFinding(state: ResearchState, key: string) {
 
 function cappedFindingKeys(config: RuntimeConfig, state: ResearchState) {
   const capped = new Set<string>()
+  const maxTurns = state.depthTier && config.quorumConfig.depthTiers?.[state.depthTier]
+    ? config.quorumConfig.depthTiers[state.depthTier].maxRebuttalTurnsPerFinding
+    : config.quorumConfig.maxRebuttalTurnsPerFinding
 
   for (const [key, turns] of Object.entries(state.rebuttalTurnCounts)) {
-    if (turns >= config.quorumConfig.maxRebuttalTurnsPerFinding) {
+    if (turns >= maxTurns) {
       capped.add(key)
     }
   }
@@ -696,7 +700,10 @@ async function runParallelAudits(
   const request = requestLabel(state)
   const auditPromises: Promise<AuditResultRecord>[] = []
 
-  for (const agent of config.quorumConfig.auditors) {
+  const tierAuditors = state.depthTier && config.quorumConfig.depthTiers?.[state.depthTier]
+    ? config.quorumConfig.depthTiers[state.depthTier].auditors
+    : config.quorumConfig.auditors
+  for (const agent of tierAuditors) {
     auditPromises.push(
       (async () => {
         const session = await createSession(config, `audit:${state.requestId}:${agent}:round:${state.round}`)
@@ -1068,6 +1075,10 @@ async function reviewRebuttalResponses(
   const session = await createSession(config, `research-drafter:${state.requestId}:review-rebuttal:${state.round}`)
   observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
 
+  const tierMaxRebuttalTurns = state.depthTier && config.quorumConfig.depthTiers?.[state.depthTier]
+    ? config.quorumConfig.depthTiers[state.depthTier].maxRebuttalTurnsPerFinding
+    : config.quorumConfig.maxRebuttalTurnsPerFinding
+
   const response = await promptAgent({
     config,
     sessionID: session.id,
@@ -1079,6 +1090,7 @@ async function reviewRebuttalResponses(
       state.draft,
       disputed,
       state.rebuttalTurnCounts,
+      tierMaxRebuttalTurns,
     ),
     schema: drafterFindingReviewSchema,
     telemetry: graphAgentTelemetry({
@@ -1181,16 +1193,23 @@ export async function aggregateConsensus(config: RuntimeConfig, state: ResearchS
   const signature = unresolvedSignature(unresolved)
   const { approvedAgents, minorOnlyAgents } = approvedAgentsForOutcome(state, unresolved)
   const hasBlockersOrMajors = unresolved.some((f) => f.severity === "blocker" || f.severity === "major")
-  const allAuditorsApproved = approvedAgents.length === config.quorumConfig.auditors.length
-  const auditorsWithOnlyMinors = config.quorumConfig.auditors.filter(
+
+  // Tier-aware config (fall back to global config if no tier set)
+  const tierConfig = state.depthTier ? config.quorumConfig.depthTiers?.[state.depthTier] : undefined
+  const effectiveAuditors = tierConfig?.auditors ?? config.quorumConfig.auditors
+  const effectiveRequireUnanimous = tierConfig?.requireUnanimousApproval ?? config.quorumConfig.requireUnanimousApproval
+  const effectiveMaxRounds = tierConfig?.maxRounds ?? config.quorumConfig.maxRounds
+
+  const allAuditorsApproved = approvedAgents.length === effectiveAuditors.length
+  const auditorsWithOnlyMinors = effectiveAuditors.filter(
     (a) => minorOnlyAgents.has(a) && !hasBlockersOrMajors,
   )
-  const allAuditorsOk = approvedAgents.length + auditorsWithOnlyMinors.length >= config.quorumConfig.auditors.length
-  const isApproved = config.quorumConfig.requireUnanimousApproval
+  const allAuditorsOk = approvedAgents.length + auditorsWithOnlyMinors.length >= effectiveAuditors.length
+  const isApproved = effectiveRequireUnanimous
     ? allAuditorsOk && !hasBlockersOrMajors
     : unresolved.length === 0
   const stagnated = unresolved.length > 0 && state.lastUnresolvedSignature === signature
-  const maxRoundsExhausted = unresolved.length > 0 && state.round >= config.quorumConfig.maxRounds
+  const maxRoundsExhausted = unresolved.length > 0 && state.round >= effectiveMaxRounds
   let outcome: AggregatedFindings["outcome"] = "needs_revision"
   let failureReason: ResearchState["failureReason"] = undefined
   let nextStatus: ResearchState["status"] = "revising"
