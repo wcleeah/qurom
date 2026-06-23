@@ -1,587 +1,95 @@
-import { useKeyboard, useRenderer } from "@opentui/react"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { readFile } from "node:fs/promises"
+import { useKeyboard } from "@opentui/react"
+import { useCallback, useRef, useState } from "react"
 import type { RuntimeConfig } from "../config"
-import { createEventBus, runResearchPipeline, type EventBus, type RuntimePrerequisites, type RuntimePromptBundle } from "../runner"
+import { createEventBus, runResearchPipeline, type RuntimePrerequisites, type RuntimePromptBundle } from "../runner"
 import type { InputRequest } from "../schema"
-import { copy } from "./clipboard"
-import { HelpOverlay } from "./components/HelpOverlay"
-import { PermissionPrompt } from "./components/PermissionPrompt"
+import { Dashboard } from "./components/Dashboard"
 import { PromptScreen } from "./components/PromptScreen"
-import { QuitConfirm } from "./components/QuitConfirm"
-import { RunningScreen } from "./components/RunningScreen"
-import { SummaryScreen, type SummaryAction } from "./components/SummaryScreen"
-import type { RunHistoryEntry } from "./runHistory"
-import { openInEditor, type OpenInEditorMode } from "./editor"
-import { replyToPermission } from "../opencode"
-import { nextFocus } from "./keymap/gridNav"
-import { computeLayout } from "./state/layout"
 import { bindBusToStore } from "./state/eventBindings"
-import { createRunStore, selectPendingPermission, type RunStore, type RunStoreInitialState } from "./state/runStore"
-import { pushSystemStatus, type SystemStatusStore } from "./state/systemStatus"
-import { useStoreSelector } from "./state/useStore"
+import { createRunStore, type RunStore } from "./state/runStore"
+import { type SystemStatusStore } from "./state/systemStatus"
 
-export type Screen = "prompt" | "running" | "summary"
+export type Screen = "prompt" | "running"
 
 export interface AppProps {
   config: RuntimeConfig
   prerequisites: RuntimePrerequisites
   promptBundle: RuntimePromptBundle
-  runHistory: RunHistoryEntry[]
   systemStatus: SystemStatusStore
   onExit: () => void
 }
 
-type PromptState = {
-  mode: "topic" | "document"
-  topic?: string
-  document?: { path: string; content: string }
-  hint?: string
-}
-
 interface RunCtx {
-  bus: EventBus
   store: RunStore
   unbind: () => void
-  flushAndUnbind: () => void
   ac: AbortController
   promise: Promise<unknown>
-  request: InputRequest
 }
 
-function buildAgentInitialState(prerequisites: RuntimePrerequisites, config: RuntimeConfig): RunStoreInitialState["agents"] {
-  const byName = new Map(prerequisites.agents.map((agent) => [agent.name, agent]))
-
-  return Object.fromEntries(
-    [config.quorumConfig.designatedDrafter, ...config.quorumConfig.auditors].map((name) => [
-      name,
-      {
-        model: byName.get(name)?.model?.modelID,
-        variant: byName.get(name)?.variant,
-      },
-    ]),
-  )
-}
-
-function PendingPermissionOverlay({
-  store,
-  submittingPermissionRequestID,
-  onReply,
-}: {
-  store: RunStore
-  submittingPermissionRequestID?: string
-  onReply: (reply: "once" | "always" | "reject") => void
-}) {
-  const pendingPermission = useStoreSelector(store, selectPendingPermission)
-  if (!pendingPermission) return null
-
-  return (
-    <PermissionPrompt
-      permission={pendingPermission}
-      submitting={submittingPermissionRequestID === pendingPermission.requestID}
-      onReply={(reply) => void onReply(reply)}
-    />
-  )
-}
-
-export const App = ({ config, prerequisites, promptBundle, runHistory, systemStatus, onExit }: AppProps) => {
-  const renderer = useRenderer()
+export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit }: AppProps) => {
   const [screen, setScreen] = useState<Screen>("prompt")
   const [runCtx, setRunCtx] = useState<RunCtx | undefined>(undefined)
-  const [selected, setSelected] = useState<string>("dashboard")
-  const [active, setActive] = useState<string | undefined>(undefined)
-  const [showHelp, setShowHelp] = useState(false)
-  const [pendingForceQuit, setPendingForceQuit] = useState(false)
-  const [pendingAbortExit, setPendingAbortExit] = useState(false)
-  const [gPending, setGPending] = useState(false)
-  const [submittingPermissionRequestID, setSubmittingPermissionRequestID] = useState<string | undefined>(undefined)
-  const [promptState, setPromptState] = useState<PromptState>({ mode: "topic", topic: "", hint: "" })
+  const [viewUrl, setViewUrl] = useState<string | undefined>(undefined)
   const lastRequestRef = useRef<InputRequest | undefined>(undefined)
-  const initialAgents = useRef(buildAgentInitialState(prerequisites, config))
-  const width = renderer.width
-  const layoutSlotOrder = [
-    "dashboard",
-    config.quorumConfig.designatedDrafter,
-    ...config.quorumConfig.auditors,
-  ]
-  if (config.quorumConfig.designQuorum?.enabled) {
-    layoutSlotOrder.push(config.quorumConfig.designQuorum.designatedDesigner)
-    layoutSlotOrder.push(...config.quorumConfig.designQuorum.auditors)
-  }
-  const layout = computeLayout(width, layoutSlotOrder)
 
-  // select to copy handling
-  useEffect(() => {
-    const onSelection = (selection: { getSelectedText: () => string; isDragging?: boolean } | null) => {
-      if (!selection || selection.isDragging) return
-      const text = selection.getSelectedText()
-      if (!text) return
-      void copy(text)
-        .then(() => renderer.clearSelection())
-        .catch(() => {})
-    }
-
-    renderer.on("selection", onSelection)
-    return () => {
-      renderer.off("selection", onSelection)
-    }
-  }, [renderer])
-
-  useKeyboard((key) => {
-    if (showHelp) {
-      if (key.shift && key.name === "/") setShowHelp(false)
-      return
-    }
-
-    if (pendingForceQuit) {
-      if (key.name === "n" || key.name === "escape") setPendingForceQuit(false)
-      return
-    }
-
-    if (key.name === "y") {
-      const text = renderer.getSelection()?.getSelectedText()
-      if (!text) return
-      void copy(text)
-        .then(() => renderer.clearSelection())
-        .catch(() => {})
-      return
-    }
-
-    if (screen === "prompt") {
-      if (key.name === "c" && key.ctrl) onExit()
-      return
-    }
-
-    if (screen === "summary") {
-      if (key.name === "c" && key.ctrl) onExit()
-      return
-    }
-
-    if (key.name === "c" && key.ctrl) {
-      if (!runCtx) return onExit()
-      if (pendingAbortExit) return
-
-      setPendingAbortExit(true)
-      pushSystemStatus(systemStatus, { level: "warn", text: "Cancelling run..." })
-      runCtx.ac.abort()
-      void Promise.race([
-        runCtx.promise.catch(() => undefined),
-        new Promise<void>((resolve) => setTimeout(resolve, 500)),
-      ]).finally(onExit)
-      return
-    }
-
-    const pendingPermission = runCtx ? selectPendingPermission(runCtx.store.getState()) : undefined
-    if (pendingPermission) return
-
-    if (key.name === "e") {
-      if (!runCtx) return
-      void viewCurrentMarkdown(runCtx.request)
-      return
-    }
-
-    if (key.shift && key.name === "E") {
-      if (!runCtx) return
-      void viewCurrentHtml()
-      return
-    }
-
-    if (key.shift && key.name === "/") {
-      setShowHelp(true)
-      return
-    }
-
-    if (key.shift && key.name === "q") {
-      setPendingForceQuit(true)
-      return
-    }
-
-    if (key.name === "q") return
-
-    if (key.name === "escape") {
-      setActive(undefined)
-      setGPending(false)
-      return
-    }
-
-    if (key.name === "return") {
-      if (selected !== "dashboard") {
-        setActive(selected)
-        setGPending(false)
-      }
-      return
-    }
-
-    if (key.name === "tab") {
-      if (active) return
-      const next = nextFocus(selected, key.shift ? "shift-tab" : "tab", layout)
-      if (next) setSelected(next)
-      return
-    }
-
-    const navKey = key.name as "h" | "j" | "k" | "l"
-    const shouldHandleNav = !active
-
-    if (shouldHandleNav) {
-      const next = nextFocus(selected, navKey, layout)
-      if (next) {
-        setSelected(next)
-        setGPending(false)
-      }
-    }
-  })
-
-  const viewCurrentMarkdown = useCallback(
-    async (request: InputRequest) => {
-      const graphState = runCtx?.store.getState().graph.state as
-        | { outputPath?: string; artifactSummary?: { sourcePath?: string } }
-        | undefined
-      const result = runCtx?.store.getState().result as
-        | { outputPath?: string; artifactSummary?: { sourcePath?: string } }
-        | undefined
-
-      const candidates =
-        request.inputMode === "document"
-          ? [
-              graphState?.artifactSummary?.sourcePath,
-              graphState?.outputPath ? `${graphState.outputPath}/final.md` : undefined,
-              graphState?.outputPath ? `${graphState.outputPath}/latest-draft.md` : undefined,
-              result?.artifactSummary?.sourcePath,
-              result?.outputPath ? `${result.outputPath}/final.md` : undefined,
-              result?.outputPath ? `${result.outputPath}/latest-draft.md` : undefined,
-              request.documentPath,
-            ]
-          : [
-              graphState?.artifactSummary?.sourcePath,
-              graphState?.outputPath ? `${graphState.outputPath}/final.md` : undefined,
-              graphState?.outputPath ? `${graphState.outputPath}/latest-draft.md` : undefined,
-              result?.artifactSummary?.sourcePath,
-              result?.outputPath ? `${result.outputPath}/final.md` : undefined,
-              result?.outputPath ? `${result.outputPath}/latest-draft.md` : undefined,
-            ]
-
-      const path = candidates.find((candidate) => typeof candidate === "string" && candidate.length > 0)
-      if (!path) {
-        pushSystemStatus(systemStatus, { level: "warn", text: "Nothing viewable yet" })
-        return
-      }
-
-      const mode: OpenInEditorMode = "view"
-      const resultOpen = await openInEditor({
-        path,
-        renderer,
-        artifactRoot: config.quorumConfig.artifactDir,
-        mode,
-      })
-
-      if (!resultOpen.ok && resultOpen.reason === "exit-code") {
-        pushSystemStatus(systemStatus, { level: "warn", text: `viewer exit ${resultOpen.code ?? "?"}` })
-      }
-    },
-    [config.quorumConfig.artifactDir, renderer, runCtx, systemStatus],
-  )
-
-  const viewCurrentHtml = useCallback(
-    async () => {
-      const outputPath = runCtx?.store.getState().result as { outputPath?: string } | undefined
-      const htmlPath = outputPath?.outputPath
-        ? `${outputPath.outputPath}/final.html`
-        : runCtx?.store.getState().lifecycle.outputDir
-          ? `${runCtx.store.getState().lifecycle.outputDir}/final.html`
-          : undefined
-
-      if (!htmlPath) {
-        pushSystemStatus(systemStatus, { level: "warn", text: "No final.html found" })
-        return
-      }
-
-      const mode: OpenInEditorMode = "view"
-      const resultOpen = await openInEditor({
-        path: htmlPath,
-        renderer,
-        artifactRoot: config.quorumConfig.artifactDir,
-        mode,
-      })
-
-      if (!resultOpen.ok && resultOpen.reason === "exit-code") {
-        pushSystemStatus(systemStatus, { level: "warn", text: `viewer exit ${resultOpen.code ?? "?"}` })
-      }
-    },
-    [config.quorumConfig.artifactDir, renderer, runCtx, systemStatus],
-  )
+  void systemStatus
 
   const startRun = useCallback(
     (request: InputRequest) => {
       lastRequestRef.current = request
-      setPromptState({
-        mode: request.inputMode,
-        topic: request.inputMode === "topic" ? request.topic : "",
-        document:
-          request.inputMode === "document"
-            ? { path: request.documentPath, content: request.documentText ?? promptState.document?.content ?? "" }
-            : undefined,
-        hint: "",
-      })
       const bus = createEventBus()
-      const store = createRunStore({ config, initial: { agents: initialAgents.current } })
-      const binding = bindBusToStore({ bus, store, config })
+      const store = createRunStore()
+      const binding = bindBusToStore({ bus, store })
       const ac = new AbortController()
       const promise = runResearchPipeline({ config, prerequisites, promptBundle, request, bus, signal: ac.signal })
-      const ctx: RunCtx = {
-        bus,
-        store,
-        unbind: binding.unbind,
-        flushAndUnbind: binding.flushAndUnbind,
-        ac,
-        promise,
-        request,
-      }
+
+      const ctx: RunCtx = { store, unbind: binding.unbind, ac, promise }
       setRunCtx(ctx)
-      setSelected("dashboard")
-      setActive(undefined)
-      setShowHelp(false)
-      setPendingForceQuit(false)
-      setPendingAbortExit(false)
-      setGPending(false)
-      setSubmittingPermissionRequestID(undefined)
       setScreen("running")
 
+      // Derive view URL from the same host/port as the view-server
+      const port = process.env.VIEW_PORT ?? "3000"
+      const host = process.env.VIEW_HOST ?? "localhost"
+      // requestId is generated inside runResearchPipeline, so we read it from lifecycle
+      const offLifecycle = bus.on((event) => {
+        if (event.kind === "lifecycle" && event.requestId) {
+          setViewUrl(`http://${host}:${port}/runs/${event.requestId}`)
+          offLifecycle()
+        }
+      })
+
       promise
-        .catch((err) => {
-          // Lifecycle reducer already records the error from the runner's lifecycle:error event.
-          // If the rejection bypassed lifecycle (e.g. abort), surface it manually.
-          const current = store.getState()
-          if (!current.lifecycle.error) {
-            store.setState({
-              lifecycle: { ...current.lifecycle, phase: "error", error: err },
-            })
-          }
-        })
+        .catch(() => {})
         .finally(() => {
           binding.flushAndUnbind()
-          setPendingAbortExit(false)
-          setScreen("summary")
         })
     },
-    [config, prerequisites, promptBundle, promptState.document?.content],
+    [config, prerequisites, promptBundle],
   )
 
-  const handleHistoryRun = useCallback(
-    async (entry: RunHistoryEntry) => {
-      if (entry.inputMode === "topic") {
-        startRun({ inputMode: "topic", topic: entry.topic })
+  useKeyboard((key) => {
+    if (key.name === "c" && key.ctrl) {
+      if (screen === "running" && runCtx) {
+        runCtx.ac.abort()
+        void runCtx.promise.catch(() => {}).finally(onExit)
       } else {
-        // Document mode — re-read the file
-        const path = entry.documentPath
-        if (!path) return
-        let content = ""
-        try {
-          content = await readFile(path, "utf8")
-        } catch {
-          pushSystemStatus(systemStatus, { level: "warn", text: `Could not read ${path}` })
-          return
-        }
-        setPromptState({ mode: "document", document: { path, content }, hint: "" })
-        startRun({ inputMode: "document", documentPath: path, documentText: content })
-      }
-    },
-    [startRun, systemStatus],
-  )
-
-  const handleRerun = useCallback(async () => {
-    const lastRequest = lastRequestRef.current
-    if (!lastRequest) return
-
-    if (lastRequest.inputMode === "document") {
-      const path = lastRequest.documentPath
-      let content = lastRequest.documentText ?? promptState.document?.content ?? ""
-      let hint = ""
-      try {
-        const fresh = await readFile(path, "utf8")
-        if (fresh.trim().length > 0) {
-          content = fresh
-        } else {
-          hint = "draft empty on disk — using cached document"
-        }
-      } catch {
-        hint = "draft missing on disk — using cached document"
-      }
-
-      setPromptState({
-        mode: "document",
-        document: { path, content },
-        hint,
-      })
-      startRun({ inputMode: "document", documentPath: path, documentText: content })
-      return
-    }
-
-    startRun(lastRequest)
-  }, [promptState.document?.content, startRun])
-
-  const handleRerunDesign = useCallback(async () => {
-    const outputDir = runCtx?.store.getState().lifecycle.outputDir
-    if (!outputDir) {
-      pushSystemStatus(systemStatus, { level: "warn", text: "No output directory found" })
-      return
-    }
-    setScreen("running")
-    try {
-      const { runDesignForExistingRun } = await import("../design-quorum")
-      const result = await runDesignForExistingRun({
-        config,
-        promptBundle,
-        runDir: outputDir,
-      })
-      const store = runCtx!.store
-      store.setState((prev) => ({
-        ...prev,
-        result: {
-          ...(prev.result as Record<string, unknown> ?? {}),
-          designHtml: result.html,
-          designStatus: result.status,
-        },
-      }))
-      pushSystemStatus(systemStatus, {
-        level: "warn",
-        text: `Design ${result.status} after ${result.round} round(s)`,
-      })
-    } catch (error) {
-      pushSystemStatus(systemStatus, {
-        level: "error",
-        text: error instanceof Error ? error.message : String(error),
-      })
-    } finally {
-      setScreen("summary")
-    }
-  }, [config, promptBundle, runCtx, systemStatus])
-
-  const handleNewTopic = useCallback(() => {
-    setRunCtx(undefined)
-    setActive(undefined)
-    setPromptState({ mode: "topic", topic: "", document: undefined, hint: "" })
-    setScreen("prompt")
-  }, [])
-
-  const handleNewDocument = useCallback(async () => {
-    setRunCtx(undefined)
-    setActive(undefined)
-    setScreen("prompt")
-    const requestId = crypto.randomUUID()
-    const result = await openInEditor({
-      requestId,
-      renderer,
-      artifactRoot: config.quorumConfig.artifactDir,
-      mode: "edit",
-    })
-
-    if (result.ok) {
-      setPromptState({ mode: "document", document: { path: result.path, content: result.content }, hint: "" })
-      return
-    }
-
-    if (result.reason === "empty") {
-      setPromptState({ mode: "document", document: undefined, hint: "(empty — nothing saved)" })
-      return
-    }
-
-    if (result.reason === "cancelled") {
-      setPromptState({ mode: "document", document: undefined, hint: "(cancelled)" })
-      return
-    }
-
-    setPromptState({ mode: "document", document: undefined, hint: `(editor exit ${result.code ?? "?"})` })
-  }, [config.quorumConfig.artifactDir, renderer])
-
-  const handleSummaryAction = useCallback(
-    (action: SummaryAction) => {
-      if (action === "quit") {
         onExit()
-      } else if (action === "rerun") {
-        void handleRerun()
-      } else if (action === "rerun-design") {
-        void handleRerunDesign()
-      } else if (action === "view-html") {
-        void viewCurrentHtml()
-      } else if (action === "new-topic") {
-        handleNewTopic()
-      } else if (action === "new-document") {
-        void handleNewDocument()
-      } else {
-        setRunCtx(undefined)
-        setScreen("prompt")
       }
-    },
-    [handleNewDocument, handleNewTopic, handleRerun, handleRerunDesign, viewCurrentHtml, onExit],
-  )
-
-  const handlePermissionReply = useCallback(
-    async (reply: "once" | "always" | "reject") => {
-      const pendingPermission = runCtx ? selectPendingPermission(runCtx.store.getState()) : undefined
-      if (!pendingPermission || submittingPermissionRequestID) return
-      setSubmittingPermissionRequestID(pendingPermission.requestID)
-      try {
-        await replyToPermission(config, { requestID: pendingPermission.requestID, reply })
-      } catch (error) {
-        pushSystemStatus(systemStatus, {
-          level: "error",
-          text: error instanceof Error ? error.message : String(error),
-        })
-      } finally {
-        setSubmittingPermissionRequestID(undefined)
-      }
-    },
-    [config, runCtx, submittingPermissionRequestID, systemStatus],
-  )
+      return
+    }
+  })
 
   if (screen === "prompt") {
     return (
       <box flexGrow={1} position="relative">
-        <PromptScreen
-          config={config}
-          onSubmit={startRun}
-          runHistory={runHistory}
-          onHistorySelect={handleHistoryRun}
-          initialMode={promptState.mode}
-          initialTopic={promptState.topic}
-          initialDocument={promptState.document}
-          initialHint={promptState.hint}
-        />
+        <PromptScreen onSubmit={startRun} />
       </box>
     )
   }
-  if (screen === "running" && runCtx) {
-    return (
-      <box flexGrow={1} position="relative">
-        <RunningScreen
-          store={runCtx.store}
-          config={config}
-          systemStatus={systemStatus}
-          selected={selected}
-          active={active}
-          gPending={gPending}
-          onGPendingChange={setGPending}
-        />
-        <PendingPermissionOverlay
-          store={runCtx.store}
-          submittingPermissionRequestID={submittingPermissionRequestID}
-          onReply={handlePermissionReply}
-        />
-        {showHelp ? <HelpOverlay /> : null}
-        {pendingForceQuit ? <QuitConfirm onYes={onExit} onNo={() => setPendingForceQuit(false)} /> : null}
-      </box>
-    )
-  }
-  if (screen === "summary" && runCtx) {
-    return (
-        <box flexGrow={1} position="relative">
-          <SummaryScreen store={runCtx.store} onAction={handleSummaryAction} />
-        </box>
-      )
-  }
+
   return (
-    <box border title="research-qurom" padding={1}>
-      <text>(initializing)</text>
+    <box flexGrow={1} position="relative">
+      <Dashboard store={runCtx!.store} viewUrl={viewUrl} />
     </box>
   )
 }

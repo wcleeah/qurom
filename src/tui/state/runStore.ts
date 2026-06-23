@@ -1,30 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla"
-import type { RuntimeConfig } from "../../config"
 import type { RunnerEvent } from "../../runner"
 import type { GraphInput, ResearchState } from "../../schema"
-
-export type ScrollbackKind = "reasoning" | "tool" | "permission" | "system"
-
-export type ScrollbackEntry = {
-  kind: ScrollbackKind
-  text: string
-  ts: number
-  key?: string
-  done?: boolean
-}
-
-export type PendingPermission = {
-  roleKey: string
-  requestID: string
-  permission: string
-  patterns: string[]
-  always: string[]
-  messageID?: string
-  callID?: string
-  requestedAt: number
-}
-
-export type PendingPermissionEntry = PendingPermission
 
 export type AgentStatus = "idle" | "running" | "error" | "complete"
 
@@ -34,14 +10,20 @@ export type AgentState = {
   lastEventAt: number
   model?: string
   variant?: string
-  scrollback: ScrollbackEntry[]
+  tool?: string
   tokensIn: number
   tokensOut: number
-  activeTool?: { tool: string; callID: string; startedAt: number }
-  pendingPermission?: PendingPermission
 }
 
 export type LifecyclePhase = "starting" | "running" | "complete" | "error"
+
+export type NodeHistoryEntry = {
+  node: string
+  startedAt: number
+  completedAt: number
+  status: "completed" | "error"
+  error?: string
+}
 
 export type RunStoreState = {
   lifecycle: {
@@ -56,103 +38,24 @@ export type RunStoreState = {
     node?: string
     phase?: "start" | "end"
     state?: ResearchState | GraphInput
+    nodeStartedAt?: number
   }
   agents: Record<string, AgentState>
-  systemLog: ScrollbackEntry[]
+  nodeHistory: NodeHistoryEntry[]
+  systemLog: Array<{ text: string; ts: number }>
   result?: unknown
 }
 
 export type RunStore = StoreApi<RunStoreState>
-
-export type RunStoreInitialState = Partial<Omit<RunStoreState, "agents">> & {
-  agents?: Record<string, Partial<AgentState>>
-}
-
-export type CreateRunStoreInput = {
-  config: RuntimeConfig
-  initial?: RunStoreInitialState
-}
-
-const INITIAL_PHASE: LifecyclePhase = "starting"
-
-export function resolveRoleKey(rawRole: string, config: RuntimeConfig): string | undefined {
-  if (rawRole === "root") return undefined
-
-  // Research roles
-  if (rawRole === "drafter") return config.quorumConfig.designatedDrafter
-  if (rawRole.startsWith("auditor:")) {
-    const name = rawRole.slice("auditor:".length)
-    if (config.quorumConfig.auditors.includes(name)) return name
-  }
-
-  // Design roles
-  const design = config.quorumConfig.designQuorum
-  if (design?.enabled) {
-    if (rawRole === design.designatedDesigner) return design.designatedDesigner
-    if (rawRole.startsWith("design-auditor:")) {
-      const name = rawRole.slice("design-auditor:".length)
-      if (design.auditors.includes(name)) return name
-    }
-  }
-
-  return undefined
-}
 
 function emptyAgent(): AgentState {
   return {
     status: "idle",
     lastEventAt: 0,
     model: undefined,
-    scrollback: [],
     tokensIn: 0,
     tokensOut: 0,
   }
-}
-
-export function createInitialState(config: RuntimeConfig, initial?: RunStoreInitialState): RunStoreState {
-  const agents: Record<string, AgentState> = {}
-
-  // Research agents
-  agents[config.quorumConfig.designatedDrafter] = emptyAgent()
-  for (const auditor of config.quorumConfig.auditors) {
-    agents[auditor] = emptyAgent()
-  }
-
-  // Design agents (if enabled)
-  const design = config.quorumConfig.designQuorum
-  if (design?.enabled) {
-    agents[design.designatedDesigner] = emptyAgent()
-    for (const auditor of design.auditors) {
-      agents[auditor] = emptyAgent()
-    }
-  }
-
-  for (const [key, value] of Object.entries(initial?.agents ?? {})) {
-    if (!agents[key]) continue
-    agents[key] = { ...agents[key], ...value }
-  }
-
-  return {
-    lifecycle: { phase: INITIAL_PHASE },
-    graph: {},
-    systemLog: [],
-    ...initial,
-    agents,
-  }
-}
-
-export function selectPendingPermission(state: RunStoreState): PendingPermissionEntry | undefined {
-  let currentPermission: PendingPermission | undefined
-
-  for (const [, agent] of Object.entries(state.agents)) {
-    const pending = agent.pendingPermission
-    if (!pending) continue
-    if (!currentPermission || pending.requestedAt < currentPermission.requestedAt) {
-      currentPermission = pending
-    }
-  }
-
-  return currentPermission
 }
 
 function deriveStatus(raw: string): AgentStatus {
@@ -162,58 +65,9 @@ function deriveStatus(raw: string): AgentStatus {
   return "running"
 }
 
-function appendScrollback(agent: AgentState, entry: ScrollbackEntry): AgentState {
-  const next = [...agent.scrollback, entry]
-  const trimmed = next.length > SCROLLBACK_LIMIT ? next.slice(next.length - SCROLLBACK_LIMIT) : next
-  return { ...agent, scrollback: trimmed, lastEventAt: entry.ts }
-}
+const SYSTEM_LOG_LIMIT = 100
 
-function upsertReasoning(agent: AgentState, entry: ScrollbackEntry): AgentState {
-  const index = agent.scrollback.findLastIndex((candidate) => candidate.kind === "reasoning" && candidate.key === entry.key)
-  if (index === -1) {
-    return appendScrollback(agent, entry)
-  }
-
-  const scrollback = [...agent.scrollback]
-  scrollback[index] = {
-    ...scrollback[index],
-    text: entry.text,
-    ts: entry.ts,
-    done: entry.done,
-  }
-  return { ...agent, scrollback, lastEventAt: entry.ts }
-}
-
-function upsertSystem(agent: AgentState, entry: ScrollbackEntry): AgentState {
-  const index = agent.scrollback.findLastIndex((candidate) => candidate.kind === "system" && candidate.key === entry.key)
-  if (index === -1) {
-    return appendScrollback(agent, entry)
-  }
-
-  const scrollback = [...agent.scrollback]
-  scrollback[index] = {
-    ...scrollback[index],
-    text: entry.text,
-    ts: entry.ts,
-    done: entry.done,
-  }
-  return { ...agent, scrollback, lastEventAt: entry.ts }
-}
-
-const SCROLLBACK_LIMIT = 500
-
-function withAgent(state: RunStoreState, key: string, mutate: (agent: AgentState) => AgentState): RunStoreState {
-  const existing = state.agents[key] ?? emptyAgent()
-  return { ...state, agents: { ...state.agents, [key]: mutate(existing) } }
-}
-
-function appendSystem(state: RunStoreState, entry: ScrollbackEntry): RunStoreState {
-  const next = [...state.systemLog, entry]
-  const trimmed = next.length > SCROLLBACK_LIMIT ? next.slice(next.length - SCROLLBACK_LIMIT) : next
-  return { ...state, systemLog: trimmed }
-}
-
-export function reduce(state: RunStoreState, event: RunnerEvent, config: RuntimeConfig): RunStoreState {
+export function reduce(state: RunStoreState, event: RunnerEvent): RunStoreState {
   const ts = Date.now()
   switch (event.kind) {
     case "lifecycle":
@@ -228,127 +82,130 @@ export function reduce(state: RunStoreState, event: RunnerEvent, config: Runtime
           error: event.error ?? state.lifecycle.error,
         },
       }
-    case "graph.node":
-      return { ...state, graph: { node: event.node, phase: event.phase, state: event.state } }
+    case "graph.node": {
+      let nodeHistory = state.nodeHistory
+      // When a node ends, record it
+      if (event.phase === "end" && state.graph.node) {
+        nodeHistory = [
+          ...nodeHistory,
+          {
+            node: state.graph.node,
+            startedAt: state.graph.nodeStartedAt ?? ts,
+            completedAt: ts,
+            status: "completed" as const,
+          },
+        ]
+      }
+      return {
+        ...state,
+        graph: { node: event.node, phase: event.phase, state: event.state, nodeStartedAt: event.phase === "start" ? ts : state.graph.nodeStartedAt },
+        nodeHistory,
+      }
+    }
     case "session.created": {
       if (event.role === "root") {
         return { ...state, lifecycle: { ...state.lifecycle, rootSessionID: event.sessionID } }
       }
-      const key = resolveRoleKey(event.role, config)
-      if (!key) return appendSystem(state, { kind: "system", text: `unmapped role: ${event.role}`, ts })
-      return withAgent(state, key, (agent) => ({ ...agent, sessionID: event.sessionID, lastEventAt: ts }))
+      const key = event.role
+      const existing = state.agents[key] ?? emptyAgent()
+      return {
+        ...state,
+        agents: {
+          ...state.agents,
+          [key]: { ...existing, sessionID: event.sessionID, lastEventAt: ts },
+        },
+      }
     }
     case "session.status": {
-      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
+      const entry = Object.entries(state.agents).find(([, a]) => a.sessionID === event.sessionID)
       if (!entry) return state
       const [key] = entry
-      return withAgent(state, key, (agent) => ({ ...agent, status: deriveStatus(event.status), lastEventAt: ts }))
+      return {
+        ...state,
+        agents: {
+          ...state.agents,
+          [key]: { ...state.agents[key], status: deriveStatus(event.status), lastEventAt: ts },
+        },
+      }
     }
     case "session.error": {
-      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
+      const entry = Object.entries(state.agents).find(([, a]) => a.sessionID === event.sessionID)
       if (!entry) return state
       const [key] = entry
-      return withAgent(state, key, (agent) =>
-        appendScrollback(
-          { ...agent, status: "error" },
-          { kind: "system", text: `error: ${event.name}${event.message ? `: ${event.message}` : ""}`, ts },
-        ),
-      )
+      const nextLog = [...state.systemLog, { text: `error: ${event.name}${event.message ? `: ${event.message}` : ""}`, ts }]
+      return {
+        ...state,
+        agents: {
+          ...state.agents,
+          [key]: { ...state.agents[key], status: "error", lastEventAt: ts },
+        },
+        systemLog: nextLog.length > SYSTEM_LOG_LIMIT ? nextLog.slice(nextLog.length - SYSTEM_LOG_LIMIT) : nextLog,
+      }
     }
     case "agent.metadata": {
-      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
+      const entry = Object.entries(state.agents).find(([, a]) => a.sessionID === event.sessionID)
       if (!entry) return state
       const [key] = entry
-      return withAgent(state, key, (agent) => ({
-        ...agent,
-        model: event.model ?? agent.model,
-        variant: event.variant ?? agent.variant,
-        lastEventAt: ts,
-      }))
-    }
-    case "agent.message.start": {
-      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
-      if (!entry) return state
-      const [key] = entry
-      return withAgent(state, key, (agent) => appendScrollback(agent, { kind: "system", text: "assistant started", ts }))
-    }
-    case "agent.reasoning": {
-      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
-      if (!entry) return state
-      const [key] = entry
-      return withAgent(state, key, (agent) =>
-        upsertReasoning(agent, { kind: "reasoning", text: event.text, ts, key: event.key, done: event.done }),
-      )
-    }
-    case "agent.message.text": {
-      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
-      if (!entry) return state
-      const [key] = entry
-      return withAgent(state, key, (agent) =>
-        upsertSystem(agent, { kind: "system", text: event.text, ts, key: event.key, done: event.done }),
-      )
+      return {
+        ...state,
+        agents: {
+          ...state.agents,
+          [key]: {
+            ...state.agents[key],
+            model: event.model ?? state.agents[key].model,
+            variant: event.variant ?? state.agents[key].variant,
+            lastEventAt: ts,
+          },
+        },
+      }
     }
     case "agent.tool": {
-      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
+      const entry = Object.entries(state.agents).find(([, a]) => a.sessionID === event.sessionID)
       if (!entry) return state
       const [key] = entry
-      if (event.status === "running") {
-        return withAgent(state, key, (agent) =>
-          appendScrollback(
-            { ...agent, activeTool: { tool: event.tool, callID: event.callID, startedAt: ts } },
-            { kind: "tool", text: `${event.tool} running`, ts },
-          ),
-        )
-      }
-      if (event.status === "completed") {
-        return withAgent(state, key, (agent) =>
-          appendScrollback({ ...agent, activeTool: undefined }, { kind: "tool", text: `${event.tool} completed`, ts }),
-        )
-      }
-      return withAgent(state, key, (agent) =>
-        appendScrollback(
-          { ...agent, activeTool: undefined },
-          { kind: "tool", text: `${event.tool} failed${event.error ? `: ${event.error}` : ""}`, ts },
-        ),
-      )
-    }
-    case "agent.permission": {
-      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
-      if (!entry) return state
-      const [key] = entry
-      return withAgent(state, key, (agent) =>
-        appendScrollback(
-          {
-            ...agent,
-            pendingPermission: {
-              roleKey: key,
-              requestID: event.requestID,
-              permission: event.permission,
-              patterns: event.patterns,
-              always: event.always,
-              messageID: event.messageID,
-              callID: event.callID,
-              requestedAt: ts,
-            },
+      return {
+        ...state,
+        agents: {
+          ...state.agents,
+          [key]: {
+            ...state.agents[key],
+            tool: event.status === "running" ? event.tool : undefined,
+            lastEventAt: ts,
           },
-          { kind: "permission", text: event.permission, ts },
-        ),
-      )
+        },
+      }
     }
+    case "agent.message.start":
+    case "agent.reasoning":
+    case "agent.message.text":
+    case "agent.permission":
     case "agent.permission.replied": {
-      const entry = Object.entries(state.agents).find(([, agent]) => agent.sessionID === event.sessionID)
+      // Update lastEventAt for the agent — no scrollback needed
+      const entry = Object.entries(state.agents).find(([, a]) => a.sessionID === event.sessionID)
       if (!entry) return state
       const [key] = entry
-      return withAgent(state, key, (agent) => {
-        if (agent.pendingPermission?.requestID !== event.requestID) return agent
-        return { ...agent, pendingPermission: undefined, lastEventAt: ts }
-      })
+      return {
+        ...state,
+        agents: {
+          ...state.agents,
+          [key]: { ...state.agents[key], lastEventAt: ts },
+        },
+      }
     }
+    case "design.phase":
+      // Design phase transitions are recorded in nodeHistory
+      return state
     case "result":
       return { ...state, result: event.runResult }
   }
 }
 
-export function createRunStore(input: CreateRunStoreInput): RunStore {
-  return createStore<RunStoreState>(() => createInitialState(input.config, input.initial))
+export function createRunStore(): RunStore {
+  return createStore<RunStoreState>(() => ({
+    lifecycle: { phase: "starting" },
+    graph: {},
+    agents: {},
+    nodeHistory: [],
+    systemLog: [],
+  }))
 }
