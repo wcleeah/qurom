@@ -1601,32 +1601,23 @@ async function runDesignQuorumNode(
     ? state.topic ?? ""
     : state.documentText ?? state.documentPath ?? ""
 
-  // Prevent the design phase from hanging forever on a slow/broken model
-  const designTimeoutMs = config.quorumConfig.designQuorum?.timeoutMs ?? 600_000 // default 10 min
-  const designPromise = runDesignQuorum({
-    config,
-    promptBundle,
-    markdown,
-    topic,
-    outputPath: state.outputPath,
-    observer,
-    telemetry: telemetry
-      ? {
-          run: telemetry.run,
-          parentObservation: telemetry.currentNode,
-          trackSessionObservation: telemetry.trackSessionObservation,
-          trackAgentMetadata: telemetry.trackAgentMetadata,
-        }
-      : undefined,
-  })
-
   try {
-    const designResult = await Promise.race([
-      designPromise,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Design quorum timed out after ${designTimeoutMs}ms`)), designTimeoutMs),
-      ),
-    ])
+    const designResult = await runDesignQuorum({
+      config,
+      promptBundle,
+      markdown,
+      topic,
+      outputPath: state.outputPath,
+      observer,
+      telemetry: telemetry
+        ? {
+            run: telemetry.run,
+            parentObservation: telemetry.currentNode,
+            trackSessionObservation: telemetry.trackSessionObservation,
+            trackAgentMetadata: telemetry.trackAgentMetadata,
+          }
+        : undefined,
+    })
 
     // If the design quorum returned failure (not threw), still write a failure artifact
     if (designResult.status === "failed") {
