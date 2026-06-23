@@ -310,28 +310,6 @@ export const App = ({ config, prerequisites, promptBundle, runHistory, systemSta
     [config.quorumConfig.artifactDir, renderer, runCtx, systemStatus],
   )
 
-  const handleHistoryRun = useCallback(
-    async (entry: RunHistoryEntry) => {
-      if (entry.inputMode === "topic") {
-        startRun({ inputMode: "topic", topic: entry.topic })
-      } else {
-        // Document mode — re-read the file
-        const path = entry.documentPath
-        if (!path) return
-        let content = ""
-        try {
-          content = await readFile(path, "utf8")
-        } catch {
-          pushSystemStatus(systemStatus, { level: "warn", text: `Could not read ${path}` })
-          return
-        }
-        setPromptState({ mode: "document", document: { path, content }, hint: "" })
-        startRun({ inputMode: "document", documentPath: path, documentText: content })
-      }
-    },
-    [startRun, systemStatus],
-  )
-
   const startRun = useCallback(
     (request: InputRequest) => {
       lastRequestRef.current = request
@@ -386,6 +364,28 @@ export const App = ({ config, prerequisites, promptBundle, runHistory, systemSta
         })
     },
     [config, prerequisites, promptBundle, promptState.document?.content],
+  )
+
+  const handleHistoryRun = useCallback(
+    async (entry: RunHistoryEntry) => {
+      if (entry.inputMode === "topic") {
+        startRun({ inputMode: "topic", topic: entry.topic })
+      } else {
+        // Document mode — re-read the file
+        const path = entry.documentPath
+        if (!path) return
+        let content = ""
+        try {
+          content = await readFile(path, "utf8")
+        } catch {
+          pushSystemStatus(systemStatus, { level: "warn", text: `Could not read ${path}` })
+          return
+        }
+        setPromptState({ mode: "document", document: { path, content }, hint: "" })
+        startRun({ inputMode: "document", documentPath: path, documentText: content })
+      }
+    },
+    [startRun, systemStatus],
   )
 
   const handleRerun = useCallback(async () => {
