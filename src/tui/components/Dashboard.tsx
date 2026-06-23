@@ -132,6 +132,9 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
     const roundText = status !== "drafting" ? `Round ${currentRound}/${maxRounds}` : ""
     const bar = status !== "drafting" ? roundBar(currentRound, maxRounds, 8) : ""
     const designTag = designRunning ? " · 🎨 design" : designApproved ? " · 🎨 ✓" : designFailed ? " · 🎨 ✗" : ""
+    const tierTag = graphState?.depthTier && graphState.depthTier !== "analysis"
+      ? ` (${graphState.depthTier} tier)`
+      : ""
 
     let icon = "⬤"
     let label = shortStatusLabel(status)
@@ -143,7 +146,7 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
 
     return (
       <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-        <span fg={labelColor}>{icon} {label}</span>
+        <span fg={labelColor}>{icon} {label}{tierTag}</span>
         <span fg={theme.textMuted}>{designTag}</span>
         {roundText ? (
           <>
