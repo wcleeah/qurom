@@ -77,11 +77,24 @@ const INITIAL_PHASE: LifecyclePhase = "starting"
 
 export function resolveRoleKey(rawRole: string, config: RuntimeConfig): string | undefined {
   if (rawRole === "root") return undefined
+
+  // Research roles
   if (rawRole === "drafter") return config.quorumConfig.designatedDrafter
   if (rawRole.startsWith("auditor:")) {
     const name = rawRole.slice("auditor:".length)
     if (config.quorumConfig.auditors.includes(name)) return name
   }
+
+  // Design roles
+  const design = config.quorumConfig.designQuorum
+  if (design?.enabled) {
+    if (rawRole === design.designatedDesigner) return design.designatedDesigner
+    if (rawRole.startsWith("design-auditor:")) {
+      const name = rawRole.slice("design-auditor:".length)
+      if (design.auditors.includes(name)) return name
+    }
+  }
+
   return undefined
 }
 
@@ -98,9 +111,20 @@ function emptyAgent(): AgentState {
 
 export function createInitialState(config: RuntimeConfig, initial?: RunStoreInitialState): RunStoreState {
   const agents: Record<string, AgentState> = {}
+
+  // Research agents
   agents[config.quorumConfig.designatedDrafter] = emptyAgent()
   for (const auditor of config.quorumConfig.auditors) {
     agents[auditor] = emptyAgent()
+  }
+
+  // Design agents (if enabled)
+  const design = config.quorumConfig.designQuorum
+  if (design?.enabled) {
+    agents[design.designatedDesigner] = emptyAgent()
+    for (const auditor of design.auditors) {
+      agents[auditor] = emptyAgent()
+    }
   }
 
   for (const [key, value] of Object.entries(initial?.agents ?? {})) {

@@ -1,5 +1,4 @@
 import { useRef } from "react"
-import type { FocusRegion } from "../state/layout"
 import { usePanelKeymap } from "../keymap/usePanelKeymap"
 import type { AgentState, RunStore, ScrollbackEntry } from "../state/runStore"
 import { useStoreSelector } from "../state/useStore"
@@ -7,7 +6,7 @@ import { theme } from "../theme"
 
 export interface AgentPanelProps {
   store: RunStore
-  roleKey: Exclude<FocusRegion, "dashboard">
+  roleKey: string
   title: string
   isDrafter: boolean
   compact?: boolean
@@ -59,7 +58,7 @@ const PanelScrollback = ({
   scrollRef,
 }: {
   store: RunStore
-  roleKey: Exclude<FocusRegion, "dashboard">
+  roleKey: string
   scrollRef: { current: { scrollTop: number; scrollHeight: number; viewport?: { height: number }; scrollBy: (delta: number, unit?: string) => void; scrollTo: (value: number) => void } | null }
 }) => {
   const scrollback = useStoreSelector(store, (s) => s.agents[roleKey]?.scrollback ?? [])

@@ -1,4 +1,3 @@
-import type { FocusRegion } from "../state/layout"
 import type { RuntimeConfig } from "../../config"
 import { TMUX_TOP_INSET } from "../layout"
 import type { RunStore } from "../state/runStore"
@@ -12,8 +11,8 @@ export interface RunningScreenProps {
   store: RunStore
   config: RuntimeConfig
   systemStatus: SystemStatusStore
-  selected: FocusRegion
-  active?: FocusRegion
+  selected: string
+  active?: string
   gPending?: boolean
   onGPendingChange: (pending: boolean) => void
 }

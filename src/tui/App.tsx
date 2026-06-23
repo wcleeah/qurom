@@ -14,7 +14,7 @@ import { SummaryScreen, type SummaryAction } from "./components/SummaryScreen"
 import { openInEditor, type OpenInEditorMode } from "./editor"
 import { replyToPermission } from "../opencode"
 import { nextFocus } from "./keymap/gridNav"
-import { computeLayout, type FocusRegion } from "./state/layout"
+import { computeLayout } from "./state/layout"
 import { bindBusToStore } from "./state/eventBindings"
 import { createRunStore, selectPendingPermission, type RunStore, type RunStoreInitialState } from "./state/runStore"
 import { pushSystemStatus, type SystemStatusStore } from "./state/systemStatus"
@@ -86,8 +86,8 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
   const renderer = useRenderer()
   const [screen, setScreen] = useState<Screen>("prompt")
   const [runCtx, setRunCtx] = useState<RunCtx | undefined>(undefined)
-  const [selected, setSelected] = useState<FocusRegion>("dashboard")
-  const [active, setActive] = useState<FocusRegion | undefined>(undefined)
+  const [selected, setSelected] = useState<string>("dashboard")
+  const [active, setActive] = useState<string | undefined>(undefined)
   const [showHelp, setShowHelp] = useState(false)
   const [pendingForceQuit, setPendingForceQuit] = useState(false)
   const [pendingAbortExit, setPendingAbortExit] = useState(false)
@@ -97,13 +97,16 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
   const lastRequestRef = useRef<InputRequest | undefined>(undefined)
   const initialAgents = useRef(buildAgentInitialState(prerequisites, config))
   const width = renderer.width
-  const layout = computeLayout(width, [
+  const layoutSlotOrder = [
     "dashboard",
-    "research-drafter",
-    "source-auditor",
-    "logic-auditor",
-    "clarity-auditor",
-  ])
+    config.quorumConfig.designatedDrafter,
+    ...config.quorumConfig.auditors,
+  ]
+  if (config.quorumConfig.designQuorum?.enabled) {
+    layoutSlotOrder.push(config.quorumConfig.designQuorum.designatedDesigner)
+    layoutSlotOrder.push(...config.quorumConfig.designQuorum.auditors)
+  }
+  const layout = computeLayout(width, layoutSlotOrder)
 
   // select to copy handling
   useEffect(() => {
@@ -172,6 +175,12 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
     if (key.name === "e") {
       if (!runCtx) return
       void viewCurrentMarkdown(runCtx.request)
+      return
+    }
+
+    if (key.shift && key.name === "E") {
+      if (!runCtx) return
+      void viewCurrentHtml()
       return
     }
 
@@ -258,6 +267,35 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
       const mode: OpenInEditorMode = "view"
       const resultOpen = await openInEditor({
         path,
+        renderer,
+        artifactRoot: config.quorumConfig.artifactDir,
+        mode,
+      })
+
+      if (!resultOpen.ok && resultOpen.reason === "exit-code") {
+        pushSystemStatus(systemStatus, { level: "warn", text: `viewer exit ${resultOpen.code ?? "?"}` })
+      }
+    },
+    [config.quorumConfig.artifactDir, renderer, runCtx, systemStatus],
+  )
+
+  const viewCurrentHtml = useCallback(
+    async () => {
+      const outputPath = runCtx?.store.getState().result as { outputPath?: string } | undefined
+      const htmlPath = outputPath?.outputPath
+        ? `${outputPath.outputPath}/final.html`
+        : runCtx?.store.getState().lifecycle.outputDir
+          ? `${runCtx.store.getState().lifecycle.outputDir}/final.html`
+          : undefined
+
+      if (!htmlPath) {
+        pushSystemStatus(systemStatus, { level: "warn", text: "No final.html found" })
+        return
+      }
+
+      const mode: OpenInEditorMode = "view"
+      const resultOpen = await openInEditor({
+        path: htmlPath,
         renderer,
         artifactRoot: config.quorumConfig.artifactDir,
         mode,
@@ -357,6 +395,43 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
     startRun(lastRequest)
   }, [promptState.document?.content, startRun])
 
+  const handleRerunDesign = useCallback(async () => {
+    const outputDir = runCtx?.store.getState().lifecycle.outputDir
+    if (!outputDir) {
+      pushSystemStatus(systemStatus, { level: "warn", text: "No output directory found" })
+      return
+    }
+    setScreen("running")
+    try {
+      const { runDesignForExistingRun } = await import("../design-quorum")
+      const result = await runDesignForExistingRun({
+        config,
+        promptBundle,
+        runDir: outputDir,
+      })
+      const store = runCtx!.store
+      store.setState((prev) => ({
+        ...prev,
+        result: {
+          ...(prev.result as Record<string, unknown> ?? {}),
+          designHtml: result.html,
+          designStatus: result.status,
+        },
+      }))
+      pushSystemStatus(systemStatus, {
+        level: "warn",
+        text: `Design ${result.status} after ${result.round} round(s)`,
+      })
+    } catch (error) {
+      pushSystemStatus(systemStatus, {
+        level: "error",
+        text: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setScreen("summary")
+    }
+  }, [config, promptBundle, runCtx, systemStatus])
+
   const handleNewTopic = useCallback(() => {
     setRunCtx(undefined)
     setActive(undefined)
@@ -400,6 +475,10 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
         onExit()
       } else if (action === "rerun") {
         void handleRerun()
+      } else if (action === "rerun-design") {
+        void handleRerunDesign()
+      } else if (action === "view-html") {
+        void viewCurrentHtml()
       } else if (action === "new-topic") {
         handleNewTopic()
       } else if (action === "new-document") {
@@ -409,7 +488,7 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
         setScreen("prompt")
       }
     },
-    [handleNewDocument, handleNewTopic, handleRerun, onExit],
+    [handleNewDocument, handleNewTopic, handleRerun, handleRerunDesign, viewCurrentHtml, onExit],
   )
 
   const handlePermissionReply = useCallback(

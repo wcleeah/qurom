@@ -4,7 +4,7 @@ import type { RunStore } from "../state/runStore"
 import { useStoreSelector } from "../state/useStore"
 import { theme } from "../theme"
 
-export type SummaryAction = "rerun" | "new-topic" | "new-document" | "quit"
+export type SummaryAction = "rerun" | "new-topic" | "new-document" | "view-html" | "rerun-design" | "quit"
 
 export interface SummaryScreenProps {
   store: RunStore
@@ -13,6 +13,8 @@ export interface SummaryScreenProps {
 
 const NEXT_OPTIONS = [
   { name: "Re-run same input", description: "run again", value: "rerun" },
+  { name: "Re-run design only", description: "HTML from existing draft", value: "rerun-design" },
+  { name: "View HTML", description: "open final.html", value: "view-html" },
   { name: "New topic", description: "fresh prompt", value: "new-topic" },
   { name: "New document", description: "fresh draft", value: "new-document" },
   { name: "Quit", description: "exit", value: "quit" },
@@ -46,6 +48,8 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
           failureReason?: string
           inputSummary?: { title?: string; summary?: string }
           artifactSummary?: { title?: string; summary?: string }
+          designHtml?: string
+          designStatus?: string
         }
     | undefined
   const agents = useStoreSelector(store, (s) => s.agents)
@@ -76,6 +80,9 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
   const unresolvedCount = result?.unresolvedFindings?.length ?? 0
   const failureReason = result?.failureReason
   const outputPath = result?.outputPath ?? outputDir ?? "(none)"
+  const designStatus = result?.designStatus
+  const designOutcome = designStatus === "approved" ? "approved" : designStatus === "failed" ? "failed" : designStatus === "running" ? "running" : undefined
+  const hasDesignHtml = Boolean(result?.designHtml)
   const errorMessage = error instanceof Error ? error.message : error ? String(error) : undefined
   const wide = width >= 100
   const outerWidth = wide ? 100 : centeredColumnWidth(width, 92, 72)
@@ -88,6 +95,8 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
   useKeyboard((key) => {
     if (key.name === "c" && key.ctrl) onAction("quit")
     else if (key.name === "r") onAction("rerun")
+    else if (key.name === "d") onAction("rerun-design")
+    else if (key.name === "h") onAction("view-html")
     else if (key.name === "n") onAction("new-topic")
     else if (key.name === "f") onAction("new-document")
   })
@@ -136,6 +145,11 @@ export const SummaryScreen = ({ store, onAction }: SummaryScreenProps) => {
               <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
                 {`trace ${shortId(traceId)}`}
               </text>
+              {designOutcome ? (
+                <text fg={designOutcome === "approved" ? theme.success : designOutcome === "failed" ? theme.warning : theme.accent} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+                  {`design: ${designOutcome}${hasDesignHtml ? " → final.html" : ""}`}
+                </text>
+              ) : null}
               {failureReason ? (
                 <text fg={theme.textMuted} selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
                   {`failure: ${failureReason}`}

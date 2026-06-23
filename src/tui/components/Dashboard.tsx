@@ -109,6 +109,8 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
   // Design quorum
   const designStatus = graphState?.designStatus
   const designRunning = designStatus === "running" || designStatus === "pending"
+  const designApproved = designStatus === "approved"
+  const designFailed = designStatus === "failed"
 
   // Agent activity
   const activeAgents = Object.entries(agents)
@@ -122,7 +124,7 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
   const renderStatusLine = () => {
     const roundText = status !== "drafting" ? `Round ${currentRound}/${maxRounds}` : ""
     const bar = status !== "drafting" ? roundBar(currentRound, maxRounds, 8) : ""
-    const designTag = designRunning ? " 🎨 design" : ""
+    const designTag = designRunning ? " · 🎨 design" : designApproved ? " · 🎨 ✓" : designFailed ? " · 🎨 ✗" : ""
 
     let icon = "⬤"
     let label = shortStatusLabel(status)
@@ -131,10 +133,6 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
     if (status === "approved") { icon = "✓"; labelColor = theme.success }
     if (status === "failed") { icon = "✗"; labelColor = theme.error }
     if (status === "revising") labelColor = theme.warning
-
-    const agentActivity = activeAgents.length > 0
-      ? `  —  ${activeAgents.join(", ")} working`
-      : ""
 
     return (
       <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
@@ -165,6 +163,7 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
 
     return (
       <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
+        <span fg={theme.textMuted}>auditors: </span>
         {audits.map((audit, i) => (
           <span key={audit.agent}>
             {i > 0 ? <span fg={theme.textMuted}>{"  "}</span> : null}
@@ -192,7 +191,7 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
 
     return (
       <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-        <span fg={theme.textMuted}>findings: </span>
+        <span fg={theme.textMuted}>research findings: </span>
         <span fg={theme.text}>{breakdown}</span>
       </text>
     )
@@ -205,7 +204,7 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
 
     return (
       <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-        <span fg={theme.textMuted}>unresolved: </span>
+        <span fg={theme.textMuted}>research unresolved: </span>
         <span fg={theme.text}>{breakdown}</span>
       </text>
     )
@@ -253,12 +252,23 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
   }
 
   const renderDesignQuorumLine = () => {
-    if (!designRunning && designStatus !== "approved" && designStatus !== "failed") return null
+    if (!designRunning && designStatus !== "approved" && designStatus !== "failed" && designStatus !== undefined) return null
+    if (graphState?.status === "drafting" || graphState?.status === "auditing" || graphState?.status === "reviewing_findings") return null
 
     if (designRunning) {
+      const designActiveAgents = Object.entries(agents)
+        .filter(([name, a]) => {
+          // Pass config as a prop; for now just show all running agents during design
+          return a.status === "running"
+        })
+        .map(([name]) => name)
+
       return (
         <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-          <span fg={theme.status.running}>🎨 html-designer converting to HTML...</span>
+          <span fg={theme.status.running}>🎨 HTML design running</span>
+          {designActiveAgents.length > 0 ? (
+            <span fg={theme.textMuted}> — {designActiveAgents.join(", ")}</span>
+          ) : null}
         </text>
       )
     }
@@ -266,7 +276,7 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
     if (designStatus === "approved") {
       return (
         <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-          <span fg={theme.success}>🎨 HTML document ready → {outputDir ?? "."}/final.html</span>
+          <span fg={theme.success}>🎨 HTML: approved → {outputDir ?? "."}/final.html</span>
         </text>
       )
     }
@@ -274,7 +284,7 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
     if (designStatus === "failed") {
       return (
         <text wrapMode="word" selectionBg={theme.selectionBg} selectionFg={theme.selectionFg}>
-          <span fg={theme.warning}>🎨 HTML conversion finished with issues → {outputDir ?? "."}/final.html</span>
+          <span fg={theme.warning}>🎨 HTML: finished with issues → {outputDir ?? "."}/final.html</span>
         </text>
       )
     }
@@ -312,12 +322,12 @@ export const Dashboard = ({ store, selected = false, active = false }: Dashboard
     >
       <box flexDirection="column" gap={0}>
         {renderStatusLine()}
-        {renderDesignQuorumLine()}
-        {!designRunning ? renderAuditorVerdicts() : null}
-        {!designRunning ? renderAuditDetail() : null}
-        {!designRunning ? renderRebuttalStatus() : null}
-        {!designRunning ? renderUnresolved() : null}
+        {renderAuditorVerdicts()}
+        {renderAuditDetail()}
+        {renderRebuttalStatus()}
+        {renderUnresolved()}
         {renderVerdict()}
+        {renderDesignQuorumLine()}
         {renderArtifactsLine()}
       </box>
     </box>

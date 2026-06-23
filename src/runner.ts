@@ -418,6 +418,8 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
         inputSummaryTitle: invocation.inputSummary?.title,
         artifactSummaryTitle: invocation.artifactSummary?.title,
         agentVariants: Object.fromEntries(actualAgentVariants),
+        designStatus: invocation.designStatus,
+        hasDesignHtml: Boolean(invocation.designHtml),
         traced: telemetry.enabled,
       }
 
@@ -432,6 +434,8 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
           outputPath: invocation.outputPath,
           inputSummary: invocation.inputSummary,
           artifactSummary: invocation.artifactSummary,
+          designHtml: invocation.designHtml,
+          designStatus: invocation.designStatus,
         },
         metadata: traceMetadata,
       })
