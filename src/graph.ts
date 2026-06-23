@@ -614,6 +614,83 @@ export async function ingestRequest(input: GraphInput) {
   })
 }
 
+async function draftWithLens(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  lens: string,
+  agentOverride: string | undefined,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+): Promise<string> {
+  const agent = agentOverride ?? config.quorumConfig.designatedDrafter
+  const session = await createSession(config, `research-drafter:${state.requestId}:draft:${state.round}`)
+  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
+
+  const basePrompt = fullDraftPrompt(config, promptBundle, state)
+  const prompt = lens ? `${basePrompt}\n\nResearch lens: ${lens}` : basePrompt
+
+  const response = await promptAgent({
+    config,
+    sessionID: session.id,
+    agent,
+    prompt,
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.draftFullDraft",
+      agentName: agent,
+      sessionId: session.id,
+      input: {
+        requestId: state.requestId,
+        round: state.round,
+        inputMode: state.inputMode,
+        lens: lens || undefined,
+      },
+    }),
+  })
+
+  return response.text ?? ""
+}
+
+async function synthesizeDrafts(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  draftA: string,
+  draftB: string,
+  lensA: string,
+  lensB: string,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+): Promise<string> {
+  const session = await createSession(config, `draft-synthesizer:${state.requestId}:${state.round}`)
+  observeSession(observer, { sessionID: session.id, role: "draft-synthesizer", requestId: state.requestId })
+
+  const prompt = (promptBundle.assets.synthesizeDrafts as string)
+    .replace("{N}", "2")
+    .replace("{lensA}", lensA)
+    .replace("{lensB}", lensB)
+    .replace("{draftA}", draftA)
+    .replace("{draftB}", draftB)
+
+  const response = await promptAgent({
+    config,
+    sessionID: session.id,
+    agent: "draft-synthesizer",
+    prompt,
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.synthesizeDrafts",
+      agentName: "draft-synthesizer",
+      sessionId: session.id,
+    }),
+  })
+
+  return response.text ?? draftA
+}
+
 async function draftFullDraft(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
@@ -622,31 +699,44 @@ async function draftFullDraft(
   observer?: RunObserver,
 ) {
   assertStatus(state, "drafting", "draftFullDraft")
-  const session = await createSession(config, `research-drafter:${state.requestId}:draft:${state.round}`)
-  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
 
-  const response = await promptAgent({
-    config,
-    sessionID: session.id,
-    agent: config.quorumConfig.designatedDrafter,
-    prompt: fullDraftPrompt(config, promptBundle, state),
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.draftFullDraft",
-      agentName: config.quorumConfig.designatedDrafter,
-      sessionId: session.id,
-      input: {
-        requestId: state.requestId,
-        round: state.round,
-        inputMode: state.inputMode,
-      },
-    }),
-  })
+  const tier = state.depthTier ?? "analysis"
+  const tierConfig = config.quorumConfig.depthTiers?.[tier]
+  const useMultiDrafter = tierConfig?.multiDrafter ?? false
+
+  // Single-drafter path (current behavior, also used for non-synthesis tiers)
+  if (!useMultiDrafter) {
+    const draft = await draftWithLens(config, promptBundle, state, "", undefined, telemetry, observer)
+    const nextState = researchStateSchema.parse({
+      ...state,
+      draft: draft || state.draft,
+      status: "auditing",
+    })
+    await persistDraftArtifact(nextState, nextState.round)
+    return nextState
+  }
+
+  // Multi-drafter path (synthesis tier)
+  const lensA = "Focus on internal mechanisms and source code evidence. Explain how it actually works. Prefer implementation-level detail and primary sources (source code, specs)."
+  const lensB = "Focus on ecosystem, trade-offs, alternatives, edge cases, and common misconceptions. Prefer breadth and practical context over deep implementation detail."
+
+  const [draftA, draftB] = await Promise.all([
+    draftWithLens(config, promptBundle, state, lensA, "research-drafter-mechanism", telemetry, observer),
+    draftWithLens(config, promptBundle, state, lensB, undefined, telemetry, observer),
+  ])
+
+  // Persist intermediate drafts for debugging
+  if (state.outputPath) {
+    await writeRunTextArtifact(state.outputPath, `draft-round-${state.round}-vA.md`, draftA)
+    await writeRunTextArtifact(state.outputPath, `draft-round-${state.round}-vB.md`, draftB)
+  }
+
+  const merged = await synthesizeDrafts(config, promptBundle, state, draftA, draftB, lensA, lensB, telemetry, observer)
 
   const nextState = researchStateSchema.parse({
     ...state,
-    draft: response.text ?? state.draft,
+    draft: merged,
+    drafts: [draftA, draftB],
     status: "auditing",
   })
 
