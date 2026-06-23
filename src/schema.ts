@@ -8,7 +8,7 @@ const auditVoteSchema = z.enum(["approve", "revise"])
 const findingSeveritySchema = z.enum(["blocker", "major", "minor"])
 const findingCategorySchema = z.enum(["sources", "coherence", "clarity", "structure", "scope"])
 const rebuttalResolutionSchema = z.enum(["withdraw", "soften", "reclassify", "withdraw_or_reclassify"])
-const aggregateOutcomeSchema = z.enum(["approved", "needs_revision", "failed_non_convergent"])
+const aggregateOutcomeSchema = z.enum(["approved", "approved_with_caveats", "needs_revision", "failed_non_convergent"])
 const failureReasonSchema = z.enum([
   "max_rounds_exhausted",
   "stagnated_findings",
@@ -233,6 +233,7 @@ export const runSummarySchema = z.object({
   rebuttalHistory: z.array(rebuttalHistoryEntrySchema),
   rebuttalResponseHistory: z.array(rebuttalResponseHistoryEntrySchema),
   failureReason: failureReasonSchema.optional(),
+  confidence: confidenceSchema.optional(),
 })
 
 export const aggregatedFindingsSchema = z
@@ -243,14 +244,14 @@ export const aggregatedFindingsSchema = z
     failureReason: failureReasonSchema.optional(),
   })
   .superRefine((value, ctx) => {
-    if (value.outcome === "approved") {
+    if (value.outcome === "approved" || value.outcome === "approved_with_caveats") {
       const blockersOrMajors = value.unresolvedFindings.filter(
         (f) => f.severity === "blocker" || f.severity === "major",
       )
       if (blockersOrMajors.length > 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Approved outcomes must not contain blocker or major unresolved findings",
+          message: "Approved (or approved_with_caveats) outcomes must not contain blocker or major unresolved findings",
           path: ["unresolvedFindings"],
         })
       }
@@ -290,6 +291,7 @@ export const researchStateObjectSchema = z.object({
   outputPath: nonEmptyStringSchema.optional(),
   depthTier: z.enum(["definitional", "tutorial", "analysis", "synthesis"]).optional(),
   depthConfidence: z.number().min(0).max(1).optional(),
+  confidence: confidenceSchema.optional(),
   designHtml: z.string().optional(),
   designStatus: designStatusSchema.optional(),
 })
@@ -332,6 +334,21 @@ export type RebuttalResponseRecord = z.infer<typeof rebuttalResponseRecordSchema
 export type AggregatedFinding = z.infer<typeof aggregatedFindingSchema>
 export type AggregatedFindings = z.infer<typeof aggregatedFindingsSchema>
 export type ResearchState = z.infer<typeof researchStateSchema>
+
+export const sectionConfidenceSchema = z.object({
+  heading: z.string(),
+  confidence: z.number().min(0).max(1),
+  findings: z.number().int().nonnegative(),
+  caveat: z.string().optional(),
+})
+
+export const confidenceSchema = z.object({
+  overall: z.number().min(0).max(1),
+  sections: z.array(sectionConfidenceSchema),
+})
+
+export type SectionConfidence = z.infer<typeof sectionConfidenceSchema>
+export type Confidence = z.infer<typeof confidenceSchema>
 
 const designAuditFindingSchema = z.object({
   severity: designFindingSeveritySchema,
