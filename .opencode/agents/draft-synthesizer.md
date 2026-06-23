@@ -11,7 +11,7 @@ permission:
   websearch: deny
   codesearch: deny
   skill: deny
-  edit: deny
+  edit: allow
   bash: deny
   task: deny
   question: deny

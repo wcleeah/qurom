@@ -12,7 +12,7 @@ permission:
   websearch: allow
   codesearch: allow
   skill: deny
-  edit: deny
+  edit: allow
   bash: deny
   task: deny
   question: deny
