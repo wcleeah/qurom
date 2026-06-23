@@ -1347,28 +1347,44 @@ async function runDesignQuorumNode(
     ? state.topic ?? ""
     : state.documentText ?? state.documentPath ?? ""
 
-  const designResult = await runDesignQuorum({
-    config,
-    promptBundle,
-    markdown,
-    topic,
-    outputPath: state.outputPath,
-    observer,
-    telemetry: telemetry
-      ? {
-          run: telemetry.run,
-          parentObservation: telemetry.currentNode,
-          trackSessionObservation: telemetry.trackSessionObservation,
-          trackAgentMetadata: telemetry.trackAgentMetadata,
-        }
-      : undefined,
-  })
+  try {
+    const designResult = await runDesignQuorum({
+      config,
+      promptBundle,
+      markdown,
+      topic,
+      outputPath: state.outputPath,
+      observer,
+      telemetry: telemetry
+        ? {
+            run: telemetry.run,
+            parentObservation: telemetry.currentNode,
+            trackSessionObservation: telemetry.trackSessionObservation,
+            trackAgentMetadata: telemetry.trackAgentMetadata,
+          }
+        : undefined,
+    })
 
-  return researchStateSchema.parse({
-    ...state,
-    designHtml: designResult.html,
-    designStatus: designResult.status,
-  })
+    return researchStateSchema.parse({
+      ...state,
+      designHtml: designResult.html,
+      designStatus: designResult.status,
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    await writeRunJsonArtifact(state.outputPath, "design-failure.json", {
+      error: errorMessage,
+      stage: "runDesignQuorum",
+      requestId: state.requestId,
+      timestamp: new Date().toISOString(),
+    })
+
+    return researchStateSchema.parse({
+      ...state,
+      designHtml: "",
+      designStatus: "failed" as const,
+    })
+  }
 }
 
 export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {

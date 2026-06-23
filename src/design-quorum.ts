@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { createSession, promptAgent } from "./opencode"
-import { writeDesignHtmlArtifact } from "./output"
+import { writeDesignHtmlArtifact, writeRunJsonArtifact, writeRunTextArtifact } from "./output"
 import {
   designAuditResultRecordSchema,
   designAuditResultSchema,
@@ -63,6 +63,26 @@ function unresolvedDesignSignature(findings: DesignAggregatedFinding[]) {
   }
 
   return JSON.stringify(normalized)
+}
+
+function htmlLooksComplete(html: string): { ok: boolean; warnings: string[] } {
+  const trimmed = html.trimEnd()
+  const warnings: string[] = []
+
+  if (!/<\/html>\s*$/i.test(trimmed)) {
+    warnings.push("missing closing </html> tag")
+  }
+  if (!/<\/body>/i.test(trimmed)) {
+    warnings.push("missing closing </body> tag")
+  }
+
+  const scriptOpens = (trimmed.match(/<script\b/gi) || []).length
+  const scriptCloses = (trimmed.match(/<\/script>/gi) || []).length
+  if (scriptOpens !== scriptCloses) {
+    warnings.push(`unbalanced <script> tags (${scriptOpens} open, ${scriptCloses} close)`)
+  }
+
+  return { ok: warnings.length === 0, warnings }
 }
 
 function designAgentTelemetry(input: {
@@ -308,6 +328,12 @@ export async function runDesignQuorum(input: {
 
   try {
     html = await designHtml(config, promptBundle, markdown, topic, telemetry, observer)
+
+    // Verify the initial design is structurally complete
+    const check = htmlLooksComplete(html)
+    if (!check.ok) {
+      console.warn(`[design-quorum] Initial design appears truncated: ${check.warnings.join("; ")}. Proceeding with audits anyway.`)
+    }
   } catch {
     return { html: "", status: "failed", round: 0 }
   }
@@ -321,7 +347,17 @@ export async function runDesignQuorum(input: {
       return { html, status: "failed", round }
     }
 
+    // Persist audit results for observability
+    await writeRunJsonArtifact(outputPath, `design-audits-round-${round}.json`, audits)
+
     const consensus = aggregateDesignConsensus(config, audits, lastSignature, round)
+
+    await writeRunJsonArtifact(outputPath, `design-consensus-round-${round}.json`, {
+      outcome: consensus.outcome,
+      approvedAgents: consensus.approvedAgents,
+      unresolvedFindings: consensus.unresolved,
+      failureReason: consensus.failureReason,
+    })
 
     if (consensus.outcome === "approved") {
       status = "approved"
@@ -337,8 +373,22 @@ export async function runDesignQuorum(input: {
 
     lastSignature = consensus.signature
 
+    const previousHtml = html
     try {
       html = await reviseDesignHtml(config, promptBundle, html, consensus.unresolved, telemetry, observer)
+
+      // Verify the revision is structurally complete; fall back if truncated
+      const check = htmlLooksComplete(html)
+      if (!check.ok) {
+        console.warn(`[design-quorum] Revision round ${round + 1} appears truncated: ${check.warnings.join("; ")}. Falling back to previous round.`)
+        html = previousHtml
+        status = "failed"
+        await writeDesignHtmlArtifact(outputPath, html)
+        return { html, status, round }
+      }
+
+      // Write intermediate HTML for debugging
+      await writeRunTextArtifact(outputPath, `design-html-round-${round + 1}.html`, html)
     } catch {
       return { html, status: "failed", round }
     }
@@ -346,7 +396,9 @@ export async function runDesignQuorum(input: {
     round += 1
   }
 
+  // Max rounds exhausted — still save the best-effort HTML
   status = "failed"
+  await writeDesignHtmlArtifact(outputPath, html)
   return { html, status, round }
 }
 

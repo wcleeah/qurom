@@ -177,5 +177,50 @@ export async function writeFailedArtifacts(
 }
 
 export async function writeDesignHtmlArtifact(runDir: string, html: string) {
-  await writeRunTextArtifact(runDir, "final.html", html)
+  // Strip LLM preamble (thinking-out-loud text before <!DOCTYPE or <html>)
+  const docTypeIdx = html.indexOf("<!DOCTYPE")
+  const htmlTagIdx = html.indexOf("<html")
+  const startIdx = docTypeIdx >= 0 ? docTypeIdx
+    : htmlTagIdx >= 0 ? htmlTagIdx
+    : -1
+
+  let cleaned = html
+  if (startIdx > 0) {
+    cleaned = html.slice(startIdx)
+  }
+
+  // Strip markdown code fences if the LLM wrapped the HTML in ```html ... ```
+  const fenceStart = cleaned.trimStart().startsWith("```html")
+  if (fenceStart) {
+    cleaned = cleaned.replace(/^```html\s*/, "").replace(/\s*```\s*$/, "")
+  }
+
+  // Validate that the result looks like HTML
+  const lower = cleaned.trimStart().toLowerCase()
+  if (!lower.startsWith("<!doctype") && !lower.startsWith("<html")) {
+    throw new Error(
+      `Design HTML artifact does not start with <!DOCTYPE> or <html>. Starts with: ${cleaned.trimStart().slice(0, 200)}`,
+    )
+  }
+
+  // Truncation detection: verify document is structurally complete
+  const trimmed = cleaned.trimEnd()
+  const hasClosingHtml = /<\/html>\s*$/i.test(trimmed)
+  const hasClosingBody = /<\/body>/i.test(trimmed)
+  const scriptOpens = (trimmed.match(/<script\b/gi) || []).length
+  const scriptCloses = (trimmed.match(/<\/script>/gi) || []).length
+  const scriptsBalanced = scriptOpens === scriptCloses
+
+  const warnings: string[] = []
+  if (!hasClosingHtml) warnings.push("missing </html>")
+  if (!hasClosingBody) warnings.push("missing </body>")
+  if (!scriptsBalanced) warnings.push(`unbalanced <script> tags (${scriptOpens} open, ${scriptCloses} close)`)
+
+  if (warnings.length > 0) {
+    console.warn(`[output] Design HTML may be truncated (${runDir}): ${warnings.join("; ")}`)
+    // Write a truncated.html alongside final.html for debugging
+    await writeRunTextArtifact(runDir, "final.html.truncation-warning.txt", warnings.join("\n"))
+  }
+
+  await writeRunTextArtifact(runDir, "final.html", cleaned)
 }
