@@ -95,33 +95,21 @@ bun run test
 ```
 
 ## TUI Flow
+
+The TUI has two screens:
+
 ### Prompt screen
-- `Tab`: switch between topic and document modes
-- `Enter`: run
-- `Ctrl-C`: quit
-- document mode only: `e` opens the editor
-- document mode only: `Esc` switches back to topics
+- Type a topic and press `Enter` to start a run
+- `Tab` toggles between topic and document mode (paste a file path)
+- `Ctrl-C` quits
 
 ### Running screen
-- `h/j/k/l`: move selection
-- `Tab` and `Shift-Tab`: cycle selection
-- `Enter`: enter the selected panel
-- `Esc`: leave the active panel
-- active panel only:
-  - `j/k`: scroll
-  - `Ctrl-d/u`: half page
-  - `Ctrl-f/b`: page
-  - `gg`: top
-  - `G`: bottom
-- `?`: help
-- `Ctrl-C`: abort the run and exit after shutdown
-- `Q`: force-quit confirmation
+- Shows current graph node, round, elapsed time, and active agents with tool names
+- Prints the view-server URL — open this in a browser for full detail
+- `Ctrl-C` cancels the run and exits
 
-### Summary screen
-- `r`: rerun same input
-- `n`: new topic
-- `f`: new document
-- `Ctrl-C`: quit
+All post-run detail (pipeline, findings, rebuttals, round history, artifacts) is available in the
+web dashboard at `http://localhost:3000` (`bun run view`).
 
 ## Notes
 - The repo may contain large `reference/` and `langfuse/` directories used as local references; the active app code is under `src/` and `tests/`.
