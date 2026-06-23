@@ -140,8 +140,13 @@ async function runDesignAudits(
         const session = await createSession(config, `design-audit:${agent}`)
         observeDesignSession(observer, { sessionID: session.id, role: `design-auditor:${agent}`, requestId: "" })
 
+        // Use script-security-specific prompt for the script-security-auditor
+        const auditPrompt = agent === "script-security-auditor" && "auditScriptSecurity" in promptBundle.assets
+          ? promptBundle.assets.auditScriptSecurity as string
+          : promptBundle.assets.auditDesign
+
         const prompt = [
-          promptBundle.assets.auditDesign,
+          auditPrompt,
           html,
         ].join("\n\n")
 

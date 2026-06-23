@@ -12,6 +12,7 @@ const promptAssetFiles = {
   reviewRebuttalResponses: "review-rebuttal-responses.md",
   designHtml: "design-html.md",
   auditDesign: "audit-design.md",
+  auditScriptSecurity: "audit-script-security.md",
   reviseDesign: "revise-design.md",
 } as const
 
