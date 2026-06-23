@@ -1347,23 +1347,43 @@ async function runDesignQuorumNode(
     ? state.topic ?? ""
     : state.documentText ?? state.documentPath ?? ""
 
+  // Prevent the design phase from hanging forever on a slow/broken model
+  const designTimeoutMs = config.quorumConfig.designQuorum?.timeoutMs ?? 600_000 // default 10 min
+  const designPromise = runDesignQuorum({
+    config,
+    promptBundle,
+    markdown,
+    topic,
+    outputPath: state.outputPath,
+    observer,
+    telemetry: telemetry
+      ? {
+          run: telemetry.run,
+          parentObservation: telemetry.currentNode,
+          trackSessionObservation: telemetry.trackSessionObservation,
+          trackAgentMetadata: telemetry.trackAgentMetadata,
+        }
+      : undefined,
+  })
+
   try {
-    const designResult = await runDesignQuorum({
-      config,
-      promptBundle,
-      markdown,
-      topic,
-      outputPath: state.outputPath,
-      observer,
-      telemetry: telemetry
-        ? {
-            run: telemetry.run,
-            parentObservation: telemetry.currentNode,
-            trackSessionObservation: telemetry.trackSessionObservation,
-            trackAgentMetadata: telemetry.trackAgentMetadata,
-          }
-        : undefined,
-    })
+    const designResult = await Promise.race([
+      designPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Design quorum timed out after ${designTimeoutMs}ms`)), designTimeoutMs),
+      ),
+    ])
+
+    // If the design quorum returned failure (not threw), still write a failure artifact
+    if (designResult.status === "failed") {
+      await writeRunJsonArtifact(state.outputPath, "design-failure.json", {
+        error: "Design quorum returned status: failed",
+        stage: "runDesignQuorum",
+        requestId: state.requestId,
+        round: designResult.round,
+        timestamp: new Date().toISOString(),
+      })
+    }
 
     return researchStateSchema.parse({
       ...state,
@@ -1372,6 +1392,7 @@ async function runDesignQuorumNode(
     })
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
+    console.warn(`[graph] Design quorum failed: ${errorMessage}`)
     await writeRunJsonArtifact(state.outputPath, "design-failure.json", {
       error: errorMessage,
       stage: "runDesignQuorum",

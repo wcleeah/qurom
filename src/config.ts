@@ -40,6 +40,7 @@ const quorumConfigSchema = z.object({
       designatedDesigner: z.string().min(1),
       auditors: z.array(z.string().min(1)).min(1),
       maxRounds: z.number().int().positive(),
+      timeoutMs: z.number().int().positive().default(600_000),
     })
     .optional(),
 })
