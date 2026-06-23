@@ -1317,6 +1317,15 @@ export async function aggregateConsensus(config: RuntimeConfig, state: ResearchS
     nextStatus = "failed"
   }
 
+  // If outcome is "approved" but there are unresolved minor findings, set to "approved_with_caveats"
+  if (outcome === "approved" && unresolved.length > 0) {
+    const allMinor = unresolved.every((f) => f.severity === "minor")
+    if (allMinor) {
+      outcome = "approved_with_caveats"
+      nextStatus = "approved"
+    }
+  }
+
   aggregatedFindingsSchema.parse({
     outcome,
     approvedAgents,
@@ -1340,6 +1349,141 @@ export async function aggregateConsensus(config: RuntimeConfig, state: ResearchS
     status: nextStatus,
   })
 }
+
+// ── Confidence scoring helpers ──
+
+function extractSections(draft: string): Array<{ heading: string; content: string; startIndex: number }> {
+  const sections: Array<{ heading: string; content: string; startIndex: number }> = []
+  const headingRegex = /^## (.+)$/gm
+  let match: RegExpExecArray | null
+
+  while ((match = headingRegex.exec(draft)) !== null) {
+    const heading = match[1].trim()
+    const startIndex = match.index
+    sections.push({ heading, content: "", startIndex })
+  }
+
+  if (sections.length === 0) {
+    // No ## headings found — treat entire draft as one section
+    sections.push({ heading: "Document", content: draft, startIndex: 0 })
+    return sections
+  }
+
+  for (let i = 0; i < sections.length; i++) {
+    const start = sections[i].startIndex
+    const end = i + 1 < sections.length ? sections[i + 1].startIndex : draft.length
+    sections[i].content = draft.slice(start, end)
+  }
+
+  return sections
+}
+
+function getRebuttalMultiplier(
+  findingId: string,
+  rebuttalResponseHistory: ResearchState["rebuttalResponseHistory"],
+): number {
+  const responses = rebuttalResponseHistory
+    .filter((e) => e.findingKey === findingId)
+    .sort((a, b) => b.turn - a.turn)
+
+  if (responses.length === 0) return 1.0
+
+  const latest = responses[0].response
+  if (latest.decision === "withdraw") return 0.0
+  if (latest.decision === "soften") return 0.5
+  return 1.0
+}
+
+function mapFindingsToSections(
+  sections: Array<{ heading: string; content: string }>,
+  findings: AggregatedFinding[],
+): Map<string, AggregatedFinding[]> {
+  const map = new Map<string, AggregatedFinding[]>()
+
+  for (const finding of findings) {
+    let bestSection: string | undefined
+    let bestScore = 0
+
+    for (const section of sections) {
+      let score = 0
+      if (finding.issue.toLowerCase().includes(section.heading.toLowerCase())) score += 3
+      for (const evidence of finding.evidence) {
+        if (evidence.toLowerCase().includes(section.heading.toLowerCase())) score += 1
+        if (section.content.includes(evidence.slice(0, 50))) score += 2
+      }
+      if (score > bestScore) {
+        bestScore = score
+        bestSection = section.heading
+      }
+    }
+
+    const section = bestScore > 0 ? bestSection! : sections[0]?.heading ?? "Untitled"
+    if (!map.has(section)) map.set(section, [])
+    map.get(section)!.push(finding)
+  }
+
+  return map
+}
+
+async function computeConfidenceNode(
+  config: RuntimeConfig,
+  state: ResearchState,
+): Promise<ResearchState> {
+  // Only compute for final states (approved, approved_with_caveats, failed)
+  if (state.status !== "approved" && state.status !== "failed") {
+    return researchStateSchema.parse(state)
+  }
+
+  const sections = extractSections(state.draft)
+  const sectionFindings = mapFindingsToSections(sections, state.unresolvedFindings)
+
+  const sectionResults = sections.map((section) => {
+    const findings = sectionFindings.get(section.heading) ?? []
+    let confidence = 0.95
+
+    for (const f of findings) {
+      const severityWeight: Record<string, number> = { blocker: 0.30, major: 0.15, minor: 0.05 }
+      const weight = severityWeight[f.severity] ?? 0.05
+      const multiplier = getRebuttalMultiplier(f.findingId, state.rebuttalResponseHistory)
+      confidence -= weight * multiplier
+    }
+
+    confidence = Math.max(0.0, Math.min(0.95, confidence))
+
+    // If all findings were minor and withdrawn, restore to near-clean
+    if (findings.length > 0 && findings.every((f) =>
+      f.severity === "minor" && getRebuttalMultiplier(f.findingId, state.rebuttalResponseHistory) === 0,
+    )) {
+      confidence = 0.95
+    }
+
+    const caveat = confidence < 0.70
+      ? findings.map((f) => f.issue).join("; ").slice(0, 200)
+      : undefined
+
+    return {
+      heading: section.heading,
+      confidence: Math.round(confidence * 100) / 100,
+      findings: findings.length,
+      caveat,
+    }
+  })
+
+  const overall = sectionResults.reduce((sum, s) => sum + s.confidence, 0) / Math.max(1, sectionResults.length)
+
+  const confidence = {
+    overall: Math.round(overall * 100) / 100,
+    sections: sectionResults,
+  }
+
+  if (state.outputPath) {
+    await writeRunJsonArtifact(state.outputPath, "confidence.json", confidence)
+  }
+
+  return researchStateSchema.parse({ ...state, confidence })
+}
+
+// ── End confidence scoring ──
 
 function summarizeNodeResult(result: unknown) {
   if (!result || typeof result !== "object") return undefined
@@ -1767,6 +1911,9 @@ export function createGraph(
     .addNode("aggregateConsensus", async (state) =>
       withNodeTelemetry("aggregateConsensus", state, () => aggregateConsensus(config, state)),
     )
+    .addNode("computeConfidence", async (state) =>
+      withNodeTelemetry("computeConfidence", state, () => computeConfidenceNode(config, state)),
+    )
     .addNode("reviseDraft", async (state) =>
       withNodeTelemetry("reviseDraft", state, () => reviseDraft(config, promptBundle, state, graphTelemetry, observer)),
     )
@@ -1805,7 +1952,8 @@ export function createGraph(
       "runTargetedRebuttals",
       "aggregateConsensus",
     ])
-    .addConditionalEdges("aggregateConsensus", routeAfterAggregate, [
+    .addEdge("aggregateConsensus", "computeConfidence")
+    .addConditionalEdges("computeConfidence", routeAfterAggregate, [
       "finalizeApprovedDraft",
       "reviseDraft",
       "finalizeFailedRun",
