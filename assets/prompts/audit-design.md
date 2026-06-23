@@ -10,4 +10,8 @@ Design Audit Context:
 - This HTML was generated from a markdown deep-dive. The content was already audited for sources, logic, and clarity.
 - Your job is to audit the **presentation layer only** — not the factual content.
 
+Additional checks for ALL auditors:
+- **Document completeness**: Does the HTML end with `</html>`? Are all script blocks syntactically complete (no unclosed functions at EOF)? If truncated, flag as blocker.
+- **Mobile readability**: At viewports as narrow as 320px, is there any horizontal overflow? Are touch targets (buttons, links) at least 44×44px? Is base font-size still readable?
+
 HTML to review:
