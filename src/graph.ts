@@ -43,6 +43,7 @@ export type RunObserver = {
   onNodeStart?: (node: string, state: ResearchState | GraphInput) => void
   onNodeEnd?: (node: string, state: ResearchState | GraphInput) => void
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
+  onDesignPhase?: (phase: "drafting" | "auditing" | "aggregating" | "revising", round: number) => void
 }
 
 type GraphTelemetry = {

@@ -44,6 +44,24 @@ interface RequestJson {
   inputSummary?: { title?: string; summary?: string }
 }
 
+interface LiveAgentStatus {
+  status: "idle" | "running" | "complete" | "error"
+  tool?: string
+  tokensIn: number
+  tokensOut: number
+}
+
+interface LiveStatus {
+  phase: "running" | "complete" | "error"
+  node?: string
+  nodeStartedAt?: number
+  round: number
+  maxRounds: number
+  depthTier?: string
+  agents: Record<string, LiveAgentStatus>
+  error?: string
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -154,6 +172,35 @@ function renderMarkdown(src: string): string {
   } catch {
     return `<pre><code>${escapeHtml(src)}</code></pre>`
   }
+}
+
+// ---------------------------------------------------------------------------
+// Live status helpers
+// ---------------------------------------------------------------------------
+
+async function readLiveStatus(runName: string): Promise<LiveStatus | null> {
+  try {
+    const p = safeFilePath(runName, "live-status.json")
+    const st = await stat(p)
+    if (Date.now() - st.mtime.getTime() > 30_000) return null
+    return await Bun.file(p).json() as LiveStatus
+  } catch {
+    return null
+  }
+}
+
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+}
+
+function statusDot(status: string): string {
+  if (status === "running") return "●"
+  if (status === "complete") return "✓"
+  if (status === "error") return "✗"
+  return "○"
 }
 
 // ---------------------------------------------------------------------------
@@ -1287,6 +1334,143 @@ code {
   .md-content h2 { font-size: 1.2rem; }
   .md-content h3 { font-size: 1.05rem; }
 }
+
+/* ── Pipeline ── */
+.pipeline-node {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 0;
+}
+.pipeline-node.active {
+  background: var(--accent-dim);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.5rem;
+  margin: 0.2rem 0;
+}
+.pipeline-node-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.pipeline-icon {
+  display: inline-block;
+  width: 1rem;
+}
+.pipeline-node-meta {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.pipeline-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-left: 1.2rem;
+  font-size: 0.75rem;
+}
+.pipeline-agent-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+}
+
+/* ── Active run hero ── */
+.active-run-hero {
+  border-color: var(--orange);
+  background: var(--orange-bg);
+}
+.active-run-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.active-run-refresh {
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+.active-run-topic {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+.active-run-topic a { color: var(--fg); }
+.active-run-pipeline {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.active-run-agents {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* ── Failure banner ── */
+.failure-banner {
+  background: var(--red-bg);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+.failure-banner-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--red);
+  margin-bottom: 0.3rem;
+}
+.failure-banner-detail {
+  font-size: 0.8rem;
+  color: var(--fg);
+}
+.failure-banner-error {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Markdown preview ── */
+.markdown-preview summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.4rem 0;
+  user-select: none;
+  list-style: none;
+}
+.markdown-preview summary::-webkit-details-marker { display: none; }
+.markdown-preview summary::before {
+  content: "▸";
+  margin-right: 0.35rem;
+  font-size: 0.7rem;
+  transition: transform 0.15s;
+}
+details[open] > .markdown-preview summary::before {
+  transform: rotate(90deg);
+}
+
+/* ── Run navigation ── */
+.run-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+.run-nav a { color: var(--muted); }
+.run-nav a:hover { color: var(--accent); }
+
+/* ── Mobile fixes ── */
+@media (max-width: 400px) {
+  .run-card-top { flex-direction: column; }
+  .pipeline-agent-list { padding-left: 0.5rem; font-size: 0.7rem; }
+  .file-list li a { word-break: break-all; }
+  .run-nav { flex-direction: column; align-items: flex-start; }
+}
 `
 
 // ---------------------------------------------------------------------------
@@ -1340,6 +1524,208 @@ function formatRelative(ms: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Pipeline, failure banner, round sections, markdown preview, nav
+// ---------------------------------------------------------------------------
+
+function renderLivePipeline(
+  liveStatus: LiveStatus | null,
+  files: string[],
+  researchStatus: RunStatus,
+  designInfo: { outcome: string; round: number; unresolvedCount: number; hasFinalHtml: boolean; hasDesignFiles: boolean } | null,
+  depthTierLabel: string,
+): string {
+  const activeNode = liveStatus?.node
+  const liveAgents = liveStatus?.agents ?? {}
+
+  // Determine node completion from files on disk
+  const hasFile = (pattern: RegExp) => files.some((f) => pattern.test(f))
+  const hasDepthTier = hasFile(/^depth-tier\.json$/)
+  const hasDraft = hasFile(/^draft-round-\d+\.md$/)
+  const hasAudits = hasFile(/^audits-round-\d+\.json$/)
+  const hasDrafterReview = hasFile(/^drafter-finding-review-round-\d+\.json$/)
+  const hasRebuttals = hasFile(/^auditor-rebuttal-responses-.*-round-\d+\.json$/)
+  const hasRebuttalReview = hasFile(/^drafter-rebuttal-review-round-\d+\.json$/)
+  const hasAggregated = hasFile(/^aggregated-findings-round-\d+\.json$/)
+  const hasFinalMd = hasFile(/^final\.md$/)
+  const hasLatestDraft = hasFile(/^latest-draft\.md$/)
+  const hasDesignHtml = hasFile(/^design-html-round-0\.html$/)
+  const hasDesignAudits = hasFile(/^design-audits-round-\d+\.json$/)
+  const hasDesignConsensus = hasFile(/^design-consensus-round-\d+\.json$/)
+  const hasDesignHtmlNext = hasFile(/^design-html-round-[1-9]\d*\.html$/)
+
+  function nodeRow(num: number, label: string, completed: boolean, isActive: boolean, meta?: string, agentList?: string): string {
+    const icon = isActive ? "●" : completed ? "✓" : "○"
+    const cls = isActive ? "pipeline-node active" : "pipeline-node"
+    return `<div class="${cls}">
+  <div class="pipeline-node-label"><span class="pipeline-icon">${icon}</span> ${num}. ${escapeHtml(label)}${meta ? ` <span class="pipeline-node-meta">${meta}</span>` : ""}</div>
+  ${agentList ? `<div class="pipeline-agent-list">${agentList}</div>` : ""}
+</div>`
+  }
+
+  function agentListHtml(agents: Record<string, LiveAgentStatus>): string {
+    return Object.entries(agents)
+      .sort(([, a], [, b]) => {
+        const order: Record<string, number> = { running: 0, complete: 1, error: 2, idle: 3 }
+        return (order[a.status] ?? 3) - (order[b.status] ?? 3)
+      })
+      .map(([name, agent]) =>
+        `<span class="pipeline-agent-item">${statusDot(agent.status)} ${escapeHtml(name)}${agent.tool ? ` · ${escapeHtml(agent.tool)}` : ""}</span>`
+      )
+      .join("\n")
+  }
+
+  const isActive = (node: string) => activeNode === node
+  const researchDone = researchStatus === "approved" || researchStatus === "failed"
+  const terminalLabel = researchStatus === "approved" ? "finalizeApprovedDraft" : researchStatus === "failed" ? "finalizeFailedRun" : "finalize"
+
+  let html = '<div class="section"><h2>📊 Pipeline</h2><div class="card" style="display:flex;flex-direction:column;gap:0.15rem;">'
+
+  // Research nodes
+  html += nodeRow(1, "ingestRequest", true, isActive("ingestRequest"))
+  html += nodeRow(2, "summarizeInputDocument", researchStatus !== "running" || hasFile(/./), isActive("summarizeInputDocument"))
+  html += nodeRow(3, "prepareOutputPath", hasFile(/./), isActive("prepareOutputPath"))
+  html += nodeRow(4, "classifyComplexity", hasDepthTier, isActive("classifyComplexity"),
+    hasDepthTier ? depthTierLabel : "")
+  html += nodeRow(5, "draftFullDraft", hasDraft, isActive("draftFullDraft"),
+    hasDraft ? `· ${files.filter((f) => /^draft-round-\d+\.md$/.test(f)).length} rounds` : "",
+    isActive("draftFullDraft") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(6, "runParallelAudits", hasAudits, isActive("runParallelAudits"),
+    hasAudits ? `· ${files.filter((f) => /^audits-round-\d+\.json$/.test(f)).length} rounds` : "",
+    isActive("runParallelAudits") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(7, "reviewFindingsByDrafter", hasDrafterReview, isActive("reviewFindingsByDrafter"),
+    "", isActive("reviewFindingsByDrafter") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(8, "runTargetedRebuttals", hasRebuttals, isActive("runTargetedRebuttals"),
+    "", isActive("runTargetedRebuttals") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(9, "reviewRebuttalResponses", hasRebuttalReview, isActive("reviewRebuttalResponses"),
+    "", isActive("reviewRebuttalResponses") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(10, "aggregateConsensus", hasAggregated, isActive("aggregateConsensus"))
+  html += nodeRow(11, "computeConfidence", hasAggregated, isActive("computeConfidence"))
+  html += nodeRow(12, researchDone ? terminalLabel : "reviseDraft", researchDone, isActive("reviseDraft") || isActive("finalizeApprovedDraft") || isActive("finalizeFailedRun"))
+  html += nodeRow(13, "summarizeOutputArtifact", hasFinalMd || hasLatestDraft, isActive("summarizeOutputArtifact"))
+
+  // Design nodes
+  const designActive = liveStatus?.node?.startsWith("design:") ?? false
+  const designExpected = researchStatus === "approved"
+  if (designInfo || designActive) {
+    // Design phase is running or has completed
+    html += nodeRow(14, "design: drafting", hasDesignHtml, isActive("design: drafting"),
+      hasDesignHtml ? "" : "", isActive("design: drafting") ? agentListHtml(liveAgents) : "")
+    html += nodeRow(15, "design: auditing round 0", hasDesignAudits, isActive("design: auditing round 0"),
+      "", isActive("design: auditing round 0") ? agentListHtml(liveAgents) : "")
+    html += nodeRow(16, "design: consensus round 0", hasDesignConsensus, isActive("design: consensus round 0"))
+    if (hasDesignHtmlNext) {
+      html += nodeRow(17, "design: revising round 0", hasDesignHtmlNext, isActive("design: revising round 0"),
+        "", isActive("design: revising round 0") ? agentListHtml(liveAgents) : "")
+    }
+  } else if (designExpected) {
+    html += nodeRow(14, "runDesignQuorum", false, isActive("runDesignQuorum"), "(pending)")
+  } else {
+    html += nodeRow(14, "runDesignQuorum", false, isActive("runDesignQuorum"), "(not configured)")
+  }
+
+  // If liveStatus has phase info from design.phase events, use that for more granular display
+  if (liveStatus?.node && liveStatus.node.startsWith("design: ")) {
+    // Live design phase is active — the matching nodeRow above will show ●
+    // Agents are shown via the liveAgents
+  }
+
+  html += '</div></div>'
+  return html
+}
+
+async function renderFailureBanner(
+  runName: string,
+  files: string[],
+  liveStatus: LiveStatus | null,
+): Promise<string> {
+  // Check for failure from files
+  const hasFailureJson = files.includes("failure.json")
+  const hasLatestDraft = files.includes("latest-draft.md")
+  const liveError = liveStatus?.phase === "error" ? liveStatus.error : undefined
+
+  if (!hasFailureJson && !hasLatestDraft && !liveError) return ""
+
+  let failureReason = ""
+  let round = "?"
+  let unresolvedCount = "?"
+  let errorMessage = liveError ?? ""
+
+  if (hasFailureJson) {
+    try {
+      const p = safeFilePath(runName, "failure.json")
+      const data = await Bun.file(p).json() as Record<string, unknown>
+      failureReason = String(data.error ?? data.reason ?? "unknown")
+    } catch { /* ignore */ }
+  }
+
+  // Try summary.json for more detail
+  if (files.includes("summary.json")) {
+    try {
+      const p = safeFilePath(runName, "summary.json")
+      const data = await Bun.file(p).json() as Record<string, unknown>
+      if (data.round !== undefined) round = String(data.round)
+      if (Array.isArray(data.unresolvedFindings)) unresolvedCount = String(data.unresolvedFindings.length)
+      if (data.failureReason) failureReason = String(data.failureReason)
+      if (!errorMessage && data.error) errorMessage = String(data.error)
+    } catch { /* ignore */ }
+  }
+
+  return `<div class="failure-banner">
+  <div class="failure-banner-title">❌ Run failed</div>
+  <div class="failure-banner-detail">
+    ${escapeHtml(failureReason)} · Round ${round} · ${unresolvedCount} findings unresolved
+  </div>
+  ${errorMessage ? `<div class="failure-banner-error">${escapeHtml(errorMessage)}</div>` : ""}
+</div>`
+}
+
+async function renderMarkdownPreview(runName: string, files: string[]): Promise<string> {
+  const mdFile = files.includes("final.md") ? "final.md" : files.includes("latest-draft.md") ? "latest-draft.md" : null
+  if (!mdFile) return ""
+
+  try {
+    const p = safeFilePath(runName, mdFile)
+    const content = await Bun.file(p).text()
+    const words = content.split(/\s+/)
+    const preview = words.slice(0, 500).join(" ")
+    const trimmed = preview.length < content.length ? preview + " …" : preview
+
+    return `<details class="markdown-preview" open>
+  <summary>📄 Draft preview</summary>
+  <div class="card md-content">${renderMarkdown(trimmed)}</div>
+  <a class="hero-link" href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(mdFile)}">Read full →</a>
+</details>`
+  } catch {
+    return ""
+  }
+}
+
+async function renderRunNav(currentName: string): Promise<string> {
+  let names: string[]
+  try {
+    const entries = await readdir(RUNS_DIR, { withFileTypes: true })
+    names = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !/\.sqlite/.test(e.name))
+      .map((e) => e.name)
+      .sort((a, b) => b.localeCompare(a))
+  } catch {
+    return ""
+  }
+
+  const index = names.indexOf(currentName)
+  if (index === -1) return ""
+
+  const prevName = index < names.length - 1 ? names[index + 1] : null
+  const nextName = index > 0 ? names[index - 1] : null
+
+  return `<div class="run-nav">
+  ${prevName ? `<a href="/runs/${encodeURIComponent(prevName)}">← Prev</a>` : '<span></span>'}
+  <a href="/">↑ All runs</a>
+  ${nextName ? `<a href="/runs/${encodeURIComponent(nextName)}">Next →</a>` : '<span></span>'}
+</div>`
+}
+
+// ---------------------------------------------------------------------------
 // Route: GET /
 // ---------------------------------------------------------------------------
 
@@ -1367,6 +1753,35 @@ async function renderIndex(): Promise<Response> {
     <div class="stat-label">Running</div>
   </div>
 </div>`
+
+  // Active run hero — scan for live-status.json
+  let activeRunHtml = ""
+  let hasActiveRun = false
+  for (const run of runs) {
+    if (run.status !== "running") continue
+    const liveStatus = await readLiveStatus(run.name)
+    if (!liveStatus) continue
+    hasActiveRun = true
+    const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : ""
+    const agentList = Object.entries(liveStatus.agents)
+      .slice(0, 4)
+      .map(([name, a]) => `${statusDot(a.status)} ${escapeHtml(name)}${a.tool ? ` · ${escapeHtml(a.tool)}` : ""}`)
+      .join(" · ")
+    activeRunHtml = `<div class="card active-run-hero">
+  <div class="active-run-header">
+    <span class="badge badge-running">● Active</span>
+    <span class="active-run-refresh">auto-refreshes</span>
+  </div>
+  <div class="active-run-topic">
+    <a href="/runs/${encodeURIComponent(run.name)}">${escapeHtml(run.topic)}</a>
+  </div>
+  <div class="active-run-pipeline">
+    ${escapeHtml(liveStatus.node ?? "running")} · Round ${liveStatus.round}/${liveStatus.maxRounds} · ${elapsed}
+  </div>
+  ${agentList ? `<div class="active-run-agents">${agentList}</div>` : ""}
+</div>`
+    break
+  }
 
   // Run cards
   let runCards = ""
@@ -1407,9 +1822,11 @@ async function renderIndex(): Promise<Response> {
   const body = `
 <h1 style="margin-bottom:0.75rem;">📋 Runs</h1>
 ${statsHtml}
+${activeRunHtml}
 ${runCards}`
 
-  const html = layout("Runs — quorum", body)
+  const extraHead = hasActiveRun ? `<meta http-equiv="refresh" content="8">` : ""
+  const html = layout("Runs — quorum", body, extraHead)
   return new Response(html, {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
@@ -1533,6 +1950,21 @@ async function renderRun(name: string): Promise<Response> {
 
   // Design status
   const design = await readDesignConsensus(name, files)
+
+  // Live status (if run is active)
+  const liveStatus = await readLiveStatus(name)
+
+  // Depth tier label (from file or live status)
+  let depthTierLabel = ""
+  if (files.includes("depth-tier.json")) {
+    try {
+      const dt = await Bun.file(join(dirPath, "depth-tier.json")).json() as { tier?: string; confidence?: number }
+      const conf = dt.confidence !== undefined ? ` · ${Math.round(dt.confidence * 100)}% conf` : ""
+      depthTierLabel = `· ${dt.tier ?? "analysis"}${conf}`
+    } catch { /* ignore */ }
+  } else if (liveStatus?.depthTier) {
+    depthTierLabel = `· ${liveStatus.depthTier}`
+  }
 
   // Overall status: combine research + design
   let status: RunStatus = "running"
@@ -1868,7 +2300,15 @@ async function renderRun(name: string): Promise<Response> {
     ? `<span class="meta-item">Input: <strong>${escapeHtml(requestJson.inputMode)}</strong></span>`
     : ""
 
+  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, design, depthTierLabel)
+  const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
+  const markdownPreviewHtml = await renderMarkdownPreview(name, files)
+  const runNavHtml = await renderRunNav(name)
+
+  const extraHead = (liveStatus?.phase === "running") ? `<meta http-equiv="refresh" content="8">` : ""
+
   const body = `
+${runNavHtml}
 <a class="back-link" href="/">← Back to runs</a>
 
 <div class="header-bar">
@@ -1882,8 +2322,9 @@ async function renderRun(name: string): Promise<Response> {
   </div>
 </div>
 
-${phaseHtml}
-${designSummaryHtml}
+${failureBannerHtml}
+${pipelineHtml}
+${markdownPreviewHtml}
 ${statsHtml}
 ${heroHtml}
 ${keyOutputsHtml}
@@ -1894,7 +2335,7 @@ ${requestInfoHtml}
   ${fileListHtml}
 </div>`
 
-  const html = layout(`${escapeHtml(topic)} — quorum run`, body)
+  const html = layout(`${escapeHtml(topic)} — quorum run`, body, extraHead)
 
   return new Response(html, {
     headers: { "content-type": "text/html; charset=utf-8" },

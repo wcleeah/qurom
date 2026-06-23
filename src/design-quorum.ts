@@ -15,6 +15,7 @@ import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 export type RunObserver = {
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
+  onDesignPhase?: (phase: "drafting" | "auditing" | "aggregating" | "revising", round: number) => void
 }
 
 type DesignTelemetry = {
@@ -346,6 +347,7 @@ export async function runDesignQuorum(input: {
   let lastSignature: string | undefined
 
   try {
+    observer?.onDesignPhase?.("drafting", 0)
     html = await designHtml(config, promptBundle, markdownFile, topic, htmlFile, telemetry, observer)
 
     // Verify the initial design is structurally complete
@@ -361,6 +363,7 @@ export async function runDesignQuorum(input: {
     let audits: DesignAuditResultRecord[]
 
     try {
+      observer?.onDesignPhase?.("auditing", round)
       audits = await runDesignAudits(config, promptBundle, htmlFile, outputPath, round, telemetry, observer)
     } catch {
       return { html, status: "failed", round }
@@ -397,6 +400,7 @@ export async function runDesignQuorum(input: {
     htmlFile = `${outputPath}/design-html-round-${nextRound}.html`
 
     try {
+      observer?.onDesignPhase?.("revising", round)
       html = await reviseDesignHtml(config, promptBundle, previousHtmlFile, consensus.unresolved, htmlFile, outputPath, round, telemetry, observer)
 
       // Verify the revision is structurally complete; fall back if truncated

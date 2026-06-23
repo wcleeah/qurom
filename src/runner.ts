@@ -1,5 +1,6 @@
 import { createGraph } from "./graph"
 import { createOpencodeEventBridge } from "./opencode-event-bridge"
+import { createLiveStatusWriter } from "./live-status"
 import { abortSession } from "./opencode"
 import { removeEmptyRunDir, writeFailedArtifacts } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
@@ -59,6 +60,11 @@ export type RunnerEvent =
       sessionID: string
     }
   | { kind: "result"; runResult: unknown }
+  | {
+      kind: "design.phase"
+      phase: "drafting" | "auditing" | "aggregating" | "revising"
+      round: number
+    }
 
 export type RunnerEventListener = (event: RunnerEvent) => void
 
@@ -336,6 +342,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
 
   const bridgeAbort = new AbortController()
   let bridgeStreamError: unknown
+  let liveStatusWriter: ReturnType<typeof createLiveStatusWriter> | undefined
   if (signal) {
     if (signal.aborted) {
         bridgeAbort.abort(signal.reason)
@@ -384,9 +391,21 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
           },
           onNodeEnd(node, state) {
             bus.emit({ kind: "graph.node", node, phase: "end", state: structuredClone(state) })
+            // Capture outputPath as soon as prepareOutputPath completes
+            if (node === "prepareOutputPath" && !liveStatusWriter) {
+              const op = (state as { outputPath?: string }).outputPath
+              if (op) {
+                liveStatusWriter = createLiveStatusWriter(bus, op, {
+                  maxRounds: config.quorumConfig.maxRounds,
+                })
+              }
+            }
           },
           onSessionCreated({ sessionID, role }) {
             bus.emit({ kind: "session.created", sessionID, role })
+          },
+          onDesignPhase(phase, round) {
+            bus.emit({ kind: "design.phase", phase, round })
           },
         },
         telemetry: {
@@ -474,6 +493,11 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
     if (recovered) {
       if (recovered.outputPath) {
         runDir = recovered.outputPath
+        // Create live-status writer for the recovery path too,
+        // so the view-server can show the failure state briefly.
+        liveStatusWriter = createLiveStatusWriter(bus, () => runDir, {
+          maxRounds: config.quorumConfig.maxRounds,
+        })
       }
 
       const salvagedState = researchStateSchema.parse({
@@ -529,6 +553,13 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
     throw failure.surfaced
   } finally {
       offSessionCreated()
+      if (liveStatusWriter) {
+        try {
+          liveStatusWriter.dispose()
+        } catch {
+          // Live-status disposal errors must not mask the original failure.
+        }
+      }
       if (bridgeAbort.signal.aborted && sessionIDs.size > 0) {
         await Promise.allSettled([...sessionIDs].map((sessionID) => abortSessionFn(config, sessionID)))
      }
@@ -588,6 +619,8 @@ export function describeRunnerEvent(event: RunnerEvent): string {
       return `agent.permission.replied:${event.sessionID}:${event.requestID}:${event.reply}`
     case "result":
       return "result"
+    case "design.phase":
+      return `design.phase:${event.phase}:${event.round}`
     default:
       return assertNever(event)
   }
