@@ -80,6 +80,28 @@ function generationMetadata(input: {
   }
 }
 
+function buildResearchToolHint(config: RuntimeConfig): string {
+  const tools = config.quorumConfig.researchTools
+  const toolList = tools.prefer.map((t) => `- **${t}**`).join("\n")
+
+  return [
+    "You have access to the following tools. Use them to assist your work if needed.",
+    "",
+    toolList,
+    "",
+    `Web search is powered by **${tools.webSearchProvider}**.`,
+  ].join("\n")
+}
+
+function isResearchAgent(agent: string, config: RuntimeConfig): boolean {
+  const researchAgents = new Set([
+    config.quorumConfig.designatedDrafter,
+    ...config.quorumConfig.auditors,
+    config.quorumConfig.summarizerAgent,
+  ])
+  return researchAgents.has(agent)
+}
+
 export async function promptAgent<T>(input: {
   config: RuntimeConfig
   sessionID: string
@@ -129,6 +151,11 @@ export async function promptAgent<T>(input: {
   let provider: string | undefined
   let variant: string | undefined
   let activeSessionID = input.sessionID
+
+  // Inject research tool hints for research agents
+  const prompt = isResearchAgent(input.agent, input.config)
+    ? buildResearchToolHint(input.config) + "\n\n---\n\n" + input.prompt
+    : input.prompt
 
   async function sendPrompt(prompt: string) {
     const generationObservation =
@@ -232,7 +259,7 @@ export async function promptAgent<T>(input: {
 
   try {
     if (!input.schema) {
-      const response = await sendPrompt(input.prompt)
+      const response = await sendPrompt(prompt)
 
       await input.telemetry?.run.endObservation(agentObservation, {
         output: {
@@ -258,7 +285,7 @@ export async function promptAgent<T>(input: {
     }
 
     const jsonSchema = toJsonSchema(input.schema) as Record<string, unknown>
-    const initialResponse = await sendPrompt(buildStructuredPrompt(input.prompt, jsonSchema))
+    const initialResponse = await sendPrompt(buildStructuredPrompt(prompt, jsonSchema))
 
     try {
       const structured = parseStructuredResponse(input.schema, initialResponse.text)
