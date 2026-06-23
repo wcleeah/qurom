@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { END, START, StateGraph } from "@langchain/langgraph"
+import { z } from "zod"
 
 import { BunSqliteSaver } from "./checkpointer"
 import type { RuntimeConfig } from "./config"
@@ -1408,6 +1409,54 @@ async function runDesignQuorumNode(
   }
 }
 
+async function classifyComplexity(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
+  const session = await createSession(config, `scope-classifier:${state.requestId}`)
+  observeSession(observer, { sessionID: session.id, role: "scope-classifier", requestId: state.requestId })
+
+  const topic = state.inputMode === "topic"
+    ? state.topic ?? ""
+    : state.inputSummary?.title ?? state.documentPath ?? ""
+  const inputContext = state.inputSummary?.summary
+    ? `\n\nInput summary: ${state.inputSummary.summary}`
+    : ""
+
+  const prompt = promptBundle.assets.classifyComplexity
+    .replace("{topic}", topic)
+    .replace("{inputContext}", inputContext)
+
+  const response = await promptAgent({
+    config,
+    sessionID: session.id,
+    agent: "scope-classifier",
+    prompt,
+    schema: z.object({ tier: z.enum(["definitional", "tutorial", "analysis", "synthesis"]), confidence: z.number() }),
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.classifyComplexity",
+      agentName: "scope-classifier",
+      sessionId: session.id,
+      input: { topic, inputMode: state.inputMode },
+    }),
+  })
+
+  const tier = response.structured?.tier ?? config.quorumConfig.depthTierDefault
+  const confidence = response.structured?.confidence ?? 0.5
+
+  const tierConfig = config.quorumConfig.depthTiers?.[tier]
+  if (state.outputPath) {
+    await writeRunJsonArtifact(state.outputPath, "depth-tier.json", { tier, confidence, config: tierConfig })
+  }
+
+  return researchStateSchema.parse({ ...state, depthTier: tier, depthConfidence: confidence })
+}
+
 export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
   if (state.status !== "approved" && state.status !== "failed") {
     throw new Error(`Invalid status for summarizeOutputArtifact: ${state.status}`)
@@ -1626,10 +1675,16 @@ export function createGraph(
         runDesignQuorumNode(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
+    .addNode("classifyComplexity", async (state) =>
+      withNodeTelemetry("classifyComplexity", state, () =>
+        classifyComplexity(config, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
-    .addEdge("prepareOutputPath", "draftFullDraft")
+    .addEdge("prepareOutputPath", "classifyComplexity")
+    .addEdge("classifyComplexity", "draftFullDraft")
     .addEdge("draftFullDraft", "runParallelAudits")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
     .addConditionalEdges("reviewFindingsByDrafter", (state) => routeAfterDrafterReview(config, state), [
