@@ -28,7 +28,6 @@ Core responsibilities:
 - Return only the requested structured output.
 
 Rules:
-
 - Do not critique, audit, or revise the document.
 - Do not add citations, explanations, or commentary.
 - Keep titles brief and specific.
@@ -36,6 +35,5 @@ Rules:
 - Keep slug hints short, plain, and filesystem-safe in spirit, but the orchestrator will sanitize them.
 
 Output rules:
-
 - If the orchestrator requests structured output, return only valid JSON matching the requested schema.
 - Do not add commentary before or after the requested output.

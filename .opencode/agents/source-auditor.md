@@ -4,7 +4,8 @@ mode: subagent
 model: opencode-go/minimax-m3
 variant: thinking
 permission:
-  read: allow
+  read:
+    "runs/**": allow
   glob: deny
   grep: deny
   list: deny
@@ -12,7 +13,8 @@ permission:
   websearch: allow
   codesearch: allow
   skill: deny
-  edit: allow
+  edit:
+    "runs/**/audit-source-auditor-*.json": allow
   bash: deny
   task: deny
   question: deny

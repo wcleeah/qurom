@@ -4,7 +4,8 @@ mode: subagent
 model: opencode-go/deepseek-v4-pro
 variant: max
 permission:
-  read: allow
+  read:
+    "runs/**": allow
   glob: deny
   grep: deny
   list: deny
@@ -12,7 +13,8 @@ permission:
   websearch: allow
   codesearch: allow
   skill: deny
-  edit: allow
+  edit:
+    "runs/**/design-audit-technical-html-*.json": allow
   bash: deny
   task: deny
   question: deny
