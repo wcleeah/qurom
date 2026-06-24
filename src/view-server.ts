@@ -1669,8 +1669,6 @@ function renderLivePipeline(
   const hasDesignAudits = hasFile(/^design-audits-round-\d+\.json$/)
   const hasDesignConsensus = hasFile(/^design-consensus-round-\d+\.json$/)
   const hasDesignHtmlNext = hasFile(/^design-html-round-[1-9]\d*\.html$/)
-  const designStarted = hasDesignHtml || hasDesignAudits || hasDesignConsensus
-  const designExpected = researchStatus === "approved"
   const designActive = liveStatus && (
     liveStatus.node === "runDesignHtml" ||
     liveStatus.node === "runDesignAudits" ||
@@ -1678,22 +1676,21 @@ function renderLivePipeline(
     liveStatus.node === "reviseDesignHtml"
   )
 
-  if (designStarted || designActive) {
-    html += nodeRow(14, "runDesignHtml", hasDesignHtml, isActive("runDesignHtml"),
-      "", isActive("runDesignHtml") ? agentListHtml(liveAgents) : "")
-    html += nodeRow(15, "runDesignAudits", hasDesignAudits, isActive("runDesignAudits"),
-      hasDesignAudits ? `· ${files.filter((f) => /^design-audits-round-\d+\.json$/.test(f)).length} rounds` : "",
-      isActive("runDesignAudits") ? agentListHtml(liveAgents) : "")
-    html += nodeRow(16, "aggregateDesignFindings", hasDesignConsensus, isActive("aggregateDesignFindings"))
-    html += nodeRow(17, "reviseDesignHtml", hasDesignHtmlNext, isActive("reviseDesignHtml"),
-      hasDesignHtmlNext ? `· ${files.filter((f) => /^design-html-round-[1-9]\d*\.html$/.test(f)).length} revisions` : "",
-      isActive("reviseDesignHtml") ? agentListHtml(liveAgents) : "")
-  } else if (designExpected) {
-    html += nodeRow(14, "runDesignHtml", false, isActive("runDesignHtml"), "(pending)")
-  } else if (researchStatus === "running") {
-    // Research still running — design will trigger after approval
-    html += nodeRow(14, "runDesignHtml", false, false, "(waiting for research)")
-  }
+  // Always show design nodes — status varies by completion
+  const designMeta = researchStatus === "approved"
+    ? "(pending)"
+    : researchStatus === "running"
+      ? "(after research)"
+      : ""
+  html += nodeRow(14, "runDesignHtml", hasDesignHtml, isActive("runDesignHtml"),
+    hasDesignHtml ? "" : designMeta, isActive("runDesignHtml") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(15, "runDesignAudits", hasDesignAudits, isActive("runDesignAudits"),
+    hasDesignAudits ? `· ${files.filter((f) => /^design-audits-round-\d+\.json$/.test(f)).length} rounds` : "",
+    isActive("runDesignAudits") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(16, "aggregateDesignFindings", hasDesignConsensus, isActive("aggregateDesignFindings"))
+  html += nodeRow(17, "reviseDesignHtml", hasDesignHtmlNext, isActive("reviseDesignHtml"),
+    hasDesignHtmlNext ? `· ${files.filter((f) => /^design-html-round-[1-9]\d*\.html$/.test(f)).length} revisions` : "",
+    isActive("reviseDesignHtml") ? agentListHtml(liveAgents) : "")
 
   html += '</div></div>'
   return html
