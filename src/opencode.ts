@@ -65,6 +65,21 @@ function buildStructuredRepairPrompt(input: {
   ].join("\n\n")
 }
 
+function buildFileRepairPrompt(input: {
+  outputFile: string
+  parseError: string
+}) {
+  return [
+    `The JSON file you wrote at \`${input.outputFile}\` could not be parsed.`,
+    `Read that file, fix the JSON syntax errors, and rewrite it.`,
+    "Common issues: unescaped double quotes inside strings, trailing commas, missing brackets.",
+    "Escape all double-quote characters inside string values with backslash-quote.",
+    "Rewrite the entire file with valid JSON. Respond with OK when done.",
+    "Parse error:",
+    input.parseError,
+  ].join("\n\n")
+}
+
 function parseStructuredResponse<T>(schema: z.ZodType<T>, text: string) {
   return schema.parse(JSON.parse(text))
 }
@@ -385,9 +400,51 @@ export async function promptAgent<T>(input: {
       }
     }
 
-    // Prefer file output if available
+    // Prefer file output if available — with repair on parse failure
     if (fileContent) {
-      return parseAndReturn(input.schema, fileContent, `from file ${input.outputFile}`)
+      try {
+        return parseAndReturn(input.schema, fileContent, `from file ${input.outputFile}`)
+      } catch (fileParseError) {
+        input.telemetry?.debugLog?.write("session.file_repair", {
+          sessionID: activeSessionID,
+          agent: input.agent,
+          error: formatStructuredError(fileParseError),
+        })
+        // File parse failed — create a repair session to fix the malformed JSON
+        repaired = true
+        const repairSession = await createSession(input.config, `${input.agent}:repair`)
+        input.telemetry?.trackSessionObservation?.(repairSession.id, agentObservation)
+        const previousSessionID = activeSessionID
+        activeSessionID = repairSession.id
+
+        await sendPrompt(
+          buildFileRepairPrompt({
+            outputFile: input.outputFile!,
+            parseError: formatStructuredError(fileParseError),
+          }),
+        )
+        activeSessionID = previousSessionID
+
+        // Re-read the repaired file
+        const repairedFile = await readOutputFile()
+        if (!repairedFile) {
+          throw new Error(
+            `Agent ${input.agent} failed to repair output file ${input.outputFile}: file not written after repair`,
+          )
+        }
+
+        try {
+          return parseAndReturn(input.schema, repairedFile, `from repaired file ${input.outputFile}`)
+        } catch (repairError) {
+          throw new Error(
+            [
+              `Structured response in file ${input.outputFile} from agent ${input.agent} remained invalid after repair.`,
+              `Initial error: ${formatStructuredError(fileParseError)}`,
+              `Repair error: ${formatStructuredError(repairError)}`,
+            ].join("\n"),
+          )
+        }
+      }
     }
 
     try {
