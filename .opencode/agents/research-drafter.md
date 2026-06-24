@@ -4,7 +4,7 @@ mode: subagent
 model: opencode-go/glm-5.2
 variant: max
 permission:
-  read: allow
+  read: "runs/**"
   glob: deny
   grep: deny
   list: deny
@@ -12,7 +12,7 @@ permission:
   websearch: allow
   codesearch: allow
   skill: deny
-  edit: allow
+  edit: "runs/**/*.md"
   bash: deny
   task: deny
   question: deny

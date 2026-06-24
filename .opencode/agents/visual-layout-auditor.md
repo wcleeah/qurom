@@ -4,7 +4,7 @@ mode: subagent
 model: opencode-go/mimo-v2.5-pro
 variant: high
 permission:
-  read: allow
+  read: "runs/**"
   glob: deny
   grep: deny
   list: deny
@@ -12,7 +12,7 @@ permission:
   websearch: allow
   codesearch: allow
   skill: deny
-  edit: allow
+  edit: "runs/**/design-audit-visual-layout-*.json"
   bash: deny
   task: deny
   question: deny

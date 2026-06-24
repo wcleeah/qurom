@@ -3,7 +3,7 @@ description: Clarity and structure auditor for quorum drafts
 mode: subagent
 model: opencode-go/mimo-v2.5-pro
 permission:
-  read: allow
+  read: "runs/**"
   glob: deny
   grep: deny
   list: deny
@@ -11,7 +11,7 @@ permission:
   websearch: allow
   codesearch: allow
   skill: deny
-  edit: allow
+  edit: "runs/**/audit-clarity-auditor-*.json"
   bash: deny
   task: deny
   question: deny
