@@ -1641,6 +1641,48 @@ async function designHtmlNode(
   })
 }
 
+async function interactiveEnhanceNode(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
+  if (!state.outputPath) throw new Error("Missing outputPath during interactiveEnhance")
+  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  const round = state.designRound ?? 0
+  const htmlFile = `${state.outputPath}/design-html-round-${round}.html`
+
+  const session = await createSession(config, `interactive-enhancer:${state.requestId}:round:${round}`)
+  observeSession(observer, { sessionID: session.id, role: "interactive-enhancer", requestId: state.requestId })
+
+  // Prompt the enhancer to edit the HTML file directly
+  await promptAgent({
+    config,
+    sessionID: session.id,
+    agent: "interactive-enhancer",
+    prompt: [
+      `Enhance the HTML document with interactivity. The file is attached as document.html.`,
+      `Edit the file directly — add Mermaid diagrams, collapsible sections, table of contents, copy buttons, and smooth scroll.`,
+      `Output file: ${htmlFile}`,
+    ].join("\n"),
+    outputFile: htmlFile,
+    inputFiles: [
+      { path: htmlFile, mime: "text/plain", filename: "document.html" },
+    ],
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.interactiveEnhance",
+      agentName: "interactive-enhancer",
+      sessionId: "",
+    }),
+  })
+
+  return researchStateSchema.parse({ ...state })
+}
+
 async function runDesignAuditsNode(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
@@ -2018,6 +2060,11 @@ export function createGraph(
         designHtmlNode(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
+    .addNode("interactiveEnhance", async (state) =>
+      withNodeTelemetry("interactiveEnhance", state, () =>
+        interactiveEnhanceNode(config, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addNode("runDesignAudits", async (state) =>
       withNodeTelemetry("runDesignAudits", state, () =>
         runDesignAuditsNode(config, promptBundle, state, graphTelemetry, observer),
@@ -2067,13 +2114,14 @@ export function createGraph(
       "runDesignHtml",
       "__end__",
     ])
-    .addEdge("runDesignHtml", "runDesignAudits")
+    .addEdge("runDesignHtml", "interactiveEnhance")
+    .addEdge("interactiveEnhance", "runDesignAudits")
     .addEdge("runDesignAudits", "aggregateDesignFindings")
     .addConditionalEdges("aggregateDesignFindings", (state) => routeAfterDesignAggregate(config, state), [
       "reviseDesignHtml",
       "__end__",
     ])
-    .addEdge("reviseDesignHtml", "runDesignAudits")
+    .addEdge("reviseDesignHtml", "interactiveEnhance")
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),
       name: "research-quorum",

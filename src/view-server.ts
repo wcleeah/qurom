@@ -1671,6 +1671,7 @@ function renderLivePipeline(
   const hasDesignHtmlNext = hasFile(/^design-html-round-[1-9]\d*\.html$/)
   const designActive = liveStatus && (
     liveStatus.node === "runDesignHtml" ||
+    liveStatus.node === "interactiveEnhance" ||
     liveStatus.node === "runDesignAudits" ||
     liveStatus.node === "aggregateDesignFindings" ||
     liveStatus.node === "reviseDesignHtml"
@@ -1684,11 +1685,13 @@ function renderLivePipeline(
       : ""
   html += nodeRow(14, "runDesignHtml", hasDesignHtml, isActive("runDesignHtml"),
     hasDesignHtml ? "" : designMeta, isActive("runDesignHtml") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(15, "runDesignAudits", hasDesignAudits, isActive("runDesignAudits"),
+  html += nodeRow(15, "interactiveEnhance", hasDesignHtml, isActive("interactiveEnhance"),
+    "", isActive("interactiveEnhance") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(16, "runDesignAudits", hasDesignAudits, isActive("runDesignAudits"),
     hasDesignAudits ? `· ${files.filter((f) => /^design-audits-round-\d+\.json$/.test(f)).length} rounds` : "",
     isActive("runDesignAudits") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(16, "aggregateDesignFindings", hasDesignConsensus, isActive("aggregateDesignFindings"))
-  html += nodeRow(17, "reviseDesignHtml", hasDesignHtmlNext, isActive("reviseDesignHtml"),
+  html += nodeRow(17, "aggregateDesignFindings", hasDesignConsensus, isActive("aggregateDesignFindings"))
+  html += nodeRow(18, "reviseDesignHtml", hasDesignHtmlNext, isActive("reviseDesignHtml"),
     hasDesignHtmlNext ? `· ${files.filter((f) => /^design-html-round-[1-9]\d*\.html$/.test(f)).length} revisions` : "",
     isActive("reviseDesignHtml") ? agentListHtml(liveAgents) : "")
 
