@@ -1,4 +1,7 @@
 import { spawn, type Subprocess } from "bun"
+import { mkdir } from "node:fs/promises"
+import { createWriteStream } from "node:fs"
+import { join } from "node:path"
 
 let child: Subprocess | undefined
 let stopping = false
@@ -43,14 +46,31 @@ export async function ensureOpenCodeServer(input: {
     return async () => {}
   }
 
+  // Capture stderr to runs/opencode-stderr.log so server stack traces
+  // don't pollute the TUI terminal.
+  const stderrLogDir = join(directory, "runs")
+  await mkdir(stderrLogDir, { recursive: true })
+  const stderrLog = createWriteStream(join(stderrLogDir, "opencode-stderr.log"), { flags: "a" })
+
   child = spawn({
     cmd: [opencodeBin, "serve", "--port", String(port), "--hostname", hostname],
     cwd: directory,
     stdout: "inherit",
-    stderr: "inherit",
+    stderr: "pipe",
   })
 
+  // Pipe child's stderr to the log file (and discard so it doesn't fill memory)
+  const stderrReadable = child.stderr as ReadableStream<Uint8Array>
+  const writer = stderrReadable.pipeTo(
+    new WritableStream({
+      write(chunk) {
+        stderrLog.write(chunk)
+      },
+    }),
+  ).catch(() => {})
+
   child.exited.then((code) => {
+    writer.then(() => stderrLog.end())
     if (!stopping && code !== 0) {
       console.error(`OpenCode server exited unexpectedly with code ${code}`)
     }
@@ -71,6 +91,7 @@ export async function ensureOpenCodeServer(input: {
     stopping = true
     child.kill()
     await child.exited.catch(() => {})
+    writer.then(() => stderrLog.end())
     child = undefined
     stopping = false
   }

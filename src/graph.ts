@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { END, START, StateGraph } from "@langchain/langgraph"
+import { START, StateGraph } from "@langchain/langgraph"
 import { z } from "zod"
 
 import { BunSqliteSaver } from "./checkpointer"
@@ -14,7 +14,7 @@ import {
 import { createSession, promptAgent } from "./opencode"
 import type { PromptBundle } from "./prompt-assets"
 import { summarizeMarkdown } from "./summarizer"
-import { runDesignQuorum } from "./design-quorum"
+import { designHtml, runDesignAudits, aggregateDesignConsensus, reviseDesignHtml } from "./design-quorum"
 import {
   aggregatedFindingSchema,
   aggregatedFindingsSchema,
@@ -92,7 +92,7 @@ function researchToolBlock(config: RuntimeConfig) {
     lines.push(`- Prefer ${tool} when it matches the task.`)
   }
 
-  lines.push(`- Preferred web search provider: ${config.quorumConfig.researchTools.webSearchProvider}.`)
+  lines.push(`- Preferred web search provider: ${config.quorumConfig.researchTools.webSearchProvider}. Favor online sources over local files when gathering evidence.`)
   return lines.join("\n")
 }
 
@@ -619,8 +619,8 @@ async function synthesizeDrafts(
     prompt,
     outputFile,
     inputFiles: [
-      { path: draftAPath, mime: "text/markdown", filename: "draftA.md" },
-      { path: draftBPath, mime: "text/markdown", filename: "draftB.md" },
+      { path: draftAPath, mime: "text/plain", filename: "draftA.md" },
+      { path: draftBPath, mime: "text/plain", filename: "draftB.md" },
     ],
     telemetry: graphAgentTelemetry({
       telemetry,
@@ -748,7 +748,7 @@ async function runParallelAudits(
           schema: auditResultSchema,
           outputFile,
           inputFiles: [
-            { path: draftFile, mime: "text/markdown", filename: "draft.md" },
+            { path: draftFile, mime: "text/plain", filename: "draft.md" },
           ],
           telemetry: graphAgentTelemetry({
             telemetry,
@@ -854,8 +854,8 @@ async function reviewFindingsByDrafter(
     schema: drafterFindingReviewSchema,
     outputFile,
     inputFiles: [
-      { path: draftFile, mime: "text/markdown", filename: "draft.md" },
-      { path: auditsFile, mime: "application/json", filename: "audits.json" },
+      { path: draftFile, mime: "text/plain", filename: "draft.md" },
+      { path: auditsFile, mime: "text/plain", filename: "audits.json" },
     ],
     telemetry: graphAgentTelemetry({
       telemetry,
@@ -986,8 +986,8 @@ async function runTargetedRebuttals(
         schema: rebuttalBatchResponseSchema,
         outputFile,
         inputFiles: [
-          { path: draftFile, mime: "text/markdown", filename: "draft.md" },
-          { path: rebuttalsFile, mime: "application/json", filename: "rebuttals.json" },
+          { path: draftFile, mime: "text/plain", filename: "draft.md" },
+          { path: rebuttalsFile, mime: "text/plain", filename: "rebuttals.json" },
         ],
         telemetry: !telemetry
           ? undefined
@@ -1162,8 +1162,8 @@ async function reviewRebuttalResponses(
     schema: drafterFindingReviewSchema,
     outputFile,
     inputFiles: [
-      { path: draftFile, mime: "text/markdown", filename: "draft.md" },
-      { path: disputedFile, mime: "application/json", filename: "disputed.json" },
+      { path: draftFile, mime: "text/plain", filename: "draft.md" },
+      { path: disputedFile, mime: "text/plain", filename: "disputed.json" },
     ],
     telemetry: graphAgentTelemetry({
       telemetry,
@@ -1519,8 +1519,8 @@ async function reviseDraft(
     prompt: revisionPrompt(config, promptBundle, state, outputFile),
     outputFile,
     inputFiles: [
-      { path: draftFile, mime: "text/markdown", filename: "draft.md" },
-      { path: findingsFile, mime: "application/json", filename: "findings.json" },
+      { path: draftFile, mime: "text/plain", filename: "draft.md" },
+      { path: findingsFile, mime: "text/plain", filename: "findings.json" },
     ],
     telemetry: graphAgentTelemetry({
       telemetry,
@@ -1575,74 +1575,152 @@ async function finalizeFailedRun(_config: RuntimeConfig, state: ResearchState) {
   return researchStateSchema.parse(state)
 }
 
-async function runDesignQuorumNode(
+// ---------------------------------------------------------------------------
+// Design quorum nodes (flattened into the main graph)
+// ---------------------------------------------------------------------------
+
+async function designHtmlNode(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
   observer?: RunObserver,
 ) {
-  if (!state.outputPath) throw new Error("Missing outputPath during runDesignQuorum")
+  if (!state.outputPath) throw new Error("Missing outputPath during designHtml")
   if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
 
-  const artifactPath = `${state.outputPath}/final.md`
-  const artifactFile = Bun.file(artifactPath)
-  const markdown = (await artifactFile.exists()) ? await artifactFile.text() : state.draft
+  const draftPath = `${state.outputPath}/latest-draft.md`
+  if (!(await Bun.file(draftPath).exists())) {
+    // Fall back to final.md if latest-draft doesn't exist
+    const finalPath = `${state.outputPath}/final.md`
+    if (await Bun.file(finalPath).exists()) {
+      await Bun.write(draftPath, await Bun.file(finalPath).text())
+    } else {
+      await Bun.write(draftPath, state.draft)
+    }
+  }
 
   const topic = state.inputMode === "topic"
     ? state.topic ?? ""
     : state.documentText ?? state.documentPath ?? ""
 
-  try {
-    const designResult = await runDesignQuorum({
-      config,
-      promptBundle,
-      markdown,
-      topic,
-      outputPath: state.outputPath,
-      observer,
-      telemetry: telemetry
-        ? {
-            run: telemetry.run,
-            parentObservation: telemetry.currentNode,
-            trackSessionObservation: telemetry.trackSessionObservation,
-            trackAgentMetadata: telemetry.trackAgentMetadata,
-          }
-        : undefined,
-    })
+  const htmlFile = `${state.outputPath}/design-html-round-${state.designRound ?? 0}.html`
 
-    // If the design quorum returned failure (not threw), still write a failure artifact
-    if (designResult.status === "failed") {
-      await writeRunJsonArtifact(state.outputPath, "design-failure.json", {
-        error: "Design quorum returned status: failed",
-        stage: "runDesignQuorum",
-        requestId: state.requestId,
-        round: designResult.round,
-        timestamp: new Date().toISOString(),
-      })
-    }
+  const html = await designHtml(config, promptBundle, draftPath, topic, htmlFile,
+    telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
+    observer,
+  )
 
-    return researchStateSchema.parse({
-      ...state,
-      designHtml: designResult.html,
-      designStatus: designResult.status,
-    })
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    console.warn(`[graph] Design quorum failed: ${errorMessage}`)
-    await writeRunJsonArtifact(state.outputPath, "design-failure.json", {
-      error: errorMessage,
-      stage: "runDesignQuorum",
-      requestId: state.requestId,
-      timestamp: new Date().toISOString(),
-    })
+  return researchStateSchema.parse({
+    ...state,
+    designHtml: html,
+    designStatus: "running" as const,
+    designRound: 0,
+  })
+}
 
-    return researchStateSchema.parse({
-      ...state,
-      designHtml: "",
-      designStatus: "failed" as const,
-    })
-  }
+async function runDesignAuditsNode(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
+  if (!state.outputPath) throw new Error("Missing outputPath during runDesignAudits")
+  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  const round = state.designRound ?? 0
+  const htmlFile = `${state.outputPath}/design-html-round-${round}.html`
+
+  const audits = await runDesignAudits(config, promptBundle, htmlFile, state.outputPath, round,
+    telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
+    observer,
+  )
+
+  // Persist audits
+  await writeRunJsonArtifact(state.outputPath, `design-audits-round-${round}.json`, audits)
+
+  return researchStateSchema.parse({ ...state })
+}
+
+async function aggregateDesignFindingsNode(
+  config: RuntimeConfig,
+  _promptBundle: PromptBundle,
+  state: ResearchState,
+  _telemetry?: GraphTelemetry,
+  _observer?: RunObserver,
+) {
+  if (!state.outputPath) throw new Error("Missing outputPath during aggregateDesignFindings")
+  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  const round = state.designRound ?? 0
+
+  // Read audits from disk
+  const auditsFile = Bun.file(`${state.outputPath}/design-audits-round-${round}.json`)
+  const audits = (await auditsFile.exists()) ? await auditsFile.json() as any[] : []
+
+  const consensus = aggregateDesignConsensus(config, audits, undefined, round)
+
+  // Persist consensus
+  await writeRunJsonArtifact(state.outputPath, `design-consensus-round-${round}.json`, {
+    outcome: consensus.outcome,
+    approvedAgents: consensus.approvedAgents,
+    unresolvedFindings: consensus.unresolved,
+    failureReason: consensus.failureReason,
+  })
+
+  return researchStateSchema.parse({
+    ...state,
+    designStatus: consensus.outcome === "approved" ? "approved" as const
+      : consensus.outcome === "failed_non_convergent" ? "failed" as const
+      : "running" as const,
+  })
+}
+
+async function reviseDesignHtmlNode(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
+  if (!state.outputPath) throw new Error("Missing outputPath during reviseDesignHtml")
+  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  const round = state.designRound ?? 0
+  const nextRound = round + 1
+  const htmlFile = `${state.outputPath}/design-html-round-${round}.html`
+  const nextHtmlFile = `${state.outputPath}/design-html-round-${nextRound}.html`
+
+  // Read unresolved findings from the consensus file
+  const consensusFile = Bun.file(`${state.outputPath}/design-consensus-round-${round}.json`)
+  const consensus = (await consensusFile.exists()) ? await consensusFile.json() as any : { unresolvedFindings: [] }
+  const findings = consensus.unresolvedFindings ?? []
+
+  const html = await reviseDesignHtml(config, promptBundle, htmlFile, findings, nextHtmlFile, state.outputPath, round,
+    telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
+    observer,
+  )
+
+  return researchStateSchema.parse({
+    ...state,
+    designHtml: html,
+    designRound: nextRound,
+  })
+}
+
+function routeAfterDesignAggregate(config: RuntimeConfig, state: ResearchState): string {
+  const designQuorum = config.quorumConfig.designQuorum
+  if (!designQuorum?.enabled) return "__end__"
+
+  if (state.designStatus === "approved") return "__end__"
+  if (state.designStatus === "failed") return "__end__"
+
+  // Check if we've exhausted rounds
+  if ((state.designRound ?? 0) >= designQuorum.maxRounds) return "__end__"
+
+  // Otherwise, revise
+  return "reviseDesignHtml"
 }
 
 async function classifyComplexity(
@@ -1779,7 +1857,7 @@ export function routeAfterAggregate(state: ResearchState) {
 
 export function routeAfterSummarize(config: RuntimeConfig, state: ResearchState) {
   if (state.status === "approved" && config.quorumConfig.designQuorum?.enabled) {
-    return "runDesignQuorum"
+    return "designHtml"
   }
   return "__end__"
 }
@@ -1909,9 +1987,24 @@ export function createGraph(
     .addNode("summarizeOutputArtifact", async (state) =>
       withNodeTelemetry("summarizeOutputArtifact", state, () => summarizeOutputArtifact(config, state, graphTelemetry)),
     )
-    .addNode("runDesignQuorum", async (state) =>
-      withNodeTelemetry("runDesignQuorum", state, () =>
-        runDesignQuorumNode(config, promptBundle, state, graphTelemetry, observer),
+    .addNode("designHtml", async (state) =>
+      withNodeTelemetry("designHtml", state, () =>
+        designHtmlNode(config, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
+    .addNode("runDesignAudits", async (state) =>
+      withNodeTelemetry("runDesignAudits", state, () =>
+        runDesignAuditsNode(config, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
+    .addNode("aggregateDesignFindings", async (state) =>
+      withNodeTelemetry("aggregateDesignFindings", state, () =>
+        aggregateDesignFindingsNode(config, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
+    .addNode("reviseDesignHtml", async (state) =>
+      withNodeTelemetry("reviseDesignHtml", state, () =>
+        reviseDesignHtmlNode(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("classifyComplexity", async (state) =>
@@ -1945,10 +2038,16 @@ export function createGraph(
     .addEdge("finalizeApprovedDraft", "summarizeOutputArtifact")
     .addEdge("finalizeFailedRun", "summarizeOutputArtifact")
     .addConditionalEdges("summarizeOutputArtifact", (state) => routeAfterSummarize(config, state), [
-      "runDesignQuorum",
+      "designHtml",
       "__end__",
     ])
-    .addEdge("runDesignQuorum", END)
+    .addEdge("designHtml", "runDesignAudits")
+    .addEdge("runDesignAudits", "aggregateDesignFindings")
+    .addConditionalEdges("aggregateDesignFindings", (state) => routeAfterDesignAggregate(config, state), [
+      "reviseDesignHtml",
+      "__end__",
+    ])
+    .addEdge("reviseDesignHtml", "runDesignAudits")
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),
       name: "research-quorum",

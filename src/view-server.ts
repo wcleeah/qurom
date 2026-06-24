@@ -49,6 +49,17 @@ interface LiveAgentStatus {
   tool?: string
   tokensIn: number
   tokensOut: number
+  toolCalls: Array<{
+    tool: string
+    status: "running" | "completed" | "error"
+    callID: string
+    startedAt: number
+    completedAt?: number
+    inputSummary?: string
+    outputSummary?: string
+    error?: string
+  }>
+  reasoning: string
 }
 
 interface LiveStatus {
@@ -59,6 +70,16 @@ interface LiveStatus {
   maxRounds: number
   depthTier?: string
   agents: Record<string, LiveAgentStatus>
+  nodeHistory: Array<{
+    node: string
+    startedAt: number
+    completedAt: number
+    status: "completed" | "error"
+    error?: string
+    round: number
+    depthTier?: string
+    summary?: Record<string, unknown>
+  }>
   error?: string
 }
 
@@ -1533,6 +1554,7 @@ function renderLivePipeline(
   researchStatus: RunStatus,
   designInfo: { outcome: string; round: number; unresolvedCount: number; hasFinalHtml: boolean; hasDesignFiles: boolean } | null,
   depthTierLabel: string,
+  runName?: string,
 ): string {
   const activeNode = liveStatus?.node
   const liveAgents = liveStatus?.agents ?? {}
@@ -1556,8 +1578,11 @@ function renderLivePipeline(
   function nodeRow(num: number, label: string, completed: boolean, isActive: boolean, meta?: string, agentList?: string): string {
     const icon = isActive ? "●" : completed ? "✓" : "○"
     const cls = isActive ? "pipeline-node active" : "pipeline-node"
+    const labelHtml = runName && completed
+      ? `<a href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(label)}" style="color:var(--fg);text-decoration:none;">${escapeHtml(label)}</a>`
+      : escapeHtml(label)
     return `<div class="${cls}">
-  <div class="pipeline-node-label"><span class="pipeline-icon">${icon}</span> ${num}. ${escapeHtml(label)}${meta ? ` <span class="pipeline-node-meta">${meta}</span>` : ""}</div>
+  <div class="pipeline-node-label"><span class="pipeline-icon">${icon}</span> ${num}. ${labelHtml}${meta ? ` <span class="pipeline-node-meta">${meta}</span>` : ""}</div>
   ${agentList ? `<div class="pipeline-agent-list">${agentList}</div>` : ""}
 </div>`
   }
@@ -1633,6 +1658,82 @@ function renderLivePipeline(
   return html
 }
 
+// ---------------------------------------------------------------------------
+// Agent activity (tool calls + reasoning)
+// ---------------------------------------------------------------------------
+
+function renderAgentActivity(liveStatus: LiveStatus | null): string {
+  if (!liveStatus || !liveStatus.agents || Object.keys(liveStatus.agents).length === 0) return ""
+
+  const agents = Object.entries(liveStatus.agents)
+    .filter(([, a]) => a.toolCalls.length > 0 || a.reasoning)
+  if (agents.length === 0) return ""
+
+  let html = '<div class="section"><h2>🤖 Agent Activity</h2>'
+
+  for (const [name, agent] of agents) {
+    html += `<div class="card" style="margin-bottom:0.5rem;"><div style="font-weight:600;margin-bottom:0.3rem;">${statusDot(agent.status)} ${escapeHtml(name)} <span style="font-weight:400;opacity:0.6;font-size:0.75rem;">(${agent.status})</span></div>`
+
+    // Reasoning (latest chunk)
+    if (agent.reasoning) {
+      html += `<details class="markdown-preview" style="margin-bottom:0.25rem;"><summary>💭 Reasoning</summary><pre style="font-size:0.78rem;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;">${escapeHtml(agent.reasoning)}</pre></details>`
+    }
+
+    // Tool calls
+    if (agent.toolCalls.length > 0) {
+      html += '<table class="summary-table" style="font-size:0.78rem;"><thead><tr><th>Tool</th><th>Status</th><th>Input</th><th>Output</th></tr></thead><tbody>'
+      for (const tc of agent.toolCalls.slice(-10).reverse()) {
+        const statusIcon = tc.status === "running" ? "●" : tc.status === "completed" ? "✓" : "✗"
+        const statusColor = tc.status === "running" ? "var(--orange)" : tc.status === "completed" ? "var(--green)" : "var(--red)"
+        html += `<tr>
+  <td><code>${escapeHtml(tc.tool)}</code></td>
+  <td style="color:${statusColor};">${statusIcon} ${tc.status}</td>
+  <td style="font-size:0.72rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(tc.inputSummary ?? "")}</td>
+  <td style="font-size:0.72rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${tc.error ? `<span style="color:var(--red);">${escapeHtml(tc.error.slice(0, 60))}</span>` : escapeHtml(tc.outputSummary ?? "")}</td>
+</tr>`
+      }
+      html += '</tbody></table>'
+    }
+
+    html += '</div>'
+  }
+
+  html += '</div>'
+  return html
+}
+
+// ---------------------------------------------------------------------------
+// Node history timeline
+// ---------------------------------------------------------------------------
+
+function renderNodeHistory(liveStatus: LiveStatus | null, runName: string): string {
+  if (!liveStatus?.nodeHistory?.length) return ""
+
+  const nodes = [...liveStatus.nodeHistory].reverse()
+
+  let html = '<div class="section"><h2>📋 Node History</h2><div class="card" style="display:flex;flex-direction:column;gap:0.3rem;">'
+
+  for (const entry of nodes) {
+    const elapsed = entry.completedAt - entry.startedAt
+    const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(1)}s` : `${elapsed}ms`
+    const icon = entry.status === "completed" ? "✓" : "✗"
+    const color = entry.status === "completed" ? "var(--green)" : "var(--red)"
+
+    html += `<div style="display:flex;align-items:baseline;gap:0.5rem;font-size:0.85rem;">
+  <span style="color:${color};flex-shrink:0;">${icon}</span>
+  <a href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(entry.node)}" style="font-weight:600;min-width:140px;">${escapeHtml(entry.node)}</a>
+  <span style="opacity:0.6;font-size:0.75rem;">${elapsedStr}</span>
+  ${entry.round > 0 ? `<span style="opacity:0.5;font-size:0.72rem;">· round ${entry.round}</span>` : ""}
+  ${entry.depthTier ? `<span style="opacity:0.5;font-size:0.72rem;">· ${escapeHtml(entry.depthTier)}</span>` : ""}
+  ${entry.summary ? `<span style="opacity:0.5;font-size:0.72rem;">· ${escapeHtml(JSON.stringify(entry.summary))}</span>` : ""}
+  ${entry.error ? `<span style="color:var(--red);font-size:0.72rem;">${escapeHtml(entry.error.slice(0, 80))}</span>` : ""}
+</div>`
+  }
+
+  html += '</div></div>'
+  return html
+}
+
 async function renderFailureBanner(
   runName: string,
   files: string[],
@@ -1698,6 +1799,94 @@ async function renderMarkdownPreview(runName: string, files: string[]): Promise<
   } catch {
     return ""
   }
+}
+
+// ---------------------------------------------------------------------------
+// Route: GET /runs/:name/node/:nodeName
+// ---------------------------------------------------------------------------
+
+async function renderNodePage(runName: string, nodeName: string): Promise<Response> {
+  let dirPath: string
+  try {
+    dirPath = safeRunPath(runName)
+  } catch {
+    return new Response("Not found", { status: 404 })
+  }
+
+  // Read node history from file
+  let nodeHistory: any[] = []
+  try {
+    const f = Bun.file(`${dirPath}/node-history.json`)
+    if (await f.exists()) {
+      nodeHistory = await f.json() as any[]
+    }
+  } catch { /* ignore */ }
+
+  // Find the target node (latest occurrence)
+  const nodeEntries = nodeHistory.filter((n: any) => n.node === nodeName)
+  if (nodeEntries.length === 0) {
+    return new Response(`Node "${escapeHtml(nodeName)}" not found in run history`, { status: 404 })
+  }
+
+  // Get run files for artifact links
+  let files: string[] = []
+  try {
+    files = await getRunFiles(runName)
+  } catch { /* ignore */ }
+
+  let html = `<a class="back-link" href="/runs/${encodeURIComponent(runName)}">← Back to run</a>
+<div class="header-bar">
+  <h1>📋 Node: ${escapeHtml(nodeName)}</h1>
+  <p style="opacity:0.6;font-size:0.85rem;">Run: ${escapeHtml(runName)}</p>
+</div>`
+
+  for (let i = nodeEntries.length - 1; i >= 0; i--) {
+    const entry = nodeEntries[i]
+    if (!entry) continue
+    const elapsed = entry.completedAt && entry.startedAt
+      ? `${((entry.completedAt - entry.startedAt) / 1000).toFixed(1)}s`
+      : "unknown"
+    const icon = entry.status === "completed" ? "✅" : "❌"
+    const statusLabel = entry.status === "completed" ? "Completed" : "Error"
+
+    html += `<div class="section">
+  <h2>${icon} Execution #${nodeEntries.length - i}</h2>
+  <div class="card">
+    <table class="summary-table">
+      <tr><td>Status</td><td>${statusLabel}</td></tr>
+      <tr><td>Duration</td><td>${elapsed}</td></tr>
+      <tr><td>Round</td><td>${entry.round ?? 0}</td></tr>
+      ${entry.depthTier ? `<tr><td>Depth tier</td><td>${escapeHtml(String(entry.depthTier))}</td></tr>` : ""}
+      ${entry.summary ? Object.entries(entry.summary as Record<string, unknown>).map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`).join("") : ""}
+      ${entry.error ? `<tr><td>Error</td><td style="color:var(--red);">${escapeHtml(String(entry.error))}</td></tr>` : ""}
+    </table>
+  </div>
+</div>`
+  }
+
+  // Show related artifacts (files matching node pattern)
+  const relatedFiles = files.filter((f) => {
+    const lower = f.toLowerCase()
+    const nodeLower = nodeName.toLowerCase()
+    return lower.includes(nodeLower) ||
+      (nodeLower === "draftfulldraft" && lower.includes("draft-round")) ||
+      (nodeLower === "runparallelaudits" && lower.includes("audits-round")) ||
+      (nodeLower === "aggregateconsensus" && lower.includes("aggregated-findings"))
+  })
+
+  if (relatedFiles.length > 0) {
+    html += `<div class="section">
+  <h2>📎 Related artifacts</h2>
+  <ul class="file-list">
+    ${relatedFiles.map((f) => `<li><a href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(f)}">${escapeHtml(f)}</a></li>`).join("")}
+  </ul>
+</div>`
+  }
+
+  const fullHtml = layout(`Node: ${nodeName} — ${escapeHtml(runName)}`, html)
+  return new Response(fullHtml, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  })
 }
 
 async function renderRunNav(currentName: string): Promise<string> {
@@ -2300,7 +2489,9 @@ async function renderRun(name: string): Promise<Response> {
     ? `<span class="meta-item">Input: <strong>${escapeHtml(requestJson.inputMode)}</strong></span>`
     : ""
 
-  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, design, depthTierLabel)
+  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, design, depthTierLabel, name)
+  const agentActivityHtml = renderAgentActivity(liveStatus)
+  const nodeHistoryHtml = renderNodeHistory(liveStatus, name)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
   const markdownPreviewHtml = await renderMarkdownPreview(name, files)
   const runNavHtml = await renderRunNav(name)
@@ -2324,6 +2515,8 @@ ${runNavHtml}
 
 ${failureBannerHtml}
 ${pipelineHtml}
+${agentActivityHtml}
+${nodeHistoryHtml}
 ${markdownPreviewHtml}
 ${statsHtml}
 ${heroHtml}
@@ -2460,6 +2653,17 @@ const server = Bun.serve({
         )
       } catch (e) {
         console.error("Raw file error:", e)
+        return new Response("Internal error", { status: 500 })
+      }
+    }
+
+    // GET /runs/:name/node/:nodeName
+    const nodeMatch = path.match(/^\/runs\/(.+?)\/node\/(.+)$/)
+    if (nodeMatch) {
+      try {
+        return await renderNodePage(decodeURIComponent(nodeMatch[1]), decodeURIComponent(nodeMatch[2]))
+      } catch (e) {
+        console.error("Node page error:", e)
         return new Response("Internal error", { status: 500 })
       }
     }

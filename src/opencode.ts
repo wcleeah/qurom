@@ -1,5 +1,7 @@
 import { toJsonSchema } from "@langchain/core/utils/json_schema"
 import { createOpencodeClient, type FilePartInput, type Part, type PermissionReplyData, type Session, type TextPartInput } from "@opencode-ai/sdk/v2"
+import { resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "./config"
@@ -89,7 +91,7 @@ function buildResearchToolHint(config: RuntimeConfig): string {
     "",
     toolList,
     "",
-    `Web search is powered by **${tools.webSearchProvider}**.`,
+    `Web search is powered by **${tools.webSearchProvider}**. Prefer online sources over local files.`,
   ].join("\n")
 }
 
@@ -200,7 +202,7 @@ export async function promptAgent<T>(input: {
           type: "file",
           mime: f.mime,
           filename: f.filename,
-          url: f.path,
+          url: pathToFileURL(resolve(f.path)).href,
         } satisfies FilePartInput)
       }
     }

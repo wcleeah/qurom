@@ -309,6 +309,7 @@ export const researchStateObjectSchema = z.object({
   confidence: confidenceSchema.optional(),
   designHtml: z.string().optional(),
   designStatus: designStatusSchema.optional(),
+  designRound: z.number().int().nonnegative().optional(),
 })
 
 export const researchStateSchema = researchStateObjectSchema.superRefine((value, ctx) => {

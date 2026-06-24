@@ -113,7 +113,7 @@ function designAgentTelemetry(input: {
   }
 }
 
-async function designHtml(
+export async function designHtml(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   markdownFile: string,
@@ -136,7 +136,7 @@ async function designHtml(
     prompt,
     outputFile,
     inputFiles: [
-      { path: markdownFile, mime: "text/markdown", filename: "content.md" },
+      { path: markdownFile, mime: "text/plain", filename: "content.md" },
     ],
     telemetry: designAgentTelemetry({
       telemetry,
@@ -150,7 +150,7 @@ async function designHtml(
   return response.text ?? ""
 }
 
-async function runDesignAudits(
+export async function runDesignAudits(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   htmlFile: string,
@@ -183,7 +183,7 @@ async function runDesignAudits(
           schema: designAuditResultSchema,
           outputFile,
           inputFiles: [
-            { path: htmlFile, mime: "text/html", filename: "document.html" },
+            { path: htmlFile, mime: "text/plain", filename: "document.html" },
           ],
           telemetry: designAgentTelemetry({
             telemetry,
@@ -220,7 +220,7 @@ async function runDesignAudits(
   return Promise.all(auditPromises)
 }
 
-function aggregateDesignConsensus(
+export function aggregateDesignConsensus(
   config: RuntimeConfig,
   audits: DesignAuditResultRecord[],
   previousSignature: string | undefined,
@@ -279,7 +279,7 @@ function aggregateDesignConsensus(
   }
 }
 
-async function reviseDesignHtml(
+export async function reviseDesignHtml(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   htmlFile: string,
@@ -306,8 +306,8 @@ async function reviseDesignHtml(
     prompt,
     outputFile,
     inputFiles: [
-      { path: htmlFile, mime: "text/html", filename: "document.html" },
-      { path: findingsFile, mime: "application/json", filename: "findings.json" },
+      { path: htmlFile, mime: "text/plain", filename: "document.html" },
+      { path: findingsFile, mime: "text/plain", filename: "findings.json" },
     ],
     telemetry: designAgentTelemetry({
       telemetry,

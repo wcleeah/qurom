@@ -2,11 +2,35 @@ import { writeFile, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import type { EventBus } from "./runner"
 
+export interface ToolCallEntry {
+  tool: string
+  status: "running" | "completed" | "error"
+  callID: string
+  startedAt: number
+  completedAt?: number
+  inputSummary?: string
+  outputSummary?: string
+  error?: string
+}
+
 export interface LiveAgentStatus {
   status: "idle" | "running" | "complete" | "error"
   tool?: string
   tokensIn: number
   tokensOut: number
+  toolCalls: ToolCallEntry[]
+  reasoning: string
+}
+
+export interface NodeHistoryEntry {
+  node: string
+  startedAt: number
+  completedAt: number
+  status: "completed" | "error"
+  error?: string
+  round: number
+  depthTier?: string
+  summary?: Record<string, unknown>
 }
 
 export interface LiveStatus {
@@ -17,10 +41,13 @@ export interface LiveStatus {
   maxRounds: number
   depthTier?: string
   agents: Record<string, LiveAgentStatus>
+  nodeHistory: NodeHistoryEntry[]
   error?: string
 }
 
 const WRITE_INTERVAL_MS = 3000
+const MAX_TOOL_CALLS_PER_AGENT = 20
+const MAX_REASONING_LENGTH = 800
 
 export function createLiveStatusWriter(
   bus: EventBus,
@@ -32,10 +59,13 @@ export function createLiveStatusWriter(
     round: 0,
     maxRounds: config.maxRounds,
     agents: {},
+    nodeHistory: [],
   }
 
   // Map sessionID → agent reference for O(1) lookup on status/tool events
   const sessionAgent = new Map<string, LiveAgentStatus>()
+  // Track tool calls by callID for completion updates
+  const toolCallMap = new Map<string, ToolCallEntry>()
 
   // Start write interval immediately — the writer is created while the run
   // is already active (after graph invoke begins). Don't wait for a
@@ -64,6 +94,17 @@ export function createLiveStatusWriter(
       await unlink(join(resolveDir()!, "live-status.json"))
     } catch {
       // File may not exist — that's fine
+    }
+  }
+
+  async function writeNodeHistory() {
+    if (disposed) return
+    const dir = resolveDir()
+    if (!dir) return
+    try {
+      await writeFile(join(dir, "node-history.json"), JSON.stringify(status.nodeHistory))
+    } catch {
+      // Silently ignore write failures
     }
   }
 
@@ -98,6 +139,20 @@ export function createLiveStatusWriter(
           if (event.state && "depthTier" in event.state && typeof event.state.depthTier === "string") {
             status.depthTier = event.state.depthTier
           }
+        } else if (event.phase === "end") {
+          // Record node completion in history
+          const entry: NodeHistoryEntry = {
+            node: event.node,
+            startedAt: status.nodeStartedAt ?? Date.now(),
+            completedAt: Date.now(),
+            status: (event.state as any)?.status === "failed" || (event.state as any)?.failureReason ? "error" : "completed",
+            round: status.round,
+            depthTier: status.depthTier,
+            summary: summarizeNodeState(event.node, event.state),
+          }
+          status.nodeHistory.push(entry)
+          // Persist node history to disk immediately
+          void writeNodeHistory()
         }
         break
       }
@@ -119,6 +174,8 @@ export function createLiveStatusWriter(
           status: "idle",
           tokensIn: 0,
           tokensOut: 0,
+          toolCalls: [],
+          reasoning: "",
         }
         status.agents[event.role] = agent
         sessionAgent.set(event.sessionID, agent)
@@ -139,9 +196,39 @@ export function createLiveStatusWriter(
         if (!agent) break
         if (event.status === "running") {
           agent.tool = event.tool
+          const entry: ToolCallEntry = {
+            tool: event.tool,
+            status: "running",
+            callID: event.callID,
+            startedAt: Date.now(),
+            inputSummary: summarizeToolInput(event.tool, event.input),
+          }
+          agent.toolCalls.push(entry)
+          if (agent.toolCalls.length > MAX_TOOL_CALLS_PER_AGENT) {
+            agent.toolCalls = agent.toolCalls.slice(-MAX_TOOL_CALLS_PER_AGENT)
+          }
+          toolCallMap.set(event.callID, entry)
         } else {
           agent.tool = undefined
+          const entry = toolCallMap.get(event.callID)
+          if (entry) {
+            entry.status = event.status === "completed" ? "completed" : "error"
+            entry.completedAt = Date.now()
+            if (event.status === "completed") {
+              entry.outputSummary = summarizeToolOutput(event.tool, event.output)
+            } else if (event.error) {
+              entry.error = event.error
+            }
+            toolCallMap.delete(event.callID)
+          }
         }
+        break
+      }
+      case "agent.reasoning": {
+        const agent = sessionAgent.get(event.sessionID)
+        if (!agent) break
+        // Keep the latest chunk; truncate older text
+        agent.reasoning = event.text.slice(-MAX_REASONING_LENGTH)
         break
       }
       case "agent.metadata": {
@@ -159,4 +246,54 @@ export function createLiveStatusWriter(
   }
 
   return { dispose }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function summarizeToolInput(_tool: string, input: unknown): string {
+  if (!input) return ""
+  if (typeof input === "string") return input.slice(0, 100)
+  if (typeof input === "object") {
+    const obj = input as Record<string, unknown>
+    // Pick the most informative field based on tool
+    if ("pattern" in obj) return String(obj.pattern).slice(0, 100)
+    if ("url" in obj) return `url: ${String(obj.url).slice(0, 100)}`
+    if ("file" in obj) return `file: ${String(obj.file).slice(0, 100)}`
+    if ("query" in obj) return `query: ${String(obj.query).slice(0, 100)}`
+    if ("search" in obj) return `search: ${String(obj.search).slice(0, 100)}`
+    if ("command" in obj) return `cmd: ${String(obj.command).slice(0, 100)}`
+    const keys = Object.keys(obj).slice(0, 3).join(", ")
+    return `{${keys}}`
+  }
+  return String(input).slice(0, 100)
+}
+
+function summarizeToolOutput(_tool: string, output: unknown): string {
+  if (!output) return ""
+  if (typeof output === "string") return output.slice(0, 200)
+  if (Array.isArray(output)) return `${output.length} items`
+  if (typeof output === "object") {
+    const obj = output as Record<string, unknown>
+    if ("length" in obj) return `${obj.length} bytes`
+    if ("count" in obj) return `${obj.count} results`
+    return `${Object.keys(obj).length} keys`
+  }
+  return String(output).slice(0, 200)
+}
+
+function summarizeNodeState(node: string, state: unknown): Record<string, unknown> | undefined {
+  if (!state || typeof state !== "object") return undefined
+  const s = state as Record<string, unknown>
+  if (node === "classifyComplexity") {
+    return { tier: s.depthTier, confidence: s.depthConfidence }
+  }
+  if (node === "draftFullDraft") {
+    return { round: s.round, draftLen: typeof s.draft === "string" ? (s.draft as string).length : 0 }
+  }
+  if (node === "aggregateConsensus" || node === "computeConfidence") {
+    return { status: s.status, round: s.round, approvedAgents: (s as any).approvedAgents?.length }
+  }
+  return undefined
 }
