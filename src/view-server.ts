@@ -2591,7 +2591,6 @@ async function renderRun(name: string): Promise<Response> {
   const nodeHistoryHtml = renderNodeHistory(liveStatus, name)
   const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
-  const markdownPreviewHtml = await renderMarkdownPreview(name, files)
   const runNavHtml = await renderRunNav(name)
 
   const extraHead = ""  // Background poll handles refresh
@@ -2602,7 +2601,7 @@ async function renderRun(name: string): Promise<Response> {
   const nodeHistorySection = `<div id="node-history-section">${nodeHistoryHtml}</div>`
   const debugLogSection = `<div id="debug-log-section">${debugLogHtml}</div>`
   const failureBannerSection = `<div id="failure-banner-section">${failureBannerHtml}</div>`
-  const markdownSection = `<div id="markdown-section">${markdownPreviewHtml}</div>`
+  const markdownSection = ""
   const statsSection = `<div id="stats-section">${statsHtml}</div>`
   const heroSection = `<div id="hero-section">${heroHtml}</div>`
   const keyOutputsSection = `<div id="key-outputs-section">${keyOutputsHtml}</div>`
