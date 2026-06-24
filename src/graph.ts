@@ -1911,7 +1911,11 @@ export function createGraph(
           status: "completed",
         },
       })
-      return observeNodeResult(observer, node, state, result)
+      // Pass result state to onNodeEnd if it's a valid state; otherwise pass input
+      const endState = researchStateSchema.safeParse(result).success
+        ? (result as ResearchState)
+        : state
+      return observeNodeResult(observer, node, endState, result)
     } catch (error) {
       await graphTelemetry?.run.endObservation(observation, {
         level: "ERROR",

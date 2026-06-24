@@ -1570,10 +1570,6 @@ function renderLivePipeline(
   const hasAggregated = hasFile(/^aggregated-findings-round-\d+\.json$/)
   const hasFinalMd = hasFile(/^final\.md$/)
   const hasLatestDraft = hasFile(/^latest-draft\.md$/)
-  const hasDesignHtml = hasFile(/^design-html-round-0\.html$/)
-  const hasDesignAudits = hasFile(/^design-audits-round-\d+\.json$/)
-  const hasDesignConsensus = hasFile(/^design-consensus-round-\d+\.json$/)
-  const hasDesignHtmlNext = hasFile(/^design-html-round-[1-9]\d*\.html$/)
 
   function nodeRow(num: number, label: string, completed: boolean, isActive: boolean, meta?: string, agentList?: string): string {
     const icon = isActive ? "●" : completed ? "✓" : "○"
@@ -1628,30 +1624,32 @@ function renderLivePipeline(
   html += nodeRow(12, researchDone ? terminalLabel : "reviseDraft", researchDone, isActive("reviseDraft") || isActive("finalizeApprovedDraft") || isActive("finalizeFailedRun"))
   html += nodeRow(13, "summarizeOutputArtifact", hasFinalMd || hasLatestDraft, isActive("summarizeOutputArtifact"))
 
-  // Design nodes
-  const designActive = liveStatus?.node?.startsWith("design:") ?? false
+  // Design nodes (flattened into main graph)
+  const hasDesignHtml = hasFile(/^design-html-round-0\.html$/)
+  const hasDesignAudits = hasFile(/^design-audits-round-\d+\.json$/)
+  const hasDesignConsensus = hasFile(/^design-consensus-round-\d+\.json$/)
+  const hasDesignHtmlNext = hasFile(/^design-html-round-[1-9]\d*\.html$/)
+  const designStarted = hasDesignHtml || hasDesignAudits || hasDesignConsensus
   const designExpected = researchStatus === "approved"
-  if (designInfo || designActive) {
-    // Design phase is running or has completed
-    html += nodeRow(14, "design: drafting", hasDesignHtml, isActive("design: drafting"),
-      hasDesignHtml ? "" : "", isActive("design: drafting") ? agentListHtml(liveAgents) : "")
-    html += nodeRow(15, "design: auditing round 0", hasDesignAudits, isActive("design: auditing round 0"),
-      "", isActive("design: auditing round 0") ? agentListHtml(liveAgents) : "")
-    html += nodeRow(16, "design: consensus round 0", hasDesignConsensus, isActive("design: consensus round 0"))
-    if (hasDesignHtmlNext) {
-      html += nodeRow(17, "design: revising round 0", hasDesignHtmlNext, isActive("design: revising round 0"),
-        "", isActive("design: revising round 0") ? agentListHtml(liveAgents) : "")
-    }
-  } else if (designExpected) {
-    html += nodeRow(14, "runDesignQuorum", false, isActive("runDesignQuorum"), "(pending)")
-  } else {
-    html += nodeRow(14, "runDesignQuorum", false, isActive("runDesignQuorum"), "(not configured)")
-  }
+  const designActive = liveStatus && (
+    liveStatus.node === "runDesignHtml" ||
+    liveStatus.node === "runDesignAudits" ||
+    liveStatus.node === "aggregateDesignFindings" ||
+    liveStatus.node === "reviseDesignHtml"
+  )
 
-  // If liveStatus has phase info from design.phase events, use that for more granular display
-  if (liveStatus?.node && liveStatus.node.startsWith("design: ")) {
-    // Live design phase is active — the matching nodeRow above will show ●
-    // Agents are shown via the liveAgents
+  if (designStarted || designActive) {
+    html += nodeRow(14, "runDesignHtml", hasDesignHtml, isActive("runDesignHtml"),
+      "", isActive("runDesignHtml") ? agentListHtml(liveAgents) : "")
+    html += nodeRow(15, "runDesignAudits", hasDesignAudits, isActive("runDesignAudits"),
+      hasDesignAudits ? `· ${files.filter((f) => /^design-audits-round-\d+\.json$/.test(f)).length} rounds` : "",
+      isActive("runDesignAudits") ? agentListHtml(liveAgents) : "")
+    html += nodeRow(16, "aggregateDesignFindings", hasDesignConsensus, isActive("aggregateDesignFindings"))
+    html += nodeRow(17, "reviseDesignHtml", hasDesignHtmlNext, isActive("reviseDesignHtml"),
+      hasDesignHtmlNext ? `· ${files.filter((f) => /^design-html-round-[1-9]\d*\.html$/.test(f)).length} revisions` : "",
+      isActive("reviseDesignHtml") ? agentListHtml(liveAgents) : "")
+  } else if (designExpected) {
+    html += nodeRow(14, "runDesignHtml", false, isActive("runDesignHtml"), "(pending)")
   }
 
   html += '</div></div>'
