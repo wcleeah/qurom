@@ -4,7 +4,7 @@ mode: subagent
 model: opencode-go/minimax-m3
 variant: thinking
 permission:
-  read: deny
+  read: allow
   glob: deny
   grep: deny
   list: deny
