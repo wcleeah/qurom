@@ -2117,7 +2117,7 @@ export function createGraph(
       "reviseDesignHtml",
       "__end__",
     ])
-    .addEdge("reviseDesignHtml", "interactiveEnhance")
+    .addEdge("reviseDesignHtml", "runDesignAudits")
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),
       name: "research-quorum",

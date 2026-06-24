@@ -2,6 +2,8 @@ Revise the current HTML document to resolve the unresolved design findings.
 The current HTML is attached as `document.html`.
 The unresolved design findings are attached as `findings.json`.
 
+The HTML may contain interactive elements, scripts, or styles added by an enhancer. Preserve these when revising — do not strip out `<script>` tags, interactive CSS, or JavaScript-driven behavior unless a finding explicitly requires it.
+
 Output rules:
 - Return the full revised HTML document.
 - Return a single complete HTML file with all CSS inline. External `<script src="...">` tags are allowed and encouraged for libraries.
