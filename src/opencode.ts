@@ -412,10 +412,13 @@ export async function promptAgent<T>(input: {
         })
         // File parse failed — create a repair session to fix the malformed JSON
         repaired = true
-        const repairSession = await createSession(input.config, `${input.agent}:repair`)
+        const repairSession = await createSession(input.config, `json-fixer:${input.outputFile}`)
         input.telemetry?.trackSessionObservation?.(repairSession.id, agentObservation)
         const previousSessionID = activeSessionID
         activeSessionID = repairSession.id
+        // Temporarily switch agent for the repair call
+        const savedAgent = input.agent
+        input.agent = "json-fixer"
 
         await sendPrompt(
           buildFileRepairPrompt({
@@ -423,6 +426,7 @@ export async function promptAgent<T>(input: {
             parseError: formatStructuredError(fileParseError),
           }),
         )
+        input.agent = savedAgent
         activeSessionID = previousSessionID
 
         // Re-read the repaired file
