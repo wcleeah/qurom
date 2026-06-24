@@ -1778,10 +1778,13 @@ async function renderFailureBanner(
   liveStatus: LiveStatus | null,
 ): Promise<string> {
   // Check for failure from files
+  const hasFinalMd = files.includes("final.md")
   const hasFailureJson = files.includes("failure.json")
   const hasLatestDraft = files.includes("latest-draft.md")
   const liveError = liveStatus?.phase === "error" ? liveStatus.error : undefined
 
+  // If final.md exists, the run was approved (latest-draft.md may exist from design phase)
+  if (hasFinalMd) return ""
   if (!hasFailureJson && !hasLatestDraft && !liveError) return ""
 
   let failureReason = ""
