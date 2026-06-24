@@ -4,7 +4,7 @@ mode: subagent
 model: opencode-go/mimo-v2.5-pro
 variant: high
 permission:
-  read: deny
+  read: allow
   glob: deny
   grep: deny
   list: deny

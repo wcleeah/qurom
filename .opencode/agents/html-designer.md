@@ -4,7 +4,7 @@ mode: subagent
 model: opencode-go/glm-5.2
 variant: max
 permission:
-  read: deny
+  read: allow
   glob: deny
   grep: deny
   list: deny

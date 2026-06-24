@@ -4,7 +4,7 @@ mode: subagent
 model: opencode-go/deepseek-v4-pro
 variant: max
 permission:
-  read: deny
+  read: allow
   glob: deny
   grep: deny
   list: deny

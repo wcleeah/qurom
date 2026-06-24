@@ -3,7 +3,7 @@ description: Topic complexity classifier for quorum — routes queries to depth 
 mode: subagent
 model: opencode-go/deepseek-v4-flash
 permission:
-  read: deny
+  read: allow
   glob: deny
   grep: deny
   list: deny

@@ -3,7 +3,7 @@ description: Draft synthesizer for quorum — merges multiple research drafts in
 mode: subagent
 model: opencode-go/qwen3.7-max
 permission:
-  read: deny
+  read: allow
   glob: deny
   grep: deny
   list: deny

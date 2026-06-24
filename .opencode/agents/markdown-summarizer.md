@@ -3,7 +3,7 @@ description: Markdown summarizer for run labels and summaries
 mode: subagent
 model: opencode-go/deepseek-v4-flash
 permission:
-  read: deny
+  read: allow
   glob: deny
   grep: deny
   list: deny
