@@ -1497,6 +1497,43 @@ details[open] > .markdown-preview summary::before {
 }
 `
 
+const POLLING_SCRIPT = /* html */ `
+<script>
+(async function poll() {
+  const IDs = [
+    "pipeline-section",
+    "agent-activity-section",
+    "node-history-section",
+    "debug-log-section",
+    "failure-banner-section",
+    "markdown-section",
+    "stats-section",
+    "hero-section",
+    "key-outputs-section",
+  ]
+  try {
+    const resp = await fetch(window.location.href)
+    if (!resp.ok) return
+    const html = await resp.text()
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, "text/html")
+    for (const id of IDs) {
+      const oldEl = document.getElementById(id)
+      const newEl = doc.getElementById(id)
+      if (oldEl && newEl) {
+        oldEl.innerHTML = newEl.innerHTML
+      }
+    }
+    const oldHeader = document.querySelector(".header-bar")
+    const newHeader = doc.querySelector(".header-bar")
+    if (oldHeader && newHeader) {
+      oldHeader.innerHTML = newHeader.innerHTML
+    }
+  } catch { /* ignore fetch errors */ }
+  setTimeout(poll, 8000)
+})()
+</script>`
+
 // ---------------------------------------------------------------------------
 // HTML helpers
 // ---------------------------------------------------------------------------
@@ -2554,7 +2591,18 @@ async function renderRun(name: string): Promise<Response> {
   const markdownPreviewHtml = await renderMarkdownPreview(name, files)
   const runNavHtml = await renderRunNav(name)
 
-  const extraHead = (liveStatus?.phase === "running") ? `<meta http-equiv="refresh" content="8">` : ""
+  const extraHead = ""  // Background poll handles refresh
+
+  // Wrap dynamic sections with IDs for background polling
+  const pipelineSection = `<div id="pipeline-section">${pipelineHtml}</div>`
+  const agentActivitySection = `<div id="agent-activity-section">${agentActivityHtml}</div>`
+  const nodeHistorySection = `<div id="node-history-section">${nodeHistoryHtml}</div>`
+  const debugLogSection = `<div id="debug-log-section">${debugLogHtml}</div>`
+  const failureBannerSection = `<div id="failure-banner-section">${failureBannerHtml}</div>`
+  const markdownSection = `<div id="markdown-section">${markdownPreviewHtml}</div>`
+  const statsSection = `<div id="stats-section">${statsHtml}</div>`
+  const heroSection = `<div id="hero-section">${heroHtml}</div>`
+  const keyOutputsSection = `<div id="key-outputs-section">${keyOutputsHtml}</div>`
 
   const body = `
 ${runNavHtml}
@@ -2571,21 +2619,22 @@ ${runNavHtml}
   </div>
 </div>
 
-${failureBannerHtml}
-${pipelineHtml}
-${agentActivityHtml}
-${nodeHistoryHtml}
-${debugLogHtml}
-${markdownPreviewHtml}
-${statsHtml}
-${heroHtml}
-${keyOutputsHtml}
+${failureBannerSection}
+${pipelineSection}
+${agentActivitySection}
+${nodeHistorySection}
+${debugLogSection}
+${markdownSection}
+${statsSection}
+${heroSection}
+${keyOutputsSection}
 ${requestInfoHtml}
 
 <div class="section">
   <h2>📎 All files</h2>
   ${fileListHtml}
-</div>`
+</div>
+${liveStatus?.phase === "running" ? POLLING_SCRIPT : ""}`
 
   const html = layout(`${escapeHtml(topic)} — quorum run`, body, extraHead)
 
