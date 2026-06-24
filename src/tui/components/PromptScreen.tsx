@@ -3,17 +3,19 @@ import { useState } from "react"
 import type { InputRequest } from "../../schema"
 import { theme } from "../theme"
 
-export type PromptMode = "topic" | "document"
+export type PromptMode = "topic" | "document" | "design"
 
 export interface PromptScreenProps {
   onSubmit: (request: InputRequest) => void
+  onDesignSubmit?: (runId: string) => void
 }
 
-export const PromptScreen = ({ onSubmit }: PromptScreenProps) => {
+export const PromptScreen = ({ onSubmit, onDesignSubmit }: PromptScreenProps) => {
   const { width, height } = useTerminalDimensions()
   const [mode, setMode] = useState<PromptMode>("topic")
   const [topic, setTopic] = useState("")
   const [documentPath, setDocumentPath] = useState("")
+  const [designRunId, setDesignRunId] = useState("")
 
   const submitTopic = () => {
     const trimmed = topic.trim()
@@ -27,14 +29,25 @@ export const PromptScreen = ({ onSubmit }: PromptScreenProps) => {
     onSubmit({ inputMode: "document", documentPath: trimmed })
   }
 
+  const submitDesign = () => {
+    const trimmed = designRunId.trim()
+    if (trimmed.length === 0) return
+    onDesignSubmit?.(trimmed)
+  }
+
   useKeyboard((key) => {
     if (key.name === "tab") {
-      setMode((current) => (current === "topic" ? "document" : "topic"))
+      setMode((current) => {
+        if (current === "topic") return "document"
+        if (current === "document") return "design"
+        return "topic"
+      })
       return
     }
     if (key.name === "return") {
       if (mode === "topic") submitTopic()
-      else submitDocument()
+      else if (mode === "document") submitDocument()
+      else submitDesign()
       return
     }
   })
@@ -56,6 +69,9 @@ export const PromptScreen = ({ onSubmit }: PromptScreenProps) => {
             <text fg={mode === "document" ? theme.text : theme.textMuted}>
               {mode === "document" ? "● document" : "○ document"}
             </text>
+            <text fg={mode === "design" ? theme.text : theme.textMuted}>
+              {mode === "design" ? "● design" : "○ design"}
+            </text>
           </box>
 
           <box
@@ -74,7 +90,7 @@ export const PromptScreen = ({ onSubmit }: PromptScreenProps) => {
                 value={topic}
                 onInput={setTopic}
               />
-            ) : (
+            ) : mode === "document" ? (
               <input
                 placeholder="path to markdown file"
                 focused
@@ -82,11 +98,19 @@ export const PromptScreen = ({ onSubmit }: PromptScreenProps) => {
                 value={documentPath}
                 onInput={setDocumentPath}
               />
+            ) : (
+              <input
+                placeholder="run directory name or request ID"
+                focused
+                width="100%"
+                value={designRunId}
+                onInput={setDesignRunId}
+              />
             )}
           </box>
 
           <text fg={theme.textMuted}>
-            Enter: run · Tab: {mode === "topic" ? "document mode" : "topic mode"} · Ctrl-C: quit
+            Enter: run · Tab: {mode === "topic" ? "document" : mode === "document" ? "design" : "topic"} mode · Ctrl-C: quit
           </text>
         </box>
       </box>

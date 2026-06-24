@@ -660,3 +660,136 @@ export function describeRunnerEvent(event: RunnerEvent): string {
       return assertNever(event)
   }
 }
+
+// ---------------------------------------------------------------------------
+// Design-only pipeline (resumed from checkpoint)
+// ---------------------------------------------------------------------------
+
+export async function runDesignPipeline(args: {
+  config: RuntimeConfig
+  promptBundle: RuntimePromptBundle
+  runId: string
+  bus: EventBus
+  signal?: AbortSignal
+}) {
+  const { config, promptBundle, runId, bus, signal } = args
+
+  // Resolve run directory from runId (could be full path, dir name, or requestId)
+  const { readdir } = await import("node:fs/promises")
+  const { resolve, join } = await import("node:path")
+
+  const runsDir = resolve(process.cwd(), "runs")
+  let runDir = runId
+
+  // If it's not an existing path, search runs/ for a matching directory
+  try {
+    const st = await import("node:fs/promises").then((m) => m.stat(runId))
+    if (!st.isDirectory()) throw new Error("Not a directory")
+  } catch {
+    // Try as directory name under runs/
+    const candidate = join(runsDir, runId)
+    try {
+      await import("node:fs/promises").then((m) => m.stat(candidate))
+      runDir = candidate
+    } catch {
+      // Try finding by requestId (directory name contains the ID)
+      const dirs = await readdir(runsDir)
+      const match = dirs.find((d) => d.includes(runId))
+      if (!match) throw new Error(`No run directory found matching "${runId}"`)
+      runDir = join(runsDir, match)
+    }
+  }
+
+  // Read requestId from request.json
+  const requestFile = Bun.file(join(runDir, "request.json"))
+  if (!(await requestFile.exists())) {
+    throw new Error(`No request.json found in ${runDir}`)
+  }
+  const requestJson = await requestFile.json() as { requestId?: string }
+  const requestId = requestJson.requestId
+  if (!requestId) throw new Error(`No requestId in ${runDir}/request.json`)
+
+  const graphFactory = createGraph
+  const telemetry = await createTelemetry(config, { requestId, inputMode: "topic" })
+  const actualAgentVariants = new Map<string, string>()
+  const trackAgentMetadata = (input: { agent: string; sessionID: string; model?: string; variant?: string }) => {
+    if (input.variant) actualAgentVariants.set(input.agent, input.variant)
+    bus.emit({ kind: "agent.metadata", ...input })
+  }
+
+  const debugLog = createDebugLog(runDir)
+  const bridge = createOpencodeEventBridge(config, { bus, getRunDir: () => runDir })
+  const bridgeAbort = new AbortController()
+
+  if (signal) {
+    if (signal.aborted) bridgeAbort.abort(signal.reason)
+    else signal.addEventListener("abort", () => bridgeAbort.abort(signal.reason), { once: true })
+  }
+
+  bus.emit({ kind: "lifecycle", phase: "starting", requestId, traceId: telemetry.traceId })
+
+  try {
+    await bridge.start()
+    bus.emit({ kind: "lifecycle", phase: "running", requestId, traceId: telemetry.traceId })
+
+    const graph = graphFactory(config, promptBundle, {
+      observer: {
+        debugLog,
+        onNodeStart(node, state) {
+          bus.emit({ kind: "graph.node", node, phase: "start", state: structuredClone(state) })
+        },
+        onNodeEnd(node, state) {
+          bus.emit({ kind: "graph.node", node, phase: "end", state: structuredClone(state) })
+          if (node === "prepareOutputPath" && !debugLog) {
+            // debugLog already created above
+          }
+        },
+        onSessionCreated({ sessionID, role }) {
+          bus.emit({ kind: "session.created", sessionID, role })
+        },
+        onDesignPhase(phase, round) {
+          bus.emit({ kind: "design.phase", phase, round })
+        },
+      },
+      telemetry: {
+        run: telemetry,
+        trackAgentMetadata,
+      },
+    })
+
+    // Find the latest checkpoint to resume from
+    const state = await graph.getState({ configurable: { thread_id: requestId } })
+    if (!state) throw new Error(`No checkpoint found for thread ${requestId}`)
+
+    const checkpointId = state.config.configurable?.checkpoint_id
+    if (!checkpointId) throw new Error(`No checkpoint_id in state for thread ${requestId}`)
+
+    debugLog.write("pipeline.design_resume", { requestId, checkpointId })
+
+    const result = await graph.invoke(null, {
+      configurable: { thread_id: requestId, checkpoint_id: checkpointId },
+      recursionLimit: config.quorumConfig.recursionLimit,
+      signal: bridgeAbort.signal,
+    })
+
+    bus.emit({ kind: "result", runResult: result })
+    bus.emit({
+      kind: "lifecycle",
+      phase: "complete",
+      requestId,
+      traceId: telemetry.traceId,
+      outputDir: (result as any).outputPath,
+    })
+
+    return result
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    debugLog.write("pipeline.error", { error: message, stack: error instanceof Error ? error.stack : undefined })
+    bus.emit({ kind: "lifecycle", phase: "error", requestId, traceId: telemetry.traceId, error })
+    throw error
+  } finally {
+    try { await debugLog.close() } catch {}
+    try { await bridge.stop() } catch {}
+    try { await telemetry.shutdown() } catch {}
+  }
+}

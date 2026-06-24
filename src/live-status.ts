@@ -54,7 +54,7 @@ export function createLiveStatusWriter(
   bus: EventBus,
   runDir: string | (() => string | undefined),
   config: { maxRounds: number },
-  debugLog?: DebugLog,
+  _debugLog?: DebugLog,
 ): { dispose: () => void } {
   const status: LiveStatus = {
     phase: "running",

@@ -1,7 +1,7 @@
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useRef, useState } from "react"
 import type { RuntimeConfig } from "../config"
-import { createEventBus, runResearchPipeline, type RuntimePrerequisites, type RuntimePromptBundle } from "../runner"
+import { createEventBus, runResearchPipeline, runDesignPipeline, type RuntimePrerequisites, type RuntimePromptBundle } from "../runner"
 import type { InputRequest } from "../schema"
 import { Dashboard } from "./components/Dashboard"
 import { PromptScreen } from "./components/PromptScreen"
@@ -47,10 +47,8 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
       setRunCtx(ctx)
       setScreen("running")
 
-      // Derive view URL from the same host/port as the view-server
       const port = process.env.VIEW_PORT ?? "3000"
       const host = process.env.VIEW_HOST ?? "localhost"
-      // requestId is generated inside runResearchPipeline, so we read it from lifecycle
       const offLifecycle = bus.on((event) => {
         if (event.kind === "lifecycle" && event.requestId) {
           setViewUrl(`http://${host}:${port}/runs/${event.requestId}`)
@@ -65,6 +63,36 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
         })
     },
     [config, prerequisites, promptBundle],
+  )
+
+  const startDesign = useCallback(
+    (runId: string) => {
+      const bus = createEventBus()
+      const store = createRunStore()
+      const binding = bindBusToStore({ bus, store })
+      const ac = new AbortController()
+      const promise = runDesignPipeline({ config, promptBundle, runId, bus, signal: ac.signal })
+
+      const ctx: RunCtx = { store, unbind: binding.unbind, ac, promise }
+      setRunCtx(ctx)
+      setScreen("running")
+
+      const port = process.env.VIEW_PORT ?? "3000"
+      const host = process.env.VIEW_HOST ?? "localhost"
+      const offLifecycle = bus.on((event) => {
+        if (event.kind === "lifecycle" && event.requestId) {
+          setViewUrl(`http://${host}:${port}/runs/${event.requestId}`)
+          offLifecycle()
+        }
+      })
+
+      promise
+        .catch(() => {})
+        .finally(() => {
+          binding.flushAndUnbind()
+        })
+    },
+    [config, promptBundle],
   )
 
   useKeyboard((key) => {
@@ -82,7 +110,7 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
   if (screen === "prompt") {
     return (
       <box flexGrow={1} position="relative">
-        <PromptScreen onSubmit={startRun} />
+        <PromptScreen onSubmit={startRun} onDesignSubmit={startDesign} />
       </box>
     )
   }
