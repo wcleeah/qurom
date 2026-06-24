@@ -290,9 +290,27 @@ export async function promptAgent<T>(input: {
 
     const text = extractText(response.data.parts)
 
+    // If the LLM returned empty text, ask it to continue
+    let finalText = text
+    if (!finalText.trim()) {
+      input.telemetry?.debugLog?.write("session.empty_response", {
+        sessionID: activeSessionID,
+        agent: input.agent,
+      })
+      const continueResponse = await client.session.prompt({
+        sessionID: activeSessionID,
+        agent: input.agent,
+        variant: input.variant,
+        parts: [{ type: "text", text: "Continue. Produce your output now." } satisfies TextPartInput],
+      })
+      if (continueResponse.data && !continueResponse.error) {
+        finalText = extractText(continueResponse.data.parts)
+      }
+    }
+
     await input.telemetry?.run.endObservation(generationObservation, {
       output: {
-        response: text,
+        response: finalText,
       },
       model: info.modelID,
         metadata: {
@@ -307,7 +325,7 @@ export async function promptAgent<T>(input: {
     })
 
     return {
-      text,
+      text: finalText,
       model: info.modelID,
       provider: info.providerID,
     }
