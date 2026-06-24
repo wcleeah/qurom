@@ -829,6 +829,7 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius);
   padding: 0.75rem;
   margin-bottom: 0.75rem;
+  overflow-x: auto;
 }
 
 /* ── Stats dashboard ── */
@@ -1252,6 +1253,7 @@ code {
 .summary-table {
   width: 100%;
   font-size: 0.82rem;
+  min-width: 300px;
 }
 .summary-table td {
   padding: 0.3rem 0.6rem;
