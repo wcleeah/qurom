@@ -1690,6 +1690,9 @@ function renderLivePipeline(
       isActive("reviseDesignHtml") ? agentListHtml(liveAgents) : "")
   } else if (designExpected) {
     html += nodeRow(14, "runDesignHtml", false, isActive("runDesignHtml"), "(pending)")
+  } else if (researchStatus === "running") {
+    // Research still running — design will trigger after approval
+    html += nodeRow(14, "runDesignHtml", false, false, "(waiting for research)")
   }
 
   html += '</div></div>'
