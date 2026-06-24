@@ -1890,6 +1890,61 @@ async function renderNodePage(runName: string, nodeName: string): Promise<Respon
   })
 }
 
+// ---------------------------------------------------------------------------
+// Debug log
+// ---------------------------------------------------------------------------
+
+async function renderDebugLog(runName: string, files: string[]): Promise<string> {
+  if (!files.includes("debug-log.jsonl")) return ""
+
+  let dirPath: string
+  try { dirPath = safeRunPath(runName) } catch { return "" }
+
+  // Read last 200 lines (tail)
+  let raw: string
+  try {
+    const f = Bun.file(`${dirPath}/debug-log.jsonl`)
+    if (!(await f.exists())) return ""
+    const content = await f.text()
+    const lines = content.trim().split("\n")
+    raw = lines.slice(-200).join("\n")
+  } catch { return "" }
+
+  if (!raw.trim()) return ""
+
+  const entries: Array<{ ts: string; type: string; [k: string]: unknown }> = []
+  for (const line of raw.split("\n")) {
+    try { entries.push(JSON.parse(line)) } catch { /* skip malformed lines */ }
+  }
+
+  if (entries.length === 0) return ""
+
+  let html = '<div class="section"><details class="markdown-preview"><summary>🪵 Debug Log (' + entries.length + ' entries)</summary>'
+  html += '<div style="max-height:500px;overflow-y:auto;font-size:0.72rem;font-family:monospace;"><table class="summary-table" style="font-size:0.7rem;">'
+  html += '<thead><tr><th>Time</th><th>Type</th><th>Data</th></tr></thead><tbody>'
+
+  const colors: Record<string, string> = {
+    error: "var(--red)",
+    complete: "var(--green)",
+    start: "var(--accent)",
+  }
+
+  for (const entry of entries.reverse()) {
+    const { ts, type, ...data } = entry
+    const time = ts ? (ts as string).slice(11, 23) : ""
+    const color = colors[type.split(".")[1] ?? ""] || "var(--muted)"
+    const dataStr = JSON.stringify(data).slice(0, 200)
+    html += `<tr>
+  <td style="white-space:nowrap;color:var(--muted);">${escapeHtml(time)}</td>
+  <td style="white-space:nowrap;color:${color};">${escapeHtml(type)}</td>
+  <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(dataStr)}</td>
+</tr>`
+  }
+
+  html += '</tbody></table></div></details></div>'
+  return html
+}
+
 async function renderRunNav(currentName: string): Promise<string> {
   let names: string[]
   try {
@@ -2494,6 +2549,7 @@ async function renderRun(name: string): Promise<Response> {
   const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, design, depthTierLabel, name)
   const agentActivityHtml = renderAgentActivity(liveStatus)
   const nodeHistoryHtml = renderNodeHistory(liveStatus, name)
+  const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
   const markdownPreviewHtml = await renderMarkdownPreview(name, files)
   const runNavHtml = await renderRunNav(name)
@@ -2519,6 +2575,7 @@ ${failureBannerHtml}
 ${pipelineHtml}
 ${agentActivityHtml}
 ${nodeHistoryHtml}
+${debugLogHtml}
 ${markdownPreviewHtml}
 ${statsHtml}
 ${heroHtml}
