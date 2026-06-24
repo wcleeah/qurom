@@ -1287,10 +1287,10 @@ export async function aggregateConsensus(config: RuntimeConfig, state: ResearchS
   const { approvedAgents, minorOnlyAgents } = approvedAgentsForOutcome(state, unresolved)
   const hasBlockersOrMajors = unresolved.some((f) => f.severity === "blocker" || f.severity === "major")
 
-  // Tier-aware config (fall back to global config if no tier set)
+  // Tier-aware config for round/rebuttal limits only (auditors and unanimity are global)
   const tierConfig = state.depthTier ? config.quorumConfig.depthTiers?.[state.depthTier] : undefined
-  const effectiveAuditors = tierConfig?.auditors ?? config.quorumConfig.auditors
-  const effectiveRequireUnanimous = tierConfig?.requireUnanimousApproval ?? config.quorumConfig.requireUnanimousApproval
+  const effectiveAuditors = config.quorumConfig.auditors
+  const effectiveRequireUnanimous = config.quorumConfig.requireUnanimousApproval
   const effectiveMaxRounds = tierConfig?.maxRounds ?? config.quorumConfig.maxRounds
 
   const auditorsWithOnlyMinors = effectiveAuditors.filter(
