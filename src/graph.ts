@@ -752,11 +752,10 @@ async function runParallelAudits(
   const request = requestLabel(state)
   const auditPromises: Promise<AuditResultRecord>[] = []
 
-  const tierAuditors = state.depthTier && config.quorumConfig.depthTiers?.[state.depthTier]
-    ? config.quorumConfig.depthTiers[state.depthTier].auditors
-    : config.quorumConfig.auditors
+  // Always run all configured auditors — tier only controls round/rebuttal limits
+  const auditors = config.quorumConfig.auditors
   const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
-  for (const agent of tierAuditors) {
+  for (const agent of auditors) {
     auditPromises.push(
       (async () => {
         const session = await createSession(config, `audit:${state.requestId}:${agent}:round:${state.round}`)
