@@ -721,6 +721,9 @@ function classifyFile(filename: string): { group: string; icon: string } {
   if (filename === "request.json") return { group: "Metadata", icon: "📋" }
   if (filename === "summary.json") return { group: "Metadata", icon: "📊" }
   if (filename === "failure.json") return { group: "Metadata", icon: "💥" }
+  if (filename === "debug-log.jsonl") return { group: "Debug", icon: "🪵" }
+  if (filename === "node-history.json") return { group: "Debug", icon: "📋" }
+  if (filename === "live-status.json") return { group: "Debug", icon: "🔄" }
   if (filename === "final.md") return { group: "Final Outputs", icon: "✅" }
   if (filename === "latest-draft.md") return { group: "Final Outputs", icon: "❌" }
   if (filename === "final.html") return { group: "Final Outputs", icon: "🏆" }
@@ -2454,6 +2457,7 @@ async function renderRun(name: string): Promise<Response> {
     "Rebuttal Reviews",
     "Aggregated Findings",
     "Design",
+    "Debug",
     "Other",
   ]
 

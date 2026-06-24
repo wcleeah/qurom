@@ -39,7 +39,10 @@ import {
 } from "./schema"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
+import type { DebugLog } from "./debug-log"
+
 export type RunObserver = {
+  debugLog?: DebugLog
   onNodeStart?: (node: string, state: ResearchState | GraphInput) => void
   onNodeEnd?: (node: string, state: ResearchState | GraphInput) => void
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
@@ -51,10 +54,18 @@ type GraphTelemetry = {
   currentNode?: TraceObservation
   trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
   trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
+  debugLog?: DebugLog
 }
 
 function observeNode(observer: RunObserver | undefined, node: string, state: ResearchState | GraphInput) {
   observer?.onNodeStart?.(node, state)
+  observer?.debugLog?.write("node.start", {
+    node,
+    round: "round" in state ? state.round : undefined,
+    status: "status" in state ? state.status : undefined,
+    depthTier: "depthTier" in state ? (state as any).depthTier : undefined,
+    outputPath: "outputPath" in state ? (state as any).outputPath : undefined,
+  })
 }
 
 function observeNodeResult<T>(
@@ -64,6 +75,11 @@ function observeNodeResult<T>(
   result: T,
 ) {
   observer?.onNodeEnd?.(node, state)
+  observer?.debugLog?.write("node.end", {
+    node,
+    round: "round" in state ? state.round : undefined,
+    status: "status" in state ? state.status : undefined,
+  })
   return result
 }
 
@@ -72,6 +88,11 @@ function observeSession(
   input: { sessionID: string; role: string; requestId: string },
 ) {
   observer?.onSessionCreated?.(input)
+  observer?.debugLog?.write("session.created", {
+    sessionID: input.sessionID,
+    role: input.role,
+    requestId: input.requestId,
+  })
 }
 
 function requestLabel(state: ResearchState) {
@@ -698,6 +719,7 @@ function graphAgentTelemetry(input: {
   return {
     run: input.telemetry.run,
     parentObservation: input.telemetry.currentNode,
+    debugLog: input.telemetry.debugLog,
     name: input.name,
     type: input.type ?? "Agent",
     input:

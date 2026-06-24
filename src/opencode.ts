@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "./config"
+import type { DebugLog } from "./debug-log"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 const assistantInfoSchema = z.object({
@@ -124,6 +125,7 @@ export async function promptAgent<T>(input: {
     parentObservation?: TraceObservation
     trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
     trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
+    debugLog?: DebugLog
     name: string
     input?: unknown
     metadata?: unknown
@@ -212,6 +214,18 @@ export async function promptAgent<T>(input: {
       agent: input.agent,
       variant: input.variant,
       parts,
+    })
+
+    input.telemetry?.debugLog?.write("session.prompt", {
+      sessionID: activeSessionID,
+      agent: input.agent,
+      variant: input.variant,
+      promptLength: prompt.length,
+      inputFiles: input.inputFiles?.map((f) => ({ name: f.filename, path: f.path })),
+      outputFile: input.outputFile,
+      hasSchema: Boolean(input.schema),
+      hasError: Boolean(response.error),
+      hasData: Boolean(response.data),
     })
 
     if (response.error) {

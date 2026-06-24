@@ -1,6 +1,7 @@
 import { createGraph } from "./graph"
 import { createOpencodeEventBridge } from "./opencode-event-bridge"
 import { createLiveStatusWriter } from "./live-status"
+import { createDebugLog, type DebugLog } from "./debug-log"
 import { abortSession } from "./opencode"
 import { removeEmptyRunDir, writeFailedArtifacts } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
@@ -343,6 +344,8 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   const bridgeAbort = new AbortController()
   let bridgeStreamError: unknown
   let liveStatusWriter: ReturnType<typeof createLiveStatusWriter> | undefined
+  let debugLog: DebugLog | undefined
+  const debugLogRef: { current: DebugLog | undefined } = { current: undefined }
   if (signal) {
     if (signal.aborted) {
         bridgeAbort.abort(signal.reason)
@@ -386,6 +389,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
 
       const graph = graphFactory(config, promptBundle, {
         observer: {
+          debugLog: { write(type, data) { debugLogRef.current?.write(type, data) } } as DebugLog,
           onNodeStart(node, state) {
             bus.emit({ kind: "graph.node", node, phase: "start", state: structuredClone(state) })
           },
@@ -397,6 +401,20 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
               if (op) {
                 liveStatusWriter = createLiveStatusWriter(bus, op, {
                   maxRounds: config.quorumConfig.maxRounds,
+                }, debugLog)
+                debugLog = createDebugLog(op)
+                debugLogRef.current = debugLog
+                debugLog.write("pipeline.start", {
+                  requestId,
+                  inputMode: request.inputMode,
+                  topic: request.inputMode === "topic" ? request.topic : undefined,
+                  documentPath: request.inputMode === "document" ? request.documentPath : undefined,
+                  recursionLimit: config.quorumConfig.recursionLimit,
+                  maxRounds: config.quorumConfig.maxRounds,
+                  designatedDrafter: config.quorumConfig.designatedDrafter,
+                  auditors: config.quorumConfig.auditors,
+                  designQuorum: config.quorumConfig.designQuorum?.enabled ?? false,
+                  depthTierDefault: config.quorumConfig.depthTierDefault,
                 })
               }
             }
@@ -412,6 +430,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
           run: telemetry,
           trackSessionObservation: telemetryListener.trackSessionObservation,
           trackAgentMetadata,
+          debugLog: { write(type, data) { debugLogRef.current?.write(type, data) } } as DebugLog,
         },
       })
 
@@ -462,6 +481,14 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
       return invocation
     })
 
+    debugLogRef.current?.write("pipeline.complete", {
+      status: runResult.status,
+      round: runResult.round,
+      outputPath: runResult.outputPath,
+      approvedAgents: runResult.approvedAgents?.length,
+      unresolvedFindings: runResult.unresolvedFindings?.length,
+    })
+
     bus.emit({ kind: "result", runResult })
     bus.emit({
       kind: "lifecycle",
@@ -479,6 +506,11 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
       raw: runResult,
     }
   } catch (error) {
+    debugLogRef.current?.write("pipeline.error", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      bridgeStreamError: bridgeStreamError instanceof Error ? bridgeStreamError.message : String(bridgeStreamError ?? ""),
+    })
     const graph = graphFactory(config, promptBundle)
     const failure = normalizeFailure(error, bridgeStreamError)
     const checkpoint =
@@ -553,6 +585,9 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
     throw failure.surfaced
   } finally {
       offSessionCreated()
+      if (debugLog) {
+        try { debugLog.write("pipeline.finalize", {}); await debugLog.close() } catch { /* ignore */ }
+      }
       if (liveStatusWriter) {
         try {
           liveStatusWriter.dispose()

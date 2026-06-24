@@ -1,6 +1,7 @@
 import { writeFile, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import type { EventBus } from "./runner"
+import type { DebugLog } from "./debug-log"
 
 export interface ToolCallEntry {
   tool: string
@@ -53,6 +54,7 @@ export function createLiveStatusWriter(
   bus: EventBus,
   runDir: string | (() => string | undefined),
   config: { maxRounds: number },
+  debugLog?: DebugLog,
 ): { dispose: () => void } {
   const status: LiveStatus = {
     phase: "running",

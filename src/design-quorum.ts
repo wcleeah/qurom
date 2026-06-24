@@ -13,7 +13,10 @@ import type { RuntimeConfig } from "./config"
 import type { PromptBundle } from "./prompt-assets"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
+import type { DebugLog } from "./debug-log"
+
 export type RunObserver = {
+  debugLog?: DebugLog
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
   onDesignPhase?: (phase: "drafting" | "auditing" | "aggregating" | "revising", round: number) => void
 }
