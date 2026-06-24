@@ -1662,11 +1662,7 @@ async function interactiveEnhanceNode(
     config,
     sessionID: session.id,
     agent: "interactive-enhancer",
-    prompt: [
-      `Enhance the HTML document with interactivity. The file is attached as document.html.`,
-      `Edit the file directly — add Mermaid diagrams, collapsible sections, table of contents, copy buttons, and smooth scroll.`,
-      `Output file: ${htmlFile}`,
-    ].join("\n"),
+    prompt: (promptBundle.assets.enhanceDesign as string).replace("{outputFile}", htmlFile),
     outputFile: htmlFile,
     inputFiles: [
       { path: htmlFile, mime: "text/plain", filename: "document.html" },
