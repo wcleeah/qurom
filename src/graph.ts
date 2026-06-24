@@ -1857,7 +1857,7 @@ export function routeAfterAggregate(state: ResearchState) {
 
 export function routeAfterSummarize(config: RuntimeConfig, state: ResearchState) {
   if (state.status === "approved" && config.quorumConfig.designQuorum?.enabled) {
-    return "designHtml"
+    return "runDesignHtml"
   }
   return "__end__"
 }
@@ -1987,8 +1987,8 @@ export function createGraph(
     .addNode("summarizeOutputArtifact", async (state) =>
       withNodeTelemetry("summarizeOutputArtifact", state, () => summarizeOutputArtifact(config, state, graphTelemetry)),
     )
-    .addNode("designHtml", async (state) =>
-      withNodeTelemetry("designHtml", state, () =>
+    .addNode("runDesignHtml", async (state) =>
+      withNodeTelemetry("runDesignHtml", state, () =>
         designHtmlNode(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
@@ -2038,10 +2038,10 @@ export function createGraph(
     .addEdge("finalizeApprovedDraft", "summarizeOutputArtifact")
     .addEdge("finalizeFailedRun", "summarizeOutputArtifact")
     .addConditionalEdges("summarizeOutputArtifact", (state) => routeAfterSummarize(config, state), [
-      "designHtml",
+      "runDesignHtml",
       "__end__",
     ])
-    .addEdge("designHtml", "runDesignAudits")
+    .addEdge("runDesignHtml", "runDesignAudits")
     .addEdge("runDesignAudits", "aggregateDesignFindings")
     .addConditionalEdges("aggregateDesignFindings", (state) => routeAfterDesignAggregate(config, state), [
       "reviseDesignHtml",

@@ -74,6 +74,11 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
       {/* Header */}
       <box flexDirection="row" gap={1} flexShrink={0}>
         <text fg={theme.accent}>research-qurom</text>
+        {lifecyclePhase === "starting" && (
+          <text fg={theme.status.running}>
+            · Starting… · {formatElapsed(elapsed)}
+          </text>
+        )}
         {researchStatus && (
           <text fg={theme.textMuted}>
             · {researchStatus} · Round {round}/{maxRounds}
@@ -82,6 +87,11 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
         {graphNode && (
           <text fg={theme.status.running}>
             · {graphNode} · {formatElapsed(elapsed)}
+          </text>
+        )}
+        {!graphNode && lifecyclePhase === "running" && (
+          <text fg={theme.textMuted}>
+            · {formatElapsed(elapsed)}
           </text>
         )}
       </box>
