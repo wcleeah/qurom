@@ -718,6 +718,9 @@ export async function runDesignPipeline(args: {
   }
 
   const debugLog = createDebugLog(runDir)
+  const liveStatusWriter = createLiveStatusWriter(bus, () => runDir, {
+    maxRounds: config.quorumConfig.designQuorum?.maxRounds ?? config.quorumConfig.maxRounds,
+  })
   const bridge = createOpencodeEventBridge(config, { bus, getRunDir: () => runDir })
   const bridgeAbort = new AbortController()
 
@@ -788,6 +791,7 @@ export async function runDesignPipeline(args: {
     bus.emit({ kind: "lifecycle", phase: "error", requestId, traceId: telemetry.traceId, error })
     throw error
   } finally {
+    try { liveStatusWriter.dispose() } catch {}
     try { await debugLog.close() } catch {}
     try { await bridge.stop() } catch {}
     try { await telemetry.shutdown() } catch {}
