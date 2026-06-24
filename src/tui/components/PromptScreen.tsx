@@ -73,7 +73,6 @@ export const PromptScreen = ({ onSubmit }: PromptScreenProps) => {
                 width="100%"
                 value={topic}
                 onInput={setTopic}
-                onSubmit={submitTopic}
               />
             ) : (
               <input
@@ -82,7 +81,6 @@ export const PromptScreen = ({ onSubmit }: PromptScreenProps) => {
                 width="100%"
                 value={documentPath}
                 onInput={setDocumentPath}
-                onSubmit={submitDocument}
               />
             )}
           </box>
