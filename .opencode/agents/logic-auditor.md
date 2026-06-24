@@ -4,7 +4,7 @@ mode: subagent
 model: opencode-go/deepseek-v4-pro
 variant: max
 permission:
-  read: "runs/**"
+  read: allow
   glob: deny
   grep: deny
   list: deny
@@ -12,7 +12,7 @@ permission:
   websearch: allow
   codesearch: allow
   skill: deny
-  edit: "runs/**/audit-logic-auditor-*.json"
+  edit: allow
   bash: deny
   task: deny
   question: deny

@@ -4,7 +4,7 @@ mode: subagent
 model: opencode-go/kimi-k2.7-code
 variant: high
 permission:
-  read: "runs/**"
+  read: allow
   glob: deny
   grep: deny
   list: deny
@@ -12,7 +12,7 @@ permission:
   websearch: allow
   codesearch: allow
   skill: deny
-  edit: "runs/**/*.html"
+  edit: allow
   bash: deny
   task: deny
   question: deny
