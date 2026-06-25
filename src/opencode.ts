@@ -44,25 +44,64 @@ function formatStructuredError(error: unknown) {
   return JSON.stringify(error)
 }
 
+/**
+ * Categorized failure classes for the structured-output recovery router.
+ * - nooutput: agent produced no usable bytes (empty inline / file missing / unreadable)
+ * - truncated: JSON cut off before closing → continue generation in the same agent
+ * - syntax:   strict JSON.parse fails (escapes, commas, fences/prefix that coerceJson couldn't recover)
+ * - schema:   strict JSON parsed fine but zod semantic/enum rules rejected it
+ * - transport: OpenCode transport/runtime error (response.error, no data, continue_failed)
+ */
+export type Fault = "nooutput" | "truncated" | "syntax" | "schema" | "transport"
+
+export class StructuredRecoveryError extends Error {
+  readonly fault: Fault
+  readonly attempts: number
+  readonly lastError: unknown
+  constructor(fault: Fault, attempts: number, lastError: unknown, msg?: string) {
+    super(msg ?? `${fault}_unresolved (attempts=${attempts})`)
+    this.name = "StructuredRecoveryError"
+    this.fault = fault
+    this.attempts = attempts
+    this.lastError = lastError
+  }
+}
+
+export function classifyFault(err: unknown): Fault {
+  if (err instanceof StructuredRecoveryError) return err.fault
+  if (err instanceof z.ZodError) return "schema"
+  if (err instanceof TruncatedJsonError) return "truncated"
+  if (err instanceof SyntaxError) return "syntax"
+  // readOutputFile.ok === false already routed upstream; this branch shouldn't be hit here.
+  return "nooutput"
+}
+
 function buildStructuredRepairPrompt(input: {
   schema: Record<string, unknown>
   previousResponse: string
   error: unknown
+  zodIssues?: z.ZodIssue[]
 }) {
-  return [
+  const lines = [
     "Your previous response did not match the required output format.",
     "Return only a single JSON object as plain text.",
     "Do not include markdown fences, prose, or explanation.",
     "<required_json_schema>",
     JSON.stringify(input.schema, null, 2),
     "</required_json_schema>",
-    "<validation_errors>",
-    formatStructuredError(input.error),
-    "</validation_errors>",
-    "<previous_response>",
-    input.previousResponse,
-    "</previous_response>",
-  ].join("\n\n")
+  ]
+  if (input.zodIssues && input.zodIssues.length > 0) {
+    lines.push(
+      "<zod_issues>",
+      input.zodIssues.map((i) => `at ${i.path.join(".") || "(root)"}: ${i.message}`).join("\n"),
+      "</zod_issues>",
+      "The JSON parsed but does not match the schema — correct the values, keep the structure.",
+    )
+  } else {
+    lines.push("<validation_errors>", formatStructuredError(input.error), "</validation_errors>")
+  }
+  lines.push("<previous_response>", input.previousResponse, "</previous_response>")
+  return lines.join("\n\n")
 }
 
 function buildFileRepairPrompt(input: {
@@ -132,8 +171,45 @@ export function coerceJson(text: string): string {
   return end === -1 ? t : t.slice(start, end + 1)
 }
 
+function hasBalancedJsonClose(text: string): boolean {
+  const t = text.trim()
+  const start = t.search(/[\[{]/)
+  if (start === -1) return false
+  const open = t[start]
+  const close = open === "{" ? "}" : "]"
+  let depth = 0
+  let inStr = false
+  let esc = false
+  for (let i = start; i < t.length; i++) {
+    const c = t[i]
+    if (inStr) {
+      if (esc) esc = false
+      else if (c === "\\") esc = true
+      else if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') inStr = true
+    else if (c === open) depth++
+    else if (c === close) {
+      depth--
+      if (depth === 0) return true
+    }
+  }
+  return false
+}
+
+/** Raised when the JSON payload has no balanced closer (truncated mid-generation). */
+export class TruncatedJsonError extends SyntaxError {
+  constructor(message = "JSON payload appears truncated: no balanced close brace found") {
+    super(message)
+    this.name = "TruncatedJsonError"
+  }
+}
+
 function parseStructuredResponse<T>(schema: z.ZodType<T>, text: string) {
-  return schema.parse(JSON.parse(coerceJson(text)))
+  const coerced = coerceJson(text)
+  if (!hasBalancedJsonClose(coerced)) throw new TruncatedJsonError()
+  return schema.parse(JSON.parse(coerced))
 }
 
 function generationMetadata(input: {
@@ -314,7 +390,10 @@ export async function promptAgent<T>(input: {
             level: "ERROR",
             statusMessage: `OpenCode prompt failed: ${JSON.stringify(response.error)}`,
           })
-          throw new Error(
+          throw new StructuredRecoveryError(
+            "transport",
+            transportAttempt + 1,
+            response.error,
             `transport.prompt_failed: Failed to prompt agent ${input.agent} in session ${activeSessionID}: ${JSON.stringify(response.error)}`,
           )
         }
@@ -322,7 +401,7 @@ export async function promptAgent<T>(input: {
           level: "ERROR",
           statusMessage: "OpenCode returned no response data",
         })
-        throw new Error(`transport.prompt_failed: OpenCode returned no response data for agent ${input.agent} in session ${activeSessionID}`)
+        throw new StructuredRecoveryError("transport", 2, "no data", `transport.prompt_failed: OpenCode returned no response data for agent ${input.agent} in session ${activeSessionID}`)
       }
       break
     }
@@ -330,7 +409,7 @@ export async function promptAgent<T>(input: {
     // Defensive: the loop above always either assigns response and breaks, or throws.
     // This narrowing keeps TS happy and is belt-and-braces for any future edit.
     if (!response || !response.data) {
-      throw new Error(`transport.prompt_failed: unreachable: response unset after retry loop for agent ${input.agent}`)
+      throw new StructuredRecoveryError("transport", 2, undefined, `transport.prompt_failed: unreachable: response unset after retry loop for agent ${input.agent}`)
     }
 
     const info = assistantInfoSchema.parse(response.data.info)
@@ -378,7 +457,10 @@ export async function promptAgent<T>(input: {
           parts: [{ type: "text", text: "Continue. Produce your output now." } satisfies TextPartInput],
         })
         if (continueResponse.error || !continueResponse.data) {
-          throw new Error(
+          throw new StructuredRecoveryError(
+            "transport",
+            continueAttempt + 1,
+            continueResponse.error,
             `transport.continue_failed: continue prompt errored for agent ${input.agent} in session ${activeSessionID}: ${JSON.stringify(continueResponse.error ?? "no data")}`,
           )
         }
@@ -475,13 +557,15 @@ export async function promptAgent<T>(input: {
     const fileContentRead = await readOutputFile()
     const fileContent = fileContentRead.ok ? fileContentRead.text : undefined
 
-    async function parseAndReturn(schema: z.ZodType<T>, sourceText: string, sourceLabel: string) {
+    async function parseAndReturn(schema: z.ZodType<T>, sourceText: string, _sourceLabel: string) {
+      void _sourceLabel
       try {
         const structured = parseStructuredResponse(schema, sourceText)
         await input.telemetry?.run.endObservation(agentObservation, {
           output: {
             response: sourceText,
             parsed: structured,
+            parseSource: _sourceLabel,
             outputFile: input.outputFile,
             structured: true,
             repaired,
@@ -502,118 +586,174 @@ export async function promptAgent<T>(input: {
           provider,
         }
       } catch (err) {
-        throw new Error(
-          `Structured response ${sourceLabel} from agent ${input.agent} could not be parsed: ${formatStructuredError(err)}`,
-        )
+        // Do not wrap — rethrow the original typed error so the router can
+        // classifyFault it (ZodError -> schema, SyntaxError -> syntax/truncated).
+        throw err
       }
     }
 
-    // Prefer file output if available — with repair on parse failure
-    if (fileContent) {
-      try {
-        return await parseAndReturn(input.schema, fileContent, `from file ${input.outputFile}`)
-      } catch (fileParseError) {
-        input.telemetry?.debugLog?.write("session.file_repair", {
-          sessionID: activeSessionID,
-          agent: input.agent,
-          error: formatStructuredError(fileParseError),
+    // Recovery router: D (coerce, inside parseAndReturn) -> classifyFault -> A/B/C.
+    //   A nooutput/truncated: reprompt the SAME agent in the current in-session.
+    //   B schema:             same agent, with <zod_issues> embedded in the repair prompt.
+    //   C syntax (with outputFile + json-fixer budget): json-fixer agent rewrites the file on disk.
+    //   If syntax has no outputFile / no C-budget, fall back to A with a generic repair prompt.
+    // On budget exhaustion we throw a typed StructuredRecoveryError so Phase 3.5's outer
+    //   fresh-session restart wrapper can match on instanceof StructuredRecoveryError.
+    const wantFile = Boolean(input.outputFile)
+    let raw: string
+    let sourceLabel: string
+    if (wantFile && fileContent) {
+      raw = fileContent
+      sourceLabel = `from file ${input.outputFile}`
+    } else {
+      raw = initialResponse.text
+      sourceLabel = "from inline response"
+    }
+
+    async function repromptSameAgentRaw(
+      kind: Fault,
+      parseErr: unknown,
+      previousResponse: string,
+    ): Promise<{ text: string; sourceLabel: string }> {
+      let repairPrompt: string
+      if (kind === "schema") {
+        const zodErr = parseErr instanceof z.ZodError ? parseErr : undefined
+        repairPrompt = buildStructuredRepairPrompt({
+          schema: jsonSchema,
+          previousResponse,
+          error: parseErr,
+          zodIssues: zodErr?.issues,
         })
-        // File parse failed — create a repair session to fix the malformed JSON
-        repaired = true
-        const repairSession = await createSession(input.config, `json-fixer:${input.outputFile}`)
-        input.telemetry?.trackSessionObservation?.(repairSession.id, agentObservation)
-        const previousSessionID = activeSessionID
-        activeSessionID = repairSession.id
-        // Temporarily switch agent for the repair call
-        const savedAgent = input.agent
-        input.agent = "json-fixer"
-
-        await sendPrompt(
-          buildFileRepairPrompt({
-            outputFile: input.outputFile!,
-            parseError: formatStructuredError(fileParseError),
-          }),
-        )
-        input.agent = savedAgent
-        activeSessionID = previousSessionID
-
-        // Re-read the repaired file
-        const repairedFileRead = await readOutputFile()
-        const repairedFile = repairedFileRead.ok ? repairedFileRead.text : undefined
-        if (!repairedFile) {
-          throw new Error(
-            `Agent ${input.agent} failed to repair output file ${input.outputFile}: file not written after repair`,
-          )
-        }
-
-        try {
-          return await parseAndReturn(input.schema, repairedFile, `from repaired file ${input.outputFile}`)
-        } catch (repairError) {
-          throw new Error(
-            [
-              `Structured response in file ${input.outputFile} from agent ${input.agent} remained invalid after repair.`,
-              `Initial error: ${formatStructuredError(fileParseError)}`,
-              `Repair error: ${formatStructuredError(repairError)}`,
-            ].join("\n"),
-          )
-        }
+      } else if (kind === "truncated") {
+        repairPrompt = [
+          "Your previous JSON output was cut off before it closed.",
+          "Continue the JSON exactly from where you left off; do not repeat content already written.",
+          "Do not include any prose or markdown. Output only the continuation.",
+          "<previous_output>",
+          previousResponse,
+          "</previous_output>",
+          "<validation_errors>",
+          formatStructuredError(parseErr),
+          "</validation_errors>",
+        ].join("\n\n")
+      } else if (kind === "nooutput" && wantFile) {
+        repairPrompt = [
+          "You were asked to write valid JSON to the file path below but produced no usable output.",
+          `Write the complete JSON object to \`${input.outputFile}\` now.`,
+          "Do not respond inline. Do not include prose or markdown. Write the file, then respond OK.",
+          "<required_json_schema>",
+          JSON.stringify(jsonSchema, null, 2),
+          "</required_json_schema>",
+        ].join("\n\n")
+      } else {
+        // nooutput (no file requested) or syntax-fallback: generic structured repair.
+        repairPrompt = buildStructuredRepairPrompt({
+          schema: jsonSchema,
+          previousResponse,
+          error: parseErr,
+        })
       }
+      const repairedResponse = await sendPrompt(repairPrompt)
+      if (wantFile) {
+        const fr = await readOutputFile()
+        if (fr.ok) return { text: fr.text, sourceLabel: `from file ${input.outputFile}` }
+      }
+      return { text: repairedResponse.text, sourceLabel: "from inline response" }
     }
 
-    try {
-      return await parseAndReturn(input.schema, initialResponse.text, "from inline response")
-    } catch (initialError) {
-      repaired = true
-      const repairSession = await createSession(input.config, `${input.agent}:repair`)
+    async function repairWithJsonFixerOnce(
+      parseErr: unknown,
+      previousResponse: string,
+    ): Promise<{ text: string; sourceLabel: string }> {
+      const target = input.outputFile!
+      const existing = await readOutputFile()
+      if (!existing.ok || existing.text !== previousResponse) {
+        await Bun.write(target, previousResponse)
+      }
+      const repairSession = await createSession(input.config, `json-fixer:${target}`)
       input.telemetry?.trackSessionObservation?.(repairSession.id, agentObservation)
       const previousSessionID = activeSessionID
+      const savedAgent = input.agent
       activeSessionID = repairSession.id
-      const repairedResponse = await sendPrompt(
-        buildStructuredRepairPrompt({
-          schema: jsonSchema,
-          previousResponse: initialResponse.text,
-          error: initialError,
-        }),
-      )
-      activeSessionID = previousSessionID
-
+      input.agent = "json-fixer"
       try {
-        const structured = parseStructuredResponse(input.schema, repairedResponse.text)
-
-        await input.telemetry?.run.endObservation(agentObservation, {
-          output: {
-            response: repairedResponse.text,
-            parsed: structured,
-            structured: true,
-            repaired,
-          },
-          metadata: {
-            agentName: input.agent,
-            sessionId: repairSession.id,
-            model,
-            provider,
-            variant,
-            repaired,
-          },
-        })
-
-        return {
-          text: undefined,
-          structured,
-          model,
-          provider,
-        }
-      } catch (repairError) {
-        throw new Error(
-          [
-            `Structured response from agent ${input.agent} in session ${repairSession.id} remained invalid after repair.`,
-            `Initial error: ${formatStructuredError(initialError)}`,
-            `Repair error: ${formatStructuredError(repairError)}`,
-            `Last response: ${JSON.stringify(repairedResponse.text)}`,
-          ].join("\n"),
+        await sendPrompt(
+          buildFileRepairPrompt({
+            outputFile: target,
+            parseError: formatStructuredError(parseErr),
+          }),
+        )
+      } finally {
+        // Always restore agent/session; the original code could leave them mutated on throw.
+        input.agent = savedAgent
+        activeSessionID = previousSessionID
+      }
+      const after = await readOutputFile()
+      if (!after.ok) {
+        throw new StructuredRecoveryError(
+          "syntax",
+          99,
+          parseErr,
+          `json-fixer did not produce a readable file at ${target}`,
         )
       }
+      return { text: after.text, sourceLabel: `from repaired file ${target}` }
     }
+
+    const budget = { sameAgent: 2, jsonFixer: 2 }
+    const maxAttempts = 8 // global cap; per-fault budgets guarantee <= 2 A + <= 2 C overall
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await parseAndReturn(input.schema, raw, sourceLabel)
+      } catch (err) {
+        // Transport-class errors from sendPrompt bubble out immediately; they originate
+        // in the reprompt/repair handlers below, not parseAndReturn, so detect-instanceof.
+        if (err instanceof StructuredRecoveryError && err.fault === "transport") throw err
+
+        const fault = classifyFault(err)
+        input.telemetry?.debugLog?.write("session.recovery.classify", {
+          sessionID: activeSessionID,
+          agent: input.agent,
+          attempt,
+          fault,
+          budgetSameAgentLeft: budget.sameAgent,
+          budgetJsonFixerLeft: budget.jsonFixer,
+        })
+        repaired = true
+
+        if (fault === "syntax" && input.outputFile && budget.jsonFixer > 0) {
+          // C branch: json-fixer on disk
+          budget.jsonFixer--
+          input.telemetry?.debugLog?.write("session.repair.json_fixer", {
+            sessionID: activeSessionID,
+            agent: input.agent,
+            attempt,
+          })
+          const after = await repairWithJsonFixerOnce(err, raw)
+          raw = after.text
+          sourceLabel = after.sourceLabel
+          continue
+        }
+
+        // A/B branches: same agent, in-session
+        if (budget.sameAgent <= 0) {
+          throw new StructuredRecoveryError(fault, attempt, err)
+        }
+        budget.sameAgent--
+        input.telemetry?.debugLog?.write("session.recovery.reprompt", {
+          sessionID: activeSessionID,
+          agent: input.agent,
+          kind: fault,
+          attempt,
+        })
+        const reprompted = await repromptSameAgentRaw(fault, err, raw)
+        raw = reprompted.text
+        sourceLabel = reprompted.sourceLabel
+        continue
+      }
+    }
+    throw new StructuredRecoveryError("nooutput", maxAttempts, undefined, `recovery budget exhausted for agent ${input.agent}`)
+
   } catch (error) {
     await input.telemetry?.run.endObservation(agentObservation, {
       level: "ERROR",
