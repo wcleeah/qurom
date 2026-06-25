@@ -80,8 +80,60 @@ function buildFileRepairPrompt(input: {
   ].join("\n\n")
 }
 
+/**
+ * Free-tier (D) pre-clean: strip a single wrapping ```json/``` fence or <json>/<output>
+ * tag pair, then slice the first balanced {...} or [...] block (string-aware so
+ * backticks and quotes inside string values are never stripped).
+ * Returns the original text trimmed if no opener is found, so JSON.parse still
+ * fails with a faithful error for the router to classify.
+ */
+export function coerceJson(text: string): string {
+  let t = text.trim()
+  // strip a single leading ```json or ``` fence (anchored, only if matching closer exists)
+  const fenceStart = t.match(/^```(?:json)?\s*/i)
+  if (fenceStart) {
+    const closer = t.search(/\n```\s*$/)
+    if (closer !== -1) t = t.slice(fenceStart[0].length, closer)
+  }
+  // strip a single leading <json>…</json> or <output>…</output> tag wrap
+  const tagMatch = t.match(/^<(json|output)>\s*/)
+  if (tagMatch) {
+    const closeTag = `</${tagMatch[1]}>`
+    const closeIdx = t.indexOf(closeTag)
+    if (closeIdx !== -1) t = t.slice(tagMatch[0].length, closeIdx)
+  }
+  t = t.trim()
+  const start = t.search(/[\[{]/)
+  if (start === -1) return t
+  const open = t[start]
+  const close = open === "{" ? "}" : "]"
+  let depth = 0
+  let inStr = false
+  let esc = false
+  let end = -1
+  for (let i = start; i < t.length; i++) {
+    const c = t[i]
+    if (inStr) {
+      if (esc) esc = false
+      else if (c === "\\") esc = true
+      else if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') inStr = true
+    else if (c === open) depth++
+    else if (c === close) {
+      depth--
+      if (depth === 0) {
+        end = i
+        break
+      }
+    }
+  }
+  return end === -1 ? t : t.slice(start, end + 1)
+}
+
 function parseStructuredResponse<T>(schema: z.ZodType<T>, text: string) {
-  return schema.parse(JSON.parse(text))
+  return schema.parse(JSON.parse(coerceJson(text)))
 }
 
 function generationMetadata(input: {
@@ -421,7 +473,7 @@ export async function promptAgent<T>(input: {
     // Prefer file output if available — with repair on parse failure
     if (fileContent) {
       try {
-        return parseAndReturn(input.schema, fileContent, `from file ${input.outputFile}`)
+        return await parseAndReturn(input.schema, fileContent, `from file ${input.outputFile}`)
       } catch (fileParseError) {
         input.telemetry?.debugLog?.write("session.file_repair", {
           sessionID: activeSessionID,
@@ -456,7 +508,7 @@ export async function promptAgent<T>(input: {
         }
 
         try {
-          return parseAndReturn(input.schema, repairedFile, `from repaired file ${input.outputFile}`)
+          return await parseAndReturn(input.schema, repairedFile, `from repaired file ${input.outputFile}`)
         } catch (repairError) {
           throw new Error(
             [
@@ -470,7 +522,7 @@ export async function promptAgent<T>(input: {
     }
 
     try {
-      return parseAndReturn(input.schema, initialResponse.text, "from inline response")
+      return await parseAndReturn(input.schema, initialResponse.text, "from inline response")
     } catch (initialError) {
       repaired = true
       const repairSession = await createSession(input.config, `${input.agent}:repair`)
