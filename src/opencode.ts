@@ -276,41 +276,61 @@ export async function promptAgent<T>(input: {
       }
     }
 
-    const response = await client.session.prompt({
-      sessionID: activeSessionID,
-      agent: input.agent,
-      variant: input.variant,
-      parts,
-    })
-
-    input.telemetry?.debugLog?.write("session.prompt", {
-      sessionID: activeSessionID,
-      agent: input.agent,
-      variant: input.variant,
-      promptLength: prompt.length,
-      inputFiles: input.inputFiles?.map((f) => ({ name: f.filename, path: f.path })),
-      outputFile: input.outputFile,
-      hasSchema: Boolean(input.schema),
-      hasError: Boolean(response.error),
-      hasData: Boolean(response.data),
-    })
-
-    if (response.error) {
-      await input.telemetry?.run.endObservation(generationObservation, {
-        level: "ERROR",
-        statusMessage: `OpenCode prompt failed: ${JSON.stringify(response.error)}`,
+    const maxTransportAttempts = 2
+    let response
+    for (let transportAttempt = 0; transportAttempt < maxTransportAttempts; transportAttempt++) {
+      response = await client.session.prompt({
+        sessionID: activeSessionID,
+        agent: input.agent,
+        variant: input.variant,
+        parts,
       })
-      throw new Error(
-        `Failed to prompt agent ${input.agent} in session ${activeSessionID}: ${JSON.stringify(response.error)}`,
-      )
+
+      input.telemetry?.debugLog?.write("session.prompt", {
+        sessionID: activeSessionID,
+        agent: input.agent,
+        variant: input.variant,
+        promptLength: prompt.length,
+        inputFiles: input.inputFiles?.map((f) => ({ name: f.filename, path: f.path })),
+        outputFile: input.outputFile,
+        hasSchema: Boolean(input.schema),
+        hasError: Boolean(response.error),
+        hasData: Boolean(response.data),
+      })
+
+      if (response.error || !response.data) {
+        if (transportAttempt + 1 < maxTransportAttempts) {
+          input.telemetry?.debugLog?.write("session.transport_retry", {
+            sessionID: activeSessionID,
+            agent: input.agent,
+            attempt: transportAttempt + 1,
+            error: response.error ? JSON.stringify(response.error) : "no data",
+          })
+          await new Promise((r) => setTimeout(r, 200))
+          continue
+        }
+        if (response.error) {
+          await input.telemetry?.run.endObservation(generationObservation, {
+            level: "ERROR",
+            statusMessage: `OpenCode prompt failed: ${JSON.stringify(response.error)}`,
+          })
+          throw new Error(
+            `transport.prompt_failed: Failed to prompt agent ${input.agent} in session ${activeSessionID}: ${JSON.stringify(response.error)}`,
+          )
+        }
+        await input.telemetry?.run.endObservation(generationObservation, {
+          level: "ERROR",
+          statusMessage: "OpenCode returned no response data",
+        })
+        throw new Error(`transport.prompt_failed: OpenCode returned no response data for agent ${input.agent} in session ${activeSessionID}`)
+      }
+      break
     }
 
-    if (!response.data) {
-      await input.telemetry?.run.endObservation(generationObservation, {
-        level: "ERROR",
-        statusMessage: "OpenCode returned no response data",
-      })
-      throw new Error(`OpenCode returned no response data for agent ${input.agent} in session ${activeSessionID}`)
+    // Defensive: the loop above always either assigns response and breaks, or throws.
+    // This narrowing keeps TS happy and is belt-and-braces for any future edit.
+    if (!response || !response.data) {
+      throw new Error(`transport.prompt_failed: unreachable: response unset after retry loop for agent ${input.agent}`)
     }
 
     const info = assistantInfoSchema.parse(response.data.info)
@@ -349,14 +369,27 @@ export async function promptAgent<T>(input: {
         sessionID: activeSessionID,
         agent: input.agent,
       })
-      const continueResponse = await client.session.prompt({
-        sessionID: activeSessionID,
-        agent: input.agent,
-        variant: input.variant,
-        parts: [{ type: "text", text: "Continue. Produce your output now." } satisfies TextPartInput],
-      })
-      if (continueResponse.data && !continueResponse.error) {
+      const maxContinueAttempts = 2
+      for (let continueAttempt = 0; continueAttempt < maxContinueAttempts && !finalText.trim(); continueAttempt++) {
+        const continueResponse = await client.session.prompt({
+          sessionID: activeSessionID,
+          agent: input.agent,
+          variant: input.variant,
+          parts: [{ type: "text", text: "Continue. Produce your output now." } satisfies TextPartInput],
+        })
+        if (continueResponse.error || !continueResponse.data) {
+          throw new Error(
+            `transport.continue_failed: continue prompt errored for agent ${input.agent} in session ${activeSessionID}: ${JSON.stringify(continueResponse.error ?? "no data")}`,
+          )
+        }
         finalText = extractText(continueResponse.data.parts)
+        if (!finalText.trim()) {
+          input.telemetry?.debugLog?.write("session.empty_response", {
+            sessionID: activeSessionID,
+            agent: input.agent,
+            continueAttempt: continueAttempt + 1,
+          })
+        }
       }
     }
 
@@ -383,19 +416,23 @@ export async function promptAgent<T>(input: {
     }
   }
 
-  async function readOutputFile(): Promise<string | undefined> {
-    if (!input.outputFile) return undefined
-    const file = Bun.file(input.outputFile)
-    if (!(await file.exists())) {
-      console.warn(`[opencode] Output file not written by agent: ${input.outputFile}`)
-      return undefined
+  async function readOutputFile(): Promise<{ ok: true; text: string } | { ok: false; reason: "missing" | "empty" | "unreadable"; err?: string }> {
+    if (!input.outputFile) return { ok: false, reason: "missing" }
+    try {
+      const file = Bun.file(input.outputFile)
+      if (!(await file.exists())) {
+        console.warn(`[opencode] Output file not written by agent: ${input.outputFile}`)
+        return { ok: false, reason: "missing", err: "file does not exist" }
+      }
+      const content = await file.text()
+      if (!content.trim()) {
+        console.warn(`[opencode] Output file empty: ${input.outputFile}`)
+        return { ok: false, reason: "empty" }
+      }
+      return { ok: true, text: content }
+    } catch (e) {
+      return { ok: false, reason: "unreadable", err: e instanceof Error ? e.message : String(e) }
     }
-    const content = await file.text()
-    if (!content.trim()) {
-      console.warn(`[opencode] Output file empty: ${input.outputFile}`)
-      return undefined
-    }
-    return content
   }
 
   try {
@@ -403,14 +440,14 @@ export async function promptAgent<T>(input: {
       const response = await sendPrompt(prompt)
 
       // If outputFile was requested, read it back (agent wrote there instead of responding inline)
-      const fileContent = await readOutputFile()
-      const outputText = fileContent ?? response.text
+      const fileContentRead = await readOutputFile()
+      const outputText = fileContentRead.ok ? fileContentRead.text : response.text
 
       await input.telemetry?.run.endObservation(agentObservation, {
         output: {
           response: response.text,
           outputFile: input.outputFile,
-          fileRead: Boolean(fileContent),
+          fileRead: fileContentRead.ok,
           structured: false,
         },
         metadata: {
@@ -435,7 +472,8 @@ export async function promptAgent<T>(input: {
     const initialResponse = await sendPrompt(buildStructuredPrompt(prompt, jsonSchema))
 
     // If outputFile was requested, try reading it first (agent may have written structured output there)
-    const fileContent = await readOutputFile()
+    const fileContentRead = await readOutputFile()
+    const fileContent = fileContentRead.ok ? fileContentRead.text : undefined
 
     async function parseAndReturn(schema: z.ZodType<T>, sourceText: string, sourceLabel: string) {
       try {
@@ -500,7 +538,8 @@ export async function promptAgent<T>(input: {
         activeSessionID = previousSessionID
 
         // Re-read the repaired file
-        const repairedFile = await readOutputFile()
+        const repairedFileRead = await readOutputFile()
+        const repairedFile = repairedFileRead.ok ? repairedFileRead.text : undefined
         if (!repairedFile) {
           throw new Error(
             `Agent ${input.agent} failed to repair output file ${input.outputFile}: file not written after repair`,
