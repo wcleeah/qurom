@@ -42,6 +42,18 @@ const quorumConfigSchema = z.object({
       maxRounds: z.number().int().positive(),
     })
     .optional(),
+  /**
+   * Phase 3.5 — outer fresh-session restart for auditors.
+   * When promptAgent's in-session RecoveryRouter exhausts its budget and throws
+   * a StructuredRecoveryError, the audit caller tears down the session and re-runs
+   * the identical audit prompt on a brand-new session, up to `maxRestarts` times.
+   * Default 1 restart; set to 0 as the runtime kill-switch (Phase 6). Audit-only.
+   */
+  auditRestart: z
+    .object({
+      maxRestarts: z.number().int().nonnegative().default(1),
+    })
+    .default({ maxRestarts: 1 }),
   depthTiers: z
     .record(
       z.string().min(1),

@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { auditWithRestart } from "./audit-restart"
 import { createSession, promptAgent } from "./opencode"
 import { writeDesignHtmlArtifact, writeRunJsonArtifact, writeRunTextArtifact } from "./output"
 import {
@@ -178,9 +179,9 @@ export async function runDesignAudits(
         const outputFile = `${outputPath}/design-audit-${agent}-round-${round}.json`
         const prompt = auditPromptAsset.replace("{outputFile}", outputFile)
 
-        const response = await promptAgent({
+        const designAuditRun = (sessionID: string) => promptAgent({
           config,
-          sessionID: session.id,
+          sessionID,
           agent,
           prompt,
           schema: designAuditResultSchema,
@@ -192,9 +193,21 @@ export async function runDesignAudits(
             telemetry,
             name: `agent.designAudit.${agent}`,
             agentName: agent,
-            sessionId: session.id,
+            sessionId: sessionID,
             inputPayload: { agent },
           }),
+        })
+        const response = await auditWithRestart({
+          maxRestarts: config.quorumConfig.auditRestart.maxRestarts,
+          agent,
+          round,
+          requestId: "",
+          titleBase: `design-audit:${agent}:round:${round}`,
+          firstSessionID: session.id,
+          createSession: (title) => createSession(config, title),
+          onSessionCreated: (id) => observeDesignSession(observer, { sessionID: id, role: `design-auditor:${agent}`, requestId: "" }),
+          runAttempt: designAuditRun,
+          debugLog: observer?.debugLog,
         })
 
         if (!response.structured) {

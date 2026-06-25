@@ -11,6 +11,7 @@ import {
   writeFailedArtifacts,
   writeRunJsonArtifact,
 } from "./output"
+import { auditWithRestart } from "./audit-restart"
 import { createSession, promptAgent } from "./opencode"
 import type { PromptBundle } from "./prompt-assets"
 import { summarizeMarkdown } from "./summarizer"
@@ -761,9 +762,9 @@ async function runParallelAudits(
         const session = await createSession(config, `audit:${state.requestId}:${agent}:round:${state.round}`)
         observeSession(observer, { sessionID: session.id, role: `auditor:${agent}`, requestId: state.requestId })
         const outputFile = `${state.outputPath}/audit-${agent}-round-${state.round}.json`
-        const response = await promptAgent({
+        const auditRun = (sessionID: string) => promptAgent({
           config,
-          sessionID: session.id,
+          sessionID,
           agent,
           prompt: auditPrompt(config, promptBundle, agent, request, outputFile, state.round > 0 ? state.unresolvedFindings : undefined),
           schema: auditResultSchema,
@@ -776,13 +777,25 @@ async function runParallelAudits(
             state,
             name: `agent.audit.${agent}`,
             agentName: agent,
-            sessionId: session.id,
+            sessionId: sessionID,
             input: {
               requestId: state.requestId,
               round: state.round,
               agent,
             },
           }),
+        })
+        const response = await auditWithRestart({
+          maxRestarts: config.quorumConfig.auditRestart.maxRestarts,
+          agent,
+          round: state.round,
+          requestId: state.requestId,
+          titleBase: `audit:${state.requestId}:${agent}:round:${state.round}`,
+          firstSessionID: session.id,
+          createSession: (title) => createSession(config, title),
+          onSessionCreated: (id) => observeSession(observer, { sessionID: id, role: `auditor:${agent}`, requestId: state.requestId }),
+          runAttempt: auditRun,
+          debugLog: telemetry?.debugLog ?? observer?.debugLog,
         })
 
         if (!response.structured) {
