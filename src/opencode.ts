@@ -556,6 +556,7 @@ export async function promptAgent<T>(input: {
     // If outputFile was requested, try reading it first (agent may have written structured output there)
     const fileContentRead = await readOutputFile()
     const fileContent = fileContentRead.ok ? fileContentRead.text : undefined
+    const wantFile = Boolean(input.outputFile)
 
     async function parseAndReturn(schema: z.ZodType<T>, sourceText: string, _sourceLabel: string) {
       void _sourceLabel
@@ -579,6 +580,25 @@ export async function promptAgent<T>(input: {
             repaired,
           },
         })
+        // Phase 4 — persistence: when an agent was asked to write to a file but
+        // produced valid JSON inline instead, persist the parsed struct to the
+        // canonical outputFile before returning so downstream file readers see
+        // it (and before any observer can treat success as final). A persist
+        // failure is escalated as a categorized 'nooutput' fault (the A branch
+        // re-prompts: 'write the file you were asked to') rather than a phantom
+        // success — never return a valid struct whose canonical file is empty.
+        if (input.outputFile && _sourceLabel === "from inline response") {
+          try {
+            await Bun.write(input.outputFile, JSON.stringify(structured, null, 2) + "\n")
+          } catch (persistErr) {
+            throw new StructuredRecoveryError(
+              "nooutput",
+              0,
+              persistErr,
+              `persist of inline-valid structured output to ${input.outputFile} failed: ${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+            )
+          }
+        }
         return {
           text: undefined,
           structured,
@@ -592,6 +612,30 @@ export async function promptAgent<T>(input: {
       }
     }
 
+    // Phase 4 — divergence triage: when BOTH a file was written AND a valid-
+    // looking inline response was produced, emit session.dual_output so post-hoc
+    // triage sees the divergence (the returned struct keeps the file, which
+    // matches today's file-first preference and avoids overwriting the agent's
+    // own chosen artifact).
+    if (wantFile && fileContent && initialResponse.text.trim()) {
+      let diverged = false
+      try {
+        const fParsed = JSON.parse(coerceJson(fileContent))
+        const iParsed = JSON.parse(coerceJson(initialResponse.text))
+        if (JSON.stringify(fParsed) !== JSON.stringify(iParsed)) diverged = true
+      } catch {
+        // If one side is not parseable (or they parse to different shapes), flag it.
+        diverged = true
+      }
+      if (diverged) {
+        input.telemetry?.debugLog?.write("session.dual_output", {
+          sessionID: activeSessionID,
+          agent: input.agent,
+          diverged: true,
+        })
+      }
+    }
+
     // Recovery router: D (coerce, inside parseAndReturn) -> classifyFault -> A/B/C.
     //   A nooutput/truncated: reprompt the SAME agent in the current in-session.
     //   B schema:             same agent, with <zod_issues> embedded in the repair prompt.
@@ -599,7 +643,6 @@ export async function promptAgent<T>(input: {
     //   If syntax has no outputFile / no C-budget, fall back to A with a generic repair prompt.
     // On budget exhaustion we throw a typed StructuredRecoveryError so Phase 3.5's outer
     //   fresh-session restart wrapper can match on instanceof StructuredRecoveryError.
-    const wantFile = Boolean(input.outputFile)
     let raw: string
     let sourceLabel: string
     if (wantFile && fileContent) {
