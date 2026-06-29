@@ -637,7 +637,10 @@ async function listRuns(): Promise<RunMeta[]> {
     // Design status
     let designStatus: RunStatus | null = null
     if (designRoundCount > 0 || hasFinalHtml || hasDesignFailure) {
-      if (designConsensusOutcome === "approved" || hasFinalHtml) {
+      // The consensus outcome is authoritative — final.html is written on both
+      // approval and best-effort failure, so hasFinalHtml alone must not imply
+      // approved.
+      if (designConsensusOutcome === "approved") {
         designStatus = "approved"
       } else if (designConsensusOutcome === "failed_non_convergent" || hasDesignFailure) {
         designStatus = "failed"
@@ -1671,6 +1674,15 @@ function renderLivePipeline(
   html += nodeRow(18, "reviseDesignHtml", hasDesignHtmlNext, isActive("reviseDesignHtml"),
     hasDesignHtmlNext ? `· ${files.filter((f) => /^design-html-round-[1-9]\d*\.html$/.test(f)).length} revisions` : "",
     isActive("reviseDesignHtml") ? agentListHtml(liveAgents) : "")
+  // finalizeDesign writes final.html; it's the terminal step for the design phase.
+  // Show it whenever a design phase ran. Active only briefly before __end__.
+  const hasFinalHtmlFile = files.includes("final.html")
+  const designRan = hasDesignHtml || hasDesignAudits || hasDesignConsensus || hasDesignHtmlNext
+  if (designRan) {
+    html += nodeRow(19, "finalizeDesign", hasFinalHtmlFile, isActive("finalizeDesign"),
+      hasFinalHtmlFile ? "· final.html written" : "",
+      isActive("finalizeDesign") ? agentListHtml(liveAgents) : "")
+  }
 
   html += '</div></div>'
   return html
@@ -1869,7 +1881,8 @@ async function renderNodePage(runName: string, nodeName: string): Promise<Respon
     return lower.includes(nodeLower) ||
       (nodeLower === "draftfulldraft" && lower.includes("draft-round")) ||
       (nodeLower === "runparallelaudits" && lower.includes("audits-round")) ||
-      (nodeLower === "aggregateconsensus" && lower.includes("aggregated-findings"))
+      (nodeLower === "aggregateconsensus" && lower.includes("aggregated-findings")) ||
+      (nodeLower === "finalizedesign" && lower === "final.html")
   })
 
   if (relatedFiles.length > 0) {
@@ -2335,7 +2348,7 @@ async function renderRun(name: string): Promise<Response> {
     let designIcon = "🔄"
     let designLabel = design.outcome
     let designClass = "badge-running"
-    if (design.outcome === "approved" || design.hasFinalHtml) {
+    if (design.outcome === "approved") {
       designIcon = "✅"
       designLabel = "approved"
       designClass = "badge-approved"
