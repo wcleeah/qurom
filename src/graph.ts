@@ -603,7 +603,7 @@ export async function ingestRequest(input: GraphInput) {
   })
 }
 
-async function discoverReader(
+async function discoverReaderPrompt(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   state: ResearchState,
@@ -614,13 +614,34 @@ async function discoverReader(
   if (!config.quorumConfig.readerDiscovery?.enabled) {
     return researchStateSchema.parse({ ...state })
   }
-  if (!state.outputPath) throw new Error("Missing outputPath during discoverReader")
+  if (!state.outputPath) throw new Error("Missing outputPath during discoverReaderPrompt")
+
+  const transcript = [...(state.interviewTranscript ?? [])]
+
+  // Safety net: if the last transcript entry is already an interviewer question,
+  // we've already prompted for this turn — pass through to the resume node.
+  // (Normal operation: the resume node appends a reader reply, so the last entry
+  // is a reader reply when this node runs for the next turn.)
+  const lastEntry = transcript[transcript.length - 1]
+  if (lastEntry && lastEntry.role === "interviewer") {
+    return researchStateSchema.parse({ ...state })
+  }
 
   const maxTurns = config.quorumConfig.readerDiscovery.maxTurns
+  const turn = Math.floor(transcript.length / 2) + 1
+
+  // Turn budget exhausted: no profile, drafter falls back to default.
+  if (turn > maxTurns) {
+    readerInterviewerSessions.delete(state.requestId)
+    return researchStateSchema.parse({
+      ...state,
+      readerProfile: undefined,
+      learningGoal: undefined,
+    })
+  }
+
   const outputFile = `${state.outputPath}/reader-profile.json`
-  // LangGraph re-executes the whole node from the top on each interrupt resume,
-  // so createSession would mint a fresh session every turn without this cache.
-  // Keyed by requestId so each run reuses one interviewer session across turns.
+  // Reuse one OpenCode session across all interview turns.
   let sessionID = readerInterviewerSessions.get(state.requestId)
   if (!sessionID) {
     const session = await createSession(config, `reader-interviewer:${state.requestId}`)
@@ -629,64 +650,92 @@ async function discoverReader(
     observeSession(observer, { sessionID, role: "reader-interviewer", requestId: state.requestId })
   }
 
-  const transcript = [...(state.interviewTranscript ?? [])]
+  const transcriptText = transcript.length === 0
+    ? "(none yet — this is the first question)"
+    : transcript.map((t) => `${t.role === "interviewer" ? "🤖" : "👤"} ${t.text}`).join("\n")
+  const prompt = promptBundle.assets.readerInterview
+    .replace("{requestContext}", requestContextBlock(state))
+    .replace("{transcript}", transcriptText)
+    .replace("{maxTurns}", String(maxTurns))
+    .replace("{turn}", String(turn))
+    .replace("{outputFile}", outputFile)
 
-  for (let turn = 1; turn <= maxTurns; turn++) {
-    const transcriptText = transcript.length === 0
-      ? "(none yet — this is the first question)"
-      : transcript.map((t) => `${t.role === "interviewer" ? "🤖" : "👤"} ${t.text}`).join("\n")
-    const prompt = promptBundle.assets.readerInterview
-      .replace("{requestContext}", requestContextBlock(state))
-      .replace("{transcript}", transcriptText)
-      .replace("{maxTurns}", String(maxTurns))
-      .replace("{turn}", String(turn))
-      .replace("{outputFile}", outputFile)
+  const response = await promptAgent({
+    config,
+    sessionID,
+    agent: "reader-interviewer",
+    prompt,
+    schema: readerInterviewTurnSchema,
+    outputFile,
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.discoverReader",
+      agentName: "reader-interviewer",
+      sessionId: sessionID,
+      input: { turn, transcriptLen: transcript.length },
+    }),
+  })
 
-    const response = await promptAgent({
-      config,
-      sessionID,
-      agent: "reader-interviewer",
-      prompt,
-      schema: readerInterviewTurnSchema,
-      outputFile,
-      telemetry: graphAgentTelemetry({
-        telemetry,
-        state,
-        name: "agent.discoverReader",
-        agentName: "reader-interviewer",
-        sessionId: sessionID,
-        input: { turn, transcriptLen: transcript.length },
-      }),
+  const turnResult = response.structured
+  if (!turnResult || turnResult.done) {
+    // Interview complete (or the agent returned nothing recoverable after the router).
+    const profile = turnResult?.profile
+    readerInterviewerSessions.delete(state.requestId)
+    return researchStateSchema.parse({
+      ...state,
+      readerProfile: profile?.concepts,
+      learningGoal: profile?.learningGoal,
     })
-
-    const turnResult = response.structured
-    if (!turnResult || turnResult.done) {
-      // Interview complete (or the agent returned nothing recoverable after the router).
-      const profile = turnResult?.profile
-      readerInterviewerSessions.delete(state.requestId)
-      return researchStateSchema.parse({
-        ...state,
-        readerProfile: profile?.concepts,
-        learningGoal: profile?.learningGoal,
-        interviewTranscript: transcript,
-      })
-    }
-
-    // Not done: surface the questions to the reader via interrupt, wait for the reply.
-    transcript.push({ role: "interviewer", text: turnResult.questions.join("\n") })
-    const reply = interrupt<string[], string>(turnResult.questions)
-    transcript.push({ role: "reader", text: reply })
   }
 
-  // Turn budget exhausted: persist whatever partial transcript we have, with no profile.
-  // The drafter falls back to the default (empty) readerContextBlock.
-  readerInterviewerSessions.delete(state.requestId)
+  // Not done: append the question to the transcript and route to the resume node.
+  transcript.push({ role: "interviewer", text: turnResult.questions.join("\n") })
   return researchStateSchema.parse({
     ...state,
-    readerProfile: undefined,
-    learningGoal: undefined,
     interviewTranscript: transcript,
   })
+}
+
+/**
+ * Resume node: calls interrupt() to pause for the reader's reply, then appends
+ * the reply to the transcript. On re-execution (LangGraph resumes after the
+ * interrupt), interrupt() returns the resume value instead of throwing, so the
+ * node completes and routes back to discoverReaderPrompt for the next turn.
+ */
+async function discoverReaderResume(
+  _config: RuntimeConfig,
+  state: ResearchState,
+): Promise<ResearchState> {
+  const transcript = [...(state.interviewTranscript ?? [])]
+  const lastEntry = transcript[transcript.length - 1]
+  const questions = lastEntry && lastEntry.role === "interviewer"
+    ? lastEntry.text.split("\n")
+    : []
+
+  // interrupt() suspends the graph on the first pass; on resume it returns
+  // the value passed to Command({ resume }). The node then appends the reply
+  // to the transcript and returns — routing back to discoverReaderPrompt.
+  const reply = interrupt<string[], string>(questions)
+  transcript.push({ role: "reader", text: reply })
+  return researchStateSchema.parse({
+    ...state,
+    interviewTranscript: transcript,
+  })
+}
+
+/**
+ * Conditional router after discoverReaderPrompt:
+ * - readerProfile set → interview complete → draftFullDraft
+ * - last transcript entry is an interviewer question → need a reply → discoverReaderResume
+ * - otherwise (kill-switch, budget exhausted, no pending question) → draftFullDraft
+ */
+function routeAfterReaderPrompt(state: ResearchState): string {
+  if (state.readerProfile !== undefined) return "draftFullDraft"
+  const transcript = state.interviewTranscript ?? []
+  const lastEntry = transcript[transcript.length - 1]
+  if (lastEntry && lastEntry.role === "interviewer") return "discoverReaderResume"
+  return "draftFullDraft"
 }
 
 async function draftFullDraft(
@@ -2020,9 +2069,14 @@ export function createGraph(
     .addNode("prepareOutputPath", async (state) =>
       withNodeTelemetry("prepareOutputPath", state, () => prepareOutputPath(config, state)),
     )
-    .addNode("discoverReader", async (state) =>
-      withNodeTelemetry("discoverReader", state, () =>
-        discoverReader(config, promptBundle, state, graphTelemetry, observer),
+    .addNode("discoverReaderPrompt", async (state) =>
+      withNodeTelemetry("discoverReaderPrompt", state, () =>
+        discoverReaderPrompt(config, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
+    .addNode("discoverReaderResume", async (state) =>
+      withNodeTelemetry("discoverReaderResume", state, () =>
+        discoverReaderResume(config, state),
       ),
     )
     .addNode("draftFullDraft", async (state) =>
@@ -2101,8 +2155,12 @@ export function createGraph(
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
-    .addEdge("prepareOutputPath", "discoverReader")
-    .addEdge("discoverReader", "draftFullDraft")
+    .addEdge("prepareOutputPath", "discoverReaderPrompt")
+    .addConditionalEdges("discoverReaderPrompt", (state) => routeAfterReaderPrompt(state), [
+      "discoverReaderResume",
+      "draftFullDraft",
+    ])
+    .addEdge("discoverReaderResume", "discoverReaderPrompt")
     .addEdge("draftFullDraft", "runParallelAudits")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
     .addConditionalEdges("reviewFindingsByDrafter", (state) => routeAfterDrafterReview(config, state), [

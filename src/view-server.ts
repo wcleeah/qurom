@@ -1724,9 +1724,9 @@ function renderLivePipeline(
   html += nodeRow(1, "ingestRequest", true, isActive("ingestRequest"))
   html += nodeRow(2, "summarizeInputDocument", researchStatus !== "running" || hasFile(/./), isActive("summarizeInputDocument"))
   html += nodeRow(3, "prepareOutputPath", hasFile(/./), isActive("prepareOutputPath"))
-  html += nodeRow(4, "discoverReader", hasReaderProfile, isActive("discoverReader"),
-    hasReaderProfile ? "· profile ready" : (isActive("discoverReader") ? "· interviewing" : ""),
-    isActive("discoverReader") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(4, "discoverReader", hasReaderProfile, isActive("discoverReaderPrompt") || isActive("discoverReaderResume"),
+    hasReaderProfile ? "· profile ready" : (isActive("discoverReaderPrompt") || isActive("discoverReaderResume") ? "· interviewing" : ""),
+    (isActive("discoverReaderPrompt") || isActive("discoverReaderResume")) ? agentListHtml(liveAgents) : "")
   html += nodeRow(5, "draftFullDraft", hasDraft, isActive("draftFullDraft"),
     hasDraft ? `· ${files.filter((f) => /^draft-round-\d+\.md$/.test(f)).length} rounds` : "",
     isActive("draftFullDraft") ? agentListHtml(liveAgents) : "")

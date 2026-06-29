@@ -292,7 +292,7 @@ function summarizeToolOutput(_tool: string, output: unknown): string {
 function summarizeNodeState(node: string, state: unknown): Record<string, unknown> | undefined {
   if (!state || typeof state !== "object") return undefined
   const s = state as Record<string, unknown>
-  if (node === "discoverReader") {
+  if (node === "discoverReaderPrompt" || node === "discoverReaderResume") {
     const profile = Array.isArray(s.readerProfile) ? s.readerProfile : undefined
     return {
       concepts: profile?.length ?? 0,

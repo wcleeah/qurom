@@ -205,7 +205,7 @@ async function runGraphWithInterviewResume<GraphT extends {
     const transcript = Array.isArray(snapshot?.values?.interviewTranscript)
       ? (snapshot!.values.interviewTranscript as { role: string; text: string }[])
       : []
-    const turn = Math.ceil(transcript.length / 2) + 1
+    const turn = Math.ceil(transcript.length / 2)
 
     opts.debugLog?.write("reader.interview_suspend", { turn, questions, attempt })
     opts.setAwaitingReaderReply({ turn, questions, transcript })
