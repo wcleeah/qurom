@@ -1,87 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import { createInitialState, createRunStore, reduce, resolveRoleKey, selectPendingPermission } from "../src/tui/state/runStore"
-import type { RuntimeConfig } from "../src/config"
+import { createRunStore, reduce } from "../src/tui/state/runStore"
 import type { RunnerEvent } from "../src/runner"
-
-const config: RuntimeConfig = {
-  env: {} as RuntimeConfig["env"],
-  quorumConfig: {
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor", "logic-auditor", "clarity-auditor"],
-    summarizerAgent: "markdown-summarizer",
-    maxRounds: 3,
-    maxRebuttalTurnsPerFinding: 2,
-    recursionLimit: 80,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: {
-      source: "local",
-      label: "production",
-    },
-    researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
-  },
-}
-
-describe("resolveRoleKey", () => {
-  test("root resolves to undefined (no agent slot)", () => {
-    expect(resolveRoleKey("root", config)).toBeUndefined()
-  })
-
-  test("drafter resolves to designatedDrafter name", () => {
-    expect(resolveRoleKey("drafter", config)).toBe("research-drafter")
-  })
-
-  test("auditor:source-auditor resolves to source-auditor", () => {
-    expect(resolveRoleKey("auditor:source-auditor", config)).toBe("source-auditor")
-  })
-
-  test("unknown auditor returns undefined", () => {
-    expect(resolveRoleKey("auditor:nope", config)).toBeUndefined()
-  })
-
-  test("garbage role returns undefined", () => {
-    expect(resolveRoleKey("garbage", config)).toBeUndefined()
-  })
-})
-
-describe("createInitialState", () => {
-  test("seeds drafter and every auditor as idle", () => {
-    const state = createInitialState(config)
-    expect(Object.keys(state.agents).sort()).toEqual(
-      ["clarity-auditor", "logic-auditor", "research-drafter", "source-auditor"],
-    )
-    for (const agent of Object.values(state.agents)) {
-      expect(agent.status).toBe("idle")
-      expect(agent.scrollback).toEqual([])
-      expect(agent.tokensIn).toBe(0)
-      expect(agent.tokensOut).toBe(0)
-    }
-    expect(state.lifecycle.phase).toBe("starting")
-  })
-
-  test("merges initial agent metadata into seeded agent slots", () => {
-    const state = createInitialState(config, {
-      agents: {
-        "research-drafter": { model: "opencode/minimax-m2.5-free", variant: "thinking" },
-      } as never,
-    })
-
-    expect(state.agents["research-drafter"]?.model).toBe("opencode/minimax-m2.5-free")
-    expect(state.agents["research-drafter"]?.variant).toBe("thinking")
-    expect(state.agents["source-auditor"]?.model).toBeUndefined()
-    expect(state.agents["source-auditor"]?.variant).toBeUndefined()
-  })
-})
 
 describe("reduce", () => {
   test("lifecycle event updates phase, requestId, traceId, outputDir", () => {
-    const initial = createInitialState(config)
-    const next = reduce(
-      initial,
-      { kind: "lifecycle", phase: "running", requestId: "r-1", traceId: "t-1", outputDir: "/tmp/out" },
-      config,
-    )
+    const initial = createRunStore().getState()
+    const next = reduce(initial, {
+      kind: "lifecycle",
+      phase: "running",
+      requestId: "r-1",
+      traceId: "t-1",
+      outputDir: "/tmp/out",
+    })
     expect(next.lifecycle.phase).toBe("running")
     expect(next.lifecycle.requestId).toBe("r-1")
     expect(next.lifecycle.traceId).toBe("t-1")
@@ -89,306 +19,124 @@ describe("reduce", () => {
   })
 
   test("graph.node stores node, phase, and full state slice", () => {
-    const initial = createInitialState(config)
+    const initial = createRunStore().getState()
     const slice = { inputMode: "topic" as const, topic: "x", requestId: "r" }
-    const next = reduce(initial, { kind: "graph.node", node: "draftInitial", phase: "start", state: slice }, config)
-    expect(next.graph.node).toBe("draftInitial")
+    const next = reduce(initial, { kind: "graph.node", node: "draftFullDraft", phase: "start", state: slice })
+    expect(next.graph.node).toBe("draftFullDraft")
     expect(next.graph.phase).toBe("start")
     expect(next.graph.state).toBe(slice)
   })
 
-  test("session.created with role=root sets rootSessionID, no agent change", () => {
-    const initial = createInitialState(config)
-    const next = reduce(initial, { kind: "session.created", sessionID: "root-s", role: "root" }, config)
-    expect(next.lifecycle.rootSessionID).toBe("root-s")
-    expect(next.agents["research-drafter"]?.sessionID).toBeUndefined()
+  test("graph.node end appends node history", () => {
+    let state = createRunStore().getState()
+    state = reduce(state, { kind: "graph.node", node: "runParallelAudits", phase: "start", state: { requestId: "r" } })
+    state = reduce(state, { kind: "graph.node", node: "runParallelAudits", phase: "end", state: { requestId: "r" } })
+    expect(state.nodeHistory).toHaveLength(1)
+    expect(state.nodeHistory[0]?.node).toBe("runParallelAudits")
+    expect(state.nodeHistory[0]?.status).toBe("completed")
   })
 
-  test("session.created with role=drafter assigns sessionID to drafter slot", () => {
-    const initial = createInitialState(config)
-    const next = reduce(initial, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
+  test("session.created with role=root sets rootSessionID", () => {
+    const initial = createRunStore().getState()
+    const next = reduce(initial, { kind: "session.created", sessionID: "root-s", role: "root" })
+    expect(next.lifecycle.rootSessionID).toBe("root-s")
+  })
+
+  test("session.created assigns sessionID to the role key", () => {
+    const initial = createRunStore().getState()
+    const next = reduce(initial, { kind: "session.created", sessionID: "d-s", role: "research-drafter" })
     expect(next.agents["research-drafter"]?.sessionID).toBe("d-s")
   })
 
-  test("session.created with auditor role assigns sessionID to that auditor slot", () => {
-    const initial = createInitialState(config)
-    const next = reduce(
-      initial,
-      { kind: "session.created", sessionID: "src-s", role: "auditor:source-auditor" },
-      config,
-    )
-    expect(next.agents["source-auditor"]?.sessionID).toBe("src-s")
-  })
-
-  test("session.created with unmapped role appends a system log entry", () => {
-    const initial = createInitialState(config)
-    const next = reduce(initial, { kind: "session.created", sessionID: "x", role: "unknown" }, config)
-    expect(next.systemLog).toHaveLength(1)
-    expect(next.systemLog[0]?.text).toContain("unmapped role")
-  })
-
   test("session.status routes via sessionID to derive agent status", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(state, { kind: "session.status", sessionID: "d-s", status: "active" }, config)
+    let state = createRunStore().getState()
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "research-drafter" })
+    state = reduce(state, { kind: "session.status", sessionID: "d-s", status: "active" })
     expect(state.agents["research-drafter"]?.status).toBe("running")
-    state = reduce(state, { kind: "session.status", sessionID: "d-s", status: "completed" }, config)
+    state = reduce(state, { kind: "session.status", sessionID: "d-s", status: "completed" })
     expect(state.agents["research-drafter"]?.status).toBe("complete")
-    state = reduce(state, { kind: "session.status", sessionID: "d-s", status: "idle" }, config)
-    expect(state.agents["research-drafter"]?.status).toBe("idle")
   })
 
-  test("session.error sets status=error and appends system scrollback", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(state, { kind: "session.error", sessionID: "d-s", name: "Boom", message: "kaboom" }, config)
-    const agent = state.agents["research-drafter"]!
-    expect(agent.status).toBe("error")
-    expect(agent.scrollback.at(-1)?.text).toBe("error: Boom: kaboom")
+  test("session.error sets status=error and appends system log", () => {
+    let state = createRunStore().getState()
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "research-drafter" })
+    state = reduce(state, { kind: "session.error", sessionID: "d-s", name: "Boom", message: "kaboom" })
+    expect(state.agents["research-drafter"]?.status).toBe("error")
+    expect(state.systemLog.at(-1)?.text).toBe("error: Boom: kaboom")
   })
 
   test("agent.metadata updates model and variant for the matching session", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(
-      state,
-      { kind: "agent.metadata", agent: "research-drafter", sessionID: "d-s", model: "opencode/gpt-5.4", variant: "high" },
-      config,
-    )
+    let state = createRunStore().getState()
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "research-drafter" })
+    state = reduce(state, {
+      kind: "agent.metadata",
+      agent: "research-drafter",
+      sessionID: "d-s",
+      model: "opencode/gpt-5.4",
+      variant: "high",
+    })
     expect(state.agents["research-drafter"]?.model).toBe("opencode/gpt-5.4")
     expect(state.agents["research-drafter"]?.variant).toBe("high")
   })
 
-  test("agent.message.start appends an assistant-started entry", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(state, { kind: "agent.message.start", sessionID: "d-s", messageID: "m-1" }, config)
-    expect(state.agents["research-drafter"]?.scrollback.at(-1)?.text).toBe("assistant started")
-  })
-
-  test("agent.reasoning upserts by reasoning key", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(state, { kind: "agent.reasoning", sessionID: "d-s", key: "k-1", text: "thinking", done: false }, config)
-    state = reduce(state, { kind: "agent.reasoning", sessionID: "d-s", key: "k-1", text: "thinking more", done: true }, config)
-    const entry = state.agents["research-drafter"]!.scrollback.at(-1)!
-    expect(entry.kind).toBe("reasoning")
-    expect(entry.key).toBe("k-1")
-    expect(entry.done).toBe(true)
-    expect(entry.text).toBe("thinking more")
-  })
-
-  test("agent.message.text upserts a system entry by key", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(state, { kind: "agent.message.text", sessionID: "d-s", key: "m-1:p-1", text: "partial", done: false }, config)
-    state = reduce(state, { kind: "agent.message.text", sessionID: "d-s", key: "m-1:p-1", text: "final sentence.", done: true }, config)
-    const entry = state.agents["research-drafter"]!.scrollback.at(-1)!
-    expect(entry.kind).toBe("system")
-    expect(entry.key).toBe("m-1:p-1")
-    expect(entry.done).toBe(true)
-    expect(entry.text).toBe("final sentence.")
-  })
-
-  test("agent.tool running sets activeTool and appends a tool entry (no counter)", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(
-      state,
-      {
-        kind: "agent.tool",
-        tool: "read",
-        status: "running",
-        callID: "c-1",
-        sessionID: "d-s",
-        messageID: "m-1",
-        partID: "p-1",
-      },
-      config,
-    )
-    const agent = state.agents["research-drafter"]!
-    expect(agent.activeTool).toEqual({ tool: "read", callID: "c-1", startedAt: agent.activeTool!.startedAt })
-    expect(agent.scrollback.at(-1)?.text).toBe("read running")
-    // Per-role tool counters intentionally not tracked.
-    expect((agent as Record<string, unknown>).toolsTotal).toBeUndefined()
-    expect((agent as Record<string, unknown>).toolsErrored).toBeUndefined()
-  })
-
-  test("agent.tool completed clears activeTool and appends completion entry", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(
-      state,
-      { kind: "agent.tool", tool: "read", status: "running", callID: "c", sessionID: "d-s", messageID: "m", partID: "p" },
-      config,
-    )
-    state = reduce(
-      state,
-      {
-        kind: "agent.tool",
-        tool: "read",
-        status: "completed",
-        callID: "c",
-        sessionID: "d-s",
-        messageID: "m",
-        partID: "p",
-      },
-      config,
-    )
-    const agent = state.agents["research-drafter"]!
-    expect(agent.activeTool).toBeUndefined()
-    expect(agent.scrollback.at(-1)?.text).toBe("read completed")
-  })
-
-  test("agent.tool error clears activeTool and appends failure entry (no error counter)", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(
-      state,
-      {
-        kind: "agent.tool",
-        tool: "read",
-        status: "error",
-        callID: "c",
-        sessionID: "d-s",
-        messageID: "m",
-        partID: "p",
-        error: "no perms",
-      },
-      config,
-    )
-    const agent = state.agents["research-drafter"]!
-    expect(agent.activeTool).toBeUndefined()
-    expect(agent.scrollback.at(-1)?.text).toBe("read failed: no perms")
-  })
-
-  test("agent.permission stores replyable pendingPermission and appends entry", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(
-      state,
-      {
-        kind: "agent.permission",
-        requestID: "perm-1",
-        permission: "edit",
-        patterns: ["src/**"],
-        always: ["src/**"],
-        sessionID: "d-s",
-        messageID: "m-1",
-        callID: "c-1",
-      },
-      config,
-    )
-    const agent = state.agents["research-drafter"]!
-    expect(agent.pendingPermission).toEqual({
-      roleKey: "research-drafter",
-      requestID: "perm-1",
-      permission: "edit",
-      patterns: ["src/**"],
-      always: ["src/**"],
-      messageID: "m-1",
+  test("agent.tool running sets active tool name", () => {
+    let state = createRunStore().getState()
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "research-drafter" })
+    state = reduce(state, {
+      kind: "agent.tool",
+      tool: "read",
+      status: "running",
       callID: "c-1",
-      requestedAt: agent.pendingPermission?.requestedAt,
+      sessionID: "d-s",
+      messageID: "m-1",
+      partID: "p-1",
     })
-    expect(agent.scrollback.at(-1)?.text).toBe("edit")
+    expect(state.agents["research-drafter"]?.tool).toBe("read")
   })
 
-  test("agent.permission.replied clears matching pendingPermission", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(
-      state,
-      {
-        kind: "agent.permission",
-        requestID: "perm-1",
-        permission: "edit",
-        patterns: ["src/**"],
-        always: ["src/**"],
-        sessionID: "d-s",
-      },
-      config,
-    )
-    state = reduce(state, { kind: "agent.permission.replied", requestID: "perm-1", reply: "once", sessionID: "d-s" }, config)
-    expect(state.agents["research-drafter"]?.pendingPermission).toBeUndefined()
-  })
-
-  test("selectPendingPermission returns the oldest pending permission across agents", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(state, { kind: "session.created", sessionID: "s-s", role: "auditor:source-auditor" }, config)
-    state = reduce(
-      state,
-      {
-        kind: "agent.permission",
-        requestID: "perm-1",
-        permission: "edit",
-        patterns: ["src/**"],
-        always: ["src/**"],
-        sessionID: "d-s",
-      },
-      config,
-    )
-    state = reduce(
-      state,
-      {
-        kind: "agent.permission",
-        requestID: "perm-2",
-        permission: "read",
-        patterns: ["tests/**"],
-        always: ["tests/**"],
-        sessionID: "s-s",
-      },
-      config,
-    )
-
-    expect(selectPendingPermission(state)).toMatchObject({
-      roleKey: "research-drafter",
-      requestID: "perm-1",
-      permission: "edit",
+  test("agent.tool completed clears active tool", () => {
+    let state = createRunStore().getState()
+    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "research-drafter" })
+    state = reduce(state, {
+      kind: "agent.tool",
+      tool: "read",
+      status: "running",
+      callID: "c",
+      sessionID: "d-s",
+      messageID: "m",
+      partID: "p",
     })
-  })
-
-  test("selectPendingPermission returns the same object reference when state is unchanged", () => {
-    let state = createInitialState(config)
-    state = reduce(state, { kind: "session.created", sessionID: "d-s", role: "drafter" }, config)
-    state = reduce(
-      state,
-      {
-        kind: "agent.permission",
-        requestID: "perm-1",
-        permission: "edit",
-        patterns: ["src/**"],
-        always: ["src/**"],
-        sessionID: "d-s",
-      },
-      config,
-    )
-
-    const first = selectPendingPermission(state)
-    const second = selectPendingPermission(state)
-
-    expect(first).toBe(second)
+    state = reduce(state, {
+      kind: "agent.tool",
+      tool: "read",
+      status: "completed",
+      callID: "c",
+      sessionID: "d-s",
+      messageID: "m",
+      partID: "p",
+    })
+    expect(state.agents["research-drafter"]?.tool).toBeUndefined()
   })
 
   test("result stores runResult", () => {
-    const initial = createInitialState(config)
-    const next = reduce(initial, { kind: "result", runResult: { ok: true } }, config)
+    const initial = createRunStore().getState()
+    const next = reduce(initial, { kind: "result", runResult: { ok: true } })
     expect(next.result).toEqual({ ok: true })
   })
 })
 
 describe("createRunStore", () => {
-  test("getState returns initial seeded state", () => {
-    const store = createRunStore({ config })
+  test("getState returns initial empty state", () => {
+    const store = createRunStore()
     expect(store.getState().lifecycle.phase).toBe("starting")
-    expect(store.getState().agents["research-drafter"]).toBeDefined()
+    expect(store.getState().agents).toEqual({})
   })
 
   test("setState notifies subscribers; unsubscribe stops notifications", () => {
-    const store = createRunStore({ config })
+    const store = createRunStore()
     const calls: number[] = []
     const unsub = store.subscribe((s) => calls.push(s.systemLog.length))
-    store.setState({ systemLog: [{ kind: "system", text: "hello", ts: 1 }] })
+    store.setState({ systemLog: [{ text: "hello", ts: 1 }] })
     expect(calls).toEqual([1])
     unsub()
     store.setState({ systemLog: [] })
@@ -396,6 +144,5 @@ describe("createRunStore", () => {
   })
 })
 
-// Type tripwire: discriminated union must be exhaustive in the reducer.
 const _exhaustive: RunnerEvent["kind"] = "lifecycle"
 void _exhaustive

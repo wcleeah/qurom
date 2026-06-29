@@ -129,7 +129,7 @@ function escapeHtmlLight(text: string): string {
     .replace(/>/g, "&gt;")
 }
 
-function renderJsonBlock(data: unknown): string {
+function _renderJsonBlock(data: unknown): string {
   try {
     return escapeHtml(JSON.stringify(data, null, 2))
   } catch {
@@ -411,7 +411,7 @@ function renderConsensusCard(filename: string, data: unknown, isDesign?: boolean
   const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
   const phaseIcon = isDesign ? "🎨" : "📊"
   const phaseLabel = isDesign ? "Design Consensus" : "Consensus"
-  const totalAuditors = (d.approvedAgents?.length ?? 0) + (d.unresolvedFindings?.length ?? 0) > 0
+  const _totalAuditors = (d.approvedAgents?.length ?? 0) + (d.unresolvedFindings?.length ?? 0) > 0
     ? (d.approvedAgents?.length ?? 0) + new Set((d.unresolvedFindings ?? []).map((f) => f.agent)).size
     : 0
 
@@ -1594,7 +1594,7 @@ function renderLivePipeline(
   liveStatus: LiveStatus | null,
   files: string[],
   researchStatus: RunStatus,
-  designInfo: { outcome: string; round: number; unresolvedCount: number; hasFinalHtml: boolean; hasDesignFiles: boolean } | null,
+  _designInfo: { outcome: string; round: number; unresolvedCount: number; hasFinalHtml: boolean; hasDesignFiles: boolean } | null,
   depthTierLabel: string,
   runName?: string,
 ): string {
@@ -1671,7 +1671,7 @@ function renderLivePipeline(
   const hasDesignAudits = hasFile(/^design-audits-round-\d+\.json$/)
   const hasDesignConsensus = hasFile(/^design-consensus-round-\d+\.json$/)
   const hasDesignHtmlNext = hasFile(/^design-html-round-[1-9]\d*\.html$/)
-  const designActive = liveStatus && (
+  const _designActive = liveStatus && (
     liveStatus.node === "runDesignHtml" ||
     liveStatus.node === "interactiveEnhance" ||
     liveStatus.node === "runDesignAudits" ||
@@ -1696,6 +1696,8 @@ function renderLivePipeline(
   html += nodeRow(18, "reviseDesignHtml", hasDesignHtmlNext, isActive("reviseDesignHtml"),
     hasDesignHtmlNext ? `· ${files.filter((f) => /^design-html-round-[1-9]\d*\.html$/.test(f)).length} revisions` : "",
     isActive("reviseDesignHtml") ? agentListHtml(liveAgents) : "")
+
+  void _designActive
 
   html += '</div></div>'
   return html
@@ -1826,7 +1828,7 @@ async function renderFailureBanner(
 </div>`
 }
 
-async function renderMarkdownPreview(runName: string, files: string[]): Promise<string> {
+async function _renderMarkdownPreview(runName: string, files: string[]): Promise<string> {
   const mdFile = files.includes("final.md") ? "final.md" : files.includes("latest-draft.md") ? "latest-draft.md" : null
   if (!mdFile) return ""
 
@@ -2284,6 +2286,7 @@ async function renderRun(name: string): Promise<Response> {
     countByPattern(files, /^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/)
   const reviewCount = countByPattern(files, /^drafter-finding-review-round-\d+\.json$/)
   const designFilesCount = countByPattern(files, /^design-/)
+  void designFilesCount
 
   const totalBytes = [...fileSizes.values()].reduce((a, b) => a + b, 0)
 
@@ -2633,6 +2636,8 @@ ${nodeHistorySection}
 ${debugLogSection}
 ${markdownSection}
 ${statsSection}
+${phaseHtml}
+${designSummaryHtml}
 ${heroSection}
 ${keyOutputsSection}
 ${requestInfoHtml}
@@ -2740,7 +2745,7 @@ ${structuredHtml}
 // Server
 // ---------------------------------------------------------------------------
 
-const server = Bun.serve({
+Bun.serve({
   port: PORT,
   hostname: HOST,
   async fetch(req): Promise<Response> {

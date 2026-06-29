@@ -1,4 +1,5 @@
 import { readdir } from "node:fs/promises"
+import type { Dirent } from "node:fs"
 import { join } from "node:path"
 
 export interface RunHistoryEntry {
@@ -16,17 +17,11 @@ function topicLabel(topic: string, maxLen = 60): string {
   return topic.length > maxLen ? topic.slice(0, maxLen - 3) + "…" : topic
 }
 
-function statusLabel(status: string): string {
-  if (status === "approved") return "✓"
-  if (status === "failed") return "✗"
-  return "⬤"
-}
-
 export async function loadRunHistory(
   runsDir: string,
   limit = 30,
 ): Promise<RunHistoryEntry[]> {
-  let entries: ReturnType<typeof readdir>
+  let entries: Dirent[]
   try {
     entries = await readdir(runsDir, { withFileTypes: true })
   } catch {

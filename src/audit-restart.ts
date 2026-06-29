@@ -1,5 +1,6 @@
 import type { DebugLog } from "./debug-log"
 import { StructuredRecoveryError } from "./opencode"
+import { recoveryDriftDetector, SystemicDriftError } from "./recovery-drift"
 
 /**
  * Phase 3.5 — outer fresh-session restart for auditors.
@@ -62,8 +63,6 @@ export async function auditWithRestart<T>(input: AuditRestartInput<T>): Promise<
       // Only StructuredRecoveryError is a recoverable restart signal;
       // any other throw (assertStatus, plain programmer error, etc.) propagates.
       if (!(e instanceof StructuredRecoveryError)) throw e
-      // Reachable only when attempt < maxRestarts: log the restart intent and loop
-      // — the next iteration mints a fresh session and runs the audit from scratch.
       input.debugLog?.write("audit.restart_from_scratch", {
         agent: input.agent,
         round: input.round,
@@ -72,6 +71,20 @@ export async function auditWithRestart<T>(input: AuditRestartInput<T>): Promise<
         priorAttempts: e.attempts,
         requestId: input.requestId,
       })
+      const drift = recoveryDriftDetector.recordRestart(input.agent, input.requestId)
+      if (drift.drift) {
+        input.debugLog?.write("recovery.systemic_drift", {
+          agent: input.agent,
+          requestIds: drift.previousRequestIds,
+          secondRunFault: e.fault,
+          recommendedAction: `audit prompt/schema for ${input.agent}`,
+        })
+        throw new SystemicDriftError({
+          agent: input.agent,
+          requestIds: drift.previousRequestIds,
+          secondRunFault: e.fault,
+        })
+      }
     }
   }
   // Unreachable: the loop body always either returns or throws.

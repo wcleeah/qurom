@@ -2,93 +2,75 @@ import { describe, expect, test } from "bun:test"
 import { createEventBus, type RunnerEvent } from "../src/runner"
 import { createRunStore } from "../src/tui/state/runStore"
 import { bindBusToStore } from "../src/tui/state/eventBindings"
-import type { RuntimeConfig } from "../src/config"
-
-const config: RuntimeConfig = {
-  env: {} as RuntimeConfig["env"],
-  quorumConfig: {
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor", "logic-auditor", "clarity-auditor"],
-    summarizerAgent: "markdown-summarizer",
-    maxRounds: 3,
-    maxRebuttalTurnsPerFinding: 2,
-    recursionLimit: 80,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: {
-      source: "local",
-      label: "production",
-    },
-    researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
-  },
-}
 
 function delay(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms))
 }
 
 describe("bindBusToStore", () => {
-  test("100 events in one tick coalesce into a single store.setState with all entries in order", async () => {
+  test("100 events in one tick coalesce into a single store.setState with all updates applied", async () => {
     const bus = createEventBus()
-    const store = createRunStore({ config })
+    const store = createRunStore()
     let setCount = 0
     const realSet = store.setState.bind(store)
     store.setState = ((next: Parameters<typeof store.setState>[0]) => {
       setCount += 1
       realSet(next)
     }) as typeof store.setState
-    const binding = bindBusToStore({ bus, store, config, flushIntervalMs: 25 })
+    const binding = bindBusToStore({ bus, store, flushIntervalMs: 25 })
 
-    // Seed drafter session so reasoning events are routed.
-    bus.emit({ kind: "session.created", sessionID: "d-s", role: "drafter" })
+    bus.emit({ kind: "session.created", sessionID: "d-s", role: "research-drafter" })
     for (let i = 0; i < 100; i += 1) {
-      bus.emit({ kind: "agent.reasoning", sessionID: "d-s", key: `k-${i}`, text: `r-${i}` })
+      bus.emit({
+        kind: "agent.tool",
+        tool: `tool-${i}`,
+        status: "running",
+        callID: `c-${i}`,
+        sessionID: "d-s",
+        messageID: "m-1",
+        partID: `p-${i}`,
+      })
     }
 
-    expect(setCount).toBe(0) // nothing dispatched yet
+    expect(setCount).toBe(0)
     await delay(50)
     expect(setCount).toBe(1)
-    const scrollback = store.getState().agents["research-drafter"]!.scrollback
-    const reasoning = scrollback.filter((s) => s.kind === "reasoning")
-    expect(reasoning).toHaveLength(100)
-    expect(reasoning.map((e) => e.text)).toEqual(Array.from({ length: 100 }, (_, i) => `r-${i}`))
+    expect(store.getState().agents["research-drafter"]?.tool).toBe("tool-99")
 
     binding.unbind()
   })
 
   test("unbind stops further dispatch", async () => {
     const bus = createEventBus()
-    const store = createRunStore({ config })
+    const store = createRunStore()
     let setCount = 0
     const realSet = store.setState.bind(store)
     store.setState = ((next: Parameters<typeof store.setState>[0]) => {
       setCount += 1
       realSet(next)
     }) as typeof store.setState
-    const binding = bindBusToStore({ bus, store, config, flushIntervalMs: 10 })
-    bus.emit({ kind: "session.created", sessionID: "d-s", role: "drafter" })
+    const binding = bindBusToStore({ bus, store, flushIntervalMs: 10 })
+    bus.emit({ kind: "session.created", sessionID: "d-s", role: "research-drafter" })
     await delay(20)
     expect(setCount).toBe(1)
 
     binding.unbind()
-    bus.emit({ kind: "agent.reasoning", sessionID: "d-s", key: "after", text: "after unbind" })
+    bus.emit({ kind: "session.status", sessionID: "d-s", status: "active" })
     await delay(20)
     expect(setCount).toBe(1)
-    const reasoning = store.getState().agents["research-drafter"]!.scrollback.filter((s) => s.kind === "reasoning")
-    expect(reasoning).toHaveLength(0)
+    expect(store.getState().agents["research-drafter"]?.status).toBe("idle")
   })
 
   test("multiple flush windows produce multiple store.setState calls", async () => {
     const bus = createEventBus()
-    const store = createRunStore({ config })
+    const store = createRunStore()
     let setCount = 0
     const realSet = store.setState.bind(store)
     store.setState = ((next: Parameters<typeof store.setState>[0]) => {
       setCount += 1
       realSet(next)
     }) as typeof store.setState
-    const unbind = bindBusToStore({ bus, store, config, flushIntervalMs: 10 })
+    const unbind = bindBusToStore({ bus, store, flushIntervalMs: 10 })
 
     bus.emit({ kind: "lifecycle", phase: "starting", requestId: "r" } satisfies RunnerEvent)
     await delay(20)
@@ -102,8 +84,8 @@ describe("bindBusToStore", () => {
 
   test("flushAndUnbind preserves pending final result events", () => {
     const bus = createEventBus()
-    const store = createRunStore({ config })
-    const binding = bindBusToStore({ bus, store, config, flushIntervalMs: 10_000 })
+    const store = createRunStore()
+    const binding = bindBusToStore({ bus, store, flushIntervalMs: 10_000 })
 
     bus.emit({
       kind: "result",
