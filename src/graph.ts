@@ -59,6 +59,12 @@ type GraphTelemetry = {
   debugLog?: DebugLog
 }
 
+// Cache of reader-interviewer sessionIDs by requestId. LangGraph re-executes
+// the discoverReader node from the top on each interrupt resume, so without
+// this the node would mint a fresh OpenCode session every turn. Cleared in
+// discoverReader when the interview completes or the turn budget is exhausted.
+const readerInterviewerSessions = new Map<string, string>()
+
 function observeNode(observer: RunObserver | undefined, node: string, state: ResearchState | GraphInput) {
   observer?.onNodeStart?.(node, state)
   observer?.debugLog?.write("node.start", {
@@ -612,8 +618,16 @@ async function discoverReader(
 
   const maxTurns = config.quorumConfig.readerDiscovery.maxTurns
   const outputFile = `${state.outputPath}/reader-profile.json`
-  const session = await createSession(config, `reader-interviewer:${state.requestId}`)
-  observeSession(observer, { sessionID: session.id, role: "reader-interviewer", requestId: state.requestId })
+  // LangGraph re-executes the whole node from the top on each interrupt resume,
+  // so createSession would mint a fresh session every turn without this cache.
+  // Keyed by requestId so each run reuses one interviewer session across turns.
+  let sessionID = readerInterviewerSessions.get(state.requestId)
+  if (!sessionID) {
+    const session = await createSession(config, `reader-interviewer:${state.requestId}`)
+    sessionID = session.id
+    readerInterviewerSessions.set(state.requestId, sessionID)
+    observeSession(observer, { sessionID, role: "reader-interviewer", requestId: state.requestId })
+  }
 
   const transcript = [...(state.interviewTranscript ?? [])]
 
@@ -630,7 +644,7 @@ async function discoverReader(
 
     const response = await promptAgent({
       config,
-      sessionID: session.id,
+      sessionID,
       agent: "reader-interviewer",
       prompt,
       schema: readerInterviewTurnSchema,
@@ -640,7 +654,7 @@ async function discoverReader(
         state,
         name: "agent.discoverReader",
         agentName: "reader-interviewer",
-        sessionId: session.id,
+        sessionId: sessionID,
         input: { turn, transcriptLen: transcript.length },
       }),
     })
@@ -649,6 +663,7 @@ async function discoverReader(
     if (!turnResult || turnResult.done) {
       // Interview complete (or the agent returned nothing recoverable after the router).
       const profile = turnResult?.profile
+      readerInterviewerSessions.delete(state.requestId)
       return researchStateSchema.parse({
         ...state,
         readerProfile: profile?.concepts,
@@ -665,6 +680,7 @@ async function discoverReader(
 
   // Turn budget exhausted: persist whatever partial transcript we have, with no profile.
   // The drafter falls back to the default (empty) readerContextBlock.
+  readerInterviewerSessions.delete(state.requestId)
   return researchStateSchema.parse({
     ...state,
     readerProfile: undefined,
