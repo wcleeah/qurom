@@ -1583,7 +1583,6 @@ function renderLivePipeline(
   liveStatus: LiveStatus | null,
   files: string[],
   researchStatus: RunStatus,
-  _designInfo: { outcome: string; round: number; unresolvedCount: number; hasFinalHtml: boolean; hasDesignFiles: boolean } | null,
   depthTierLabel: string,
   runName?: string,
 ): string {
@@ -1660,13 +1659,6 @@ function renderLivePipeline(
   const hasDesignAudits = hasFile(/^design-audits-round-\d+\.json$/)
   const hasDesignConsensus = hasFile(/^design-consensus-round-\d+\.json$/)
   const hasDesignHtmlNext = hasFile(/^design-html-round-[1-9]\d*\.html$/)
-  const _designActive = liveStatus && (
-    liveStatus.node === "runDesignHtml" ||
-    liveStatus.node === "interactiveEnhance" ||
-    liveStatus.node === "runDesignAudits" ||
-    liveStatus.node === "aggregateDesignFindings" ||
-    liveStatus.node === "reviseDesignHtml"
-  )
 
   // Always show design nodes — status varies by completion
   const designMeta = researchStatus === "approved"
@@ -1685,8 +1677,6 @@ function renderLivePipeline(
   html += nodeRow(18, "reviseDesignHtml", hasDesignHtmlNext, isActive("reviseDesignHtml"),
     hasDesignHtmlNext ? `· ${files.filter((f) => /^design-html-round-[1-9]\d*\.html$/.test(f)).length} revisions` : "",
     isActive("reviseDesignHtml") ? agentListHtml(liveAgents) : "")
-
-  void _designActive
 
   html += '</div></div>'
   return html
@@ -2562,7 +2552,7 @@ async function renderRun(name: string): Promise<Response> {
     ? `<span class="meta-item">Input: <strong>${escapeHtml(requestJson.inputMode)}</strong></span>`
     : ""
 
-  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, design, depthTierLabel, name)
+  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, depthTierLabel, name)
   const agentActivityHtml = renderAgentActivity(liveStatus)
   const nodeHistoryHtml = renderNodeHistory(liveStatus, name)
   const debugLogHtml = await renderDebugLog(name, files)
