@@ -8,6 +8,7 @@ import {
   resolveRunDir,
   writeApprovedArtifacts,
   writeFailedArtifacts,
+  writeDesignHtmlArtifact,
   writeRunJsonArtifact,
 } from "./output"
 import { auditWithRestart } from "./audit-restart"
@@ -1649,6 +1650,35 @@ async function aggregateDesignFindingsNode(
   })
 }
 
+async function finalizeDesignNode(
+  _config: RuntimeConfig,
+  _promptBundle: PromptBundle,
+  state: ResearchState,
+  _telemetry?: GraphTelemetry,
+  _observer?: RunObserver,
+) {
+  if (!state.outputPath) throw new Error("Missing outputPath during finalizeDesign")
+  if (!_config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  // Write the approved (or best-effort) design HTML as final.html.
+  // state.designHtml holds the latest HTML the auditors reviewed; fall back to
+  // the on-disk round file if it's empty for any reason.
+  let html = state.designHtml ?? ""
+  if (!html) {
+    const round = state.designRound ?? 0
+    const fallback = Bun.file(`${state.outputPath}/design-html-round-${round}.html`)
+    if (await fallback.exists()) {
+      html = await fallback.text()
+    }
+  }
+
+  if (html) {
+    await writeDesignHtmlArtifact(state.outputPath, html)
+  }
+
+  return researchStateSchema.parse(state)
+}
+
 async function reviseDesignHtmlNode(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
@@ -1681,17 +1711,16 @@ async function reviseDesignHtmlNode(
   })
 }
 
-function routeAfterDesignAggregate(config: RuntimeConfig, state: ResearchState): string {
+export function routeAfterDesignAggregate(config: RuntimeConfig, state: ResearchState): string {
   const designQuorum = config.quorumConfig.designQuorum
   if (!designQuorum?.enabled) return "__end__"
 
-  if (state.designStatus === "approved") return "__end__"
-  if (state.designStatus === "failed") return "__end__"
+  // Approved, failed, or rounds exhausted → finalize the design (write final.html)
+  // before ending. Otherwise loop back to revise.
+  if (state.designStatus === "approved") return "finalizeDesign"
+  if (state.designStatus === "failed") return "finalizeDesign"
+  if ((state.designRound ?? 0) >= designQuorum.maxRounds) return "finalizeDesign"
 
-  // Check if we've exhausted rounds
-  if ((state.designRound ?? 0) >= designQuorum.maxRounds) return "__end__"
-
-  // Otherwise, revise
   return "reviseDesignHtml"
 }
 
@@ -1940,6 +1969,11 @@ export function createGraph(
         reviseDesignHtmlNode(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
+    .addNode("finalizeDesign", async (state) =>
+      withNodeTelemetry("finalizeDesign", state, () =>
+        finalizeDesignNode(config, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
@@ -1973,9 +2007,10 @@ export function createGraph(
     .addEdge("runDesignAudits", "aggregateDesignFindings")
     .addConditionalEdges("aggregateDesignFindings", (state) => routeAfterDesignAggregate(config, state), [
       "reviseDesignHtml",
-      "__end__",
+      "finalizeDesign",
     ])
     .addEdge("reviseDesignHtml", "runDesignAudits")
+    .addEdge("finalizeDesign", "__end__")
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),
       name: "research-quorum",

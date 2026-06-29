@@ -5,11 +5,12 @@ import { createEventBus, runResearchPipeline, runDesignPipeline, type RuntimePre
 import type { InputRequest } from "../schema"
 import { Dashboard } from "./components/Dashboard"
 import { PromptScreen } from "./components/PromptScreen"
+import { SummaryScreen } from "./components/SummaryScreen"
 import { bindBusToStore } from "./state/eventBindings"
 import { createRunStore, type RunStore } from "./state/runStore"
 import { type SystemStatusStore } from "./state/systemStatus"
 
-export type Screen = "prompt" | "running"
+export type Screen = "prompt" | "running" | "complete"
 
 export interface AppProps {
   config: RuntimeConfig
@@ -55,6 +56,12 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
           offLifecycle()
         }
       })
+      const offTerminal = bus.on((event) => {
+        if (event.kind === "lifecycle" && (event.phase === "complete" || event.phase === "error")) {
+          setScreen("complete")
+          offTerminal()
+        }
+      })
 
       promise
         .catch(() => {})
@@ -85,6 +92,12 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
           offLifecycle()
         }
       })
+      const offTerminal = bus.on((event) => {
+        if (event.kind === "lifecycle" && (event.phase === "complete" || event.phase === "error")) {
+          setScreen("complete")
+          offTerminal()
+        }
+      })
 
       promise
         .catch(() => {})
@@ -94,6 +107,13 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
     },
     [config, promptBundle],
   )
+
+  const restart = useCallback(() => {
+    runCtx?.unbind()
+    setRunCtx(undefined)
+    setViewUrl(undefined)
+    setScreen("prompt")
+  }, [runCtx])
 
   useKeyboard((key) => {
     if (key.name === "c" && key.ctrl) {
@@ -105,12 +125,24 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
       }
       return
     }
+    if (screen === "complete" && key.name === "return") {
+      restart()
+      return
+    }
   })
 
   if (screen === "prompt") {
     return (
       <box flexGrow={1} position="relative">
         <PromptScreen onSubmit={startRun} onDesignSubmit={startDesign} />
+      </box>
+    )
+  }
+
+  if (screen === "complete" && runCtx) {
+    return (
+      <box flexGrow={1} position="relative">
+        <SummaryScreen store={runCtx.store} viewUrl={viewUrl} />
       </box>
     )
   }

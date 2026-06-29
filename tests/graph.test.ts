@@ -8,6 +8,7 @@ import {
   ingestRequest,
   prepareOutputPath,
   routeAfterAggregate,
+  routeAfterDesignAggregate,
   routeAfterDrafterReview,
   routeAfterRebuttalResponses,
   summarizeInputDocument,
@@ -262,6 +263,39 @@ describe("graph helpers", () => {
     expect(routeAfterAggregate(baseState({ status: "approved" }))).toBe("finalizeApprovedDraft")
     expect(routeAfterAggregate(baseState({ status: "failed" }))).toBe("finalizeFailedRun")
     expect(routeAfterAggregate(baseState({ status: "revising" }))).toBe("reviseDraft")
+  })
+
+  test("routeAfterDesignAggregate routes approved/failed/exhausted to finalizeDesign, otherwise to revise", () => {
+    const designConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        designQuorum: {
+          enabled: true,
+          designatedDesigner: "html-designer",
+          auditors: ["visual-layout-auditor", "technical-html-auditor", "script-security-auditor"],
+          maxRounds: 2,
+        },
+      },
+    } satisfies RuntimeConfig
+
+    const withDesign = (overrides: Partial<ResearchState> = {}) =>
+      baseState({ status: "approved", designRound: 0, ...overrides })
+
+    // approved → finalize (writes final.html), not __end__
+    expect(routeAfterDesignAggregate(designConfig, withDesign({ designStatus: "approved" }))).toBe("finalizeDesign")
+    // failed → finalize (best-effort HTML), not __end__
+    expect(routeAfterDesignAggregate(designConfig, withDesign({ designStatus: "failed" }))).toBe("finalizeDesign")
+    // rounds exhausted but still running → finalize
+    expect(
+      routeAfterDesignAggregate(designConfig, withDesign({ designStatus: "running", designRound: 2 })),
+    ).toBe("finalizeDesign")
+    // rounds remaining, not yet approved → revise
+    expect(
+      routeAfterDesignAggregate(designConfig, withDesign({ designStatus: "running", designRound: 0 })),
+    ).toBe("reviseDesignHtml")
+    // design quorum disabled → __end__
+    expect(routeAfterDesignAggregate(config, withDesign({ designStatus: "approved" }))).toBe("__end__")
   })
 
   test("ingestRequest prefers cached documentText over rereading the file", async () => {
