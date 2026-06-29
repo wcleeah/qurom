@@ -55,7 +55,6 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
   const maxRounds = (graphState && "maxRounds" in graphState && typeof graphState.maxRounds === "number")
     ? (graphState as { maxRounds?: number }).maxRounds : 10
   const researchStatus = (graphState && "status" in graphState) ? (graphState as { status?: string }).status : undefined
-  const depthTier = (graphState && "depthTier" in graphState) ? (graphState as { depthTier?: string }).depthTier : undefined
 
   // Active agents: those with status not idle
   const activeAgents = Object.entries(agents)
@@ -109,13 +108,6 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
             </text>
           ))}
         </box>
-      )}
-
-      {/* Depth tier (if available) */}
-      {depthTier && depthTier !== "analysis" && (
-        <text fg={theme.textMuted} marginTop={1} flexShrink={0}>
-          depth: {depthTier}
-        </text>
       )}
 
       {/* Error surface */}

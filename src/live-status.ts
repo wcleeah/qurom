@@ -30,7 +30,6 @@ export interface NodeHistoryEntry {
   status: "completed" | "error"
   error?: string
   round: number
-  depthTier?: string
   summary?: Record<string, unknown>
 }
 
@@ -40,7 +39,6 @@ export interface LiveStatus {
   nodeStartedAt?: number
   round: number
   maxRounds: number
-  depthTier?: string
   agents: Record<string, LiveAgentStatus>
   nodeHistory: NodeHistoryEntry[]
   error?: string
@@ -138,9 +136,6 @@ export function createLiveStatusWriter(
           if (event.state && "round" in event.state && typeof event.state.round === "number") {
             status.round = event.state.round
           }
-          if (event.state && "depthTier" in event.state && typeof event.state.depthTier === "string") {
-            status.depthTier = event.state.depthTier
-          }
         } else if (event.phase === "end") {
           // Record node completion in history
           const entry: NodeHistoryEntry = {
@@ -149,7 +144,6 @@ export function createLiveStatusWriter(
             completedAt: Date.now(),
             status: (event.state as any)?.status === "failed" || (event.state as any)?.failureReason ? "error" : "completed",
             round: status.round,
-            depthTier: status.depthTier,
             summary: summarizeNodeState(event.node, event.state),
           }
           status.nodeHistory.push(entry)
@@ -288,9 +282,6 @@ function summarizeToolOutput(_tool: string, output: unknown): string {
 function summarizeNodeState(node: string, state: unknown): Record<string, unknown> | undefined {
   if (!state || typeof state !== "object") return undefined
   const s = state as Record<string, unknown>
-  if (node === "classifyComplexity") {
-    return { tier: s.depthTier, confidence: s.depthConfidence }
-  }
   if (node === "draftFullDraft") {
     return { round: s.round, draftLen: typeof s.draft === "string" ? (s.draft as string).length : 0 }
   }

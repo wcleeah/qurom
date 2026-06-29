@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto"
 import { START, StateGraph } from "@langchain/langgraph"
-import { z } from "zod"
 
 import { BunSqliteSaver } from "./checkpointer"
 import type { RuntimeConfig } from "./config"
@@ -64,7 +63,6 @@ function observeNode(observer: RunObserver | undefined, node: string, state: Res
     node,
     round: "round" in state ? state.round : undefined,
     status: "status" in state ? state.status : undefined,
-    depthTier: "depthTier" in state ? (state as any).depthTier : undefined,
     outputPath: "outputPath" in state ? (state as any).outputPath : undefined,
   })
 }
@@ -346,9 +344,7 @@ function turnForFinding(state: ResearchState, key: string) {
 
 function cappedFindingKeys(config: RuntimeConfig, state: ResearchState) {
   const capped = new Set<string>()
-  const maxTurns = state.depthTier && config.quorumConfig.depthTiers?.[state.depthTier]
-    ? config.quorumConfig.depthTiers[state.depthTier].maxRebuttalTurnsPerFinding
-    : config.quorumConfig.maxRebuttalTurnsPerFinding
+  const maxTurns = config.quorumConfig.maxRebuttalTurnsPerFinding
 
   for (const [key, turns] of Object.entries(state.rebuttalTurnCounts)) {
     if (turns >= maxTurns) {
@@ -572,90 +568,6 @@ export async function ingestRequest(input: GraphInput) {
   })
 }
 
-async function draftWithLens(
-  config: RuntimeConfig,
-  promptBundle: PromptBundle,
-  state: ResearchState,
-  lens: string,
-  agentOverride: string | undefined,
-  outputFile: string,
-  telemetry?: GraphTelemetry,
-  observer?: RunObserver,
-): Promise<string> {
-  const agent = agentOverride ?? config.quorumConfig.designatedDrafter
-  const session = await createSession(config, `research-drafter:${state.requestId}:draft:${state.round}`)
-  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
-
-  const basePrompt = fullDraftPrompt(config, promptBundle, state, outputFile)
-  const prompt = lens ? `${basePrompt}\n\nResearch lens: ${lens}` : basePrompt
-
-  const response = await promptAgent({
-    config,
-    sessionID: session.id,
-    agent,
-    prompt,
-    outputFile,
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.draftFullDraft",
-      agentName: agent,
-      sessionId: session.id,
-      input: {
-        requestId: state.requestId,
-        round: state.round,
-        inputMode: state.inputMode,
-        lens: lens || undefined,
-      },
-    }),
-  })
-
-  return response.text ?? ""
-}
-
-async function synthesizeDrafts(
-  config: RuntimeConfig,
-  promptBundle: PromptBundle,
-  state: ResearchState,
-  draftAPath: string,
-  draftBPath: string,
-  lensA: string,
-  lensB: string,
-  outputFile: string,
-  telemetry?: GraphTelemetry,
-  observer?: RunObserver,
-): Promise<string> {
-  const session = await createSession(config, `draft-synthesizer:${state.requestId}:${state.round}`)
-  observeSession(observer, { sessionID: session.id, role: "draft-synthesizer", requestId: state.requestId })
-
-  const prompt = (promptBundle.assets.synthesizeDrafts as string)
-    .replace("{N}", "2")
-    .replace("{lensA}", lensA)
-    .replace("{lensB}", lensB)
-    .replace("{outputFile}", outputFile)
-
-  const response = await promptAgent({
-    config,
-    sessionID: session.id,
-    agent: "draft-synthesizer",
-    prompt,
-    outputFile,
-    inputFiles: [
-      { path: draftAPath, mime: "text/plain", filename: "draftA.md" },
-      { path: draftBPath, mime: "text/plain", filename: "draftB.md" },
-    ],
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.synthesizeDrafts",
-      agentName: "draft-synthesizer",
-      sessionId: session.id,
-    }),
-  })
-
-  return response.text ?? ""
-}
-
 async function draftFullDraft(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
@@ -665,45 +577,36 @@ async function draftFullDraft(
 ) {
   assertStatus(state, "drafting", "draftFullDraft")
 
-  const tier = state.depthTier ?? "analysis"
-  const tierConfig = config.quorumConfig.depthTiers?.[tier]
-  const useMultiDrafter = tierConfig?.multiDrafter ?? false
+  const outputFile = `${state.outputPath}/draft-round-${state.round}.md`
+  const session = await createSession(config, `research-drafter:${state.requestId}:draft:${state.round}`)
+  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
 
-  // Single-drafter path
-  if (!useMultiDrafter) {
-    const outputFile = `${state.outputPath}/draft-round-${state.round}.md`
-    const draft = await draftWithLens(config, promptBundle, state, "", undefined, outputFile, telemetry, observer)
-    const nextState = researchStateSchema.parse({
-      ...state,
-      draft: draft || state.draft,
-      status: "auditing",
-    })
-    return nextState
-  }
-
-  // Multi-drafter path (synthesis tier)
-  const lensA = "Focus on internal mechanisms and source code evidence. Explain how it actually works. Prefer implementation-level detail and primary sources (source code, specs)."
-  const lensB = "Focus on ecosystem, trade-offs, alternatives, edge cases, and common misconceptions. Prefer breadth and practical context over deep implementation detail."
-
-  const outputFileA = `${state.outputPath}/draft-round-${state.round}-vA.md`
-  const outputFileB = `${state.outputPath}/draft-round-${state.round}-vB.md`
-
-  const [draftA, draftB] = await Promise.all([
-    draftWithLens(config, promptBundle, state, lensA, "research-drafter-mechanism", outputFileA, telemetry, observer),
-    draftWithLens(config, promptBundle, state, lensB, undefined, outputFileB, telemetry, observer),
-  ])
-
-  const mergedOutputFile = `${state.outputPath}/draft-round-${state.round}.md`
-  const merged = await synthesizeDrafts(config, promptBundle, state, outputFileA, outputFileB, lensA, lensB, mergedOutputFile, telemetry, observer)
-
-  const nextState = researchStateSchema.parse({
-    ...state,
-    draft: merged,
-    drafts: [draftA, draftB],
-    status: "auditing",
+  const prompt = fullDraftPrompt(config, promptBundle, state, outputFile)
+  const response = await promptAgent({
+    config,
+    sessionID: session.id,
+    agent: config.quorumConfig.designatedDrafter,
+    prompt,
+    outputFile,
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.draftFullDraft",
+      agentName: config.quorumConfig.designatedDrafter,
+      sessionId: session.id,
+      input: {
+        requestId: state.requestId,
+        round: state.round,
+        inputMode: state.inputMode,
+      },
+    }),
   })
 
-  return nextState
+  return researchStateSchema.parse({
+    ...state,
+    draft: response.text || state.draft,
+    status: "auditing",
+  })
 }
 
 function graphAgentTelemetry(input: {
@@ -1169,9 +1072,7 @@ async function reviewRebuttalResponses(
   const session = await createSession(config, `research-drafter:${state.requestId}:review-rebuttal:${state.round}`)
   observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
 
-  const tierMaxRebuttalTurns = state.depthTier && config.quorumConfig.depthTiers?.[state.depthTier]
-    ? config.quorumConfig.depthTiers[state.depthTier].maxRebuttalTurnsPerFinding
-    : config.quorumConfig.maxRebuttalTurnsPerFinding
+  const maxRebuttalTurns = config.quorumConfig.maxRebuttalTurnsPerFinding
 
   // Write disputed findings + rebuttal turn counts to a temp JSON file for attachment
   const disputedFile = `${state.outputPath}/disputed-round-${state.round}.json`
@@ -1191,7 +1092,7 @@ async function reviewRebuttalResponses(
       promptBundle,
       requestLabel(state),
       outputFile,
-      tierMaxRebuttalTurns,
+      maxRebuttalTurns,
     ),
     schema: drafterFindingReviewSchema,
     outputFile,
@@ -1300,11 +1201,10 @@ export async function aggregateConsensus(config: RuntimeConfig, state: ResearchS
   const { approvedAgents, minorOnlyAgents } = approvedAgentsForOutcome(state, unresolved)
   const hasBlockersOrMajors = unresolved.some((f) => f.severity === "blocker" || f.severity === "major")
 
-  // Tier-aware config for round/rebuttal limits only (auditors and unanimity are global)
-  const tierConfig = state.depthTier ? config.quorumConfig.depthTiers?.[state.depthTier] : undefined
+  // Auditors and unanimity are global config; maxRounds is the global cap.
   const effectiveAuditors = config.quorumConfig.auditors
   const effectiveRequireUnanimous = config.quorumConfig.requireUnanimousApproval
-  const effectiveMaxRounds = tierConfig?.maxRounds ?? config.quorumConfig.maxRounds
+  const effectiveMaxRounds = config.quorumConfig.maxRounds
 
   const auditorsWithOnlyMinors = effectiveAuditors.filter(
     (a) => minorOnlyAgents.has(a) && !hasBlockersOrMajors,
@@ -1795,54 +1695,6 @@ function routeAfterDesignAggregate(config: RuntimeConfig, state: ResearchState):
   return "reviseDesignHtml"
 }
 
-async function classifyComplexity(
-  config: RuntimeConfig,
-  promptBundle: PromptBundle,
-  state: ResearchState,
-  telemetry?: GraphTelemetry,
-  observer?: RunObserver,
-) {
-  const session = await createSession(config, `scope-classifier:${state.requestId}`)
-  observeSession(observer, { sessionID: session.id, role: "scope-classifier", requestId: state.requestId })
-
-  const topic = state.inputMode === "topic"
-    ? state.topic ?? ""
-    : state.inputSummary?.title ?? state.documentPath ?? ""
-  const inputContext = state.inputSummary?.summary
-    ? `\n\nInput summary: ${state.inputSummary.summary}`
-    : ""
-
-  const prompt = promptBundle.assets.classifyComplexity
-    .replace("{topic}", topic)
-    .replace("{inputContext}", inputContext)
-
-  const response = await promptAgent({
-    config,
-    sessionID: session.id,
-    agent: "scope-classifier",
-    prompt,
-    schema: z.object({ tier: z.enum(["definitional", "tutorial", "analysis", "synthesis"]), confidence: z.number() }),
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.classifyComplexity",
-      agentName: "scope-classifier",
-      sessionId: session.id,
-      input: { topic, inputMode: state.inputMode },
-    }),
-  })
-
-  const tier = response.structured?.tier ?? config.quorumConfig.depthTierDefault
-  const confidence = response.structured?.confidence ?? 0.5
-
-  const tierConfig = config.quorumConfig.depthTiers?.[tier]
-  if (state.outputPath) {
-    await writeRunJsonArtifact(state.outputPath, "depth-tier.json", { tier, confidence, config: tierConfig })
-  }
-
-  return researchStateSchema.parse({ ...state, depthTier: tier, depthConfidence: confidence })
-}
-
 export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
   if (state.status !== "approved" && state.status !== "failed") {
     throw new Error(`Invalid status for summarizeOutputArtifact: ${state.status}`)
@@ -2088,16 +1940,10 @@ export function createGraph(
         reviseDesignHtmlNode(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
-    .addNode("classifyComplexity", async (state) =>
-      withNodeTelemetry("classifyComplexity", state, () =>
-        classifyComplexity(config, promptBundle, state, graphTelemetry, observer),
-      ),
-    )
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
-    .addEdge("prepareOutputPath", "classifyComplexity")
-    .addEdge("classifyComplexity", "draftFullDraft")
+    .addEdge("prepareOutputPath", "draftFullDraft")
     .addEdge("draftFullDraft", "runParallelAudits")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
     .addConditionalEdges("reviewFindingsByDrafter", (state) => routeAfterDrafterReview(config, state), [

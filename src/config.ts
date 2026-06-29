@@ -54,19 +54,6 @@ const quorumConfigSchema = z.object({
       maxRestarts: z.number().int().nonnegative().default(1),
     })
     .default({ maxRestarts: 1 }),
-  depthTiers: z
-    .record(
-      z.string().min(1),
-      z.object({
-        auditors: z.array(z.string().min(1)).min(1),
-        maxRounds: z.number().int().positive(),
-        maxRebuttalTurnsPerFinding: z.number().int().nonnegative(),
-        requireUnanimousApproval: z.boolean(),
-        multiDrafter: z.boolean().optional(),
-      }),
-    )
-    .optional(),
-  depthTierDefault: z.enum(["definitional", "tutorial", "analysis", "synthesis"]).default("analysis"),
 })
 
 export async function loadRuntimeConfig() {

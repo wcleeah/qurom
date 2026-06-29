@@ -14,8 +14,6 @@ const promptAssetFiles = {
   auditDesign: "audit-design.md",
   auditScriptSecurity: "audit-script-security.md",
   reviseDesign: "revise-design.md",
-  classifyComplexity: "classify-complexity.md",
-  synthesizeDrafts: "synthesize-drafts.md",
   enhanceDesign: "enhance-design.md",
 } as const
 

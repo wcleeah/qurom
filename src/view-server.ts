@@ -68,7 +68,6 @@ interface LiveStatus {
   nodeStartedAt?: number
   round: number
   maxRounds: number
-  depthTier?: string
   agents: Record<string, LiveAgentStatus>
   nodeHistory: Array<{
     node: string
@@ -77,7 +76,6 @@ interface LiveStatus {
     status: "completed" | "error"
     error?: string
     round: number
-    depthTier?: string
     summary?: Record<string, unknown>
   }>
   error?: string
@@ -1583,7 +1581,6 @@ function renderLivePipeline(
   liveStatus: LiveStatus | null,
   files: string[],
   researchStatus: RunStatus,
-  depthTierLabel: string,
   runName?: string,
 ): string {
   const activeNode = liveStatus?.node
@@ -1591,7 +1588,6 @@ function renderLivePipeline(
 
   // Determine node completion from files on disk
   const hasFile = (pattern: RegExp) => files.some((f) => pattern.test(f))
-  const hasDepthTier = hasFile(/^depth-tier\.json$/)
   const hasDraft = hasFile(/^draft-round-\d+\.md$/)
   const hasAudits = hasFile(/^audits-round-\d+\.json$/)
   const hasDrafterReview = hasFile(/^drafter-finding-review-round-\d+\.json$/)
@@ -1635,24 +1631,22 @@ function renderLivePipeline(
   html += nodeRow(1, "ingestRequest", true, isActive("ingestRequest"))
   html += nodeRow(2, "summarizeInputDocument", researchStatus !== "running" || hasFile(/./), isActive("summarizeInputDocument"))
   html += nodeRow(3, "prepareOutputPath", hasFile(/./), isActive("prepareOutputPath"))
-  html += nodeRow(4, "classifyComplexity", hasDepthTier, isActive("classifyComplexity"),
-    hasDepthTier ? depthTierLabel : "")
-  html += nodeRow(5, "draftFullDraft", hasDraft, isActive("draftFullDraft"),
+  html += nodeRow(4, "draftFullDraft", hasDraft, isActive("draftFullDraft"),
     hasDraft ? `· ${files.filter((f) => /^draft-round-\d+\.md$/.test(f)).length} rounds` : "",
     isActive("draftFullDraft") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(6, "runParallelAudits", hasAudits, isActive("runParallelAudits"),
+  html += nodeRow(5, "runParallelAudits", hasAudits, isActive("runParallelAudits"),
     hasAudits ? `· ${files.filter((f) => /^audits-round-\d+\.json$/.test(f)).length} rounds` : "",
     isActive("runParallelAudits") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(7, "reviewFindingsByDrafter", hasDrafterReview, isActive("reviewFindingsByDrafter"),
+  html += nodeRow(6, "reviewFindingsByDrafter", hasDrafterReview, isActive("reviewFindingsByDrafter"),
     "", isActive("reviewFindingsByDrafter") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(8, "runTargetedRebuttals", hasRebuttals, isActive("runTargetedRebuttals"),
+  html += nodeRow(7, "runTargetedRebuttals", hasRebuttals, isActive("runTargetedRebuttals"),
     "", isActive("runTargetedRebuttals") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(9, "reviewRebuttalResponses", hasRebuttalReview, isActive("reviewRebuttalResponses"),
+  html += nodeRow(8, "reviewRebuttalResponses", hasRebuttalReview, isActive("reviewRebuttalResponses"),
     "", isActive("reviewRebuttalResponses") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(10, "aggregateConsensus", hasAggregated, isActive("aggregateConsensus"))
-  html += nodeRow(11, "computeConfidence", hasAggregated, isActive("computeConfidence"))
-  html += nodeRow(12, researchDone ? terminalLabel : "reviseDraft", researchDone, isActive("reviseDraft") || isActive("finalizeApprovedDraft") || isActive("finalizeFailedRun"))
-  html += nodeRow(13, "summarizeOutputArtifact", hasFinalMd || hasLatestDraft, isActive("summarizeOutputArtifact"))
+  html += nodeRow(9, "aggregateConsensus", hasAggregated, isActive("aggregateConsensus"))
+  html += nodeRow(10, "computeConfidence", hasAggregated, isActive("computeConfidence"))
+  html += nodeRow(11, researchDone ? terminalLabel : "reviseDraft", researchDone, isActive("reviseDraft") || isActive("finalizeApprovedDraft") || isActive("finalizeFailedRun"))
+  html += nodeRow(12, "summarizeOutputArtifact", hasFinalMd || hasLatestDraft, isActive("summarizeOutputArtifact"))
 
   // Design nodes (flattened into main graph)
   const hasDesignHtml = hasFile(/^design-html-round-0\.html$/)
@@ -1748,7 +1742,6 @@ function renderNodeHistory(liveStatus: LiveStatus | null, runName: string): stri
   <a href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(entry.node)}" style="font-weight:600;min-width:140px;">${escapeHtml(entry.node)}</a>
   <span style="opacity:0.6;font-size:0.75rem;">${elapsedStr}</span>
   ${entry.round > 0 ? `<span style="opacity:0.5;font-size:0.72rem;">· round ${entry.round}</span>` : ""}
-  ${entry.depthTier ? `<span style="opacity:0.5;font-size:0.72rem;">· ${escapeHtml(entry.depthTier)}</span>` : ""}
   ${entry.summary ? `<span style="opacity:0.5;font-size:0.72rem;">· ${escapeHtml(JSON.stringify(entry.summary))}</span>` : ""}
   ${entry.error ? `<span style="color:var(--red);font-size:0.72rem;">${escapeHtml(entry.error.slice(0, 80))}</span>` : ""}
 </div>`
@@ -1862,7 +1855,6 @@ async function renderNodePage(runName: string, nodeName: string): Promise<Respon
       <tr><td>Status</td><td>${statusLabel}</td></tr>
       <tr><td>Duration</td><td>${elapsed}</td></tr>
       <tr><td>Round</td><td>${entry.round ?? 0}</td></tr>
-      ${entry.depthTier ? `<tr><td>Depth tier</td><td>${escapeHtml(String(entry.depthTier))}</td></tr>` : ""}
       ${entry.summary ? Object.entries(entry.summary as Record<string, unknown>).map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`).join("") : ""}
       ${entry.error ? `<tr><td>Error</td><td style="color:var(--red);">${escapeHtml(String(entry.error))}</td></tr>` : ""}
     </table>
@@ -2204,18 +2196,6 @@ async function renderRun(name: string): Promise<Response> {
   // Live status (if run is active)
   const liveStatus = await readLiveStatus(name)
 
-  // Depth tier label (from file or live status)
-  let depthTierLabel = ""
-  if (files.includes("depth-tier.json")) {
-    try {
-      const dt = await Bun.file(join(dirPath, "depth-tier.json")).json() as { tier?: string; confidence?: number }
-      const conf = dt.confidence !== undefined ? ` · ${Math.round(dt.confidence * 100)}% conf` : ""
-      depthTierLabel = `· ${dt.tier ?? "analysis"}${conf}`
-    } catch { /* ignore */ }
-  } else if (liveStatus?.depthTier) {
-    depthTierLabel = `· ${liveStatus.depthTier}`
-  }
-
   // Overall status: combine research + design
   let status: RunStatus = "running"
   if (researchStatus === "approved" && design?.outcome === "approved") {
@@ -2552,7 +2532,7 @@ async function renderRun(name: string): Promise<Response> {
     ? `<span class="meta-item">Input: <strong>${escapeHtml(requestJson.inputMode)}</strong></span>`
     : ""
 
-  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, depthTierLabel, name)
+  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, name)
   const agentActivityHtml = renderAgentActivity(liveStatus)
   const nodeHistoryHtml = renderNodeHistory(liveStatus, name)
   const debugLogHtml = await renderDebugLog(name, files)

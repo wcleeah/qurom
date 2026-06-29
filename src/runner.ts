@@ -414,7 +414,6 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
                   designatedDrafter: config.quorumConfig.designatedDrafter,
                   auditors: config.quorumConfig.auditors,
                   designQuorum: config.quorumConfig.designQuorum?.enabled ?? false,
-                  depthTierDefault: config.quorumConfig.depthTierDefault,
                 })
               }
             }
