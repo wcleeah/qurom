@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { START, StateGraph } from "@langchain/langgraph"
+import { START, StateGraph, interrupt } from "@langchain/langgraph"
 
 import { BunSqliteSaver } from "./checkpointer"
 import type { RuntimeConfig } from "./config"
@@ -29,6 +29,7 @@ import {
   researchStateObjectSchema,
   researchStateSchema,
   runSummarySchema,
+  readerInterviewTurnSchema,
   type AggregatedFinding,
   type AggregatedFindings,
   type AuditResultRecord,
@@ -125,11 +126,28 @@ function requestContextBlock(state: ResearchState) {
   }
 }
 
+function readerContextBlock(state: ResearchState): string {
+  if (!state.readerProfile || state.readerProfile.length === 0) {
+    return state.learningGoal ? `Reader goal: ${state.learningGoal}` : ""
+  }
+  const familiar = state.readerProfile.filter((c) => c.level === "familiar").map((c) => c.concept)
+  const lacks = state.readerProfile.filter((c) => c.level !== "familiar")
+  const lines: string[] = []
+  if (state.learningGoal) lines.push(`Reader goal: ${state.learningGoal}`)
+  if (familiar.length > 0) lines.push(`Reader already knows: ${familiar.join(", ")}`)
+  if (lacks.length > 0) {
+    lines.push(`Reader does NOT know: ${lacks.map((c) => c.concept).join(", ")}`)
+    lines.push(`Include a Prerequisites section covering: ${lacks.map((c) => c.concept).join(", ")}. Explain these before the main topic.`)
+  }
+  return lines.join("\n")
+}
+
 function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string) {
   return [
     promptBundle.assets.deepDiveContract,
     researchToolBlock(config),
     requestContextBlock(state),
+    readerContextBlock(state),
     promptBundle.assets.draftFullDraft.replace("{outputFile}", outputFile),
   ]
     .filter(Boolean)
@@ -566,6 +584,82 @@ export async function ingestRequest(input: GraphInput) {
     inputMode: "document",
     documentPath: parsed.documentPath,
     documentText: parsed.documentText ?? (await Bun.file(parsed.documentPath).text()),
+  })
+}
+
+async function discoverReader(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+): Promise<ResearchState> {
+  // Kill-switch: short-circuit to a default (empty) profile, run proceeds as today.
+  if (!config.quorumConfig.readerDiscovery?.enabled) {
+    return researchStateSchema.parse({ ...state })
+  }
+  if (!state.outputPath) throw new Error("Missing outputPath during discoverReader")
+
+  const maxTurns = config.quorumConfig.readerDiscovery.maxTurns
+  const outputFile = `${state.outputPath}/reader-profile.json`
+  const session = await createSession(config, `reader-interviewer:${state.requestId}`)
+  observeSession(observer, { sessionID: session.id, role: "reader-interviewer", requestId: state.requestId })
+
+  const transcript = [...(state.interviewTranscript ?? [])]
+
+  for (let turn = 1; turn <= maxTurns; turn++) {
+    const transcriptText = transcript.length === 0
+      ? "(none yet — this is the first question)"
+      : transcript.map((t) => `${t.role === "interviewer" ? "🤖" : "👤"} ${t.text}`).join("\n")
+    const prompt = promptBundle.assets.readerInterview
+      .replace("{requestContext}", requestContextBlock(state))
+      .replace("{transcript}", transcriptText)
+      .replace("{maxTurns}", String(maxTurns))
+      .replace("{turn}", String(turn))
+      .replace("{outputFile}", outputFile)
+
+    const response = await promptAgent({
+      config,
+      sessionID: session.id,
+      agent: "reader-interviewer",
+      prompt,
+      schema: readerInterviewTurnSchema,
+      outputFile,
+      telemetry: graphAgentTelemetry({
+        telemetry,
+        state,
+        name: "agent.discoverReader",
+        agentName: "reader-interviewer",
+        sessionId: session.id,
+        input: { turn, transcriptLen: transcript.length },
+      }),
+    })
+
+    const turnResult = response.structured
+    if (!turnResult || turnResult.done) {
+      // Interview complete (or the agent returned nothing recoverable after the router).
+      const profile = turnResult?.profile
+      return researchStateSchema.parse({
+        ...state,
+        readerProfile: profile?.concepts,
+        learningGoal: profile?.learningGoal,
+        interviewTranscript: transcript,
+      })
+    }
+
+    // Not done: surface the questions to the reader via interrupt, wait for the reply.
+    transcript.push({ role: "interviewer", text: turnResult.questions.join("\n") })
+    const reply = interrupt<string[], string>(turnResult.questions)
+    transcript.push({ role: "reader", text: reply })
+  }
+
+  // Turn budget exhausted: persist whatever partial transcript we have, with no profile.
+  // The drafter falls back to the default (empty) readerContextBlock.
+  return researchStateSchema.parse({
+    ...state,
+    readerProfile: undefined,
+    learningGoal: undefined,
+    interviewTranscript: transcript,
   })
 }
 
@@ -1901,6 +1995,11 @@ export function createGraph(
     .addNode("prepareOutputPath", async (state) =>
       withNodeTelemetry("prepareOutputPath", state, () => prepareOutputPath(config, state)),
     )
+    .addNode("discoverReader", async (state) =>
+      withNodeTelemetry("discoverReader", state, () =>
+        discoverReader(config, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addNode("draftFullDraft", async (state) =>
       withNodeTelemetry("draftFullDraft", state, () =>
         draftFullDraft(config, promptBundle, state, graphTelemetry, observer),
@@ -1977,7 +2076,8 @@ export function createGraph(
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
-    .addEdge("prepareOutputPath", "draftFullDraft")
+    .addEdge("prepareOutputPath", "discoverReader")
+    .addEdge("discoverReader", "draftFullDraft")
     .addEdge("draftFullDraft", "runParallelAudits")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
     .addConditionalEdges("reviewFindingsByDrafter", (state) => routeAfterDrafterReview(config, state), [
