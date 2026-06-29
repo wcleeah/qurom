@@ -5,7 +5,7 @@ import { createDebugLog, type DebugLog } from "./debug-log"
 import { abortSession } from "./opencode"
 import { removeEmptyRunDir, writeFailedArtifacts } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
-import { GraphRecursionError } from "@langchain/langgraph"
+import { Command, GraphRecursionError } from "@langchain/langgraph"
 
 import type { RuntimeConfig } from "./config"
 import { researchStateSchema, type GraphInput, type InputRequest, type ResearchState } from "./schema"
@@ -149,6 +149,111 @@ function toolKey(event: { sessionID: string; messageID: string; partID: string }
 
 function permissionKey(input: { sessionID: string; messageID?: string; callID?: string }) {
   return `${input.sessionID}:${input.messageID ?? ""}:${input.callID ?? ""}`
+}
+
+/**
+ * Run a graph that may suspend on `interrupt()` inside the `discoverReader` node.
+ * On suspend: write the current questions to live-status.json (awaitingReaderReply),
+ * poll for a reader-reply.json file in the run dir, then resume with
+ * `Command({ resume: replyText })`. Loops until the graph completes.
+ *
+ * This is the repo's first human-in-the-loop: it extends the existing
+ * checkpoint-resume pattern (used by design-resume at the bottom of this file)
+ * with a resume value and a file-mediated reply handshake with the view-server.
+ */
+async function runGraphWithInterviewResume<GraphT extends {
+  invoke: (input: unknown, config: unknown) => Promise<Record<string, unknown>>
+  getState?: (config: unknown) => Promise<{
+    tasks: Array<{ name: string; interrupts: Array<{ value: unknown }> }>
+    config: Record<string, unknown> & { configurable?: Record<string, unknown> }
+    values: Record<string, unknown>
+  }>
+}>(
+  graph: GraphT,
+  initialInput: Record<string, unknown>,
+  baseConfig: { configurable: { thread_id: string }; recursionLimit: number; signal: AbortSignal },
+  opts: {
+    runDir: () => string | undefined
+    setAwaitingReaderReply: (value: { turn: number; questions: string[]; transcript: { role: string; text: string }[] } | undefined) => void
+    debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
+  },
+): Promise<Record<string, unknown>> {
+  const { configurable, recursionLimit, signal } = baseConfig
+  let input: unknown = initialInput
+  let attempt = 0
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const result = await graph.invoke(input, { configurable, recursionLimit, signal })
+    attempt += 1
+
+    // Detect an interrupt: getState().tasks[].interrupts[].value holds the
+    // value passed to interrupt(). An empty interrupts list means the graph
+    // completed normally. If the graph has no getState (e.g. a test stub),
+    // there is no interrupt to resume — return the result.
+    if (typeof graph.getState !== "function") {
+      return result
+    }
+    const snapshot = await graph.getState({ configurable }).catch(() => undefined)
+    const interruptTask = snapshot?.tasks?.find((t) => t.interrupts && t.interrupts.length > 0)
+    if (!interruptTask || !interruptTask.interrupts || interruptTask.interrupts.length === 0) {
+      return result
+    }
+
+    const interruptValue = interruptTask.interrupts[0]!.value
+    const questions = Array.isArray(interruptValue) ? (interruptValue as string[]) : [String(interruptValue)]
+    const transcript = Array.isArray(snapshot?.values?.interviewTranscript)
+      ? (snapshot!.values.interviewTranscript as { role: string; text: string }[])
+      : []
+    const turn = Math.ceil(transcript.length / 2) + 1
+
+    opts.debugLog?.write("reader.interview_suspend", { turn, questions, attempt })
+    opts.setAwaitingReaderReply({ turn, questions, transcript })
+
+    // Wait for the view-server to write reader-reply.json (the user submitted
+    // the chat form). Poll the run dir; honor the abort signal.
+    const replyText = await waitForReaderReply(opts.runDir, signal)
+    opts.setAwaitingReaderReply(undefined)
+    opts.debugLog?.write("reader.interview_resume", { turn, replyLen: replyText.length })
+
+    // Resume the graph from its checkpoint with the reply as the resume value.
+    // The checkpoint_id in the snapshot config pins the resume to the suspend point.
+    const checkpointId = snapshot?.config?.configurable?.checkpoint_id as string | undefined
+    const resumeConfig: { configurable: Record<string, unknown>; recursionLimit: number; signal: AbortSignal } = {
+      configurable: checkpointId ? { ...configurable, checkpoint_id: checkpointId } : configurable,
+      recursionLimit,
+      signal,
+    }
+    input = new Command({ resume: replyText })
+    // Re-enter the loop; the next invoke continues from the interrupt.
+    void resumeConfig
+  }
+}
+
+async function waitForReaderReply(runDir: () => string | undefined, signal: AbortSignal): Promise<string> {
+  const { exists, readFile, unlink } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+  const pollIntervalMs = 400
+  while (!signal.aborted) {
+    const dir = runDir()
+    if (dir) {
+      const replyPath = join(dir, "reader-reply.json")
+      if (await exists(replyPath)) {
+        try {
+          const raw = await readFile(replyPath, "utf8")
+          try { await unlink(replyPath) } catch { /* best effort */ }
+          // The view-server writes the reply body as JSON { reply: string } or raw text.
+          try {
+            const parsed = JSON.parse(raw) as { reply?: string }
+            if (typeof parsed.reply === "string") return parsed.reply
+          } catch { /* not JSON — treat as raw text */ }
+          return raw.trim()
+        } catch { /* read failed — keep polling */ }
+      }
+    }
+    await new Promise((r) => setTimeout(r, pollIntervalMs))
+  }
+  throw new Error("Reader reply wait aborted")
 }
 
 function normalizeFailure(error: unknown, bridgeStreamError: unknown) {
@@ -333,6 +438,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
 
   const requestId = crypto.randomUUID()
   let runDir: string | undefined
+  let interviewRunDir: string | undefined
 
   const telemetry = await telemetryFactory(config, {
     requestId,
@@ -399,6 +505,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
             if (node === "prepareOutputPath" && !liveStatusWriter) {
               const op = (state as { outputPath?: string }).outputPath
               if (op) {
+                interviewRunDir = op
                 liveStatusWriter = createLiveStatusWriter(bus, op, {
                   maxRounds: config.quorumConfig.maxRounds,
                 }, debugLog)
@@ -433,14 +540,20 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
         },
       })
 
-      const invocation = await graph.invoke(
+      const invocation = await runGraphWithInterviewResume(
+        graph as unknown as Parameters<typeof runGraphWithInterviewResume>[0],
         { ...request, requestId },
         {
           configurable: { thread_id: requestId },
           recursionLimit: config.quorumConfig.recursionLimit,
           signal: bridgeAbort.signal,
         },
-      )
+        {
+          runDir: () => interviewRunDir ?? runDir,
+          setAwaitingReaderReply: (value) => liveStatusWriter?.setAwaitingReaderReply(value),
+          debugLog: { write(type, data) { debugLogRef.current?.write(type, data) } } as { write: (type: string, data?: Record<string, unknown>) => void },
+        },
+      ) as ResearchState
 
       runDir = invocation.outputPath
 

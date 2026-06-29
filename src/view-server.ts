@@ -79,6 +79,11 @@ interface LiveStatus {
     summary?: Record<string, unknown>
   }>
   error?: string
+  awaitingReaderReply?: {
+    turn: number
+    questions: string[]
+    transcript: { role: string; text: string }[]
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1421,6 +1426,59 @@ code {
   color: var(--muted);
 }
 
+/* ── Interview chat card ── */
+.interview-card {
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.chat-transcript {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+}
+.interviewer-msg, .reader-msg {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.interviewer-msg .chat-icon { color: var(--accent); }
+.reader-msg .chat-icon { color: var(--green); }
+.chat-text { white-space: pre-wrap; flex: 1; }
+.chat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.chat-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+}
+.chat-form button {
+  align-self: flex-start;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--bg);
+  cursor: pointer;
+  font-weight: 600;
+}
+
 /* ── Failure banner ── */
 .failure-banner {
   background: var(--red-bg);
@@ -1761,6 +1819,26 @@ function renderNodeHistory(liveStatus: LiveStatus | null, runName: string): stri
 
   html += '</div></div>'
   return html
+}
+
+function renderInterviewChatCard(runName: string, liveStatus: LiveStatus | null): string {
+  const awaiting = liveStatus?.awaitingReaderReply
+  if (!awaiting) return ""
+  const transcriptHtml = (awaiting.transcript ?? []).map((t) => {
+    const isReader = t.role === "reader"
+    const icon = isReader ? "👤" : "🤖"
+    const cls = isReader ? "reader-msg" : "interviewer-msg"
+    return `<div class="${cls}"><span class="chat-icon">${icon}</span> <span class="chat-text">${escapeHtml(t.text)}</span></div>`
+  }).join("")
+  const questionsHtml = awaiting.questions.map((q) => `<div class="interviewer-msg"><span class="chat-icon">🤖</span> <span class="chat-text">${escapeHtml(q)}</span></div>`).join("")
+  return `<div class="section interview-card">
+  <h2>🎙 Reader interview · turn ${awaiting.turn}</h2>
+  <div class="chat-transcript">${transcriptHtml}${questionsHtml}</div>
+  <form method="POST" action="/runs/${encodeURIComponent(runName)}/reply" class="chat-form">
+    <textarea name="reply" rows="4" placeholder="type your answer..." required></textarea>
+    <button type="submit">Send reply</button>
+  </form>
+</div>`
 }
 
 async function renderFailureBanner(
@@ -2551,6 +2629,7 @@ async function renderRun(name: string): Promise<Response> {
   const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
   const runNavHtml = await renderRunNav(name)
+  const interviewChatHtml = renderInterviewChatCard(name, liveStatus)
 
   const extraHead = ""  // Background poll handles refresh
 
@@ -2560,6 +2639,7 @@ async function renderRun(name: string): Promise<Response> {
   const nodeHistorySection = `<div id="node-history-section">${nodeHistoryHtml}</div>`
   const debugLogSection = `<div id="debug-log-section">${debugLogHtml}</div>`
   const failureBannerSection = `<div id="failure-banner-section">${failureBannerHtml}</div>`
+  const interviewChatSection = `<div id="interview-chat-section">${interviewChatHtml}</div>`
   const markdownSection = ""
   const statsSection = `<div id="stats-section">${statsHtml}</div>`
   const heroSection = `<div id="hero-section">${heroHtml}</div>`
@@ -2568,7 +2648,7 @@ async function renderRun(name: string): Promise<Response> {
   const body = `
 ${runNavHtml}
 <a class="back-link" href="/">← Back to runs</a>
-
+${interviewChatSection}
 <div class="header-bar">
   <div style="flex:1;min-width:0;">
     <h1>${escapeHtml(topic)}</h1>
@@ -2709,6 +2789,34 @@ Bun.serve({
         return await renderIndex()
       } catch (e) {
         console.error("GET / error:", e)
+        return new Response("Internal error", { status: 500 })
+      }
+    }
+
+    // POST /runs/:name/reply — the view-server's first non-GET route.
+    // The interview chat form submits here; we write reader-reply.json to the
+    // run dir, which the runner's interrupt loop polls for and consumes.
+    const replyMatch = path.match(/^\/runs\/(.+?)\/reply$/)
+    if (replyMatch && req.method === "POST") {
+      const runName = decodeURIComponent(replyMatch[1])
+      try {
+        const runDir = safeRunPath(runName)
+        const raw = await req.text()
+        // The form posts urlencoded `reply=<text>`; accept that or raw JSON.
+        let replyText = raw
+        try {
+          const params = new URLSearchParams(raw)
+          const r = params.get("reply")
+          if (r !== null) replyText = r
+        } catch { /* not urlencoded — use raw */ }
+        await Bun.write(`${runDir}/reader-reply.json`, JSON.stringify({ reply: replyText }))
+        // Redirect back to the run page; the next poll shows the next question (or completion).
+        return new Response(null, {
+          status: 303,
+          headers: { Location: `/runs/${encodeURIComponent(runName)}` },
+        })
+      } catch (e) {
+        console.error("POST /reply error:", e)
         return new Response("Internal error", { status: 500 })
       }
     }

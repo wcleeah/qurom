@@ -42,6 +42,11 @@ export interface LiveStatus {
   agents: Record<string, LiveAgentStatus>
   nodeHistory: NodeHistoryEntry[]
   error?: string
+  awaitingReaderReply?: {
+    turn: number
+    questions: string[]
+    transcript: { role: string; text: string }[]
+  }
 }
 
 const WRITE_INTERVAL_MS = 3000
@@ -53,7 +58,7 @@ export function createLiveStatusWriter(
   runDir: string | (() => string | undefined),
   config: { maxRounds: number },
   _debugLog?: DebugLog,
-): { dispose: () => void } {
+): { dispose: () => void; setAwaitingReaderReply: (value: LiveStatus["awaitingReaderReply"]) => void } {
   const status: LiveStatus = {
     phase: "running",
     round: 0,
@@ -75,6 +80,11 @@ export function createLiveStatusWriter(
 
   function resolveDir(): string | undefined {
     return typeof runDir === "function" ? runDir() : runDir
+  }
+
+  function setAwaitingReaderReply(value: LiveStatus["awaitingReaderReply"]) {
+    status.awaitingReaderReply = value
+    void writeStatus()
   }
 
   async function writeStatus() {
@@ -241,7 +251,7 @@ export function createLiveStatusWriter(
     void deleteStatus()
   }
 
-  return { dispose }
+  return { dispose, setAwaitingReaderReply }
 }
 
 // ---------------------------------------------------------------------------

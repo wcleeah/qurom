@@ -55,6 +55,7 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
   const maxRounds = (graphState && "maxRounds" in graphState && typeof graphState.maxRounds === "number")
     ? (graphState as { maxRounds?: number }).maxRounds : 10
   const researchStatus = (graphState && "status" in graphState) ? (graphState as { status?: string }).status : undefined
+  const interviewActive = !!(graphState && "interviewTranscript" in graphState && (graphState as { interviewTranscript?: unknown[] }).interviewTranscript && !(graphState as { readerProfile?: unknown[] }).readerProfile)
 
   // Active agents: those with status not idle
   const activeAgents = Object.entries(agents)
@@ -114,6 +115,13 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
       {errorMessage && (
         <text fg={theme.error} marginTop={1} wrapMode="word" flexShrink={0}>
           {errorMessage}
+        </text>
+      )}
+
+      {/* Interview pointer — the chat lives in the view dashboard */}
+      {interviewActive && viewUrl && (
+        <text fg={theme.accent} marginTop={1} flexShrink={0}>
+          🎙 Interviewing reader — answer in the view dashboard: {viewUrl}
         </text>
       )}
 
