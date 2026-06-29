@@ -118,6 +118,25 @@ web dashboard at `http://localhost:3000` (`bun run view`).
 - The runner now aborts created OpenCode sessions when a run is cancelled.
 - Failed runs attempt to recover the latest checkpointed state and write failure artifacts when possible.
 
+## Recovery & Telemetry
+
+When an agent produces malformed, missing, or schema-invalid structured output, `promptAgent` runs an in-session **recovery router** before failing the run. The ladder is `D` (free `coerceJson` pre-clean) → `A`/`B`/`C` (same-agent reprompt, schema-aware reprompt with `<zod_issues>`, or `json-fixer` agent on disk) → `R` (auditor-only fresh-session restart) → run failure. On budget exhaustion a typed `StructuredRecoveryError` is thrown.
+
+Every recovery tier emits a standardized debug-log event so post-hoc triage can see *which* tier caught a fault without re-reading raw stacks. Grep `runs/<rid>/debug-log.jsonl` for:
+
+| Event | Emitted by | Meaning |
+|---|---|---|
+| `session.recovery.classify` | recovery router | A fault was classified (`nooutput`/`truncated`/`syntax`/`schema`/`transport`) with remaining budgets |
+| `session.recovery.reprompt` | A/B branches | Same-agent in-session reprompt with `kind` |
+| `session.repair.json_fixer` | C branch | `json-fixer` agent invoked on disk |
+| `audit.restart_from_scratch` | `auditWithRestart` (R tier) | Auditor re-run on a fresh OpenCode session |
+| `session.dual_output` | persistence | Agent wrote `outputFile` AND returned valid inline JSON that differs; file is preferred |
+| `recovery.systemic_drift` | drift detector | Same agent restarted across two distinct `requestId`s in one process — prompt/schema drift suspected; the run fails loud instead of silently looping |
+
+### Kill-switch
+
+`auditRestart.maxRestarts` in `quorum.config.json` controls the R tier. Set it to `0` to disable fresh-session restarts entirely — `promptAgent` then throws `StructuredRecoveryError` directly with no `audit.restart_from_scratch` events. Default is `1`.
+
 ## Improvements / Enhancements
 - A LOT, see `references/docs/pending`, a bunch of uiux polish, functional enhancement, checkpoint recovery, real cli packaging
 - Also an implementation plan flow

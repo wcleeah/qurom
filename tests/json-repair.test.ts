@@ -572,6 +572,25 @@ describe("non-structured path", () => {
   })
 })
 
+describe("structured happy path", () => {
+  test("first-try valid structured output emits zero recovery events", async () => {
+    promptScript.push(() => assistantText(validAuditJson()))
+    const capture = debugLogCapture()
+    const result = await promptAgent({
+      config: testConfig,
+      sessionID: "s-1",
+      agent: "source-auditor",
+      prompt: "audit",
+      schema: auditResultSchema,
+      telemetry: { name: "test", debugLog: capture.log },
+    })
+    expect(result.structured?.vote).toBe("approve")
+    expect(capture.entries.some((e) => e.type.startsWith("session.recovery."))).toBe(false)
+    expect(capture.entries.some((e) => e.type === "session.repair.json_fixer")).toBe(false)
+    expect(capture.entries.some((e) => e.type === "session.dual_output")).toBe(false)
+  })
+})
+
 describe("recovery drift (Phase 6)", () => {
   test("same agent restarted across two distinct requestIds → systemic drift", async () => {
     const capture = debugLogCapture()
