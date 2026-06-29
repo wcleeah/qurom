@@ -1859,16 +1859,19 @@ function renderNodeHistory(liveStatus: LiveStatus | null, runName: string): stri
 function renderInterviewChatCard(runName: string, liveStatus: LiveStatus | null): string {
   const awaiting = liveStatus?.awaitingReaderReply
   if (!awaiting) return ""
+  // The checkpointed transcript already includes the current question as its
+  // last interviewer entry (discoverReaderPrompt appended it before the resume
+  // node called interrupt). Render only the transcript — do NOT re-render the
+  // questions separately, or the current question appears twice.
   const transcriptHtml = (awaiting.transcript ?? []).map((t) => {
     const isReader = t.role === "reader"
     const icon = isReader ? "👤" : "🤖"
     const cls = isReader ? "reader-msg" : "interviewer-msg"
     return `<div class="${cls}"><span class="chat-icon">${icon}</span> <span class="chat-text">${escapeHtml(t.text)}</span></div>`
   }).join("")
-  const questionsHtml = awaiting.questions.map((q) => `<div class="interviewer-msg"><span class="chat-icon">🤖</span> <span class="chat-text">${escapeHtml(q)}</span></div>`).join("")
   return `<div class="section interview-card">
   <h2>🎙 Reader interview · turn ${awaiting.turn}</h2>
-  <div class="chat-transcript">${transcriptHtml}${questionsHtml}</div>
+  <div class="chat-transcript">${transcriptHtml}</div>
   <form method="POST" action="/runs/${encodeURIComponent(runName)}/reply" class="chat-form">
     <textarea name="reply" rows="4" placeholder="type your answer..." required></textarea>
     <button type="submit">Send reply</button>
