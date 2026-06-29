@@ -129,13 +129,6 @@ function escapeHtmlLight(text: string): string {
     .replace(/>/g, "&gt;")
 }
 
-function _renderJsonBlock(data: unknown): string {
-  try {
-    return escapeHtml(JSON.stringify(data, null, 2))
-  } catch {
-    return escapeHtml(String(data))
-  }
-}
 
 /**
  * Render a JSON value as a structured, collapsible block.
@@ -411,10 +404,6 @@ function renderConsensusCard(filename: string, data: unknown, isDesign?: boolean
   const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
   const phaseIcon = isDesign ? "🎨" : "📊"
   const phaseLabel = isDesign ? "Design Consensus" : "Consensus"
-  const _totalAuditors = (d.approvedAgents?.length ?? 0) + (d.unresolvedFindings?.length ?? 0) > 0
-    ? (d.approvedAgents?.length ?? 0) + new Set((d.unresolvedFindings ?? []).map((f) => f.agent)).size
-    : 0
-
   let html = `<div class="section"><h2>${phaseIcon} ${phaseLabel} — ${roundLabel}</h2>
 <div class="structured-card">
   <div class="outcome-banner ${outcomeClass(d.outcome)}">${outcomeLabel(d.outcome)}</div>`
@@ -1826,27 +1815,6 @@ async function renderFailureBanner(
   </div>
   ${errorMessage ? `<div class="failure-banner-error">${escapeHtml(errorMessage)}</div>` : ""}
 </div>`
-}
-
-async function _renderMarkdownPreview(runName: string, files: string[]): Promise<string> {
-  const mdFile = files.includes("final.md") ? "final.md" : files.includes("latest-draft.md") ? "latest-draft.md" : null
-  if (!mdFile) return ""
-
-  try {
-    const p = safeFilePath(runName, mdFile)
-    const content = await Bun.file(p).text()
-    const words = content.split(/\s+/)
-    const preview = words.slice(0, 500).join(" ")
-    const trimmed = preview.length < content.length ? preview + " …" : preview
-
-    return `<details class="markdown-preview" open>
-  <summary>📄 Draft preview</summary>
-  <div class="card md-content">${renderMarkdown(trimmed)}</div>
-  <a class="hero-link" href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(mdFile)}">Read full →</a>
-</details>`
-  } catch {
-    return ""
-  }
 }
 
 // ---------------------------------------------------------------------------
