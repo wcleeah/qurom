@@ -507,7 +507,51 @@ describe("persistence (Phase 4)", () => {
       telemetry: { name: "test", debugLog: capture.log },
     })
     expect(result.structured?.summary).toBe("from-file")
-    expect(capture.entries.some((e) => e.type === "session.dual_output")).toBe(true)
+    const dual = capture.entries.find((e) => e.type === "session.dual_output")
+    expect(dual).toBeDefined()
+    expect(dual?.data?.diverged).toBe(true)
+  })
+
+  test("session.dual_output carries requestId/round from telemetry.metadata", async () => {
+    const outputFile = join(tempDir, "audit.json")
+    await mkdir(tempDir, { recursive: true })
+    const fileStruct = { vote: "approve", summary: "from-file", findings: [] }
+    await writeFile(outputFile, JSON.stringify(fileStruct, null, 2), "utf8")
+    promptScript.push(() => assistantText(validAuditJson({ summary: "from-inline" })))
+    const capture = debugLogCapture()
+    await promptAgent({
+      config: testConfig,
+      sessionID: "s-1",
+      agent: "source-auditor",
+      prompt: "audit",
+      schema: auditResultSchema,
+      outputFile,
+      telemetry: { name: "test", debugLog: capture.log, metadata: { requestId: "req-42", round: 2 } },
+    }).catch(() => undefined)
+    const dual = capture.entries.find((e) => e.type === "session.dual_output")
+    expect(dual?.data?.requestId).toBe("req-42")
+    expect(dual?.data?.round).toBe(2)
+  })
+
+  test("malformed file + valid inline → no session.dual_output (not a divergence)", async () => {
+    const outputFile = join(tempDir, "audit.json")
+    await mkdir(tempDir, { recursive: true })
+    // A broken file is a different failure mode (router handles it), not a
+    // dual-output divergence — must not noise session.dual_output. Recovery
+    // may succeed or throw; the invariant under test is only the event absence.
+    await writeFile(outputFile, "{ not valid json ", "utf8")
+    promptScript.push(() => assistantText(validAuditJson()))
+    const capture = debugLogCapture()
+    await promptAgent({
+      config: testConfig,
+      sessionID: "s-1",
+      agent: "source-auditor",
+      prompt: "audit",
+      schema: auditResultSchema,
+      outputFile,
+      telemetry: { name: "test", debugLog: capture.log },
+    }).catch(() => undefined)
+    expect(capture.entries.some((e) => e.type === "session.dual_output")).toBe(false)
   })
 })
 

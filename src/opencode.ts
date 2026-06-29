@@ -612,11 +612,14 @@ export async function promptAgent<T>(input: {
       }
     }
 
-    // Phase 4 — divergence triage: when BOTH a file was written AND a valid-
-    // looking inline response was produced, emit session.dual_output so post-hoc
+    // Phase 4 — divergence triage: when BOTH a file was written AND a valid
+    // inline response was produced, emit session.dual_output so post-hoc
     // triage sees the divergence (the returned struct keeps the file, which
     // matches today's file-first preference and avoids overwriting the agent's
-    // own chosen artifact).
+    // own chosen artifact). Per the plan, divergence is flagged ONLY when both
+    // sides parse to distinct values — a malformed file or malformed inline is
+    // a different failure mode (handled by the router), not a dual-output
+    // divergence, so it must not noise this event.
     if (wantFile && fileContent && initialResponse.text.trim()) {
       let diverged = false
       try {
@@ -624,13 +627,16 @@ export async function promptAgent<T>(input: {
         const iParsed = JSON.parse(coerceJson(initialResponse.text))
         if (JSON.stringify(fParsed) !== JSON.stringify(iParsed)) diverged = true
       } catch {
-        // If one side is not parseable (or they parse to different shapes), flag it.
-        diverged = true
+        // One side did not parse — not a dual-output divergence; leave to the router.
+        diverged = false
       }
       if (diverged) {
+        const meta = input.telemetry?.metadata as { requestId?: string; round?: number } | undefined
         input.telemetry?.debugLog?.write("session.dual_output", {
           sessionID: activeSessionID,
           agent: input.agent,
+          requestId: meta?.requestId,
+          round: meta?.round,
           diverged: true,
         })
       }
