@@ -1510,6 +1510,55 @@ code {
 .chat-question-block:last-of-type {
   border-bottom: none;
 }
+/* ── Interview history toggle (problem 2) ── */
+.interview-history {
+  margin: 0.5rem 0;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem;
+  opacity: 0.9;
+}
+.interview-history > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--muted);
+  user-select: none;
+}
+.interview-history > summary:hover {
+  color: var(--fg);
+}
+.interview-history .chat-transcript {
+  margin-top: 0.5rem;
+  opacity: 0.75;
+}
+.chat-answered-turn {
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.5rem;
+  border-left: 2px solid var(--border);
+}
+.chat-turn-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+/* ── Current pending turn (problem 2) ── */
+.interview-current {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+.chat-current-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 .chat-form button {
   align-self: flex-start;
   padding: 0.5rem 1rem;
@@ -1874,38 +1923,68 @@ function renderInterviewChatCard(runName: string, liveStatus: LiveStatus | null)
   const questions = awaiting.questions ?? []
   // The checkpointed transcript's last entry is the current pending question
   // (discoverReaderPrompt appended it before the resume node called interrupt).
-  // Drop it from the history so the current questions (rendered below with
-  // per-question inputs) don't appear twice.
-  const history = questions.length > 0
+  // Everything before that is answered history — alternating interviewer (Q)
+  // and reader (A) entries, two per turn. Drop the last entry so the current
+  // questions (rendered below with per-question inputs) don't appear twice.
+  const historyEntries = questions.length > 0
     ? fullTranscript.slice(0, -1)
     : fullTranscript
-  const historyHtml = history.map((t) => {
-    const isReader = t.role === "reader"
-    const icon = isReader ? "👤" : "🤖"
-    const cls = isReader ? "reader-msg" : "interviewer-msg"
-    return `<div class="${cls}"><span class="chat-icon">${icon}</span> <span class="chat-text">${escapeHtml(t.text)}</span></div>`
-  }).join("")
-  // Per-question: one bubble + one textarea + a hidden carry of the question.
-  // required on every textarea = browser-level validation, no JS needed.
+
+  // Group answered history into turns (each turn = one Q entry + one A entry).
+  // Each group renders with a 'Turn N ✓ answered' label, dimmed, inside a
+  // collapsible <details> so the user can focus on the current question.
+  const turns: Array<{ q: string; a: string }> = []
+  for (let i = 0; i + 1 < historyEntries.length; i += 2) {
+    const qEntry = historyEntries[i]
+    const aEntry = historyEntries[i + 1]
+    if (qEntry && aEntry && qEntry.role === "interviewer" && aEntry.role === "reader") {
+      turns.push({ q: qEntry.text, a: aEntry.text })
+    } else if (qEntry && qEntry.role === "reader") {
+      // Stray reader reply with no preceding question — append as a lone answer.
+      turns.push({ q: "", a: qEntry.text })
+    }
+  }
+  const answeredTurns = turns.length
+  const historyHtml = turns.map((t, i) =>
+    `<div class="chat-answered-turn">
+      <div class="chat-turn-label">✓ Turn ${i + 1} · answered</div>
+      ${t.q ? `<div class="interviewer-msg"><span class="chat-icon">🤖</span> <span class="chat-text">${escapeHtml(t.q)}</span></div>` : ""}
+      <div class="reader-msg"><span class="chat-icon">👤</span> <span class="chat-text">${escapeHtml(t.a)}</span></div>
+    </div>`
+  ).join("")
+  const historySection = answeredTurns > 0
+    ? `<details class="interview-history">
+        <summary>📜 Answered history (${answeredTurns} turn${answeredTurns === 1 ? "" : "s"}) ▾</summary>
+        <div class="chat-transcript">${historyHtml}</div>
+      </details>`
+    : ""
+
+  // Current pending questions: one bubble + one textarea each. No hidden
+  // question carry — the POST handler reads the answers by index only, and
+  // the pairing with questions is reconstructed from transcript position at
+  // prompt-build time (the interviewer sees the full transcript anyway).
+  // required on every textarea = browser-level validation, no JS.
   const inputsHtml = questions.length > 0
     ? questions.map((q, i) =>
         `<div class="chat-question-block">
           <div class="interviewer-msg"><span class="chat-icon">🤖</span> <span class="chat-text">${escapeHtml(q)}</span></div>
-          <input type="hidden" name="q_${i}" value="${escapeHtml(q)}">
           <textarea name="a_${i}" rows="3" placeholder="your answer..." required></textarea>
         </div>`
       ).join("")
     : `<div class="chat-question-block">
         <textarea name="a_0" rows="4" placeholder="type your answer..." required></textarea>
-        <input type="hidden" name="q_0" value="">
       </div>`
+  const currentTurn = awaiting.turn
   return `<div class="section interview-card">
-  <h2>🎙 Reader interview · turn ${awaiting.turn}</h2>
-  <div class="chat-transcript">${historyHtml}</div>
-  <form method="POST" action="/runs/${encodeURIComponent(runName)}/reply" class="chat-form">
-    ${inputsHtml}
-    <button type="submit">Send reply</button>
-  </form>
+  <h2>🎙 Reader interview · turn ${currentTurn}</h2>
+  ${historySection}
+  <div class="interview-current">
+    <div class="chat-current-label">Answer this turn:</div>
+    <form method="POST" action="/runs/${encodeURIComponent(runName)}/reply" class="chat-form">
+      ${inputsHtml}
+      <button type="submit">Send reply</button>
+    </form>
+  </div>
 </div>`
 }
 
@@ -2864,9 +2943,13 @@ Bun.serve({
     // POST /runs/:name/reply — the view-server's first non-GET route.
     // The interview chat form submits here; we write reader-reply.json to the
     // run dir, which the runner's interrupt loop polls for and consumes.
-    // The form posts one or more q_N/a_N pairs (per-question inputs). We pair
-    // each answer with its question so the interviewer sees the mapping in the
-    // transcript, then write the joined text as the single reader reply.
+    // The form posts one or more a_N fields (one per current question). We
+    // store the BARE answers joined by a blank line — NO Q:/A: framing, so the
+    // stored reader reply is the reader's words only and renders cleanly in the
+    // answered history on the next turn's toggle. The pairing of each answer
+    // with its question is reconstructed from transcript position at
+    // prompt-build time (the interviewer sees the full transcript, with its
+    // questions interleaved with these bare answers).
     const replyMatch = path.match(/^\/runs\/(.+?)\/reply$/)
     if (replyMatch && req.method === "POST") {
       const runName = decodeURIComponent(replyMatch[1])
@@ -2874,25 +2957,23 @@ Bun.serve({
         const runDir = safeRunPath(runName)
         const raw = await req.text()
         const params = new URLSearchParams(raw)
-        // Collect all q_N/a_N pairs in index order.
-        const pairs: Array<{ q: string; a: string }> = []
+        // Collect all a_N answers in index order, drop blanks.
+        const answers: string[] = []
         let idx = 0
         while (params.has(`a_${idx}`)) {
-          const q = params.get(`q_${idx}`) ?? ""
           const a = params.get(`a_${idx}`) ?? ""
-          if (a.trim().length > 0) pairs.push({ q, a })
+          if (a.trim().length > 0) answers.push(a.trim())
           idx += 1
         }
-        // Build a paired reply text so the interviewer sees which answer maps to which question.
-        // Single-question turns collapse to the bare answer (backward-compatible with one-question turns).
+        // Multi-question turn: join bare answers with a blank line.
+        // Single-answer turn: the bare answer. Fallback: legacy reply field / raw body.
         let replyText: string
-        if (pairs.length === 0) {
-          // Fallback: legacy single-reply field or raw body.
+        if (answers.length === 0) {
           replyText = params.get("reply") ?? raw
-        } else if (pairs.length === 1 && pairs[0]!.q === "") {
-          replyText = pairs[0]!.a
+        } else if (answers.length === 1) {
+          replyText = answers[0]!
         } else {
-          replyText = pairs.map((p) => `Q: ${p.q}\nA: ${p.a}`).join("\n\n")
+          replyText = answers.join("\n\n")
         }
         await Bun.write(`${runDir}/reader-reply.json`, JSON.stringify({ reply: replyText }))
         // Redirect back to the run page; the next poll shows the next question (or completion).
