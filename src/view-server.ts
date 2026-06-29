@@ -1662,6 +1662,30 @@ const POLLING_SCRIPT = /* html */ `
     for (const id of IDs) {
       const oldEl = document.getElementById(id)
       const newEl = doc.getElementById(id)
+      // Never replace the interview chat section while the user is interactively
+      // typing in it — replacing innerHTML would recreate the <textarea> DOM nodes
+      // and wipe in-progress input. Skip the swap if any input/textarea inside
+      // the section has focus OR has a non-empty value. A swap still fires once
+      // the user clears the field / blurs, and once they submit the 303 redirect
+      // does a full page reload anyway. A pending interview still keeps a fast
+      // poll interval (see the bottom of this script) so when the user submits
+      // and the runner consumes the reply, the next page load reflects it.
+      if (id === "interview-chat-section" && oldEl) {
+        const hasFocus = oldEl.contains(document.activeElement)
+        const hasContent = Array.from(oldEl.querySelectorAll("textarea, input")).some(
+          (el) => (el).value && (el).value.trim().length > 0,
+        )
+        if (hasFocus || hasContent) {
+          // Skip replacing this cycle but still let the interview disappear if the
+          // fresh render shows no interview (interview concluded) — only skip when
+          // the fresh render ALSO has the interview.
+          if (newEl) continue
+          // No interview in the fresh render and the user has unsaved input: this
+          // shouldn't normally happen (submit clears the form via 303 reload),
+          // but be safe and preserve the input rather than wipe it.
+          continue
+        }
+      }
       if (oldEl && newEl) {
         oldEl.innerHTML = newEl.innerHTML
       } else if (oldEl && !newEl) {
