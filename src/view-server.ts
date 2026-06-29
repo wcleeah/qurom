@@ -1647,6 +1647,7 @@ const POLLING_SCRIPT = /* html */ `
     "node-history-section",
     "debug-log-section",
     "failure-banner-section",
+    "interview-chat-section",
     "markdown-section",
     "stats-section",
     "hero-section",
@@ -1663,6 +1664,9 @@ const POLLING_SCRIPT = /* html */ `
       const newEl = doc.getElementById(id)
       if (oldEl && newEl) {
         oldEl.innerHTML = newEl.innerHTML
+      } else if (oldEl && !newEl) {
+        // The section disappeared from the fresh render — clear the stale DOM.
+        oldEl.innerHTML = ""
       }
     }
     const oldHeader = document.querySelector(".header-bar")
@@ -1671,7 +1675,13 @@ const POLLING_SCRIPT = /* html */ `
       oldHeader.innerHTML = newHeader.innerHTML
     }
   } catch { /* ignore fetch errors */ }
-  setTimeout(poll, 8000)
+  // Adaptive interval: poll fast while a reader-interview reply is pending
+  // (so the form clears within ~1.5s of submit once the runner consumes
+  // reader-reply.json), and slow otherwise (the 8s default for long audit
+  // rounds is fine).
+  const interviewEl = document.getElementById("interview-chat-section")
+  const interviewPending = !!(interviewEl && interviewEl.querySelector("form"))
+  setTimeout(poll, interviewPending ? 1500 : 8000)
 })()
 </script>`
 
