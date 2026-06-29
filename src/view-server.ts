@@ -629,7 +629,7 @@ async function listRuns(): Promise<RunMeta[]> {
       mtime = dirStat.mtimeMs
 
       const files = await readdir(dirPath)
-      fileCount = files.filter((f) => !isSqliteFile(f) && f !== ".gitkeep").length
+      fileCount = files.filter((f) => !isSqliteFile(f) && f !== ".gitkeep" && !isReaderReplyArchive(f)).length
 
       for (const file of files) {
         if (file === "request.json") {
@@ -725,8 +725,12 @@ async function getRunFiles(runName: string): Promise<string[]> {
   const dirPath = safeRunPath(runName)
   const files = await readdir(dirPath)
   return files
-    .filter((f) => !isSqliteFile(f) && f !== ".gitkeep")
+    .filter((f) => !isSqliteFile(f) && f !== ".gitkeep" && !isReaderReplyArchive(f))
     .sort()
+}
+
+function isReaderReplyArchive(name: string): boolean {
+  return /^reader-reply-turn-\d+\.json$/.test(name)
 }
 
 // ---------------------------------------------------------------------------

@@ -212,7 +212,7 @@ async function runGraphWithInterviewResume<GraphT extends {
 
     // Wait for the view-server to write reader-reply.json (the user submitted
     // the chat form). Poll the run dir; honor the abort signal.
-    const replyText = await waitForReaderReply(opts.runDir, signal)
+    const replyText = await waitForReaderReply(opts.runDir, signal, turn)
     opts.setAwaitingReaderReply(undefined)
     opts.debugLog?.write("reader.interview_resume", { turn, replyLen: replyText.length })
 
@@ -230,8 +230,8 @@ async function runGraphWithInterviewResume<GraphT extends {
   }
 }
 
-async function waitForReaderReply(runDir: () => string | undefined, signal: AbortSignal): Promise<string> {
-  const { exists, readFile, unlink } = await import("node:fs/promises")
+async function waitForReaderReply(runDir: () => string | undefined, signal: AbortSignal, turn: number): Promise<string> {
+  const { exists, readFile, rename } = await import("node:fs/promises")
   const { join } = await import("node:path")
   const pollIntervalMs = 400
   while (!signal.aborted) {
@@ -241,7 +241,10 @@ async function waitForReaderReply(runDir: () => string | undefined, signal: Abor
       if (await exists(replyPath)) {
         try {
           const raw = await readFile(replyPath, "utf8")
-          try { await unlink(replyPath) } catch { /* best effort */ }
+          // Preserve the reply for triage: rename reader-reply.json →
+          // reader-reply-turn-N.json instead of deleting it. The run dir
+          // keeps the full reply trail alongside reader-profile.json.
+          try { await rename(replyPath, join(dir, `reader-reply-turn-${turn}.json`)) } catch { /* best effort */ }
           // The view-server writes the reply body as JSON { reply: string } or raw text.
           try {
             const parsed = JSON.parse(raw) as { reply?: string }
