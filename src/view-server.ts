@@ -1499,6 +1499,17 @@ code {
   color: var(--fg);
   resize: vertical;
 }
+.chat-question-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px dashed var(--border);
+}
+.chat-question-block:last-of-type {
+  border-bottom: none;
+}
 .chat-form button {
   align-self: flex-start;
   padding: 0.5rem 1rem;
@@ -1859,21 +1870,40 @@ function renderNodeHistory(liveStatus: LiveStatus | null, runName: string): stri
 function renderInterviewChatCard(runName: string, liveStatus: LiveStatus | null): string {
   const awaiting = liveStatus?.awaitingReaderReply
   if (!awaiting) return ""
-  // The checkpointed transcript already includes the current question as its
-  // last interviewer entry (discoverReaderPrompt appended it before the resume
-  // node called interrupt). Render only the transcript — do NOT re-render the
-  // questions separately, or the current question appears twice.
-  const transcriptHtml = (awaiting.transcript ?? []).map((t) => {
+  const fullTranscript = awaiting.transcript ?? []
+  const questions = awaiting.questions ?? []
+  // The checkpointed transcript's last entry is the current pending question
+  // (discoverReaderPrompt appended it before the resume node called interrupt).
+  // Drop it from the history so the current questions (rendered below with
+  // per-question inputs) don't appear twice.
+  const history = questions.length > 0
+    ? fullTranscript.slice(0, -1)
+    : fullTranscript
+  const historyHtml = history.map((t) => {
     const isReader = t.role === "reader"
     const icon = isReader ? "👤" : "🤖"
     const cls = isReader ? "reader-msg" : "interviewer-msg"
     return `<div class="${cls}"><span class="chat-icon">${icon}</span> <span class="chat-text">${escapeHtml(t.text)}</span></div>`
   }).join("")
+  // Per-question: one bubble + one textarea + a hidden carry of the question.
+  // required on every textarea = browser-level validation, no JS needed.
+  const inputsHtml = questions.length > 0
+    ? questions.map((q, i) =>
+        `<div class="chat-question-block">
+          <div class="interviewer-msg"><span class="chat-icon">🤖</span> <span class="chat-text">${escapeHtml(q)}</span></div>
+          <input type="hidden" name="q_${i}" value="${escapeHtml(q)}">
+          <textarea name="a_${i}" rows="3" placeholder="your answer..." required></textarea>
+        </div>`
+      ).join("")
+    : `<div class="chat-question-block">
+        <textarea name="a_0" rows="4" placeholder="type your answer..." required></textarea>
+        <input type="hidden" name="q_0" value="">
+      </div>`
   return `<div class="section interview-card">
   <h2>🎙 Reader interview · turn ${awaiting.turn}</h2>
-  <div class="chat-transcript">${transcriptHtml}</div>
+  <div class="chat-transcript">${historyHtml}</div>
   <form method="POST" action="/runs/${encodeURIComponent(runName)}/reply" class="chat-form">
-    <textarea name="reply" rows="4" placeholder="type your answer..." required></textarea>
+    ${inputsHtml}
     <button type="submit">Send reply</button>
   </form>
 </div>`
@@ -2834,19 +2864,36 @@ Bun.serve({
     // POST /runs/:name/reply — the view-server's first non-GET route.
     // The interview chat form submits here; we write reader-reply.json to the
     // run dir, which the runner's interrupt loop polls for and consumes.
+    // The form posts one or more q_N/a_N pairs (per-question inputs). We pair
+    // each answer with its question so the interviewer sees the mapping in the
+    // transcript, then write the joined text as the single reader reply.
     const replyMatch = path.match(/^\/runs\/(.+?)\/reply$/)
     if (replyMatch && req.method === "POST") {
       const runName = decodeURIComponent(replyMatch[1])
       try {
         const runDir = safeRunPath(runName)
         const raw = await req.text()
-        // The form posts urlencoded `reply=<text>`; accept that or raw JSON.
-        let replyText = raw
-        try {
-          const params = new URLSearchParams(raw)
-          const r = params.get("reply")
-          if (r !== null) replyText = r
-        } catch { /* not urlencoded — use raw */ }
+        const params = new URLSearchParams(raw)
+        // Collect all q_N/a_N pairs in index order.
+        const pairs: Array<{ q: string; a: string }> = []
+        let idx = 0
+        while (params.has(`a_${idx}`)) {
+          const q = params.get(`q_${idx}`) ?? ""
+          const a = params.get(`a_${idx}`) ?? ""
+          if (a.trim().length > 0) pairs.push({ q, a })
+          idx += 1
+        }
+        // Build a paired reply text so the interviewer sees which answer maps to which question.
+        // Single-question turns collapse to the bare answer (backward-compatible with one-question turns).
+        let replyText: string
+        if (pairs.length === 0) {
+          // Fallback: legacy single-reply field or raw body.
+          replyText = params.get("reply") ?? raw
+        } else if (pairs.length === 1 && pairs[0]!.q === "") {
+          replyText = pairs[0]!.a
+        } else {
+          replyText = pairs.map((p) => `Q: ${p.q}\nA: ${p.a}`).join("\n\n")
+        }
         await Bun.write(`${runDir}/reader-reply.json`, JSON.stringify({ reply: replyText }))
         // Redirect back to the run page; the next poll shows the next question (or completion).
         return new Response(null, {
