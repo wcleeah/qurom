@@ -49,14 +49,14 @@ The phantom reader. Every prompt-contract function in `src/graph.ts` builds its 
 
 The mental model that matters: **the interview is not a new "phase" bolted on top of the quorum — it is a new input that feeds the same prompt-contract functions.** The quorum already has `requestLabel(state)` threaded into every prompt. The profile becomes a peer of `requestLabel`: a `readerContextBlock(state)` function that returns either "Reader profile: ..." or an empty string (default-reader fallback), inserted into the same prompt arrays.
 
-The second mental model that matters: **the interview is a LangGraph `interrupt` loop, not a bespoke state machine.** The `discoverReader` node calls `interrupt(question)` to pause the graph each turn. The graph checkpoint persists (the same `BunSqliteSaver` the design-resume path uses). The runner catches the pause, surfaces the question via the bus, the TUI collects the reply, and the runner resumes the graph with `Command({ resume: reply })`. To the node code it looks like a loop that yields one question per iteration; to the graph it's a clean suspend/resume with full checkpoint support.
+The second mental model that matters: **the interview is a LangGraph `interrupt` loop, not a bespoke state machine.** The `discoverReader` node calls `interrupt(questions)` to pause the graph each turn. The graph checkpoint persists (the same `BunSqliteSaver` the design-resume path uses). The runner catches the pause, writes the current question to `live-status.json` (the existing file-mediated channel between runner and view-server); the **view-server** (the `bun run view` web dashboard) polls it, renders a chat UI, and on submit writes the reply to `reader-reply.json` in the run dir; the runner watches for that file and resumes the graph with `Command({ resume: reply })`. To the node code it looks like a loop that yields one or more questions per iteration; to the graph it's a clean suspend/resume with full checkpoint support. The TUI does not host the chat — it stays on the running screen and points the user at the view URL (which it already displays).
 
 One concrete flow, "What is MLX?" (topic mode):
 
-1. Reader submits the topic. TUI switches to a new `interviewing` screen.
-2. `discoverReader` node runs turn 1: calls `reader-interviewer` subagent with the topic context (`requestContextBlock(state)`, same as the drafter gets) + `researchToolBlock(config)` (the config-defined research-tool preferences). The interviewer may use the configured research tools (context7/exa/grepapp) to look up "what does MLX depend on." It writes the turn JSON to `reader-profile.json` (auditor pattern: `outputFile` set, agent writes the file, `promptAgent` reads it back). The parsed turn is `{ question: "What are you trying to do with MLX?", done: false }`. The node calls `interrupt(question)` → graph suspends, checkpoint persists.
-3. Runner surfaces the question via a bus event; TUI renders it. Reader types a reply. TUI sends the reply back via the bus. Runner resumes the graph with `Command({ resume: reply })`.
-4. Turn 2+: the node appends the reply to the transcript in `ResearchState`, calls the subagent again with the full transcript so far. The interviewer returns the next probe: `{ question: "Do you know what a computational graph is? what backprop computes?", done: false }` → `interrupt` → reply → resume.
+1. Reader submits the topic. TUI stays on the running screen; the view-server (already open per the TUI's view-URL pointer) hosts the interview.
+2. `discoverReader` node runs turn 1: calls `reader-interviewer` subagent with the topic context (`requestContextBlock(state)`, same as the drafter gets) + `researchToolBlock(config)` (the config-defined research-tool preferences). The interviewer may use the configured research tools (context7/exa/grepapp) to look up "what does MLX depend on." It writes the turn JSON to `reader-profile.json` (auditor pattern: `outputFile` set, agent writes the file, `promptAgent` reads it back). The parsed turn is `{ questions: ["What are you trying to do with MLX?"], done: false }`. The node calls `interrupt(questions)` → graph suspends, checkpoint persists, the runner writes the question to `live-status.json`.
+3. The view-server polls `live-status.json`, sees the awaiting-reply state, renders the question(s) + an input form. Reader types a reply and submits. The view-server writes the reply to `reader-reply.json` in the run dir. The runner picks it up and resumes the graph with `Command({ resume: reply })`.
+4. Turn 2+: the node appends the reply to the transcript in `ResearchState`, calls the subagent again with the full transcript so far. The interviewer returns the next probe: `{ questions: ["Do you know what a computational graph is?", "what backprop computes?"], done: false }` (independent questions batched into one turn) → `interrupt` → reply → resume.
 5. After the generous turn cap (Decision B, default 6) OR when the interviewer returns `{ done: true, profile: { learningGoal, concepts: [...] } }`, the node stops. The profile is already on disk in `reader-profile.json` (the agent wrote it on the final turn via the auditor `outputFile` pattern; no separate `writeRunJsonArtifact` call). The node sets `state.readerProfile`/`state.learningGoal` from the parsed result and returns. Graph proceeds to `draftFullDraft`.
 6. `fullDraftPrompt` now includes `readerContextBlock(state)` → "Writing for a reader who knows tensor ops and PyTorch basics, does NOT know autograd or GPU memory. Goal: deciding whether MLX is worth learning. Include a Prerequisites section covering: autograd, GPU/memory fundamentals." The drafter writes that document.
 7. `clarity-auditor` gets the same `readerContextBlock` in its `auditPrompt` → judges clarity *for this reader*, stops flagging the autograd prereq section as "too basic."
@@ -84,9 +84,9 @@ There is no mid-interview skip. The reader commits to the interview by submittin
 
 ### D — interview state ownership: **D2 via LangGraph `interrupt`**
 
-The interview is a **single `discoverReader` node that loops with `interrupt()`**. Each turn: the node calls the interviewer subagent, gets the next question, and calls `interrupt(question)`. The graph suspends (checkpoint persists via `BunSqliteSaver`). The runner catches the suspension, surfaces the question on the bus, collects the reply, and resumes with `Command({ resume: reply })`. The node receives the reply as the return value of `interrupt()` and continues the loop.
+The interview is a **single `discoverReader` node that loops with `interrupt()`**. Each turn: the node calls the interviewer subagent, gets the next question(s), and calls `interrupt(questions)`. The graph suspends (checkpoint persists via `BunSqliteSaver`). The runner catches the suspension, writes the question to `live-status.json` (the existing runner→view-server file channel); the **view-server** renders the chat UI and writes the reader's reply to `reader-reply.json`; the runner picks up the reply and resumes with `Command({ resume: reply })`. The node receives the reply as the return value of `interrupt()` and continues the loop.
 
-This is D2 (the state-machine approach) implemented via LangGraph's native primitive rather than a hand-rolled `awaiting_reader_reply` status + separate `readerReply` node. **Why this is the cleanest reading of D2:** it gives D2's checkpoint-resume robustness (a crash mid-interview resumes from the last checkpoint, re-asking the current question) with D1's code locality (one node, one loop). It reuses the exact resume pattern already in the codebase (`src/runner.ts:763` design-resume does `graph.invoke(null, { configurable: { thread_id, checkpoint_id } })`) plus a `Command({ resume })` value. The interview transcript persists in `ResearchState` (a new `interviewTranscript` array field) so it survives checkpoints and is available to the interviewer's next turn.
+This is D2 (the state-machine approach) implemented via LangGraph's native primitive rather than a hand-rolled `awaiting_reader_reply` status + separate `readerReply` node. **Why this is the cleanest reading of D2:** it gives D2's checkpoint-resume robustness (a crash mid-interview resumes from the last checkpoint, re-asking the current question) with D1's code locality (one node, one loop). It reuses the exact resume pattern already in the codebase (`src/runner.ts:763` design-resume does `graph.invoke(null, { configurable: { thread_id, checkpoint_id } })`) plus a `Command({ resume })` value. The interview transcript persists in `ResearchState` (a new `interviewTranscript` array field) so it survives checkpoints and is available to the interviewer's next turn. **The interaction UI lives in the view-server, not the TUI** — see "Where the chat lives" below.
 
 **Flag for execution:** confirm the `Command({ resume })` resume-value API against LangGraph 1.2.9 at execution time. The `interrupt`/`Command` exports are present (Confirmed); the exact resume invocation is the one SDK detail to nail in Phase 1's first commit.
 
@@ -96,32 +96,66 @@ The interviewer is a structured-output subagent that **follows the existing audi
 
 ```
 readerInterviewTurnSchema = z.object({
-  question: z.string(),            // the next question to display to the reader; empty when done
-  done: z.boolean(),               // true when the profile is complete
-  profile: z.object({              // present only when done === true
+  questions: z.array(z.string()).min(1),  // one or more questions for this turn; empty when done
+  done: z.boolean(),                      // true when the profile is complete
+  profile: z.object({                     // present only when done === true
     learningGoal: z.string().optional(),
     concepts: z.array(z.object({
       concept: z.string(),
       level: z.enum(["familiar", "heard-of", "unknown"]),
-      evidence: z.string().optional(),   // what the reader said that justifies the level
+      evidence: z.string().optional(),    // what the reader said that justifies the level
     })),
   }).optional(),
 })
 ```
 
+**Multiple questions per turn are allowed** (`questions` is an array, not a single string). The interviewer prompt instructs: ask **one question per turn by default**; batch multiple only when the questions are **independent** (the answer to one doesn't determine the next — e.g. "do you know PyTorch?" and "do you know Swift?" can be batched; "do you know autograd?" → "have you implemented custom autograd?" must be sequential, because the second depends on the answer to the first). This saves turns for independent probes without sacrificing the adaptiveness that is the whole point of Decision A2. The reader replies with one free-text blob addressing all questions in the turn.
+
 The node loop (one `promptAgent` call per turn, all with `outputFile: ${state.outputPath}/reader-profile.json`):
-1. Build the interviewer prompt: `researchToolBlock(config)` + `requestContextBlock(state)` + the transcript so far + "write JSON per the schema to the output file; ask one question; set `done: true` only when you have enough to fill the profile."
+1. Build the interviewer prompt: `researchToolBlock(config)` + `requestContextBlock(state)` + the transcript so far + "write JSON per the schema to the output file; ask one question per turn by default, batch only independent questions; set `done: true` only when you have enough to fill the profile."
 2. Call `promptAgent` with `schema: readerInterviewTurnSchema` and `outputFile: .../reader-profile.json`. The agent writes the turn JSON to the file; `promptAgent` reads it back and parses it. (If the agent returns inline instead, Phase 4 persistence writes it to the file — the same fallback auditors have.)
-3. If `done === false`: `const reply = interrupt(turn.question)` (graph suspends). On resume, append `{ role: "interviewer", text: turn.question }` and `{ role: "reader", text: reply }` to `state.interviewTranscript`. Loop.
+3. If `done === false`: `const reply = interrupt(turn.questions)` (graph suspends). On resume, append `{ role: "interviewer", text: turn.questions.join("\n") }` and `{ role: "reader", text: reply }` to `state.interviewTranscript`. Loop.
 4. If `done === true`: `reader-profile.json` already contains the profile (the agent wrote it on this final turn). Set `state.readerProfile`/`state.learningGoal` from the parsed `turn.profile`. **No separate `writeRunJsonArtifact` call** — the auditor pattern handles persistence; the node only reads back what `promptAgent` already parsed.
 
-Note on the file's mid-interview contents: on non-final turns `reader-profile.json` contains the current turn's JSON (a question), overwritten each turn. On the final turn it contains the profile. This is the same "output file reflects the latest agent output" semantics auditors have, and it's useful for live debugging (the view-server can show interview progress). The node never reads the file directly — it relies on `promptAgent`'s parsed return value, which is file-first.
+Note on the file's mid-interview contents: on non-final turns `reader-profile.json` contains the current turn's JSON (the questions), overwritten each turn. On the final turn it contains the profile. This is the same "output file reflects the latest agent output" semantics auditors have, and it's useful for live debugging (the view-server can show interview progress). The node never reads the file directly — it relies on `promptAgent`'s parsed return value, which is file-first.
 
 There is **no `confidence` field** anywhere — not on concepts, not on the profile, not on the stopping rule. Levels are categorical (`familiar`/`heard-of`/`unknown`), justified by the free-text `evidence` field.
 
+## The interviewer's JSON output goes through the recovery router
+
+Because the interviewer calls `promptAgent` with `schema` + `outputFile`, it **automatically inherits the recovery router** (D→A/B/C) that lives inside `promptAgent` (`src/opencode.ts`):
+
+- **D (coerceJson)** runs on every parse attempt — a fenced or prose-prefixed JSON still parses.
+- **A (nooutput/truncated reprompt)** — and the A-branch's `nooutput && wantFile` reprompt (`src/opencode.ts:686`) literally says "Write the complete JSON object to `{outputFile}` now" — exactly right for the interviewer writing `reader-profile.json`.
+- **B (schema reprompt)** with `<zod_issues>` embedded if the turn JSON fails `readerInterviewTurnSchema`.
+- **C (json-fixer)** rewrites `reader-profile.json` on disk if the syntax is broken.
+- On budget exhaustion, `promptAgent` throws `StructuredRecoveryError`.
+
+The **R-tier (`auditWithRestart`, Phase 3.5) does NOT wrap the interviewer**, by design. R is auditor-only — `src/graph.ts:692` and `src/design-quorum.ts:200` are the only callers; the Phase 3.5 brief scoped R to auditors because "drafter/rebuttal/draft-synthesis carries accumulated state across turns and would lose information on a fresh session." The interviewer is drafter-like (it carries the transcript), so a fresh-session restart would discard the conversation. On `StructuredRecoveryError`, the interview fails and the run fails (no profile, no draft) — consistent with Decision C (no escape hatch: if the interviewer breaks, the user re-runs).
+
+**Why this changes the plan:** the interviewer gets robust malformed-JSON recovery for free, with no special handling in the node. The node's loop only deals with the *happy path* (a parsed `readerInterviewTurnSchema`); `promptAgent`'s router handles everything else before the node ever sees a value. The one thing the node must do is let `StructuredRecoveryError` propagate (don't catch and retry the interview from scratch — that would discard the transcript).
+
+## Where the chat lives — the view-server, not the TUI
+
+**Decision: the interview chat UI lives in the view-server (`bun run view`, `src/view-server.ts`), not the TUI.** The TUI stays on the running screen and points the user at the view URL (which it already displays via `Dashboard.tsx:121`).
+
+**Why this is better than a TUI chat surface:**
+- The view-server is a **web UI** — a chat surface (scrollable transcript + input form + submit) is trivial in HTML/CSS. The TUI is `@opentui/react`, which has **no chat precedent** in this repo (`interactiveEnhance` is misnamed — no user input; `replyToPermission` is never called from the TUI). Building chat in the TUI was the single biggest build piece in the prior draft.
+- The runner and view-server are already **decoupled via the filesystem** — `live-status.json`, `node-history.json`, `debug-log.jsonl`, run artifacts are all file-mediated. The interview is one more file-mediated handshake, fitting the codebase's universal pattern. The runner does not expose HTTP; the view-server does not have a handle to the graph.
+- The view-server **already polls** `live-status.json` (`src/view-server.ts:193` `readLiveStatus`; `:2555` "Background poll handles refresh"; `:1507` `fetch(window.location.href)`). Surfacing the current question is a small addition to an existing poll.
+- The user is **already oriented to the view URL** — the TUI prints it when the run starts.
+
+**The handshake (all file-mediated, no new IPC):**
+1. The runner's `interrupt` handler writes the current question(s) to `live-status.json` as a new `awaitingReaderReply: { turn, questions, transcript }` field (the `liveStatusWriter` at `src/live-status.ts:51` already writes this file on every status change).
+2. The view-server's existing poll picks up `awaitingReaderReply` and renders a chat UI (transcript + input form) on the run page.
+3. On submit, the view-server **writes the reply to `reader-reply.json`** in the run dir (a new `POST /runs/:name/reply` route in `src/view-server.ts:2702`'s fetch handler — the view-server's first non-`GET` route).
+4. The runner watches for `reader-reply.json` (a small `fs.watch` or poll loop in the `interrupt` handler), reads the reply, deletes the file, and resumes the graph with `new Command({ resume: reply })`.
+
+**What this costs:** the view-server becomes **interactive** (gains one `POST` route + writes to the run dir). That's a deliberate role change from pure read-only dashboard to active control surface, but it's a small one — one new route, one file write. **The user must open the view URL** to answer; if they don't, the run hangs at the interview. Mitigation: the TUI's running screen shows a prominent `🎙 Interviewing reader — answer in the view dashboard: {viewUrl}` status line (reuses the existing `viewUrl` display), so the user knows where to go. The view-server's run page already auto-refreshes during active runs, so the interview UI appears without a manual reload.
+
 ## Recommended approach
 
-A new **pre-draft `discoverReader` graph node** between `prepareOutputPath` and `draftFullDraft` (the exact slot `classifyComplexity` vacated), implemented as a LangGraph `interrupt` loop. It is driven by a new **`interviewing` TUI screen** that renders a chat-like transcript and a single input line. The node loops a `reader-interviewer` subagent that **follows the auditor JSON-output pattern** (`outputFile` + `edit` permission + file-first read) and **has the config-defined research tools** (`researchToolBlock(config)` in its prompt, backed by `websearch`/`codesearch`/`webfetch: allow` permissions in its agent def). It is fully adaptive (Decision A2), bounded by a generous turn cap (Decision B, default 6), runs to completion with no skip path (Decision C), and suspends/resumes via `interrupt`/`Command({ resume })` (Decision D). The agent writes `reader-profile.json` itself each turn (auditor pattern); the node reads the profile back via `promptAgent`'s parsed return and sets two new `ResearchState` fields: `readerProfile` and `learningGoal` (plus `interviewTranscript` for the loop). A new `readerContextBlock(state)` function feeds those into `fullDraftPrompt`, `auditPrompt`, `rebuttalPrompt`, `rebuttalReviewPrompt`, and `drafterReviewPrompt`. The just-removed depth-tier surfacing slots (view-server card, `summarizeNodeState` case, Dashboard badge) are repurposed for the profile.
+A new **pre-draft `discoverReader` graph node** between `prepareOutputPath` and `draftFullDraft` (the exact slot `classifyComplexity` vacated), implemented as a LangGraph `interrupt` loop. The **chat UI lives in the view-server** (the `bun run view` web dashboard), not the TUI — the runner and view-server handshake via `live-status.json` (question) and `reader-reply.json` (reply), the existing file-mediated channel. The TUI stays on the running screen and points the user at the view URL. The node loops a `reader-interviewer` subagent that **follows the auditor JSON-output pattern** (`outputFile` + `edit` permission + file-first read) and **has the config-defined research tools** (`researchToolBlock(config)` in its prompt, backed by `websearch`/`codesearch`/`webfetch: allow` permissions in its agent def). It is fully adaptive (Decision A2), bounded by a generous turn cap (Decision B, default 6), runs to completion with no skip path (Decision C), and suspends/resumes via `interrupt`/`Command({ resume })` (Decision D). Its JSON output goes through the recovery router (D→A/B/C) automatically because it uses `promptAgent`; the R-tier does not wrap it. The agent writes `reader-profile.json` itself each turn (auditor pattern); the node reads the profile back via `promptAgent`'s parsed return and sets two new `ResearchState` fields: `readerProfile` and `learningGoal` (plus `interviewTranscript` for the loop). A new `readerContextBlock(state)` function feeds those into `fullDraftPrompt`, `auditPrompt`, `rebuttalPrompt`, `rebuttalReviewPrompt`, and `drafterReviewPrompt`. The just-removed depth-tier surfacing slots (view-server card, `summarizeNodeState` case, Dashboard badge) are repurposed for the profile.
 
 What is **not** changing: quorum size, auditor count, round/rebuttal budgets, the graph nodes after `draftFullDraft`, the design phase, the recovery router.
 
@@ -129,9 +163,13 @@ What is **not** changing: quorum size, auditor count, round/rebuttal budgets, th
 
 ```mermaid
 flowchart TD
-    subgraph "TUI screens (new: interviewing)"
-      P[prompt screen<br/>topic OR document] -->|submit| I[interviewing screen]
-      I -->|interview concludes| R[running screen]
+    subgraph "TUI (unchanged screens; pointer only)"
+      P[prompt screen<br/>topic OR document] -->|submit| R[running screen<br/>shows view URL + interview status]
+    end
+
+    subgraph "View-server (NEW: hosts the chat)"
+      V[run page poll] -->|reads live-status.json| CHAT[interview chat UI<br/>transcript + input form]
+      CHAT -->|POST /runs/:name/reply| RR[(reader-reply.json)]
     end
 
     subgraph "Graph (new node: discoverReader, interrupt loop)"
@@ -139,7 +177,7 @@ flowchart TD
       IR --> SID[summarizeInputDocument]
       SID --> POP[prepareOutputPath]
       POP --> DR[discoverReader<br/>new: interrupt-loop reader-interviewer subagent]
-      DR -->|interrupt question| PAUSE((graph suspended<br/>checkpoint persists))
+      DR -->|interrupt questions| PAUSE((graph suspended<br/>checkpoint persists))
       PAUSE -->|Command resume: reply| DR
       DR -->|done: profile on state| DFD[draftFullDraft]
       DFD --> RPA[runParallelAudits]
@@ -150,12 +188,13 @@ flowchart TD
       AC --> FIN[finalizeApprovedDraft / finalizeFailedRun]
     end
 
-    DR -.persists.-> RPJ[(reader-profile.json)]
-    DR -.emits question via bus.-> I
-    I -.reader reply via bus.-> DR
+    DR -.writes question to.-> LS[(live-status.json)]
+    LS -.polled by.-> V
+    RR -.watched by runner.-> PAUSE
+    DR -.agent writes each turn.-> RPJ[(reader-profile.json)]
 ```
 
-What this shows: the interview is a **TUI screen ↔ graph node loop mediated by LangGraph `interrupt`** that sits between submit and the existing draft pipeline. The node suspends the graph each turn (checkpoint persists); the TUI renders the question from a bus event and sends the reply back; the runner resumes the graph with `Command({ resume: reply })`. After the node returns, the rest of the graph is unchanged except every prompt-contract function reads `state.readerProfile`/`state.learningGoal`. Both topic and document mode flow through the same path.
+What this shows: the interview is a **view-server ↔ graph node loop mediated by files** (`live-status.json` for the question, `reader-reply.json` for the reply) that sits between submit and the existing draft pipeline. The node suspends the graph each turn via `interrupt` (checkpoint persists); the view-server renders the question from its existing poll and writes the reply to the run dir; the runner watches for the reply file and resumes with `Command({ resume: reply })`. The TUI does not host the chat — it points the user at the view URL. After the node returns, the rest of the graph is unchanged except every prompt-contract function reads `state.readerProfile`/`state.learningGoal`. Both topic and document mode flow through the same path.
 
 ## Step-by-step implementation plan
 
@@ -168,11 +207,13 @@ Phases are dependency-ordered. Phase 1 is the minimum that proves the feature; P
 - `.opencode/agents/reader-interviewer.md` — new agent. **Mirrors the auditor permission pattern** (`.opencode/agents/source-auditor.md`): `read: "runs/**": allow` + `edit: "runs/**/reader-profile.json": allow` (scoped to its own output file, exactly like the auditor's `edit: "runs/**/audit-source-auditor-*.json": allow`). **Plus the research-tool enabling permissions** (`websearch: allow`, `codesearch: allow`, `webfetch: allow`) so the config-defined research tools (`researchToolBlock(config)`) are actionable. Denies bash/task/skill/todowrite/question/glob/grep/list. Model: a capable model (the interviewer's probing quality is the feature's core; do not use the cheapest model — `opencode-go/glm-5.2` or similar).
 - `assets/prompts/reader-interview.md` — new prompt asset: the interviewer system prompt. Specifies: ask one question at a time; use research tools to look up what the topic depends on when you're unsure; cover `learningGoal` first, then probe each prerequisite concept; never exceed the turn budget; on the final turn set `done: true` and return the full profile; output strictly per the JSON schema.
 - `src/prompt-assets.ts` — register `readerInterview` in `promptAssetFiles`.
-- `src/graph.ts` — new `discoverReader` node function implementing the `interrupt` loop (Decisions A2/D, schema from above). Each turn: build prompt from `researchToolBlock(config)` + `requestContextBlock(state)` + `state.interviewTranscript` + the interviewer asset; call `promptAgent` with `schema: readerInterviewTurnSchema` AND `outputFile: ${state.outputPath}/reader-profile.json` (auditor pattern — the agent writes the file, `promptAgent` reads it back file-first); if `!done`, `interrupt(turn.question)`, append Q+A to transcript on resume, loop; if `done`, set `state.readerProfile`/`state.learningGoal` from the parsed `turn.profile` (the file is already written by the agent — **no `writeRunJsonArtifact` call**). **Runs for both `inputMode === "topic"` and `"document"`** (the prompt builder already branches on mode via `requestContextBlock`). New `readerContextBlock(state)` returning a prompt fragment or `""`. Inject `readerContextBlock` into `fullDraftPrompt` only in Phase 1. Add node + edges: `prepareOutputPath → discoverReader → draftFullDraft` (replacing the current direct edge). Import `interrupt` from `@langchain/langgraph`.
+- `src/graph.ts` — new `discoverReader` node function implementing the `interrupt` loop (Decisions A2/D, schema from above). Each turn: build prompt from `researchToolBlock(config)` + `requestContextBlock(state)` + `state.interviewTranscript` + the interviewer asset; call `promptAgent` with `schema: readerInterviewTurnSchema` AND `outputFile: ${state.outputPath}/reader-profile.json` (auditor pattern — the agent writes the file, `promptAgent` reads it back file-first); if `!done`, `interrupt(turn.questions)`, append Q+A to transcript on resume, loop; if `done`, set `state.readerProfile`/`state.learningGoal` from the parsed `turn.profile` (the file is already written by the agent — **no `writeRunJsonArtifact` call**). **Runs for both `inputMode === "topic"` and `"document"`** (the prompt builder already branches on mode via `requestContextBlock`). New `readerContextBlock(state)` returning a prompt fragment or `""`. Inject `readerContextBlock` into `fullDraftPrompt` only in Phase 1. Add node + edges: `prepareOutputPath → discoverReader → draftFullDraft` (replacing the current direct edge). Import `interrupt` from `@langchain/langgraph`.
 - `src/config.ts` + `quorum.config.json` — add `readerDiscovery: { maxTurns: z.number().int().positive().default(6), enabled: z.boolean().default(true) }`.
-- `src/runner.ts` — handle the `interrupt` suspension: when `graph.invoke` throws/resolves with a `GraphInterrupt`-shaped result, extract the interrupt value (the question), emit a new `reader.interview_question` bus event, and wait for a `reader.reply` bus event; resume with `new Command({ resume: reply })` via `graph.invoke(command, { configurable: { thread_id, checkpoint_id } })`. This is the one genuinely new runner behavior — it extends the existing design-resume pattern (`:763`) with a resume value. Add `reader.interview_question` and `reader.reply` to the `RunnerEvent` union.
-- `src/tui/App.tsx` — new `Screen` value `"interviewing"`. Transition `prompt → interviewing` on submit (instead of `prompt → running`). Transition `interviewing → running` when the `discoverReader` node completes (listen for `graph.node` end on `discoverReader`).
-- `src/tui/components/InterviewScreen.tsx` — **new component.** Renders a scrollable transcript (questions from `reader.interview_question` events + user replies) and a single `<input>` line. Sends replies via a `reader.reply` bus event. No skip control (Decision C); only Ctrl-C quits the run (existing handler).
+- `src/runner.ts` — handle the `interrupt` suspension: when `graph.invoke` resolves with a `GraphInterrupt`-shaped result, extract the interrupt value (the questions), write them to `live-status.json` via the existing `liveStatusWriter` as a new `awaitingReaderReply: { turn, questions, transcript }` field, then **wait for `reader-reply.json`** in the run dir (a small `fs.watch` or short poll loop on `state.outputPath`). When the reply file appears, read it, delete it, and resume with `new Command({ resume: replyText })` via `graph.invoke(command, { configurable: { thread_id, checkpoint_id } })`. This extends the existing design-resume pattern (`:763`) with a resume value and a file wait. No new `RunnerEvent` types are needed (the handshake is file-mediated, not bus-mediated) — though a `reader.interview_turn` debug-log event for triage is useful.
+- `src/live-status.ts` — extend the `LiveStatus` shape with `awaitingReaderReply?: { turn: number; questions: string[]; transcript: { role: string; text: string }[] }`. The `liveStatusWriter` already serializes the whole status to `live-status.json` on every change; the runner sets this field when `interrupt` fires and clears it when the reply arrives.
+- `src/view-server.ts` — **the chat UI host.** (a) Extend `readLiveStatus`/the `LiveStatus` interface to include `awaitingReaderReply`. (b) On the run page (`renderRun`), when `awaitingReaderReply` is present, render a chat card: scrollable transcript + a `<form>` with a `<textarea>` and submit button, posting to `/runs/:name/reply`. (c) Add the first non-`GET` route to the fetch handler (`:2702`): `POST /runs/:name/reply` reads the body, writes it to `${runDir}/reader-reply.json`, and returns a small ack. This is the view-server's transition from read-only dashboard to interactive control surface — one new route + one file write. (d) Render the interview transcript/history from `awaitingReaderReply.transcript` so the user sees the whole conversation, not just the current question.
+- `src/tui/components/Dashboard.tsx` — **no new screen, no `InterviewScreen` component.** During the interview (detected via a `awaitingReaderReply`-shaped graph.node state, or a new bus field), show a prominent status line: `🎙 Interviewing reader — answer in the view dashboard: {viewUrl}` (reuses the existing `viewUrl` prop). The TUI's role is pointer-only; the chat lives in the view-server.
+- `src/tui/App.tsx` — **no `interviewing` Screen state.** The app stays on the `running` screen from submit through the interview through the draft. No `Screen` enum change.
 
 **Sequence of work:** schema → agent + prompt → prompt-assets → graph node (interrupt loop) → config → runner interrupt/resume → TUI screen → App wiring. The node can be developed and tested against a stubbed runner (hardcoded reply sequence) before the TUI screen exists.
 
@@ -201,62 +242,79 @@ Only if Phase 1–2 show the fixed-cap interview is too thin or too long. Candid
 
 ## UI sketch and component map
 
-### Interview screen (new)
+### Interview chat card in the view-server (new)
+
+Rendered on the run page (`/runs/:name`) when `live-status.json` has `awaitingReaderReply`:
+
+```
+┌─ 🎙 reader interview · "What is MLX?" ─────────────┐
+│                                                    │
+│  Turn 2 of 6                                       │
+│                                                    │
+│  🤖 What are you trying to do with MLX?            │
+│  👤 decide if it's worth learning for side projects│
+│                                                    │
+│  🤖 Have you used any ML framework before?         │
+│  👤 yes, pytorch, but only tutorials               │
+│                                                    │
+│  🤖 Do you know what a computational graph is?     │
+│     What backprop computes?                        │
+│                                                    │
+│  ┌──────────────────────────────────────────────┐ │
+│  │ type your answer...                          │ │
+│  └──────────────────────────────────────────────┘ │
+│  [ Send reply ]                                    │
+└────────────────────────────────────────────────────┘
+```
+
+The card auto-appears when the run page polls `live-status.json` and sees `awaitingReaderReply`. On submit, the form `POST`s to `/runs/:name/reply`; the handler writes `reader-reply.json` to the run dir; the runner picks it up and resumes the graph; the next poll shows the next question (or the interview-complete state). No skip button (Decision C).
+
+### TUI during the interview (running screen, pointer-only)
 
 ```
 ┌─ research-qurom ─────────────────────────────────┐
+│ ...pipeline status...                            │
 │                                                  │
-│ 🎙 reader interview · "What is MLX?"             │
+│ 🎙 Interviewing reader — answer in the view      │
+│    dashboard: http://localhost:3000/runs/<rid>   │
 │                                                  │
-│ ┌────────────────────────────────────────────┐   │
-│ │ 🤖 what are you trying to do with MLX?     │   │
-│ │    decide if it's worth learning for       │   │
-│ │    side projects                           │   │
-│ │                                            │   │
-│ │ 🤖 have you used any ML framework before?  │   │
-│ │    yes, pytorch, but only tutorials        │   │
-│ │                                            │   │
-│ │ 🤖 do you know what a computational graph  │   │
-│ │    is? what backprop computes?             │   │
-│ │ ▌                                          │   │
-│ └────────────────────────────────────────────┘   │
-│                                                  │
-│ ┌────────────────────────────────────────────┐   │
-│ │ type your answer...                       ▌│   │
-│ └────────────────────────────────────────────┘   │
-│ Enter: send · Ctrl-C: quit                       │
+│ → http://localhost:3000/runs/<rid>               │
 └────────────────────────────────────────────────┘
 ```
 
-(Note: no `Tab: skip` line — Decision C. The only exit is Ctrl-C, which aborts the run.)
+No new TUI screen. The running screen reuses the existing `viewUrl` display (`Dashboard.tsx:121`) plus a one-line interview-status indicator.
 
 ### Component map
 
 ```
-App
-├─ Screen: "prompt"      → PromptScreen (existing, unchanged)
-├─ Screen: "interviewing" → InterviewScreen (NEW)
-│   ├─ props: store (transcript from bus events), onReply
-│   ├─ state: draftInput (local, cleared on send)
-│   ├─ renders: scrollable <text> history + <input> line
-│   └─ emits: reader.reply via bus
-└─ Screen: "running"      → Dashboard (existing + new reader badge)
+App (TUI — unchanged screens)
+├─ Screen: "prompt"   → PromptScreen (existing, unchanged)
+└─ Screen: "running"   → Dashboard (existing + one interview-status line)
+
+view-server (src/view-server.ts — NEW interactive role)
+├─ GET /runs/:name      → renderRun (existing) + NEW interview chat card when awaitingReaderReply
+├─ POST /runs/:name/reply → NEW: write reader-reply.json to run dir
+└─ poll live-status.json → existing; now also surfaces awaitingReaderReply
+
+runner (src/runner.ts — NEW interrupt/resume handling)
+├─ detect GraphInterrupt → write awaitingReaderReply to live-status.json
+├─ watch for reader-reply.json → resume graph with Command({ resume })
 ```
 
 **State ownership:**
-- The **transcript** lives in the `RunStore` (new `readerInterview` slice) populated by `reader.interview_question` events + echoed replies, mirroring how `agent.tool` events populate `agents` today (`src/tui/state/runStore.ts:181`).
-- The **user's draft input** is local `InterviewScreen` state (cleared on send).
+- The **chat transcript shown to the user** lives in `live-status.json`'s `awaitingReaderReply.transcript` (written by the runner each turn, polled by the view-server). The view-server is stateless across requests — it always renders from the file.
+- The **user's reply** is a single `POST` body, written to `reader-reply.json` by the view-server and consumed (and deleted) by the runner. One file, one reply, one consume — no shared state.
 - The **canonical profile + transcript** live in `ResearchState` (`readerProfile`, `learningGoal`, `interviewTranscript`) set when the node completes, and in `reader-profile.json` on disk (written by the agent each turn via the auditor `outputFile` pattern, not by the node). The `interviewTranscript` is updated each turn (before the `interrupt`) so it survives checkpoints.
 
-**Responsive differences:** none material — the TUI is terminal-sized; the interview surface uses the same `useTerminalDimensions` pattern as `PromptScreen`. A very short terminal (<20 rows) truncates the transcript to the last N turns.
+**Responsive differences:** none material — the chat card is web UI (HTML/CSS, responsive by default); the TUI is unchanged. The view-server already auto-refreshes the run page during active runs, so the interview card appears and updates without a manual reload.
 
 ## Risks and failure modes
 
 1. **Fully-adaptive interviewer wanders / never converges (Decision A2).** Without a separate primer, the interviewer may ask off-domain probes or burn turns without covering the prerequisites that matter. *Mitigation:* the interviewer has the config-defined research tools (`researchToolBlock(config)` + the `websearch`/`codesearch`/`webfetch` permissions) so it can look up what the topic depends on rather than guessing; the generous turn cap (6) bounds the cost; the interviewer prompt instructs it to research the topic before probing. *Detection:* Phase 1 manual runs — inspect `reader-profile.json` and confirm the concepts are on-domain.
-2. **Interview abandonment with no escape hatch (Decision C).** A reader who doesn't want to be interviewed must Ctrl-C (aborting the run) and re-run with `readerDiscovery.enabled: false`. *Mitigation:* this is an accepted trade-off, not a bug — the feature's value depends on the interview running. The kill-switch exists for users who opt out. *Detection:* telemetry on how often users Ctrl-C during the interview vs. complete it; if abandonment is high, revisit Decision C.
+2. **Interview abandonment / user doesn't open the view URL (Decision C).** A reader who doesn't open `http://localhost:3000` never sees the interview prompt and the run hangs at the `interrupt`. *Mitigation:* the TUI's running screen shows a prominent `🎙 Interviewing reader — answer in the view dashboard: {viewUrl}` status line (reusing the existing `viewUrl` display), so the user knows where to go; the only exit if they refuse is Ctrl-C (abort + re-run with `readerDiscovery.enabled: false`). *Detection:* telemetry on how often runs hang at the interview vs. complete; if high, reconsider Decision C or make the TUI pointer more prominent.
 3. **OpenCode session multi-turn assumption fails (Assumption).** If `client.session.prompt` does not carry conversation state across calls in one session, the interviewer can't reference prior answers within a session. *Mitigation:* the node re-sends the full `interviewTranscript` on every call, so the interviewer is stateless across calls — it sees the whole conversation each turn. The LangGraph `interrupt` path makes this natural (state lives in `ResearchState`, not the OpenCode session). *Detection:* Phase 1 manual test — confirm the interviewer references prior answers (from the transcript in its prompt).
 4. **LangGraph `interrupt`/`Command({ resume })` API details.** The exports are present in v1.2.9 (Confirmed), but the exact resume invocation (whether `Command({ resume })` is passed as the `invoke` input or via a config field) needs nailing in Phase 1's first commit. *Mitigation:* the existing design-resume (`runner.ts:763`) already does checkpoint-based `graph.invoke(null, ...)`; the only new piece is the resume value. *Detection:* Phase 1 first commit — wire a single `interrupt` + resume and confirm it round-trips a value.
-5. **TUI has no chat-surface precedent.** `@opentui/react` has `<input>` and `<text>` but no scrollable-list primitive in this repo. *Mitigation:* render the transcript as a column of `<text>` nodes inside a `<box>` with fixed height, truncating to the last N turns (the same manual layout `PromptScreen` uses). *Detection:* Phase 1 manual render test.
+5. **View-server becomes interactive (role change).** The view-server has been read-only (all `GET` routes); the interview adds its first `POST` route (`/runs/:name/reply`) and a file write to the run dir. *Mitigation:* one new route + one file write, scoped to `reader-reply.json`; the route validates the run name and body shape; existing `GET` routes are untouched. *Detection:* Phase 1 manual test — confirm existing view pages still render and the `POST` round-trips a reply. (This risk replaces the prior "TUI has no chat-surface precedent" risk — that risk is eliminated by moving the chat to the view-server.)
 6. **Checkpoint resume mid-interview.** With `interrupt`, a crash mid-interview resumes from the last checkpoint and re-asks the current question (the transcript up to that point is in `state.interviewTranscript`, persisted by the saver). This is a genuine strength of Decision D — no special handling needed. *Verify* in Phase 1.
 7. **Profile makes auditors *too* lenient.** If "judge clarity for this reader" is read as "don't flag anything the reader wouldn't notice," the clarity auditor stops catching real defects. *Mitigation:* the Phase 2 audit prompt asset must distinguish "clarity for this reader" from "correctness" — the profile gates *explanation depth*, not *factual rigor*. *Detection:* Phase 2 manual run — confirm auditors still flag factual/logic defects.
 8. **Profile schema too rigid.** The `{concept, level, evidence}` triple may not capture nuance (e.g. "knows PyTorch but not custom CUDA kernels"). *Mitigation:* the `evidence` field captures the nuance; Phase 4 can add sub-concepts if needed. *Acceptable for v1.*
@@ -282,12 +340,12 @@ App
 **Regression checks:**
 - Document mode end-to-end still works when `readerDiscovery.enabled: false`.
 - Design phase unchanged — the profile is not injected into design prompts (out of scope for v1).
-- Recovery router unchanged — `discoverReader` uses `promptAgent` and inherits D/A/B/C recovery; a malformed interviewer JSON triggers the router, not a crash. The `interrupt` is outside `promptAgent` and is not affected by the recovery router.
+- Recovery router unchanged — `discoverReader` uses `promptAgent` and inherits D/A/B/C recovery automatically (see "The interviewer's JSON output goes through the recovery router"); a malformed interviewer JSON triggers the router, not a crash. The R-tier (`auditWithRestart`) does not wrap the interviewer. The `interrupt` is outside `promptAgent` and is not affected by the recovery router.
 
 ## Rollback or recovery plan
 
 - **Per-phase rollback:** each phase is one commit (or a small set). Revert the commit to roll back that phase; earlier phases continue to work because the profile fields are optional and `readerContextBlock` returns `""` when absent.
-- **Feature kill-switch:** `quorum.config.json` `readerDiscovery.enabled: false` → `discoverReader` node short-circuits to a default (empty) profile and the run proceeds as today, with no `interviewing` screen (App goes straight `prompt → running`). Add this gate in Phase 1.
+- **Feature kill-switch:** `quorum.config.json` `readerDiscovery.enabled: false` → `discoverReader` node short-circuits to a default (empty) profile and the run proceeds as today, with no interview (App goes straight `prompt → running`, view-server never shows a chat card). Add this gate in Phase 1.
 - **Full rollback:** revert all phase commits. The schema fields (`readerProfile`, `learningGoal`, `interviewTranscript`) are optional, so older checkpoints still parse. The agent definition and prompt assets are additive files (deletable). The view-server card and TUI badge are additive (gated on the artifact existing). No data migration needed in either direction.
 - **Run-artifact compatibility:** old runs without `reader-profile.json` render fine (the card is absent, same as today); new runs with the artifact render the card. No backfill.
 
@@ -295,9 +353,11 @@ App
 
 - `src/graph.ts:97` (`requestLabel`), `:108` (`researchToolBlock` — reused for the interviewer; this is the config-defined "research tools" guidance), `:121` (`requestContextBlock` — already branches on `inputMode` for both topic and document), `:127` (`fullDraftPrompt`), `:138` (`auditPrompt`), `:179`/`:190` (`rebuttalPrompt`/`rebuttalReviewPrompt`), `:535` (`ingestRequest`), `:668-675` (the auditor `promptAgent` call with `outputFile` + `schema` — the exact pattern the interviewer mirrors), `:1556` (`interactiveEnhanceNode` — the misnamed "interactive" precedent), edge chain near `:1899`.
 - `src/schema.ts:44–54` (`inputRequestSchema` discriminated union — both modes), `:286+` (`researchStateSchema`), `:338` (`InputRequest` type).
-- `src/tui/App.tsx` (`Screen` type — currently `"prompt" | "running"`; `startRun`; Ctrl-C handler).
-- `src/tui/components/PromptScreen.tsx` — single-`<input>` pattern, `useTerminalDimensions`, `useKeyboard`.
-- `src/runner.ts:40–65` (`RunnerEvent` union incl. `agent.permission` — closest precedent for bus-based agent round-trips), `:436` (`graph.invoke` call site), `:763` (checkpoint-resume via `graph.invoke(null, { configurable: { thread_id, checkpoint_id } })` — the exact pattern D2 extends with `Command({ resume })`).
+- `src/tui/App.tsx` (`Screen` type — unchanged: stays `"prompt" | "running"`; the interview does not add a screen), `startRun`, Ctrl-C handler.
+- `src/tui/components/Dashboard.tsx:121` (the existing `→ {viewUrl}` display — reused as the interview pointer; no `InterviewScreen` component, no `interviewing` screen).
+- `src/view-server.ts:2702` (fetch handler — all `GET` today; the `POST /runs/:name/reply` route is the first non-`GET`), `:193` (`readLiveStatus` — the poll the interview chat card hooks into), `:2555` ("Background poll handles refresh" — the run page already auto-refreshes), `:308` (`renderRequestCard` — card pattern to mirror), `:535` (card dispatcher — injection point for `reader-profile.json`).
+- `src/live-status.ts:51` (`createLiveStatusWriter` — serializes the whole status to `live-status.json` on every change; the `awaitingReaderReply` field rides this channel), `:85` (the `writeFile(join(dir, "live-status.json"), ...)` call — the runner→view-server file handshake).
+- `src/runner.ts:40-65` (`RunnerEvent` union — no new events needed; the handshake is file-mediated), `:436` (`graph.invoke` call site — where the `GraphInterrupt` is detected), `:763` (checkpoint-resume via `graph.invoke(null, { configurable: { thread_id, checkpoint_id } })` — the exact pattern D2 extends with `Command({ resume })`).
 - `src/opencode.ts:857` (`replyToPermission` — never called from TUI; confirms no prior human-in-the-loop), in-session reprompt pattern (the interviewer reuses `promptAgent`).
 - `src/view-server.ts:308` (`renderRequestCard` — card pattern to mirror), `:535` (card dispatcher — injection point for `reader-profile.json`).
 - `src/live-status.ts:285` (`summarizeNodeState` — repurpose the removed `classifyComplexity` case).
