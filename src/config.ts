@@ -54,6 +54,12 @@ const quorumConfigSchema = z.object({
       maxRestarts: z.number().int().nonnegative().default(1),
     })
     .default({ maxRestarts: 1 }),
+  readerDiscovery: z
+    .object({
+      maxTurns: z.number().int().positive().default(6),
+      enabled: z.boolean().default(true),
+    })
+    .default({ maxTurns: 6, enabled: true }),
 })
 
 export async function loadRuntimeConfig() {

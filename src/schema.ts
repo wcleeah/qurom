@@ -238,6 +238,24 @@ export const confidenceSchema = z.object({
 export type SectionConfidence = z.infer<typeof sectionConfidenceSchema>
 export type Confidence = z.infer<typeof confidenceSchema>
 
+export const readerProfileSchema = z.array(z.object({
+  concept: z.string(),
+  level: z.enum(["familiar", "heard-of", "unknown"]),
+  evidence: z.string().optional(),
+}))
+
+export const readerInterviewTurnSchema = z.object({
+  questions: z.array(z.string()).min(1),
+  done: z.boolean(),
+  profile: z.object({
+    learningGoal: z.string().optional(),
+    concepts: readerProfileSchema,
+  }).optional(),
+})
+
+export type ReaderProfile = z.infer<typeof readerProfileSchema>
+export type ReaderInterviewTurn = z.infer<typeof readerInterviewTurnSchema>
+
 export const runSummarySchema = z.object({
   requestId: nonEmptyStringSchema,
   outcome: aggregateOutcomeSchema,
@@ -303,6 +321,16 @@ export const researchStateObjectSchema = z.object({
   status: researchStatusSchema,
   failureReason: failureReasonSchema.optional(),
   outputPath: nonEmptyStringSchema.optional(),
+  readerProfile: z.array(z.object({
+    concept: z.string(),
+    level: z.enum(["familiar", "heard-of", "unknown"]),
+    evidence: z.string().optional(),
+  })).optional(),
+  learningGoal: z.string().optional(),
+  interviewTranscript: z.array(z.object({
+    role: z.enum(["interviewer", "reader"]),
+    text: z.string(),
+  })).optional(),
   confidence: confidenceSchema.optional(),
   designHtml: z.string().optional(),
   designStatus: designStatusSchema.optional(),

@@ -29,5 +29,9 @@
       "script-security-auditor"
     ],
     "maxRounds": 2
+  },
+  "readerDiscovery": {
+    "maxTurns": 6,
+    "enabled": true
   }
 }
