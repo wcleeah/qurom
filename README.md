@@ -10,6 +10,7 @@ The generated document can be found in `./example/go-routine-parking.md`
 - Writes one full draft directly from the request and evidence, then runs revision rounds when needed.
 - Runs three auditors in parallel to review the draft from different perspective. 
 - Aggregates findings, rebuttals, and approvals until the run is approved or fails.
+- Once a research run is approved, an optional **design quorum** turns the document into a single self-contained HTML page (`final.html`), reviewed by its own panel of design auditors.
 - Streams live activity into a TUI with per-agent panels, dashboard and a summary screen after run.
 - Captures Langfuse telemetry when configured.
 
@@ -43,21 +44,36 @@ The generated document can be found in `./example/go-routine-parking.md`
 8. The user can choose to rerun, it will all go back to step 3
 
 ## Current Agent Roles
+Research quorum:
 - `research-drafter`
 - `source-auditor`
 - `logic-auditor`
 - `clarity-auditor`
+- `markdown-summarizer` (post-run summary)
+
+Design quorum (when `designQuorum.enabled` is true):
+- `html-designer`
+- `visual-layout-auditor`
+- `technical-html-auditor`
+- `script-security-auditor`
+- `interactive-enhancer`
+
+Recovery helpers (used by the structured-output recovery router):
+- `json-fixer`
+
 These are configured in `quorum.config.json` and backed by local agent definitions under `.opencode/agents/`.
 
 ## Requirements
-- Bun
-- An OpenCode server reachable at `OPENCODE_BASE_URL`
-- Local agent definitions available to that OpenCode instance
+- **Bun** (runtime + test runner)
+- **OpenCode** (`opencode` binary on your `PATH`) — the app spawns `opencode serve` on the configured port if no server is already reachable at `OPENCODE_BASE_URL`. Alternatively, point `OPENCODE_BASE_URL` at an already-running OpenCode server and it will be reused as-is.
+- Local agent definitions available to that OpenCode instance (the repo ships them under `.opencode/agents/`; OpenCode loads them automatically when `OPENCODE_DIRECTORY` points at this repo).
+
 Prompt contracts are repo-owned and loaded from `assets/prompts/`.
 Live quorum runs do not require the global `deep-dive-research` skill. Drafting behavior is owned by the repo prompt bundle and the repo agent definitions under `.opencode/agents/`.
 
 Optional:
 - Langfuse credentials for trace export
+- Git submodules under `reference/` and `references/` (only needed for browsing upstream sources; the app does not require them to run)
 
 ## Configuration
 Runtime config is loaded from environment variables and `quorum.config.json`.
@@ -78,14 +94,51 @@ Main environment variables:
 - `LANGFUSE_BASE_URL`
 Default values are defined in `src/config.ts`.
 
-## Install
+## Setup
+
+1. Clone with submodules (or fetch them after the fact):
+```bash
+git clone --recurse-submodules <repo-url> qurom
+cd qurom
+# or, if already cloned without submodules:
+git submodule update --init --recursive
+```
+
+2. Install JS dependencies (this also populates `.opencode/node_modules` for the agent defs):
 ```bash
 bun install
 ```
 
+3. Copy the env template and edit it to match your machine:
+```bash
+cp .env.example .env
+```
+Set at least:
+- `OPENCODE_DIRECTORY` — absolute path to this repo (used as the OpenCode server's working dir so it can see `.opencode/agents/` and the prompt assets)
+- `OPENCODE_BASE_URL` — where the app should reach OpenCode. If nothing is running there, the app starts `opencode serve` itself on that port.
+
+Leave the `LANGFUSE_*` keys blank to skip telemetry, or fill them in to export traces to Langfuse.
+
+4. Make sure the `opencode` binary is on your `PATH` (the app shells out to `opencode serve`). `opencode --version` should work before you run.
+
+5. (Optional) typecheck + tests to confirm the install:
+```bash
+bun run typecheck
+bun run test
+```
+
+You're ready — `bun run dev` launches the TUI.
+
 ## Run
 ```bash
-bun run dev
+bun run dev      # launch the TUI
+```
+
+Other entry points:
+```bash
+bun run view     # web dashboard for live + past runs at http://localhost:3000
+bun run design <run-directory>   # re-run the design quorum for an existing approved run
+bun run design   # in the TUI, paste a run ID to resume the design phase from checkpoint
 ```
 
 ## Test And Typecheck
@@ -136,6 +189,16 @@ Every recovery tier emits a standardized debug-log event so post-hoc triage can 
 ### Kill-switch
 
 `auditRestart.maxRestarts` in `quorum.config.json` controls the R tier. Set it to `0` to disable fresh-session restarts entirely — `promptAgent` then throws `StructuredRecoveryError` directly with no `audit.restart_from_scratch` events. Default is `1`.
+
+## Design Quorum
+
+When `designQuorum.enabled` is true in `quorum.config.json`, an approved research run can be turned into a single self-contained HTML document by a second quorum loop (`src/design-quorum.ts`). It mirrors the research loop: a designated `html-designer` drafts, three design auditors (`visual-layout-auditor`, `technical-html-auditor`, `script-security-auditor`) review in parallel, findings are aggregated, and the designer revises until approved or `designQuorum.maxRounds` is hit. An `interactive-enhancer` pass adds lightweight interactivity to the approved HTML.
+
+Run it on an existing approved run directory:
+```bash
+bun run design runs/my-topic-abc123
+```
+Or from the TUI by pasting a run ID to resume the design phase from its checkpoint. Output is written to `<run-directory>/final.html`.
 
 ## Improvements / Enhancements
 - A LOT, see `references/docs/pending`, a bunch of uiux polish, functional enhancement, checkpoint recovery, real cli packaging
