@@ -292,6 +292,14 @@ function summarizeToolOutput(_tool: string, output: unknown): string {
 function summarizeNodeState(node: string, state: unknown): Record<string, unknown> | undefined {
   if (!state || typeof state !== "object") return undefined
   const s = state as Record<string, unknown>
+  if (node === "discoverReader") {
+    const profile = Array.isArray(s.readerProfile) ? s.readerProfile : undefined
+    return {
+      concepts: profile?.length ?? 0,
+      goal: typeof s.learningGoal === "string" ? s.learningGoal : undefined,
+      transcriptTurns: Array.isArray(s.interviewTranscript) ? Math.ceil(s.interviewTranscript.length / 2) : 0,
+    }
+  }
   if (node === "draftFullDraft") {
     return { round: s.round, draftLen: typeof s.draft === "string" ? (s.draft as string).length : 0 }
   }

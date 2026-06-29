@@ -5,13 +5,11 @@ import { join } from "node:path"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "../src/config"
-import { researchStateSchema, readerInterviewTurnSchema, readerProfileSchema } from "../src/schema"
+import { researchStateSchema, readerInterviewTurnSchema, readerProfileSchema, type ResearchState } from "../src/schema"
 
 // Pure-function imports — these don't touch the OpenCode client.
-const { createGraph } = await import("../src/graph")
-// We import createGraph only to assert it's constructible with the new node;
-// the prompt-contract functions are internal, so we exercise them via a
-// small re-implementation against the same schema to lock the contract.
+const { createGraph, fullDraftPrompt, auditPrompt, rebuttalPrompt, rebuttalReviewPrompt, drafterReviewPrompt, readerContextBlock } = await import("../src/graph")
+const { loadPromptBundle } = await import("../src/prompt-assets")
 
 const testConfig: RuntimeConfig = {
   env: {
@@ -225,5 +223,93 @@ describe("reader-profile.json artifact shape", () => {
     // No confidence field anywhere in the persisted artifact.
     expect(loaded).not.toHaveProperty("confidence")
     expect(loaded.concepts.every((c: Record<string, unknown>) => !("confidence" in c))).toBe(true)
+  })
+})
+
+describe("Phase 2 — reader profile threaded to prompt-contract functions", () => {
+  const profileState = (overrides: Partial<ResearchState> = {}) =>
+    researchStateSchema.parse({
+      requestId: "r-1",
+      inputMode: "topic" as const,
+      topic: "What is MLX?",
+      round: 0,
+      draft: "",
+      audits: [],
+      activeRebuttals: {},
+      currentRebuttalResponsesByFinding: {},
+      rebuttalTurnCounts: {},
+      rebuttalHistory: [],
+      rebuttalResponseHistory: [],
+      unresolvedFindings: [],
+      approvedAgents: [],
+      status: "auditing" as const,
+      readerProfile: [
+        { concept: "autograd", level: "unknown", evidence: "couldn't explain it" },
+        { concept: "tensor ops", level: "familiar" },
+      ],
+      learningGoal: "decide if MLX is worth learning",
+      ...overrides,
+    }) as ResearchState
+
+  let promptBundle: Awaited<ReturnType<typeof loadPromptBundle>>
+  beforeEach(async () => {
+    promptBundle = await loadPromptBundle(testConfig)
+  })
+
+  test("readerContextBlock lists familiar concepts, lacks, and the Prerequisites instruction", () => {
+    const block = readerContextBlock(profileState())
+    expect(block).toContain("Reader goal: decide if MLX is worth learning")
+    expect(block).toContain("Reader already knows: tensor ops")
+    expect(block).toContain("Reader does NOT know: autograd")
+    expect(block).toContain("Include a Prerequisites section covering: autograd")
+  })
+
+  test("readerContextBlock returns empty when no profile and no goal (default-reader fallback)", () => {
+    const block = readerContextBlock(profileState({ readerProfile: undefined, learningGoal: undefined }))
+    expect(block).toBe("")
+  })
+
+  test("fullDraftPrompt includes the reader context block when a profile is set", () => {
+    const prompt = fullDraftPrompt(testConfig, promptBundle, profileState(), "out.md")
+    expect(prompt).toContain("Reader does NOT know: autograd")
+    expect(prompt).toContain("Include a Prerequisites section covering: autograd")
+  })
+
+  test("fullDraftPrompt omits reader context when no profile is set", () => {
+    const prompt = fullDraftPrompt(testConfig, promptBundle, profileState({ readerProfile: undefined, learningGoal: undefined }), "out.md")
+    expect(prompt).not.toContain("Prerequisites section")
+    expect(prompt).not.toContain("Reader does NOT know")
+  })
+
+  test("auditPrompt includes the reader context block when a profile is set", () => {
+    const prompt = auditPrompt(testConfig, promptBundle, "source-auditor", profileState(), "audit.json")
+    expect(prompt).toContain("Reader does NOT know: autograd")
+  })
+
+  test("auditPrompt includes the explanation-depth-vs-factual-rigor instruction", () => {
+    const prompt = auditPrompt(testConfig, promptBundle, "source-auditor", profileState(), "audit.json")
+    expect(prompt).toContain("Judge clarity")
+    expect(prompt).toContain("factual rigor")
+  })
+
+  test("auditPrompt omits reader context when no profile is set (and notes the default)", () => {
+    const prompt = auditPrompt(testConfig, promptBundle, "source-auditor", profileState({ readerProfile: undefined, learningGoal: undefined }), "audit.json")
+    expect(prompt).not.toContain("Reader does NOT know")
+    expect(prompt).toContain("no reader profile provided")
+  })
+
+  test("rebuttalPrompt includes the reader context block when a profile is set", () => {
+    const prompt = rebuttalPrompt(testConfig, promptBundle, profileState(), "rebuttal.json")
+    expect(prompt).toContain("Reader does NOT know: autograd")
+  })
+
+  test("rebuttalReviewPrompt includes the reader context block when a profile is set", () => {
+    const prompt = rebuttalReviewPrompt(testConfig, promptBundle, profileState(), "review.json", 2)
+    expect(prompt).toContain("Reader does NOT know: autograd")
+  })
+
+  test("drafterReviewPrompt includes the reader context block when a profile is set", () => {
+    const prompt = drafterReviewPrompt(testConfig, promptBundle, profileState(), "review.json")
+    expect(prompt).toContain("Reader does NOT know: autograd")
   })
 })

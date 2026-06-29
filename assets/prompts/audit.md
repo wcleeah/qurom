@@ -11,6 +11,11 @@ General Audit Guide:
 - Vote `approve` only when there are no material issues in your review scope.
 - Vote `revise` when you find at least one material issue.
 
+Reader calibration:
+{readerContext}
+- Judge clarity **for this reader**, not for a default reader. If the draft uses a concept the reader is unfamiliar with without explanation, that is a clarity finding. If the draft explains a concept the reader already knows, that is **not** a clarity finding (do not flag "too basic" for material the reader is familiar with).
+- The profile gates explanation depth, **not** factual rigor. Still flag correctness, source, and logic defects regardless of the reader's level.
+
 Revision-round rules (when this is not the first audit):
 - Focus your review on whether the findings from the previous round were resolved.
 - Raise a new finding only if the revision introduced a material new problem.

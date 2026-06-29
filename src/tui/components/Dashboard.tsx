@@ -56,6 +56,12 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
     ? (graphState as { maxRounds?: number }).maxRounds : 10
   const researchStatus = (graphState && "status" in graphState) ? (graphState as { status?: string }).status : undefined
   const interviewActive = !!(graphState && "interviewTranscript" in graphState && (graphState as { interviewTranscript?: unknown[] }).interviewTranscript && !(graphState as { readerProfile?: unknown[] }).readerProfile)
+  const readerProfile = (graphState && "readerProfile" in graphState && Array.isArray((graphState as { readerProfile?: unknown[] }).readerProfile))
+    ? ((graphState as { readerProfile?: Array<{ concept: string; level: string }> }).readerProfile!)
+    : undefined
+  const learningGoal = (graphState && "learningGoal" in graphState && typeof (graphState as { learningGoal?: string }).learningGoal === "string")
+    ? (graphState as { learningGoal?: string }).learningGoal
+    : undefined
 
   // Active agents: those with status not idle
   const activeAgents = Object.entries(agents)
@@ -122,6 +128,13 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
       {interviewActive && viewUrl && (
         <text fg={theme.accent} marginTop={1} flexShrink={0}>
           🎙 Interviewing reader — answer in the view dashboard: {viewUrl}
+        </text>
+      )}
+
+      {/* Reader profile badge — shown once the interview completes */}
+      {readerProfile && readerProfile.length > 0 && (
+        <text fg={theme.textMuted} marginTop={1} flexShrink={0}>
+          reader: {readerProfile.length} concepts{learningGoal ? ` · ${learningGoal.slice(0, 40)}` : ""}
         </text>
       )}
 

@@ -327,6 +327,31 @@ function renderRequestCard(data: unknown): string {
 </div>`
 }
 
+// ── reader-profile.json ──
+
+function renderReaderProfileCard(data: unknown): string {
+  // The interviewer writes the per-turn JSON to reader-profile.json each turn
+  // (auditor pattern). On the final turn the file holds the full turn object
+  // with `profile: { learningGoal, concepts: [...] }`.
+  const d = data as Record<string, unknown>
+  const profile = (d.profile ?? d) as { learningGoal?: string; concepts?: Array<{ concept: string; level: string; evidence?: string }> }
+  const concepts = Array.isArray(profile.concepts) ? profile.concepts : []
+  const goal = profile.learningGoal ? escapeHtml(String(profile.learningGoal)) : "<span style=\"opacity:0.5;\">(not specified)</span>"
+  const levelColor: Record<string, string> = { familiar: "var(--green)", "heard-of": "var(--accent)", unknown: "var(--red)" }
+  const conceptRows = concepts.map((c) => {
+    const lvl = escapeHtml(String(c.level))
+    const ev = c.evidence ? escapeHtml(String(c.evidence)) : ""
+    return `<tr><td>${escapeHtml(c.concept)}</td><td style="color:${levelColor[c.level] ?? "var(--muted)"};">${lvl}</td><td style="opacity:0.7;">${ev}</td></tr>`
+  }).join("")
+  return `<div class="structured-card">
+  <div class="auditor-header">🎙 Reader profile</div>
+  <table class="summary-table">
+    <tr><td>Learning goal</td><td colspan="2">${goal}</td></tr>
+    ${concepts.length > 0 ? `<tr><th>Concept</th><th>Level</th><th>Evidence</th></tr>${conceptRows}` : "<tr><td colspan=\"3\" style=\"opacity:0.5;\">(interview did not complete)</td></tr>"}
+  </table>
+</div>`
+}
+
 // ── summary.json ──
 
 function renderSummaryCard(data: unknown): string {
@@ -538,6 +563,7 @@ function renderRebuttalResponses(filename: string, data: unknown): string {
 
 function renderStructuredJson(filename: string, data: unknown): string {
   if (filename === "request.json") return renderRequestCard(data)
+  if (filename === "reader-profile.json") return renderReaderProfileCard(data)
   if (filename === "summary.json") return renderSummaryCard(data)
   if (/^audits-round-\d+\.json$/.test(filename)) return renderAuditRound(filename, data)
   if (/^aggregated-findings-round-\d+\.json$/.test(filename)) return renderConsensusCard(filename, data)
@@ -714,6 +740,7 @@ async function getRunFiles(runName: string): Promise<string[]> {
  */
 function classifyFile(filename: string): { group: string; icon: string } {
   if (filename === "request.json") return { group: "Metadata", icon: "📋" }
+  if (filename === "reader-profile.json") return { group: "Metadata", icon: "🎙" }
   if (filename === "summary.json") return { group: "Metadata", icon: "📊" }
   if (filename === "failure.json") return { group: "Metadata", icon: "💥" }
   if (filename === "debug-log.jsonl") return { group: "Debug", icon: "🪵" }
@@ -1649,6 +1676,7 @@ function renderLivePipeline(
 
   // Determine node completion from files on disk
   const hasFile = (pattern: RegExp) => files.some((f) => pattern.test(f))
+  const hasReaderProfile = hasFile(/^reader-profile\.json$/)
   const hasDraft = hasFile(/^draft-round-\d+\.md$/)
   const hasAudits = hasFile(/^audits-round-\d+\.json$/)
   const hasDrafterReview = hasFile(/^drafter-finding-review-round-\d+\.json$/)
@@ -1692,22 +1720,25 @@ function renderLivePipeline(
   html += nodeRow(1, "ingestRequest", true, isActive("ingestRequest"))
   html += nodeRow(2, "summarizeInputDocument", researchStatus !== "running" || hasFile(/./), isActive("summarizeInputDocument"))
   html += nodeRow(3, "prepareOutputPath", hasFile(/./), isActive("prepareOutputPath"))
-  html += nodeRow(4, "draftFullDraft", hasDraft, isActive("draftFullDraft"),
+  html += nodeRow(4, "discoverReader", hasReaderProfile, isActive("discoverReader"),
+    hasReaderProfile ? "· profile ready" : (isActive("discoverReader") ? "· interviewing" : ""),
+    isActive("discoverReader") ? agentListHtml(liveAgents) : "")
+  html += nodeRow(5, "draftFullDraft", hasDraft, isActive("draftFullDraft"),
     hasDraft ? `· ${files.filter((f) => /^draft-round-\d+\.md$/.test(f)).length} rounds` : "",
     isActive("draftFullDraft") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(5, "runParallelAudits", hasAudits, isActive("runParallelAudits"),
+  html += nodeRow(6, "runParallelAudits", hasAudits, isActive("runParallelAudits"),
     hasAudits ? `· ${files.filter((f) => /^audits-round-\d+\.json$/.test(f)).length} rounds` : "",
     isActive("runParallelAudits") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(6, "reviewFindingsByDrafter", hasDrafterReview, isActive("reviewFindingsByDrafter"),
+  html += nodeRow(7, "reviewFindingsByDrafter", hasDrafterReview, isActive("reviewFindingsByDrafter"),
     "", isActive("reviewFindingsByDrafter") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(7, "runTargetedRebuttals", hasRebuttals, isActive("runTargetedRebuttals"),
+  html += nodeRow(8, "runTargetedRebuttals", hasRebuttals, isActive("runTargetedRebuttals"),
     "", isActive("runTargetedRebuttals") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(8, "reviewRebuttalResponses", hasRebuttalReview, isActive("reviewRebuttalResponses"),
+  html += nodeRow(9, "reviewRebuttalResponses", hasRebuttalReview, isActive("reviewRebuttalResponses"),
     "", isActive("reviewRebuttalResponses") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(9, "aggregateConsensus", hasAggregated, isActive("aggregateConsensus"))
-  html += nodeRow(10, "computeConfidence", hasAggregated, isActive("computeConfidence"))
-  html += nodeRow(11, researchDone ? terminalLabel : "reviseDraft", researchDone, isActive("reviseDraft") || isActive("finalizeApprovedDraft") || isActive("finalizeFailedRun"))
-  html += nodeRow(12, "summarizeOutputArtifact", hasFinalMd || hasLatestDraft, isActive("summarizeOutputArtifact"))
+  html += nodeRow(10, "aggregateConsensus", hasAggregated, isActive("aggregateConsensus"))
+  html += nodeRow(11, "computeConfidence", hasAggregated, isActive("computeConfidence"))
+  html += nodeRow(12, researchDone ? terminalLabel : "reviseDraft", researchDone, isActive("reviseDraft") || isActive("finalizeApprovedDraft") || isActive("finalizeFailedRun"))
+  html += nodeRow(13, "summarizeOutputArtifact", hasFinalMd || hasLatestDraft, isActive("summarizeOutputArtifact"))
 
   // Design nodes (flattened into main graph)
   const hasDesignHtml = hasFile(/^design-html-round-0\.html$/)

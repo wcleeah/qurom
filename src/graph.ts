@@ -126,7 +126,7 @@ function requestContextBlock(state: ResearchState) {
   }
 }
 
-function readerContextBlock(state: ResearchState): string {
+export function readerContextBlock(state: ResearchState): string {
   if (!state.readerProfile || state.readerProfile.length === 0) {
     return state.learningGoal ? `Reader goal: ${state.learningGoal}` : ""
   }
@@ -142,7 +142,7 @@ function readerContextBlock(state: ResearchState): string {
   return lines.join("\n")
 }
 
-function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string) {
+export function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string) {
   return [
     promptBundle.assets.deepDiveContract,
     researchToolBlock(config),
@@ -154,14 +154,15 @@ function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, stat
     .join("\n\n")
 }
 
-function auditPrompt(
+export function auditPrompt(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   agent: string,
-  request: string,
+  state: ResearchState,
   outputFile: string,
   previousUnresolved?: AggregatedFinding[],
 ) {
+  const request = requestLabel(state)
   const deltaContext =
     previousUnresolved && previousUnresolved.length > 0
       ? [
@@ -177,46 +178,55 @@ function auditPrompt(
 
   return [
     `You are the ${agent}, user requested a review on the ${request} draft.`,
-    promptBundle.assets.audit.replace("{deltaContext}", deltaContext).replace("{outputFile}", outputFile),
+    promptBundle.assets.audit
+      .replace("{deltaContext}", deltaContext)
+      .replace("{outputFile}", outputFile)
+      .replace("{readerContext}", readerContextBlock(state) || "(no reader profile provided — judge clarity against a competent practitioner default)"),
     researchToolBlock(config),
   ].join("\n\n")
 }
 
-function drafterReviewPrompt(
+export function drafterReviewPrompt(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
-  request: string,
+  state: ResearchState,
   outputFile: string,
 ) {
+  const request = requestLabel(state)
   return [
     `You are the drafter-agent reviewing auditor findings for this ${request}.`,
     promptBundle.assets.reviewFindings.replace("{outputFile}", outputFile),
     researchToolBlock(config),
+    readerContextBlock(state),
   ].join("\n\n")
 }
 
-function rebuttalPrompt(config: RuntimeConfig, promptBundle: PromptBundle, request: string, outputFile: string) {
+export function rebuttalPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string) {
+  const request = requestLabel(state)
   return [
     promptBundle.assets.rebuttal.replace("{outputFile}", outputFile),
     researchToolBlock(config),
     `Respond to the disputed findings for this ${request}.`,
+    readerContextBlock(state),
     "Return only JSON that matches the requested schema.",
     "Answer only for the findings in the rebuttal list.",
     "Use uphold, soften, or withdraw for each response.",
   ].join("\n\n")
 }
 
-function rebuttalReviewPrompt(
+export function rebuttalReviewPrompt(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
-  request: string,
+  state: ResearchState,
   outputFile: string,
   maxRebuttalTurns: number,
 ) {
+  const request = requestLabel(state)
   return [
     promptBundle.assets.reviewRebuttalResponses.replace("{outputFile}", outputFile),
     researchToolBlock(config),
     `Review the auditor rebuttal responses for this ${request}.`,
+    readerContextBlock(state),
     "Return only JSON that matches the requested schema.",
     "For each disputed finding, either accept the auditor response or issue one narrower rebuttal with stronger evidence.",
     `Do not rebut a finding that has already hit the rebuttal cap of ${maxRebuttalTurns}.`,
@@ -748,7 +758,6 @@ async function runParallelAudits(
   observer?: RunObserver,
 ) {
   assertStatus(state, "auditing", "runParallelAudits")
-  const request = requestLabel(state)
   const auditPromises: Promise<AuditResultRecord>[] = []
 
   // Always run all configured auditors — tier only controls round/rebuttal limits
@@ -764,7 +773,7 @@ async function runParallelAudits(
           config,
           sessionID,
           agent,
-          prompt: auditPrompt(config, promptBundle, agent, request, outputFile, state.round > 0 ? state.unresolvedFindings : undefined),
+          prompt: auditPrompt(config, promptBundle, agent, state, outputFile, state.round > 0 ? state.unresolvedFindings : undefined),
           schema: auditResultSchema,
           outputFile,
           inputFiles: [
@@ -882,7 +891,7 @@ async function reviewFindingsByDrafter(
     config,
     sessionID: session.id,
     agent: config.quorumConfig.designatedDrafter,
-    prompt: drafterReviewPrompt(config, promptBundle, requestLabel(state), outputFile),
+    prompt: drafterReviewPrompt(config, promptBundle, state, outputFile),
     schema: drafterFindingReviewSchema,
     outputFile,
     inputFiles: [
@@ -1014,7 +1023,7 @@ async function runTargetedRebuttals(
         config,
         sessionID: session.id,
         agent,
-        prompt: rebuttalPrompt(config, promptBundle, requestLabel(state), outputFile),
+        prompt: rebuttalPrompt(config, promptBundle, state, outputFile),
         schema: rebuttalBatchResponseSchema,
         outputFile,
         inputFiles: [
@@ -1185,7 +1194,7 @@ async function reviewRebuttalResponses(
     prompt: rebuttalReviewPrompt(
       config,
       promptBundle,
-      requestLabel(state),
+      state,
       outputFile,
       maxRebuttalTurns,
     ),
