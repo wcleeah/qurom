@@ -14,6 +14,21 @@ const envSchema = z.object({
   LANGFUSE_BASE_URL: z.string().url().optional(),
 })
 
+const agentRuntimeRoleSchema = z.object({
+  provider: z.string().min(1).optional(),
+  providerAgent: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  variant: z.string().min(1).optional(),
+  options: z.record(z.unknown()).default({}),
+})
+
+const agentRuntimeSchema = z
+  .object({
+    defaultProvider: z.string().min(1).default("opencode"),
+    roles: z.record(agentRuntimeRoleSchema).default({}),
+  })
+  .default({ defaultProvider: "opencode", roles: {} })
+
 const quorumConfigSchema = z.object({
   designatedDrafter: z.string().min(1),
   auditors: z.array(z.string().min(1)).min(1),
@@ -60,6 +75,7 @@ const quorumConfigSchema = z.object({
       enabled: z.boolean().default(true),
     })
     .default({ maxTurns: 6, enabled: true }),
+  agentRuntime: agentRuntimeSchema,
 })
 
 export async function loadRuntimeConfig() {

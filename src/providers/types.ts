@@ -1,0 +1,100 @@
+import type { z } from "zod"
+
+import type { Bridge, EventBus } from "../runner"
+import type { RuntimeConfig } from "../config"
+import type { PromptFileInput } from "../opencode"
+
+export type AgentProviderId = "opencode" | (string & {})
+
+export type AgentRole = string
+
+export type ProviderCapability =
+  | "streamingEvents"
+  | "toolEvents"
+  | "permissionEvents"
+  | "fileAttachments"
+  | "providerManagedAgents"
+  | "jsonFileOutput"
+  | "plainJsonOutput"
+
+export type StructuredOutputMode = "json_file" | "plain_json"
+
+export type AgentRunHandle = {
+  id: string
+  providerId: AgentProviderId
+  role: AgentRole
+  title: string
+  providerAgent?: string
+  dispose?: () => Promise<void>
+}
+
+export type ProviderRuntimeInfo = {
+  cleanup?: () => Promise<void>
+  metadata?: Record<string, unknown>
+}
+
+export type ProviderPrepareInput = {
+  config: RuntimeConfig
+}
+
+export type CreateRunHandleInput = {
+  config: RuntimeConfig
+  role: AgentRole
+  title: string
+  parentId?: string
+  providerOptions?: Record<string, unknown>
+}
+
+export type ProviderPromptInput<T> = {
+  config: RuntimeConfig
+  handle: AgentRunHandle
+  role: AgentRole
+  prompt: string
+  schema?: z.ZodType<T>
+  variant?: string
+  inputFiles?: PromptFileInput[]
+  outputFile?: string
+  structuredOutput?: {
+    preferred: StructuredOutputMode[]
+  }
+  providerOptions?: Record<string, unknown>
+}
+
+export type ProviderPromptResult<T> = {
+  text?: string
+  structured?: T
+  model?: string
+  provider?: string
+  variant?: string
+  outputSource?: "file" | "inline"
+  raw?: unknown
+}
+
+export type ProviderBridgeInput = {
+  config: RuntimeConfig
+  bus: EventBus
+  getRunDir: () => string | undefined
+  onStreamError?: (error: unknown) => void
+}
+
+export type ProviderValidationInput = {
+  config: RuntimeConfig
+  roles: AgentRole[]
+}
+
+export type ProviderValidationResult = {
+  providerId: AgentProviderId
+  agents?: unknown[]
+  warnings?: string[]
+}
+
+export interface AgentProvider {
+  id: AgentProviderId
+  capabilities: ReadonlySet<ProviderCapability>
+  prepare?: (input: ProviderPrepareInput) => Promise<ProviderRuntimeInfo>
+  createRunHandle: (input: CreateRunHandleInput) => Promise<AgentRunHandle>
+  prompt: <T>(input: ProviderPromptInput<T>) => Promise<ProviderPromptResult<T>>
+  abort?: (config: RuntimeConfig, handleId: string) => Promise<void>
+  createEventBridge?: (input: ProviderBridgeInput) => Bridge
+  validate?: (input: ProviderValidationInput) => Promise<ProviderValidationResult>
+}
