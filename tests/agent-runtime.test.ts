@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { createAgentRuntime } from "../src/agent-runtime/runtime"
 import type { RuntimeConfig } from "../src/config"
@@ -71,5 +74,64 @@ describe("createAgentRuntime", () => {
     expect(events).toContainEqual({ kind: "session.created", sessionID: "handle:research-drafter", role: "research-drafter" })
     expect(events).toContainEqual({ kind: "session.status", sessionID: "handle:research-drafter", status: "running" })
     expect(events).toContainEqual({ kind: "session.status", sessionID: "handle:research-drafter", status: "completed" })
+  })
+
+  test("inlines input files for providers without file attachment support", async () => {
+    let seenPrompt = ""
+    let seenInputFiles: unknown
+    const dir = await mkdtemp(join(tmpdir(), "qurom-runtime-inline-"))
+    const filePath = join(dir, "draft.md")
+    await writeFile(filePath, "# Draft\n\nHello")
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt(input) {
+        seenPrompt = input.prompt
+        seenInputFiles = input.inputFiles
+        return { text: "ok" }
+      },
+    }
+    const runtime = createAgentRuntime(config, undefined, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("source-auditor", "audit")
+
+    await runtime.prompt({
+      role: "source-auditor",
+      handle,
+      prompt: "Review this.",
+      inputFiles: [{ path: filePath, mime: "text/markdown", filename: "draft.md" }],
+    })
+
+    expect(seenInputFiles).toBeUndefined()
+    expect(seenPrompt).toContain("Review this.")
+    expect(seenPrompt).toContain('<attached_file filename="draft.md"')
+    expect(seenPrompt).toContain("# Draft\n\nHello")
+  })
+
+  test("passes input files through for providers with file attachment support", async () => {
+    let seenPrompt = ""
+    let seenInputFiles: unknown
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput", "fileAttachments"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt(input) {
+        seenPrompt = input.prompt
+        seenInputFiles = input.inputFiles
+        return { text: "ok" }
+      },
+    }
+    const runtime = createAgentRuntime(config, undefined, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("source-auditor", "audit")
+    const inputFiles = [{ path: "/tmp/draft.md", mime: "text/markdown", filename: "draft.md" }]
+
+    await runtime.prompt({ role: "source-auditor", handle, prompt: "Review this.", inputFiles })
+
+    expect(seenPrompt).toBe("Review this.")
+    expect(seenInputFiles).toBe(inputFiles)
   })
 })

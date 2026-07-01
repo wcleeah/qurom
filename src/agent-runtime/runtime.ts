@@ -12,6 +12,8 @@ import type {
 } from "../providers/types"
 import type { PromptFileInput } from "../opencode"
 
+const INLINE_ATTACHMENT_MAX_BYTES = 1024 * 1024
+
 export type RuntimePromptInput<T> = {
   role: AgentRole
   handle: AgentRunHandle
@@ -28,6 +30,32 @@ export type AgentRuntime = {
   prompt: <T>(input: RuntimePromptInput<T>) => Promise<ProviderPromptResult<T>>
   abort: (handle: AgentRunHandle) => Promise<void>
   providerForRole: (role: AgentRole) => AgentProvider
+}
+
+async function inlineInputFiles(prompt: string, inputFiles: PromptFileInput[] | undefined) {
+  if (!inputFiles || inputFiles.length === 0) {
+    return { prompt, inputFiles }
+  }
+
+  const blocks: string[] = []
+  for (const file of inputFiles) {
+    const bunFile = Bun.file(file.path)
+    const size = bunFile.size
+    if (size > INLINE_ATTACHMENT_MAX_BYTES) {
+      throw new Error(`Input file ${file.filename} is too large to inline (${size} bytes; max ${INLINE_ATTACHMENT_MAX_BYTES})`)
+    }
+    const text = await bunFile.text()
+    blocks.push([
+      `<attached_file filename="${file.filename}" path="${file.path}" mime="${file.mime}" bytes="${size}">`,
+      text,
+      "</attached_file>",
+    ].join("\n"))
+  }
+
+  return {
+    prompt: [prompt, "Attached file contents:", blocks.join("\n\n")].join("\n\n"),
+    inputFiles: undefined,
+  }
 }
 
 export function createAgentRuntime(
@@ -56,14 +84,17 @@ export function createAgentRuntime(
         bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "running" })
       }
       try {
+        const promptInput = provider.capabilities.has("fileAttachments")
+          ? { prompt: input.prompt, inputFiles: input.inputFiles }
+          : await inlineInputFiles(input.prompt, input.inputFiles)
         const result = await provider.prompt({
           config,
           handle: input.handle,
           role: input.role,
-          prompt: input.prompt,
+          prompt: promptInput.prompt,
           schema: input.schema,
           variant: input.variant,
-          inputFiles: input.inputFiles,
+          inputFiles: promptInput.inputFiles,
           outputFile: input.outputFile,
           structuredOutput: input.schema ? { preferred: ["json_file", "plain_json"] } : undefined,
           telemetry: input.telemetry,
