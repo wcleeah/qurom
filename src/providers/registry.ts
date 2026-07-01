@@ -1,9 +1,15 @@
 import type { RuntimeConfig } from "../config"
+import { cursorProvider } from "./cursor"
 import { opencodeProvider } from "./opencode"
-import type { AgentProvider, AgentProviderId, AgentRole } from "./types"
+import type { AgentProvider, AgentProviderId, AgentRole, ProviderConfigFormDescriptor } from "./types"
 
 const providers: Record<string, AgentProvider> = {
+  cursor: cursorProvider,
   opencode: opencodeProvider,
+}
+
+export function availableProviderIds(): string[] {
+  return Object.keys(providers)
 }
 
 export function getProvider(id: AgentProviderId): AgentProvider {
@@ -12,6 +18,22 @@ export function getProvider(id: AgentProviderId): AgentProvider {
     throw new Error(`Unknown agent provider ${JSON.stringify(id)}`)
   }
   return provider
+}
+
+export async function providerConfigForm(
+  config: RuntimeConfig,
+  id: AgentProviderId,
+): Promise<ProviderConfigFormDescriptor> {
+  const provider = getProvider(id)
+  return provider.configForm?.({ config }) ?? {
+    providerId: provider.id,
+    fields: {
+      providerAgent: true,
+      model: "text",
+      variant: true,
+      outputMode: true,
+    },
+  }
 }
 
 export function providerForRole(config: RuntimeConfig, role: AgentRole): AgentProvider {

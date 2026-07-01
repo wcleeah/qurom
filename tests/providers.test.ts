@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import type { RuntimeConfig } from "../src/config"
-import { configuredAgentRoles, providerForRole } from "../src/providers/registry"
+import { availableProviderIds, configuredAgentRoles, providerForRole } from "../src/providers/registry"
 
 const baseConfig: RuntimeConfig = {
   env: {
@@ -62,6 +62,27 @@ describe("provider registry", () => {
 
   test("uses the default provider when a role has no override", () => {
     expect(providerForRole(baseConfig, "research-drafter").id).toBe("opencode")
+  })
+
+  test("exposes cursor as a selectable provider", () => {
+    expect(availableProviderIds()).toContain("cursor")
+  })
+
+  test("uses cursor for a role override", () => {
+    const config: RuntimeConfig = {
+      ...baseConfig,
+      quorumConfig: {
+        ...baseConfig.quorumConfig,
+        agentRuntime: {
+          defaultProvider: "opencode",
+          roles: {
+            "clarity-auditor": { provider: "cursor", model: "composer-2.5", options: {} },
+          },
+        },
+      },
+    }
+
+    expect(providerForRole(config, "clarity-auditor").id).toBe("cursor")
   })
 
   test("rejects unknown per-role providers early", () => {

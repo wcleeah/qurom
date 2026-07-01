@@ -100,6 +100,39 @@ export type ProviderValidationResult = {
   warnings?: string[]
 }
 
+export type ProviderConfigFormInput = {
+  config: RuntimeConfig
+}
+
+export type ProviderConfigFormModelOption = {
+  id: string
+  label: string
+}
+
+export type ProviderConfigFormParameterValue = {
+  value: string
+  label: string
+}
+
+export type ProviderConfigFormParameter = {
+  id: string
+  label: string
+  values: ProviderConfigFormParameterValue[]
+}
+
+export type ProviderConfigFormDescriptor = {
+  providerId: AgentProviderId
+  modelOptions?: ProviderConfigFormModelOption[]
+  parametersByModel?: Record<string, ProviderConfigFormParameter[]>
+  warnings?: string[]
+  fields?: {
+    providerAgent?: boolean
+    model?: "text" | "select" | false
+    variant?: boolean
+    outputMode?: boolean
+  }
+}
+
 export interface AgentProvider {
   id: AgentProviderId
   capabilities: ReadonlySet<ProviderCapability>
@@ -109,4 +142,5 @@ export interface AgentProvider {
   abort?: (config: RuntimeConfig, handleId: string) => Promise<void>
   createEventBridge?: (input: ProviderBridgeInput) => Bridge
   validate?: (input: ProviderValidationInput) => Promise<ProviderValidationResult>
+  configForm?: (input: ProviderConfigFormInput) => Promise<ProviderConfigFormDescriptor>
 }
