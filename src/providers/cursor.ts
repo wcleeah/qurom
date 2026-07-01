@@ -95,6 +95,35 @@ async function loadCursorMcpServers(): Promise<Record<string, McpServerConfig>> 
   }
 }
 
+function interpolateEnvString(value: string, env: RuntimeConfig["env"]) {
+  const runtimeEnv = env as Record<string, string | undefined>
+  return value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, lowerEnvName: string | undefined, upperEnvName: string | undefined, shellName: string | undefined) => {
+    const envName = lowerEnvName ?? upperEnvName
+    const name = envName ?? shellName
+    if (!name) return _match
+    const resolved = runtimeEnv[name] ?? process.env[name]
+    if (resolved === undefined) {
+      throw new Error(`Cursor MCP config references missing environment variable ${name}`)
+    }
+    return resolved
+  })
+}
+
+function interpolateMcpConfigEnv<T>(value: T, env: RuntimeConfig["env"]): T {
+  if (typeof value === "string") {
+    return interpolateEnvString(value, env) as T
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => interpolateMcpConfigEnv(item, env)) as T
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, interpolateMcpConfigEnv(item, env)]),
+    ) as T
+  }
+  return value
+}
+
 async function resolveMcpServers(
   config: RuntimeConfig,
   options: ReturnType<typeof cursorOptionsForRole>,
@@ -106,7 +135,7 @@ async function resolveMcpServers(
       .map((name) => [name, configured[name]!]),
   ) as Record<string, McpServerConfig>
   const merged = { ...selected, ...(options?.mcpServers ?? {}) }
-  return Object.keys(merged).length > 0 ? merged : undefined
+  return Object.keys(merged).length > 0 ? interpolateMcpConfigEnv(merged, config.env) : undefined
 }
 
 async function listCursorModels(apiKey: string) {

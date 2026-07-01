@@ -167,6 +167,9 @@ beforeEach(() => {
   cancelCalled = false
   disposeCalled = false
   delete process.env.CURSOR_MCP_CONFIG_PATH
+  delete process.env.CONTEXT7_API_KEY
+  delete process.env.GENERIC_MCP_TOKEN
+  delete process.env.SEARCH_API_KEY
 })
 
 describe("cursorProvider", () => {
@@ -271,6 +274,95 @@ describe("cursorProvider", () => {
     expect(createCalls[0]).not.toMatchObject({
       mcpServers: {
         unused: { url: "https://mcp.example/unused" },
+      },
+    })
+  })
+
+  test("interpolates environment placeholders in Cursor MCP definitions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-cursor-mcp-env-"))
+    process.env.CURSOR_MCP_CONFIG_PATH = join(dir, "mcp.json")
+    process.env.CONTEXT7_API_KEY = "context7-secret"
+    process.env.GENERIC_MCP_TOKEN = "generic-secret"
+    await writeFile(process.env.CURSOR_MCP_CONFIG_PATH, JSON.stringify({
+      mcpServers: {
+        context7: {
+          command: "context7-mcp",
+          env: { CONTEXT7_API_KEY: "{env:CONTEXT7_API_KEY}" },
+        },
+        generic: {
+          command: "generic-mcp",
+          args: ["--token", "{ENV:GENERIC_MCP_TOKEN}"],
+          env: { GENERIC_MCP_TOKEN: "{ENV:GENERIC_MCP_TOKEN}" },
+        },
+      },
+    }))
+    const mcpConfig: RuntimeConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        researchTools: { prefer: ["context7", "generic"], webSearchProvider: "exa" },
+      },
+    }
+
+    await cursorProvider.createRunHandle({
+      config: mcpConfig,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    expect(createCalls[0]).toMatchObject({
+      mcpServers: {
+        context7: {
+          env: { CONTEXT7_API_KEY: "context7-secret" },
+        },
+        generic: {
+          args: ["--token", "generic-secret"],
+          env: { GENERIC_MCP_TOKEN: "generic-secret" },
+        },
+      },
+    })
+  })
+
+  test("interpolates environment placeholders in role-level Cursor MCP overrides", async () => {
+    process.env.SEARCH_API_KEY = "role-search-secret"
+    const mcpConfig: RuntimeConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        agentRuntime: {
+          ...config.quorumConfig.agentRuntime,
+          roles: {
+            "research-drafter": {
+              provider: "cursor",
+              model: "composer-2.5",
+              options: {
+                mcpServers: {
+                  search: {
+                    url: "https://mcp.example/search?key=${SEARCH_API_KEY}",
+                    headers: { Authorization: "Bearer ${SEARCH_API_KEY}" },
+                    env: { SEARCH_API_KEY: "${SEARCH_API_KEY}" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }
+
+    await cursorProvider.createRunHandle({
+      config: mcpConfig,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    expect(createCalls[0]).toMatchObject({
+      mcpServers: {
+        search: {
+          url: "https://mcp.example/search?key=role-search-secret",
+          headers: { Authorization: "Bearer role-search-secret" },
+          env: { SEARCH_API_KEY: "role-search-secret" },
+        },
       },
     })
   })
