@@ -92,8 +92,10 @@ function renderOutputInstructions(input: {
   outputFile?: string
   schema?: z.ZodType<unknown>
   mode: OutputMode
+  providerInstructions?: string
 }) {
   if (!input.outputFile) return ""
+  if (input.providerInstructions) return input.providerInstructions
 
   if (input.schema) {
     const schema = JSON.stringify(toJsonSchema(input.schema), null, 2)
@@ -137,6 +139,7 @@ function renderPromptForOutputMode(input: {
   outputFile?: string
   schema?: z.ZodType<unknown>
   mode: OutputMode
+  providerInstructions?: string
 }) {
   const instructions = renderOutputInstructions(input)
   return [input.prompt.trim(), instructions].filter(Boolean).join("\n\n")
@@ -200,6 +203,15 @@ export function createAgentRuntime(
         outputFile: input.outputFile,
         schema: input.schema,
         mode: outputMode,
+        providerInstructions: outputMode === "file" && input.outputFile
+          ? provider.outputInstructions?.({
+              config,
+              handle: input.handle,
+              role: input.role,
+              outputFile: input.outputFile,
+              schema: input.schema,
+            })
+          : undefined,
       })
       if (!provider.capabilities.has("streamingEvents")) {
         bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "running" })

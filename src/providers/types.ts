@@ -87,6 +87,14 @@ export type ProviderPromptResult<T> = {
   raw?: unknown
 }
 
+export type ProviderOutputInstructionInput = {
+  config: RuntimeConfig
+  handle: AgentRunHandle
+  role: AgentRole
+  outputFile: string
+  schema?: z.ZodType<unknown>
+}
+
 export type ProviderBridgeInput = {
   config: RuntimeConfig
   bus: EventBus
@@ -141,6 +149,7 @@ export type ProviderConfigFormDescriptor = {
 export interface AgentProvider {
   id: AgentProviderId
   capabilities: ReadonlySet<ProviderCapability>
+  outputInstructions?: (input: ProviderOutputInstructionInput) => string | undefined
   prepare?: (input: ProviderPrepareInput) => Promise<ProviderRuntimeInfo>
   createRunHandle: (input: CreateRunHandleInput) => Promise<AgentRunHandle>
   prompt: <T>(input: ProviderPromptInput<T>) => Promise<ProviderPromptResult<T>>

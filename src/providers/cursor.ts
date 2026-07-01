@@ -7,6 +7,7 @@ import {
   type McpServerConfig,
   type SettingSource,
 } from "@cursor/sdk"
+import { toJsonSchema } from "@langchain/core/utils/json_schema"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
@@ -432,6 +433,27 @@ function emitCursorDelta(input: {
 export const cursorProvider: AgentProvider = {
   id: "cursor",
   capabilities,
+  outputInstructions(input) {
+    const name = basename(input.outputFile)
+    if (input.schema) {
+      const schema = JSON.stringify(toJsonSchema(input.schema), null, 2)
+      return [
+        "## Output instructions",
+        `Create a downloadable Cursor Cloud artifact named \`${name}\` using the correct Cursor Cloud artifact location.`,
+        "The artifact content must be exactly one JSON object matching this schema:",
+        schema,
+        "Respond with only `OK` after the artifact is created.",
+        "Do not include the JSON in your response.",
+      ].join("\n")
+    }
+    return [
+      "## Output instructions",
+      `Create a downloadable Cursor Cloud artifact named \`${name}\` using the correct Cursor Cloud artifact location.`,
+      "Write the complete output content into that downloadable artifact.",
+      "Respond with only `OK` after the artifact is created.",
+      "Do not include the output content in your response.",
+    ].join("\n")
+  },
   async createRunHandle(input): Promise<AgentRunHandle> {
     const apiKey = cursorApiKey(input.config)
     if (!apiKey) throw new Error("Cursor provider requires CURSOR_API_KEY")

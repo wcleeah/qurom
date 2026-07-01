@@ -302,6 +302,26 @@ describe("cursorProvider", () => {
     expect(sendCalls[0]).not.toContain("## Output instructions")
   })
 
+  test("provides indirect downloadable artifact output instructions for runtime prompt construction", async () => {
+    const instructions = cursorProvider.outputInstructions?.({
+      config,
+      handle: {
+        id: "bc-cursor-agent-1",
+        providerId: "cursor",
+        role: "research-drafter",
+        title: "draft",
+      },
+      role: "research-drafter",
+      outputFile: "/tmp/reader-profile-1.json",
+      schema: z.object({ ok: z.boolean() }),
+    })
+
+    expect(instructions).toContain("Create a downloadable Cursor Cloud artifact named `reader-profile-1.json`")
+    expect(instructions).toContain("\"ok\"")
+    expect(instructions).not.toContain("/tmp/reader-profile-1.json")
+    expect(instructions).not.toContain("/opt/cursor/artifacts")
+  })
+
   test("emits runner activity events from Cursor deltas", async () => {
     const outputFile = await tempOutputFile("message.txt")
     artifactPath = "artifacts/message.txt"
