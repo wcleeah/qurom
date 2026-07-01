@@ -12,7 +12,6 @@ import {
   writeRunJsonArtifact,
 } from "./output"
 import { auditWithRestart } from "./audit-restart"
-import { createSession, promptAgent } from "./opencode"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import type { AgentRunHandle } from "./providers/types"
 import type { PromptBundle } from "./prompt-assets"
@@ -1757,6 +1756,7 @@ async function finalizeFailedRun(_config: RuntimeConfig, state: ResearchState) {
 
 async function designHtmlNode(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -1785,6 +1785,7 @@ async function designHtmlNode(
   const html = await designHtml(config, promptBundle, draftPath, topic, htmlFile,
     telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
     observer,
+    runtime,
   )
 
   return researchStateSchema.parse({
@@ -1797,6 +1798,7 @@ async function designHtmlNode(
 
 async function interactiveEnhanceNode(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -1808,14 +1810,18 @@ async function interactiveEnhanceNode(
   const round = state.designRound ?? 0
   const htmlFile = `${state.outputPath}/design-html-round-${round}.html`
 
-  const session = await createSession(config, `interactive-enhancer:${state.requestId}:round:${round}`)
-  observeSession(observer, { sessionID: session.id, role: "interactive-enhancer", requestId: state.requestId })
+  const handle = await createObservedHandle({
+    runtime,
+    role: "interactive-enhancer",
+    title: `interactive-enhancer:${state.requestId}:round:${round}`,
+    requestId: state.requestId,
+    observer,
+  })
 
   // Prompt the enhancer to edit the HTML file directly
-  await promptAgent({
-    config,
-    sessionID: session.id,
-    agent: "interactive-enhancer",
+  await runtime.prompt({
+    role: "interactive-enhancer",
+    handle,
     prompt: (promptBundle.assets.enhanceDesign as string).replace("{outputFile}", htmlFile),
     outputFile: htmlFile,
     inputFiles: [
@@ -1826,7 +1832,7 @@ async function interactiveEnhanceNode(
       state,
       name: "agent.interactiveEnhance",
       agentName: "interactive-enhancer",
-      sessionId: "",
+      sessionId: handle.id,
     }),
   })
 
@@ -1835,6 +1841,7 @@ async function interactiveEnhanceNode(
 
 async function runDesignAuditsNode(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -1849,6 +1856,7 @@ async function runDesignAuditsNode(
   const audits = await runDesignAudits(config, promptBundle, htmlFile, state.outputPath, round,
     telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
     observer,
+    runtime,
   )
 
   // Persist audits
@@ -1922,6 +1930,7 @@ async function finalizeDesignNode(
 
 async function reviseDesignHtmlNode(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -1943,6 +1952,7 @@ async function reviseDesignHtmlNode(
   const html = await reviseDesignHtml(config, promptBundle, htmlFile, findings, nextHtmlFile, state.outputPath, round,
     telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
     observer,
+    runtime,
   )
 
   return researchStateSchema.parse({
@@ -2200,17 +2210,17 @@ export function createGraph(
     )
     .addNode("runDesignHtml", async (state) =>
       withNodeTelemetry("runDesignHtml", state, () =>
-        designHtmlNode(config, promptBundle, state, graphTelemetry, observer),
+        designHtmlNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("interactiveEnhance", async (state) =>
       withNodeTelemetry("interactiveEnhance", state, () =>
-        interactiveEnhanceNode(config, promptBundle, state, graphTelemetry, observer),
+        interactiveEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("runDesignAudits", async (state) =>
       withNodeTelemetry("runDesignAudits", state, () =>
-        runDesignAuditsNode(config, promptBundle, state, graphTelemetry, observer),
+        runDesignAuditsNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("aggregateDesignFindings", async (state) =>
@@ -2220,7 +2230,7 @@ export function createGraph(
     )
     .addNode("reviseDesignHtml", async (state) =>
       withNodeTelemetry("reviseDesignHtml", state, () =>
-        reviseDesignHtmlNode(config, promptBundle, state, graphTelemetry, observer),
+        reviseDesignHtmlNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("finalizeDesign", async (state) =>
