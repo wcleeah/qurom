@@ -1,37 +1,78 @@
 import { loadRuntimeConfig } from "../config"
 import { listConfigSummary, updatePromptAsset, updateRoleBinding } from "../config-store"
-import { validateProviderPrerequisites } from "../providers/registry"
+import { availableProviderIds, providerConfigForm, validateProviderPrerequisites } from "../providers/registry"
+import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
 import { card, section, summaryRow, summaryTable } from "./html"
 import { layout } from "./layout"
 import { escapeHtml } from "./utils"
 
-function nav() {
-  return `<div class="run-nav">
-  <a href="/">Runs</a>
-  <a href="/config">Config</a>
-  <a href="/config/roles">Roles</a>
-  <a href="/config/prompts">Prompts</a>
+type ConfigTab = "overview" | "roles" | "prompts"
+
+function nav(active: ConfigTab) {
+  const link = (href: string, label: string, tab: ConfigTab) =>
+    `<a href="${href}"${tab === active ? ' class="active"' : ""}>${label}</a>`
+  return `<div class="config-nav">
+  ${link("/config", "Overview", "overview")}
+  ${link("/config/roles", "Roles", "roles")}
+  ${link("/config/prompts", "Prompts", "prompts")}
 </div>`
+}
+
+function backLink() {
+  return `<a class="back-link" href="/">← Back to runs</a>`
+}
+
+function parseOptionsJson(text: string | undefined) {
+  if (!text) return {}
+  try {
+    return JSON.parse(text) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+function frontmatterModel(content: string): string {
+  const match = content.match(/^---\n([\s\S]*?)\n---/)
+  const block = match ? match[1] : content
+  const modelLine = block.match(/^model:\s*(.+)$/m)
+  return modelLine ? modelLine[1].trim() : ""
+}
+
+function cursorModelParams(options: Record<string, unknown>) {
+  const params = options.modelParams
+  if (!Array.isArray(params)) return []
+  return params.filter((entry): entry is { id: string; value: string } =>
+    Boolean(entry) &&
+    typeof entry === "object" &&
+    typeof (entry as { id?: unknown }).id === "string" &&
+    typeof (entry as { value?: unknown }).value === "string")
 }
 
 export async function renderConfigIndex(): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
-  const validation = await validateProviderPrerequisites(config)
-    .then(() => "valid")
-    .catch((error) => `invalid: ${error instanceof Error ? error.message : String(error)}`)
+  const validationError = await validateProviderPrerequisites(config)
+    .then(() => null)
+    .catch((error) => (error instanceof Error ? error.message : String(error)))
+  const isValid = validationError === null
+
+  const statusCard = `<div class="structured-card">
+  <div class="outcome-banner ${isValid ? "approved" : "failed"}">${isValid ? "Providers valid" : "Validation failed"}</div>
+  ${summaryTable([
+    summaryRow("Profile", escapeHtml(summary.profile.name)),
+    summaryRow("Validation", isValid ? "valid" : escapeHtml(validationError ?? "invalid")),
+    summaryRow("Roles", String(summary.roles.length)),
+    summaryRow("Prompt assets", String(summary.prompts.length)),
+    summaryRow("Default provider", escapeHtml(summary.config?.agentRuntime.defaultProvider ?? "unknown")),
+  ])}
+</div>`
 
   const body = [
-    nav(),
-    `<div class="header-bar"><h1>Configuration</h1><p class="muted-note">Active profile: ${escapeHtml(summary.profile.name)}</p></div>`,
-    section("Status", card(summaryTable([
-      summaryRow("Profile", escapeHtml(summary.profile.name)),
-      summaryRow("Validation", escapeHtml(validation)),
-      summaryRow("Roles", String(summary.roles.length)),
-      summaryRow("Prompt assets", String(summary.prompts.length)),
-      summaryRow("Providers", escapeHtml(summary.config?.agentRuntime.defaultProvider ?? "unknown")),
-    ]))),
-    `<form method="POST" action="/config/validate"><button type="submit">Validate providers</button></form>`,
+    backLink(),
+    nav("overview"),
+    `<div class="header-bar"><div class="header-main"><h1>Configuration</h1><div class="meta-row"><span class="meta-item">Active profile: <strong>${escapeHtml(summary.profile.name)}</strong></span></div></div></div>`,
+    section("Status", statusCard),
+    `<form class="config-form" method="POST" action="/config/validate"><div class="form-actions"><button type="submit" class="btn btn-primary">Validate providers</button></div></form>`,
   ].join("\n")
 
   return new Response(layout("Configuration", body), {
@@ -43,23 +84,146 @@ export async function renderConfigRoles(): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
   const bindingByRole = new Map(summary.bindings.map((b) => [b.role, b]))
-  const rows = summary.roles.map((role) => {
-    const binding = bindingByRole.get(role.role)
-    return `<div class="card">
-  <h3>${escapeHtml(role.role)}</h3>
-  <form method="POST" action="/config/roles/${encodeURIComponent(role.role)}">
-    <label>Provider <input name="provider" value="${escapeHtml(binding?.provider ?? "opencode")}"></label>
-    <label>Provider agent <input name="providerAgent" value="${escapeHtml(binding?.provider_agent ?? role.role)}"></label>
-    <label>Model <input name="model" value="${escapeHtml(binding?.model ?? "")}"></label>
-    <label>Variant <input name="variant" value="${escapeHtml(binding?.variant ?? "")}"></label>
-    <label>Output mode <input name="outputMode" value="${escapeHtml(binding?.output_mode ?? "")}"></label>
-    <button type="submit">Save</button>
-  </form>
-  <details><summary>Definition</summary><pre>${escapeHtml(role.content)}</pre></details>
-</div>`
-  })
+  const providerIds = availableProviderIds()
+  const field = (label: string, name: string, value: string, help: string, placeholder = "unset", disabled = false) =>
+    `<label class="form-field"><span>${label}</span><input class="form-input" name="${name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${disabled ? " disabled" : ""}><small>${escapeHtml(help)}</small></label>`
 
-  return new Response(layout("Config Roles", `${nav()}<div class="header-bar"><h1>Roles</h1></div>${rows.join("\n")}`), {
+  const providerTabs = (role: string, current: string) => {
+    const options = providerIds.includes(current) ? providerIds : [current, ...providerIds]
+    const tabs = options
+      .map((id, i) => {
+        const inputId = `provider-${encodeURIComponent(role)}-${i}`
+        const checked = id === current ? " checked" : ""
+        return `<input type="radio" class="provider-tab-input" id="${inputId}" name="provider" value="${escapeHtml(id)}"${checked}><label class="provider-tab" for="${inputId}">${escapeHtml(id)}</label>`
+      })
+      .join("")
+    return `<div class="form-field"><span>Provider</span><div class="provider-tabs">${tabs}</div></div>`
+  }
+
+  const selectField = (label: string, name: string, value: string, options: Array<{ id: string; label: string }>, help: string, disabled = false) => {
+    const optionHtml = [
+      value && !options.some((option) => option.id === value)
+        ? `<option value="${escapeHtml(value)}" selected>${escapeHtml(value)} (saved)</option>`
+        : "",
+      ...options.map((option) => `<option value="${escapeHtml(option.id)}"${option.id === value ? " selected" : ""}>${escapeHtml(option.label)}</option>`),
+    ].join("")
+    return `<label class="form-field"><span>${label}</span><select class="form-input" name="${name}"${disabled ? " disabled" : ""}>${optionHtml}</select><small>${escapeHtml(help)}</small></label>`
+  }
+
+  const providerHelp = (provider: string) => {
+    if (provider === "cursor") {
+      return "Cursor runs this role through the Cursor Agent SDK. Set a per-role model; role instructions below remain app-owned."
+    }
+    if (provider === "opencode") {
+      return "OpenCode runs this role through the named provider agent. Role instructions below are synced to compatibility agent files."
+    }
+    return "This provider controls which runtime executes the role. Role instructions below stay separate from the provider binding."
+  }
+
+  const providerFields = (
+    role: string,
+    binding: (typeof summary.bindings)[number] | undefined,
+    descriptor: ProviderConfigFormDescriptor,
+    active: boolean,
+    fallbackModel = "",
+  ) => {
+    const fields = descriptor.fields ?? { providerAgent: true, model: "text", variant: true, outputMode: true }
+    const options = parseOptionsJson(binding?.options_json)
+    const savedParams = new Map(cursorModelParams(options).map((param) => [param.id, param.value]))
+    const model = binding?.model || (descriptor.providerId === "opencode" ? fallbackModel : "")
+    const selectedModelParameters = descriptor.parametersByModel?.[model] ?? []
+    const warnings = descriptor.warnings?.length
+      ? `<div class="outcome-banner failed">${descriptor.warnings.map(escapeHtml).join("<br>")}</div>`
+      : ""
+
+    const controls: string[] = []
+    if (fields.providerAgent !== false) {
+      controls.push(field("Provider agent / role label", "providerAgent", binding?.provider_agent ?? "", "OpenCode: agent name. Cursor: optional label only.", role, !active))
+    }
+    if (fields.model === "select" && descriptor.modelOptions?.length) {
+      controls.push(selectField("Model", "model", model, descriptor.modelOptions, "Loaded from the provider catalog for this account.", !active))
+    } else if (fields.model !== false) {
+      controls.push(field("Model", "model", model, "Provider model id. Cursor requires this for local runs.", "composer-2.5", !active))
+    }
+    if (fields.variant) {
+      controls.push(field("Variant", "variant", binding?.variant ?? "", "Provider-specific variant. Mostly used by OpenCode today.", "unset", !active))
+    }
+    if (fields.outputMode) {
+      controls.push(field("Output mode", "outputMode", binding?.output_mode ?? "", "Reserved for structured output preference; leave unset unless a provider documents it.", "unset", !active))
+    }
+
+    const parameterControls = selectedModelParameters.map((parameter: ProviderConfigFormParameter) => {
+      const saved = savedParams.get(parameter.id) ?? parameter.values[0]?.value ?? ""
+      if (parameter.values.length === 0) {
+        return field(parameter.label, `modelParam:${parameter.id}`, saved, `Cursor model parameter ${parameter.id}.`, "unset", !active)
+      }
+      return selectField(parameter.label, `modelParam:${parameter.id}`, saved, parameter.values.map((value) => ({ id: value.value, label: value.label })), `Cursor model parameter ${parameter.id}.`, !active)
+    })
+
+    const parameterBlock = parameterControls.length
+      ? `<div class="form-fields-grid">${parameterControls.join("\n")}</div>`
+      : descriptor.providerId === "cursor"
+        ? `<p class="tiny-text muted-text">No parameter controls are exposed for the selected Cursor model.</p>`
+        : ""
+
+    return `<div class="provider-fields"${active ? "" : " hidden"} data-provider-fields="${escapeHtml(descriptor.providerId)}">
+  <p class="tiny-text muted-text">${escapeHtml(providerHelp(descriptor.providerId))}</p>
+  ${warnings}<div class="form-fields-grid">${controls.join("\n")}</div>${parameterBlock}
+</div>`
+  }
+
+  const descriptors = new Map(await Promise.all(providerIds.map(async (id) => [id, await providerConfigForm(config, id as AgentProviderId)] as const)))
+  const cards = await Promise.all(summary.roles.map(async (role) => {
+    const binding = bindingByRole.get(role.role)
+    const currentProvider = binding?.provider ?? summary.config?.agentRuntime.defaultProvider ?? "opencode"
+    const opencodeModel = frontmatterModel(role.content)
+    const providerFormBlocks = providerIds
+      .map((id) => providerFields(role.role, binding, descriptors.get(id)!, id === currentProvider, opencodeModel))
+      .join("\n")
+    const form = `<form class="config-form" method="POST" action="/config/roles/${encodeURIComponent(role.role)}">
+  ${providerTabs(role.role, currentProvider)}
+  ${providerFormBlocks}
+  <div class="form-actions"><button type="submit" class="btn btn-primary">Save</button></div>
+</form>
+<details><summary>Role instructions</summary><p class="tiny-text muted-text">These instructions are app-owned and do not change when you switch providers.</p><pre>${escapeHtml(role.content)}</pre></details>`
+    return card(`<h3>${escapeHtml(role.role)}</h3>${form}`)
+  }))
+
+  const body = [
+    backLink(),
+    nav("roles"),
+    `<div class="header-bar"><div class="header-main"><h1>Roles</h1></div></div>`,
+    section("Role provider bindings", cards.join("\n")),
+  ].join("\n")
+
+  const roleFormScript = `<script>
+(function(){
+  function init(){
+  document.querySelectorAll("form.config-form").forEach(function(form){
+    var radios = form.querySelectorAll("input[name='provider']");
+    function sync(){
+      var checked = form.querySelector("input[name='provider']:checked");
+      var provider = checked ? checked.value : "";
+      form.querySelectorAll("[data-provider-fields]").forEach(function(block){
+        var active = block.getAttribute("data-provider-fields") === provider;
+        block.hidden = !active;
+        block.querySelectorAll("input,select,textarea").forEach(function(input){
+          input.disabled = !active;
+        });
+      });
+    }
+    radios.forEach(function(radio){ radio.addEventListener("change", sync); });
+    sync();
+  });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>`
+  return new Response(layout("Config Roles", body, roleFormScript), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -67,15 +231,22 @@ export async function renderConfigRoles(): Promise<Response> {
 export async function renderConfigPrompts(): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
-  const rows = summary.prompts.map((prompt) => `<div class="card">
-  <h3>${escapeHtml(prompt.key)} <span class="tiny-text muted-text">v${prompt.version}</span></h3>
-  <form method="POST" action="/config/prompts/${encodeURIComponent(prompt.key)}">
-    <textarea name="content" rows="14" style="width:100%;font-family:var(--font-mono);">${escapeHtml(prompt.content)}</textarea>
-    <button type="submit">Save prompt</button>
-  </form>
-</div>`)
+  const cards = summary.prompts.map((prompt) => {
+    const form = `<form class="config-form" method="POST" action="/config/prompts/${encodeURIComponent(prompt.key)}">
+  <textarea name="content" rows="14">${escapeHtml(prompt.content)}</textarea>
+  <div class="form-actions"><button type="submit" class="btn btn-primary">Save prompt</button></div>
+</form>`
+    return card(`<h3>${escapeHtml(prompt.key)} <span class="tiny-text muted-text">v${prompt.version}</span></h3>${form}`)
+  })
 
-  return new Response(layout("Config Prompts", `${nav()}<div class="header-bar"><h1>Prompts</h1></div>${rows.join("\n")}`), {
+  const body = [
+    backLink(),
+    nav("prompts"),
+    `<div class="header-bar"><div class="header-main"><h1>Prompts</h1></div></div>`,
+    section("Prompt assets", cards.join("\n")),
+  ].join("\n")
+
+  return new Response(layout("Config Prompts", body), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -90,12 +261,21 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
   const roleMatch = path.match(/^\/config\/roles\/(.+)$/)
   if (roleMatch) {
     const params = new URLSearchParams(await req.text())
+    const provider = params.get("provider")?.trim() || undefined
+    const options: Record<string, unknown> = {}
+    if (provider === "cursor") {
+      const modelParams = [...params.entries()]
+        .filter(([key, value]) => key.startsWith("modelParam:") && value.trim())
+        .map(([key, value]) => ({ id: key.slice("modelParam:".length), value: value.trim() }))
+      if (modelParams.length > 0) options.modelParams = modelParams
+    }
     await updateRoleBinding(config.env, decodeURIComponent(roleMatch[1]), {
-      provider: params.get("provider")?.trim() || undefined,
+      provider,
       providerAgent: params.get("providerAgent")?.trim() || undefined,
       model: params.get("model")?.trim() || undefined,
       variant: params.get("variant")?.trim() || undefined,
       outputMode: params.get("outputMode")?.trim() || undefined,
+      options,
     })
     return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
   }

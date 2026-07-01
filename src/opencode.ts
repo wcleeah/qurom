@@ -703,6 +703,27 @@ export async function replyToPermission(
   }
 }
 
+export async function listModels(config: RuntimeConfig): Promise<Array<{ id: string; label: string }>> {
+  const response = await createOpencodeClient({
+    baseUrl: config.env.OPENCODE_BASE_URL,
+    directory: config.env.OPENCODE_DIRECTORY,
+  }).config.providers()
+
+  if (response.error) {
+    throw new Error(`Failed to query OpenCode providers from ${config.env.OPENCODE_BASE_URL}: ${JSON.stringify(response.error)}`)
+  }
+
+  const providers = response.data?.providers ?? []
+  const models: Array<{ id: string; label: string }> = []
+  for (const provider of providers) {
+    for (const model of Object.values(provider.models ?? {})) {
+      const id = `${provider.id}/${model.id}`
+      models.push({ id, label: `${provider.name} · ${model.name}` })
+    }
+  }
+  return models.sort((a, b) => a.label.localeCompare(b.label))
+}
+
 export async function listAgents(config: RuntimeConfig) {
   const response = await createOpencodeClient({
     baseUrl: config.env.OPENCODE_BASE_URL,

@@ -1,5 +1,5 @@
 import { createOpencodeEventBridge } from "../opencode-event-bridge"
-import { abortSession, createSession, listAgents, promptAgent } from "../opencode"
+import { abortSession, createSession, listAgents, listModels, promptAgent } from "../opencode"
 import { ensureOpenCodeServer } from "../opencode-server"
 import { syncOpencodeAgentsFromStore } from "../config-store"
 import type { AgentProvider, AgentRunHandle, AgentRole, ProviderCapability } from "./types"
@@ -83,6 +83,29 @@ export const opencodeProvider: AgentProvider = {
     return {
       providerId: "opencode",
       agents,
+    }
+  },
+  async configForm(input) {
+    try {
+      const models = await listModels(input.config)
+      if (models.length > 0) {
+        return {
+          providerId: "opencode",
+          modelOptions: models,
+          fields: { providerAgent: true, model: "select" as const, variant: true, outputMode: true },
+        }
+      }
+    } catch {
+      // OpenCode server may be offline; fall back to a free-text model field.
+    }
+    return {
+      providerId: "opencode",
+      fields: {
+        providerAgent: true,
+        model: "text" as const,
+        variant: true,
+        outputMode: true,
+      },
     }
   },
 }

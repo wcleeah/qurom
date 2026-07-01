@@ -113,6 +113,8 @@ describe("config store", () => {
 
     const rolesHtml = await renderConfigRoles().then((r) => r.text())
     expect(rolesHtml).toContain("source-auditor")
+    expect(rolesHtml).toContain("Role instructions")
+    expect(rolesHtml).toContain("OpenCode: agent name. Cursor: optional label only.")
 
     const promptHtml = await renderConfigPrompts().then((r) => r.text())
     expect(promptHtml).toContain("audit")
