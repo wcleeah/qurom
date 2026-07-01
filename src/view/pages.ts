@@ -262,6 +262,10 @@ export async function renderIndex(): Promise<Response> {
   }
 
   const body = `
+<div class="site-nav">
+  <a href="/" class="active">Runs</a>
+  <a href="/config">Config</a>
+</div>
 <h1 class="page-title">Runs</h1>
 ${statsHtml}
 ${activeRunHtml}

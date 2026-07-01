@@ -1116,6 +1116,149 @@ details[open] > .markdown-preview summary::before {
   color: var(--accent);
 }
 
+/* ── Config pages ── */
+.config-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.config-nav a {
+  padding: 0.4rem 0.7rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.config-nav a:hover { color: var(--fg); text-decoration: none; }
+.config-nav a.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.form-field > span {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.form-field > small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+.form-input,
+.config-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+}
+.form-input:focus,
+.config-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.config-form textarea { font-family: var(--font-mono); line-height: 1.5; }
+.form-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+@media (min-width: 640px) {
+  .form-fields-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.btn {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--fg);
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+.btn-primary:hover { color: var(--bg); opacity: 0.9; }
+.provider-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  width: fit-content;
+}
+.provider-tab-input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.provider-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.provider-tab:hover { color: var(--fg); }
+.provider-tab-input:checked + .provider-tab {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+.provider-tab-input:focus-visible + .provider-tab {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Site nav ── */
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+.site-nav a { color: var(--muted); }
+.site-nav a:hover { color: var(--accent); }
+.site-nav a.active { color: var(--fg); font-weight: 600; }
+
 /* ── Theme toggle ── */
 .theme-toggle {
   position: fixed;
