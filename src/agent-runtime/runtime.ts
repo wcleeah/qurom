@@ -1,4 +1,5 @@
 import type { z } from "zod"
+import { toJsonSchema } from "@langchain/core/utils/json_schema"
 
 import type { RuntimeConfig } from "../config"
 import type { EventBus } from "../runner"
@@ -13,6 +14,8 @@ import type {
 import type { PromptFileInput } from "../opencode"
 
 const INLINE_ATTACHMENT_MAX_BYTES = 1024 * 1024
+
+type OutputMode = "file" | "inline"
 
 export type RuntimePromptInput<T> = {
   role: AgentRole
@@ -58,6 +61,66 @@ async function inlineInputFiles(prompt: string, inputFiles: PromptFileInput[] | 
   }
 }
 
+function outputModeFor(provider: AgentProvider, schema: z.ZodType<unknown> | undefined, outputFile: string | undefined): OutputMode {
+  if (!outputFile) return "inline"
+  if (schema) return provider.capabilities.has("jsonFileOutput") ? "file" : "inline"
+  return provider.capabilities.has("fileOutput") ? "file" : "inline"
+}
+
+function renderOutputInstructions(input: {
+  outputFile?: string
+  schema?: z.ZodType<unknown>
+  mode: OutputMode
+}) {
+  if (!input.outputFile) return ""
+
+  if (input.schema) {
+    const schema = JSON.stringify(toJsonSchema(input.schema), null, 2)
+    if (input.mode === "file") {
+      return [
+        "## Output instructions",
+        `Write JSON to the output file \`${input.outputFile}\` matching this schema:`,
+        schema,
+        "Respond with only `OK` when the file is written.",
+        "Do not include the JSON in your response.",
+      ].join("\n")
+    }
+    return [
+      "## Output instructions",
+      "Return JSON inline matching this schema:",
+      schema,
+      "Do not write to any output file.",
+      "Do not include prose or markdown outside the JSON.",
+    ].join("\n")
+  }
+
+  if (input.mode === "file") {
+    return [
+      "## Output instructions",
+      `Write the complete output to \`${input.outputFile}\`.`,
+      "Respond with only `OK` when the file is written.",
+      "Do not include the output content in your response.",
+    ].join("\n")
+  }
+
+  return [
+    "## Output instructions",
+    "Return the complete output inline.",
+    "Do not write to any output file.",
+    "Do not respond with only `OK`.",
+  ].join("\n")
+}
+
+function renderPromptForOutputMode(input: {
+  prompt: string
+  outputFile?: string
+  schema?: z.ZodType<unknown>
+  mode: OutputMode
+}) {
+  const instructions = renderOutputInstructions(input)
+  return [input.prompt.trim(), instructions].filter(Boolean).join("\n\n")
+}
+
 export function createAgentRuntime(
   config: RuntimeConfig,
   bus?: EventBus,
@@ -80,13 +143,20 @@ export function createAgentRuntime(
     },
     async prompt(input) {
       const provider = resolveProvider(input.role)
+      const outputMode = outputModeFor(provider, input.schema, input.outputFile)
+      const prompt = renderPromptForOutputMode({
+        prompt: input.prompt,
+        outputFile: input.outputFile,
+        schema: input.schema,
+        mode: outputMode,
+      })
       if (!provider.capabilities.has("streamingEvents")) {
         bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "running" })
       }
       try {
         const promptInput = provider.capabilities.has("fileAttachments")
-          ? { prompt: input.prompt, inputFiles: input.inputFiles }
-          : await inlineInputFiles(input.prompt, input.inputFiles)
+          ? { prompt, inputFiles: input.inputFiles }
+          : await inlineInputFiles(prompt, input.inputFiles)
         const result = await provider.prompt({
           config,
           bus,
@@ -96,8 +166,10 @@ export function createAgentRuntime(
           schema: input.schema,
           variant: input.variant,
           inputFiles: promptInput.inputFiles,
-          outputFile: input.outputFile,
-          structuredOutput: input.schema ? { preferred: ["json_file", "plain_json"] } : undefined,
+          outputFile: outputMode === "file" ? input.outputFile : undefined,
+          structuredOutput: input.schema
+            ? { preferred: outputMode === "file" ? ["json_file", "plain_json"] : ["plain_json"] }
+            : undefined,
           telemetry: input.telemetry,
         })
         if (!provider.capabilities.has("streamingEvents")) {

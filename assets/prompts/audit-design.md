@@ -18,7 +18,3 @@ Additional checks for ALL auditors:
 - **Theme implementation**: Is every color defined as a CSS variable (no hardcoded hex/rgb in rules)? Is theme driven by `data-theme="light|dark"` on `<html>`? Is there a visible manual toggle (sun/moon icon) that persists to `localStorage`? Is there a blocking no-FOUC theme script in `<head>` (a theme script only at end of `<body>` = `major`)?
 - **Theme parity**: In dark mode, does any text fall below WCAG AA contrast against the dark background? Does any element vanish or lose affordance (dropped border, washed-out muted text, invisible divider)? Does the single accent still pass AA on the dark base, or does it clip/glow? Flag contrast failures as `visual` / `major`.
 
-## Output instructions
-Write your audit result as JSON to `{outputFile}`.
-Respond with only `OK` when the file is written.
-Do not include the JSON in your response.

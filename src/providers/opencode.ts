@@ -9,6 +9,7 @@ const capabilities = new Set<ProviderCapability>([
   "toolEvents",
   "permissionEvents",
   "fileAttachments",
+  "fileOutput",
   "providerManagedAgents",
   "jsonFileOutput",
   "plainJsonOutput",

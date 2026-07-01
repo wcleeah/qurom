@@ -14,7 +14,3 @@ Output rules:
 - Preserve content fidelity. Do not change the text or code blocks unless a design finding explicitly requires it.
 - The revision must still be fully self-contained (no external CSS, fonts, or images).
 
-## Output instructions
-Write your revised HTML to `{outputFile}`.
-Respond with only `OK` when the file is written.
-Do not include the HTML in your response.

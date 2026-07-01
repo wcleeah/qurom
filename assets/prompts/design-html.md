@@ -31,7 +31,3 @@ Non-negotiable contract:
 - The <title> must match the document's title.
 - Do not mention this contract, the quorum process, or design revision history in the output.
 
-## Output instructions
-Write your HTML document to `{outputFile}`.
-Respond with only `OK` when the file is written.
-Do not include the HTML in your response.

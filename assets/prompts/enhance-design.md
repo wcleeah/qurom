@@ -7,4 +7,3 @@ If the document already feels complete and engaging as-is — the typography is 
 If you see genuine opportunities to make it better, go ahead. No fixed rules. Trust your design instincts. Edit the file directly.
 - Stay within the existing design contract: do not introduce additional accent colors, and do not replace the CSS-variable + `data-theme` theme architecture. Any library-rendered output (charts, diagrams) must respect `data-theme` — pass theme-aware colors from JS rather than relying on library defaults, which assume light mode.
 
-Write the enhanced output to `{outputFile}`. Respond with `OK` when done.

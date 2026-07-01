@@ -140,38 +140,6 @@ function requestContextBlock(state: ResearchState) {
   }
 }
 
-function structuredOutputInstruction(input: { outputFile: string; schema?: string; supportsJsonFileOutput: boolean }) {
-  const schemaBlock = input.schema ? ["matching this schema:", input.schema].join("\n") : "matching the requested schema."
-  if (input.supportsJsonFileOutput) {
-    return [
-      "## Output instructions",
-      `Write JSON to the output file \`${input.outputFile}\` ${schemaBlock}`,
-      "Respond with only `OK` when the file is written.",
-      "Do not include the JSON in your response.",
-    ].join("\n")
-  }
-  return [
-    "## Output instructions",
-    `Return JSON inline ${schemaBlock}`,
-    "Do not write to any output file.",
-    "Do not include prose or markdown outside the JSON.",
-  ].join("\n")
-}
-
-function renderStructuredJsonPrompt(input: {
-  template: string
-  outputFile: string
-  supportsJsonFileOutput: boolean
-  schema?: string
-}) {
-  const instruction = structuredOutputInstruction(input)
-  return [input.template.trim(), instruction].filter(Boolean).join("\n\n")
-}
-
-function supportsJsonFileOutput(runtime: AgentRuntime, role: string) {
-  return runtime.providerForRole(role).capabilities.has("jsonFileOutput")
-}
-
 export function readerContextBlock(state: ResearchState): string {
   if (!state.readerProfile || state.readerProfile.length === 0) {
     return state.learningGoal ? `Reader goal: ${state.learningGoal}` : ""
@@ -188,13 +156,35 @@ export function readerContextBlock(state: ResearchState): string {
   return lines.join("\n")
 }
 
-export function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string) {
+async function fileExists(path: string) {
+  return Bun.file(path).exists()
+}
+
+async function ensureTextArtifact(path: string, text: string | undefined, label: string) {
+  if (await fileExists(path)) return Bun.file(path).text()
+  if (text && text.trim() && text.trim() !== "OK") {
+    await Bun.write(path, text)
+    return text
+  }
+  throw new Error(`Missing ${label} artifact at ${path}; provider returned no inline content to persist`)
+}
+
+async function ensureJsonArtifact(path: string, data: unknown, label: string) {
+  if (await fileExists(path)) return
+  if (data !== undefined) {
+    await Bun.write(path, JSON.stringify(data, null, 2) + "\n")
+    return
+  }
+  throw new Error(`Missing ${label} artifact at ${path}; provider returned no structured content to persist`)
+}
+
+export function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
   return [
     promptBundle.assets.deepDiveContract,
     buildResearchToolHint(config),
     requestContextBlock(state),
     readerContextBlock(state),
-    promptBundle.assets.draftFullDraft.replace("{outputFile}", outputFile),
+    promptBundle.assets.draftFullDraft,
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -205,10 +195,12 @@ export function auditPrompt(
   promptBundle: PromptBundle,
   agent: string,
   state: ResearchState,
-  outputFile: string,
-  previousUnresolved?: AggregatedFinding[],
-  supportsJsonFileOutput = true,
+  outputFileOrPreviousUnresolved?: string | AggregatedFinding[],
+  previousUnresolvedInput?: AggregatedFinding[],
 ) {
+  const previousUnresolved = Array.isArray(outputFileOrPreviousUnresolved)
+    ? outputFileOrPreviousUnresolved
+    : previousUnresolvedInput
   const request = requestLabel(state)
   const deltaContext =
     previousUnresolved && previousUnresolved.length > 0
@@ -225,13 +217,8 @@ export function auditPrompt(
 
   return [
     `You are the ${agent}, user requested a review on the ${request} draft.`,
-    renderStructuredJsonPrompt({
-      template: promptBundle.assets.audit,
-      outputFile,
-      supportsJsonFileOutput,
-    })
+    promptBundle.assets.audit
       .replace("{deltaContext}", deltaContext)
-      .replace("{outputFile}", outputFile)
       .replace("{readerContext}", readerContextBlock(state) || "(no reader profile provided — judge clarity against a competent practitioner default)"),
     buildResearchToolHint(config),
   ].join("\n\n")
@@ -241,30 +228,20 @@ export function drafterReviewPrompt(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   state: ResearchState,
-  outputFile: string,
-  supportsJsonFileOutput = true,
 ) {
   const request = requestLabel(state)
   return [
     `You are the drafter-agent reviewing auditor findings for this ${request}.`,
-    renderStructuredJsonPrompt({
-      template: promptBundle.assets.reviewFindings,
-      outputFile,
-      supportsJsonFileOutput,
-    }),
+    promptBundle.assets.reviewFindings,
     buildResearchToolHint(config),
     readerContextBlock(state),
   ].join("\n\n")
 }
 
-export function rebuttalPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string, supportsJsonFileOutput = true) {
+export function rebuttalPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
   const request = requestLabel(state)
   return [
-    renderStructuredJsonPrompt({
-      template: promptBundle.assets.rebuttal,
-      outputFile,
-      supportsJsonFileOutput,
-    }),
+    promptBundle.assets.rebuttal,
     buildResearchToolHint(config),
     `Respond to the disputed findings for this ${request}.`,
     readerContextBlock(state),
@@ -278,17 +255,11 @@ export function rebuttalReviewPrompt(
   config: RuntimeConfig,
   promptBundle: PromptBundle,
   state: ResearchState,
-  outputFile: string,
   maxRebuttalTurns: number,
-  supportsJsonFileOutput = true,
 ) {
   const request = requestLabel(state)
   return [
-    renderStructuredJsonPrompt({
-      template: promptBundle.assets.reviewRebuttalResponses,
-      outputFile,
-      supportsJsonFileOutput,
-    }),
+    promptBundle.assets.reviewRebuttalResponses,
     buildResearchToolHint(config),
     `Review the auditor rebuttal responses for this ${request}.`,
     readerContextBlock(state),
@@ -298,10 +269,10 @@ export function rebuttalReviewPrompt(
   ].join("\n\n")
 }
 
-function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string) {
+function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
   return [
     promptBundle.assets.deepDiveContract,
-    promptBundle.assets.reviseDraft.replace("{outputFile}", outputFile),
+    promptBundle.assets.reviseDraft,
     buildResearchToolHint(config),
     requestLabel(state),
   ].join("\n\n")
@@ -728,30 +699,13 @@ async function discoverReaderPrompt(
     .replace("{transcript}", transcriptText)
     .replace("{maxTurns}", String(maxTurns))
     .replace("{turn}", String(turn))
-  const renderedPrompt = renderStructuredJsonPrompt({
-    template: prompt,
-    outputFile,
-    supportsJsonFileOutput: supportsJsonFileOutput(runtime, "reader-interviewer"),
-    schema: `\`\`\`
-{
-  "questions": [string, ...],   // one or more questions for this turn; empty when done
-  "done": boolean,              // true when the profile is complete
-  "profile": {                  // present only when done === true
-    "learningGoal": string,     // what the reader is trying to accomplish
-    "concepts": [
-      { "concept": string, "level": "familiar" | "heard-of" | "unknown", "evidence": string }
-    ]
-  }
-}
-\`\`\``,
-  })
 
   let response: { structured?: ReaderInterviewTurn }
   try {
     response = await runtime.prompt({
       role: "reader-interviewer",
       handle,
-      prompt: renderedPrompt,
+      prompt,
       schema: readerInterviewTurnSchema,
       outputFile,
       telemetry: graphAgentTelemetry({
@@ -769,6 +723,7 @@ async function discoverReaderPrompt(
   }
 
   const turnResult = response.structured
+  await ensureJsonArtifact(outputFile, turnResult, "reader profile")
   if (!turnResult || turnResult.done) {
     // Interview complete (or the agent returned nothing recoverable after the router).
     const profile = turnResult?.profile
@@ -849,7 +804,7 @@ async function draftFullDraft(
     displayRole: "drafter",
   })
 
-  const prompt = fullDraftPrompt(config, promptBundle, state, outputFile)
+  const prompt = fullDraftPrompt(config, promptBundle, state)
   const response = await runtime.prompt({
     role: config.quorumConfig.designatedDrafter,
     handle,
@@ -868,10 +823,11 @@ async function draftFullDraft(
       },
     }),
   })
+  const draft = await ensureTextArtifact(outputFile, response.text, "draft")
 
   return researchStateSchema.parse({
     ...state,
-    draft: response.text || state.draft,
+    draft,
     status: "auditing",
   })
 }
@@ -963,9 +919,7 @@ async function runParallelAudits(
             promptBundle,
             agent,
             state,
-            outputFile,
             state.round > 0 ? state.unresolvedFindings : undefined,
-            supportsJsonFileOutput(runtime, agent),
           ),
           schema: auditResultSchema,
           outputFile,
@@ -1005,6 +959,7 @@ async function runParallelAudits(
         if (!response.structured) {
           throw new Error(`Missing structured audit response from agent ${agent}`)
         }
+        await ensureJsonArtifact(outputFile, response.structured, `audit ${agent}`)
 
         const findings = []
 
@@ -1098,8 +1053,6 @@ async function reviewFindingsByDrafter(
       config,
       promptBundle,
       state,
-      outputFile,
-      supportsJsonFileOutput(runtime, config.quorumConfig.designatedDrafter),
     ),
     schema: drafterFindingReviewSchema,
     outputFile,
@@ -1238,7 +1191,7 @@ async function runTargetedRebuttals(
       const response = await runtime.prompt({
         role: agent,
         handle,
-        prompt: rebuttalPrompt(config, promptBundle, state, outputFile, supportsJsonFileOutput(runtime, agent)),
+        prompt: rebuttalPrompt(config, promptBundle, state),
         schema: rebuttalBatchResponseSchema,
         outputFile,
         inputFiles: [
@@ -1270,6 +1223,7 @@ async function runTargetedRebuttals(
       if (!response.structured) {
         throw new Error(`Missing structured rebuttal response from agent ${agent}`)
       }
+      await ensureJsonArtifact(outputFile, response.structured, `rebuttal response ${agent}`)
 
       const expectedFindingIds = new Set<string>()
       for (const rebuttal of rebuttals) {
@@ -1416,9 +1370,7 @@ async function reviewRebuttalResponses(
       config,
       promptBundle,
       state,
-      outputFile,
       maxRebuttalTurns,
-      supportsJsonFileOutput(runtime, config.quorumConfig.designatedDrafter),
     ),
     schema: drafterFindingReviewSchema,
     outputFile,
@@ -1782,7 +1734,7 @@ async function reviseDraft(
   const response = await runtime.prompt({
     role: config.quorumConfig.designatedDrafter,
     handle,
-    prompt: revisionPrompt(config, promptBundle, state, outputFile),
+    prompt: revisionPrompt(config, promptBundle, state),
     outputFile,
     inputFiles: [
       { path: draftFile, mime: "text/plain", filename: "draft.md" },
@@ -1801,10 +1753,11 @@ async function reviseDraft(
       },
     }),
   })
+  const draft = await ensureTextArtifact(outputFile, response.text, "revised draft")
 
   const nextState = researchStateSchema.parse({
     ...state,
-    draft: response.text ?? state.draft,
+    draft,
     audits: [],
     activeRebuttals: {},
     currentRebuttalResponsesByFinding: {},
@@ -1909,11 +1862,10 @@ async function interactiveEnhanceNode(
     observer,
   })
 
-  // Prompt the enhancer to edit the HTML file directly
-  await runtime.prompt({
+  const response = await runtime.prompt({
     role: "interactive-enhancer",
     handle,
-    prompt: (promptBundle.assets.enhanceDesign as string).replace("{outputFile}", htmlFile),
+    prompt: promptBundle.assets.enhanceDesign as string,
     outputFile: htmlFile,
     inputFiles: [
       { path: htmlFile, mime: "text/plain", filename: "document.html" },
@@ -1926,6 +1878,9 @@ async function interactiveEnhanceNode(
       sessionId: handle.id,
     }),
   })
+  if (response.text && response.text.trim() && response.text.trim() !== "OK") {
+    await Bun.write(htmlFile, response.text)
+  }
 
   return researchStateSchema.parse({ ...state })
 }

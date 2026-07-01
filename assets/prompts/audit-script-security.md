@@ -26,7 +26,3 @@ Categories you may use:
 - `security` — known vulnerability, malicious code, or suspicious patterns
 - `self-containedness` — URL points to non-reputable CDN or uses HTTP instead of HTTPS
 
-## Output instructions
-Write your audit result as JSON to `{outputFile}`.
-Respond with only `OK` when the file is written.
-Do not include the JSON in your response.

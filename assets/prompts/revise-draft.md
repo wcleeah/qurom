@@ -20,7 +20,3 @@ Surgical revision rules:
 - If two findings about the same topic conflict, prefer the more precise one.
 - If the draft was already correct and a finding is mistaken (e.g., auditor misunderstood), preserve the original text.
 
-## Output instructions
-Write your revised draft to `{outputFile}`.
-Respond with only `OK` when the file is written.
-Do not include the revised draft in your response.

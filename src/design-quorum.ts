@@ -37,6 +37,25 @@ function observeDesignSession(
   observer?.onSessionCreated?.(input)
 }
 
+async function ensureTextArtifact(path: string, text: string | undefined, label: string) {
+  const file = Bun.file(path)
+  if (await file.exists()) return file.text()
+  if (text && text.trim() && text.trim() !== "OK") {
+    await Bun.write(path, text)
+    return text
+  }
+  throw new Error(`Missing ${label} artifact at ${path}; provider returned no inline content to persist`)
+}
+
+async function ensureJsonArtifact(path: string, data: unknown, label: string) {
+  if (await Bun.file(path).exists()) return
+  if (data !== undefined) {
+    await Bun.write(path, JSON.stringify(data, null, 2) + "\n")
+    return
+  }
+  throw new Error(`Missing ${label} artifact at ${path}; provider returned no structured content to persist`)
+}
+
 async function createObservedDesignHandle(input: {
   runtime: AgentRuntime
   role: string
@@ -155,7 +174,6 @@ export async function designHtml(
 
   const prompt = promptBundle.assets.designHtml
     .replace("{topic}", topic)
-    .replace("{outputFile}", outputFile)
 
   const response = await runtime.prompt({
     role,
@@ -174,7 +192,7 @@ export async function designHtml(
     }),
   })
 
-  return response.text ?? ""
+  return ensureTextArtifact(outputFile, response.text, "design HTML")
 }
 
 export async function runDesignAudits(
@@ -206,7 +224,7 @@ export async function runDesignAudits(
           : promptBundle.assets.auditDesign
 
         const outputFile = `${outputPath}/design-audit-${agent}-round-${round}.json`
-        const prompt = auditPromptAsset.replace("{outputFile}", outputFile)
+        const prompt = auditPromptAsset
 
         const designAuditRun = (attemptHandle: AgentRunHandle) => runtime.prompt({
           role: agent,
@@ -245,6 +263,7 @@ export async function runDesignAudits(
         if (!response.structured) {
           throw new Error(`Missing structured design audit response from agent ${agent}`)
         }
+        await ensureJsonArtifact(outputFile, response.structured, `design audit ${agent}`)
 
         const findings = []
 
@@ -356,7 +375,7 @@ export async function reviseDesignHtml(
   const findingsFile = `${outputPath}/design-findings-round-${round}.json`
   await writeRunJsonArtifact(outputPath, `design-findings-round-${round}.json`, findings)
 
-  const prompt = promptBundle.assets.reviseDesign.replace("{outputFile}", outputFile)
+  const prompt = promptBundle.assets.reviseDesign
 
   const response = await runtime.prompt({
     role,
@@ -376,7 +395,7 @@ export async function reviseDesignHtml(
     }),
   })
 
-  return response.text ?? ""
+  return ensureTextArtifact(outputFile, response.text, "revised design HTML")
 }
 
 export async function runDesignQuorum(input: {
