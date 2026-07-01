@@ -260,17 +260,56 @@ function cursorArtifactMatchesPath(actual: string, expected: string) {
   return actual === expected || actual.endsWith(`/${expected}`)
 }
 
+function safeJson(value: unknown) {
+  return JSON.stringify(value, (_key, item) => {
+    if (typeof item === "bigint") return item.toString()
+    if (item instanceof Error) {
+      return {
+        name: item.name,
+        message: item.message,
+        stack: item.stack,
+      }
+    }
+    return item
+  }, 2)
+}
+
+async function saveCursorResponse(input: {
+  outputFile: string
+  agentId: string
+  runId: string
+  result: unknown
+  text: string
+  artifacts?: unknown
+  conversation?: unknown
+}) {
+  const base = `${input.outputFile}.cursor-response`
+  await mkdir(dirname(input.outputFile), { recursive: true })
+  await writeFile(`${base}.txt`, input.text, "utf8")
+  await writeFile(`${base}.json`, safeJson({
+    agentId: input.agentId,
+    runId: input.runId,
+    outputFile: input.outputFile,
+    requestedArtifact: cursorArtifactPath(input.outputFile),
+    artifacts: input.artifacts,
+    result: input.result,
+    text: input.text,
+    conversation: input.conversation,
+  }) + "\n", "utf8")
+}
+
 async function downloadCursorArtifact(input: {
   agent: CursorAgentHandle
   handle: AgentRunHandle
   outputFile: string
+  artifacts?: Awaited<ReturnType<CursorAgentHandle["listArtifacts"]>>
 }) {
   if (!input.handle.id.startsWith("bc-")) {
     throw new Error("Cursor local agents do not support artifact download; use Cursor cloud for file output")
   }
 
   const artifactPath = cursorArtifactPath(input.outputFile)
-  const artifacts = await input.agent.listArtifacts()
+  const artifacts = input.artifacts ?? await input.agent.listArtifacts()
   const found = artifacts.find((artifact) => cursorArtifactMatchesPath(artifact.path, artifactPath))
   if (!found) {
     const available = artifacts.map((artifact) => artifact.path).join(", ") || "(none)"
@@ -398,6 +437,7 @@ export const cursorProvider: AgentProvider = {
     if (input.inputFiles && input.inputFiles.length > 0) {
       throw new Error("Cursor provider does not yet support file attachments in quorum prompts")
     }
+    const outputFile = input.outputFile
 
     const active = activeAgents.get(input.handle.id)
     if (!active) {
@@ -436,15 +476,33 @@ export const cursorProvider: AgentProvider = {
             if (status && status !== "finished" && status !== "completed") {
               throw new CursorRunStatusError(run.id, status, result)
             }
-            if (input.outputFile) {
-              await downloadCursorArtifact({
-                agent: active.agent,
-                handle: input.handle,
-                outputFile: input.outputFile,
-              })
+            const text = extractRunText(result)
+            const artifacts = await active.agent.listArtifacts()
+            let conversation: unknown
+            if (run.supports("conversation")) {
+              try {
+                conversation = await run.conversation()
+              } catch (error) {
+                conversation = { error: cursorErrorMessage(error) }
+              }
             }
+            await saveCursorResponse({
+              outputFile,
+              agentId: input.handle.id,
+              runId: run.id,
+              result,
+              text,
+              artifacts,
+              conversation,
+            })
+            await downloadCursorArtifact({
+              agent: active.agent,
+              handle: input.handle,
+              outputFile,
+              artifacts,
+            })
             return {
-              text: extractRunText(result),
+              text,
               model: roleRuntime?.model,
               provider: "cursor",
               variant: input.variant ?? roleRuntime?.variant,

@@ -376,6 +376,13 @@ describe("cursorProvider", () => {
 
     expect(result.structured).toEqual({ ok: true })
     expect(JSON.parse(await readFile(outputFile, "utf8"))).toEqual({ ok: true })
+    expect(await readFile(`${outputFile}.cursor-response.txt`, "utf8")).toBe("OK")
+    expect(JSON.parse(await readFile(`${outputFile}.cursor-response.json`, "utf8"))).toMatchObject({
+      agentId: "bc-cursor-agent-1",
+      runId: "cursor-run-1",
+      requestedArtifact: "artifacts/reader-profile.json",
+      text: "OK",
+    })
     expect(sendCalls[0]).toContain("artifacts/reader-profile.json")
     expect(sendCalls[0]).not.toContain(outputFile)
   })
