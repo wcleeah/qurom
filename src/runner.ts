@@ -1,5 +1,6 @@
 import { createGraph } from "./graph"
 import { createOpencodeEventBridge } from "./opencode-event-bridge"
+import { createAgentRuntime } from "./agent-runtime/runtime"
 import { createLiveStatusWriter } from "./live-status"
 import { createDebugLog, type DebugLog } from "./debug-log"
 import { abortSession } from "./opencode"
@@ -497,6 +498,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
       bus.emit({ kind: "lifecycle", phase: "running", requestId, traceId: telemetry.traceId })
 
       const graph = graphFactory(config, promptBundle, {
+        runtime: createAgentRuntime(config, bus),
         observer: {
           debugLog: { write(type, data) { debugLogRef.current?.write(type, data) } } as DebugLog,
           onNodeStart(node, state) {

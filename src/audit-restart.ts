@@ -25,7 +25,7 @@ import { recoveryDriftDetector, SystemicDriftError } from "./recovery-drift"
  * "retry the audit".
  */
 
-export interface AuditRestartInput<T> {
+export interface AuditRestartInput<T, H = string> {
   maxRestarts: number
   agent: string
   round: number
@@ -34,29 +34,33 @@ export interface AuditRestartInput<T> {
   titleBase: string
   /** Session already created and observed by the caller; used for attempt 0. */
   firstSessionID: string
+  /** Opaque provider handle for attempt 0. Defaults to firstSessionID for legacy callers. */
+  firstHandle?: H
   /**
    * Factory for fresh restart sessions. Inject as `opencode.createSession` in
    * production; inject a stub in tests so the wrapper is unit-testable without
    * Bun module mocking.
    */
-  createSession: (title: string) => Promise<{ id: string }>
+  createSession: (title: string) => Promise<{ id: string; handle?: H }>
   /** Called whenever a fresh restart session is created (observe + telemetry). */
   onSessionCreated: (sessionID: string) => void
   /** Build the audit promptAgent/tui call and invoke it with `sessionID`. */
-  runAttempt: (sessionID: string) => Promise<T>
+  runAttempt: (handle: H) => Promise<T>
   debugLog?: DebugLog
 }
 
-export async function auditWithRestart<T>(input: AuditRestartInput<T>): Promise<T> {
+export async function auditWithRestart<T, H = string>(input: AuditRestartInput<T, H>): Promise<T> {
   for (let attempt = 0; attempt <= input.maxRestarts; attempt++) {
-    const sessionID = attempt === 0
-      ? input.firstSessionID
-      : (await input.createSession(`${input.titleBase}:restart:${attempt}`)).id
+    const created = attempt === 0
+      ? { id: input.firstSessionID, handle: input.firstHandle }
+      : await input.createSession(`${input.titleBase}:restart:${attempt}`)
+    const sessionID = created.id
+    const handle = (created.handle ?? sessionID) as H
     if (attempt > 0) {
       input.onSessionCreated(sessionID)
     }
     try {
-      return await input.runAttempt(sessionID)
+      return await input.runAttempt(handle)
     } catch (e) {
       // Last attempt — propagate whatever it is.
       if (attempt === input.maxRestarts) throw e

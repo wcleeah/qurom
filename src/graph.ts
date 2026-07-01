@@ -13,6 +13,8 @@ import {
 } from "./output"
 import { auditWithRestart } from "./audit-restart"
 import { createSession, promptAgent } from "./opencode"
+import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
+import type { AgentRunHandle } from "./providers/types"
 import type { PromptBundle } from "./prompt-assets"
 import { summarizeMarkdown } from "./summarizer"
 import { designHtml, runDesignAudits, aggregateDesignConsensus, reviseDesignHtml } from "./design-quorum"
@@ -605,6 +607,7 @@ export async function ingestRequest(input: GraphInput) {
 
 async function discoverReaderPrompt(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -643,11 +646,24 @@ async function discoverReaderPrompt(
   const outputFile = `${state.outputPath}/reader-profile.json`
   // Reuse one OpenCode session across all interview turns.
   let sessionID = readerInterviewerSessions.get(state.requestId)
+  let handle: AgentRunHandle | undefined
   if (!sessionID) {
-    const session = await createSession(config, `reader-interviewer:${state.requestId}`)
-    sessionID = session.id
+    handle = await createObservedHandle({
+      runtime,
+      role: "reader-interviewer",
+      title: `reader-interviewer:${state.requestId}`,
+      requestId: state.requestId,
+      observer,
+    })
+    sessionID = handle.id
     readerInterviewerSessions.set(state.requestId, sessionID)
-    observeSession(observer, { sessionID, role: "reader-interviewer", requestId: state.requestId })
+  } else {
+    handle = {
+      id: sessionID,
+      providerId: runtime.providerForRole("reader-interviewer").id,
+      role: "reader-interviewer",
+      title: `reader-interviewer:${state.requestId}`,
+    }
   }
 
   const transcriptText = transcript.length === 0
@@ -660,10 +676,9 @@ async function discoverReaderPrompt(
     .replace("{turn}", String(turn))
     .replace("{outputFile}", outputFile)
 
-  const response = await promptAgent({
-    config,
-    sessionID,
-    agent: "reader-interviewer",
+  const response = await runtime.prompt({
+    role: "reader-interviewer",
+    handle,
     prompt,
     schema: readerInterviewTurnSchema,
     outputFile,
@@ -740,6 +755,7 @@ function routeAfterReaderPrompt(state: ResearchState): string {
 
 async function draftFullDraft(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -748,14 +764,19 @@ async function draftFullDraft(
   assertStatus(state, "drafting", "draftFullDraft")
 
   const outputFile = `${state.outputPath}/draft-round-${state.round}.md`
-  const session = await createSession(config, `research-drafter:${state.requestId}:draft:${state.round}`)
-  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
+  const handle = await createObservedHandle({
+    runtime,
+    role: config.quorumConfig.designatedDrafter,
+    title: `research-drafter:${state.requestId}:draft:${state.round}`,
+    requestId: state.requestId,
+    observer,
+    displayRole: "drafter",
+  })
 
   const prompt = fullDraftPrompt(config, promptBundle, state, outputFile)
-  const response = await promptAgent({
-    config,
-    sessionID: session.id,
-    agent: config.quorumConfig.designatedDrafter,
+  const response = await runtime.prompt({
+    role: config.quorumConfig.designatedDrafter,
+    handle,
     prompt,
     outputFile,
     telemetry: graphAgentTelemetry({
@@ -763,7 +784,7 @@ async function draftFullDraft(
       state,
       name: "agent.draftFullDraft",
       agentName: config.quorumConfig.designatedDrafter,
-      sessionId: session.id,
+      sessionId: handle.id,
       input: {
         requestId: state.requestId,
         round: state.round,
@@ -815,8 +836,26 @@ function graphAgentTelemetry(input: {
   }
 }
 
+async function createObservedHandle(input: {
+  runtime: AgentRuntime
+  role: string
+  title: string
+  requestId: string
+  observer?: RunObserver
+  displayRole?: string
+}): Promise<AgentRunHandle> {
+  const handle = await input.runtime.createHandle(input.role, input.title)
+  observeSession(input.observer, {
+    sessionID: handle.id,
+    role: input.displayRole ?? input.role,
+    requestId: input.requestId,
+  })
+  return handle
+}
+
 async function runParallelAudits(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -831,13 +870,18 @@ async function runParallelAudits(
   for (const agent of auditors) {
     auditPromises.push(
       (async () => {
-        const session = await createSession(config, `audit:${state.requestId}:${agent}:round:${state.round}`)
-        observeSession(observer, { sessionID: session.id, role: `auditor:${agent}`, requestId: state.requestId })
+        const handle = await createObservedHandle({
+          runtime,
+          role: agent,
+          title: `audit:${state.requestId}:${agent}:round:${state.round}`,
+          requestId: state.requestId,
+          observer,
+          displayRole: `auditor:${agent}`,
+        })
         const outputFile = `${state.outputPath}/audit-${agent}-round-${state.round}.json`
-        const auditRun = (sessionID: string) => promptAgent({
-          config,
-          sessionID,
-          agent,
+        const auditRun = (attemptHandle: AgentRunHandle) => runtime.prompt({
+          role: agent,
+          handle: attemptHandle,
           prompt: auditPrompt(config, promptBundle, agent, state, outputFile, state.round > 0 ? state.unresolvedFindings : undefined),
           schema: auditResultSchema,
           outputFile,
@@ -849,7 +893,7 @@ async function runParallelAudits(
             state,
             name: `agent.audit.${agent}`,
             agentName: agent,
-            sessionId: sessionID,
+            sessionId: attemptHandle.id,
             input: {
               requestId: state.requestId,
               round: state.round,
@@ -863,10 +907,14 @@ async function runParallelAudits(
           round: state.round,
           requestId: state.requestId,
           titleBase: `audit:${state.requestId}:${agent}:round:${state.round}`,
-          firstSessionID: session.id,
-          createSession: (title) => createSession(config, title),
+          firstSessionID: handle.id,
+          createSession: async (title) => {
+            const restartHandle = await runtime.createHandle(agent, title)
+            return { id: restartHandle.id, handle: restartHandle }
+          },
           onSessionCreated: (id) => observeSession(observer, { sessionID: id, role: `auditor:${agent}`, requestId: state.requestId }),
           runAttempt: auditRun,
+          firstHandle: handle,
           debugLog: telemetry?.debugLog ?? observer?.debugLog,
         })
 
@@ -920,6 +968,7 @@ async function runParallelAudits(
 
 async function reviewFindingsByDrafter(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -944,18 +993,23 @@ async function reviewFindingsByDrafter(
     })
   }
 
-  const session = await createSession(config, `research-drafter:${state.requestId}:review-findings:${state.round}`)
-  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
+  const handle = await createObservedHandle({
+    runtime,
+    role: config.quorumConfig.designatedDrafter,
+    title: `research-drafter:${state.requestId}:review-findings:${state.round}`,
+    requestId: state.requestId,
+    observer,
+    displayRole: "drafter",
+  })
 
   // Audits file was already written by persistAuditsArtifact in runParallelAudits
   const auditsFile = `${state.outputPath}/audits-round-${state.round}.json`
   const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
   const outputFile = `${state.outputPath}/drafter-finding-review-round-${state.round}.json`
 
-  const response = await promptAgent({
-    config,
-    sessionID: session.id,
-    agent: config.quorumConfig.designatedDrafter,
+  const response = await runtime.prompt({
+    role: config.quorumConfig.designatedDrafter,
+    handle,
     prompt: drafterReviewPrompt(config, promptBundle, state, outputFile),
     schema: drafterFindingReviewSchema,
     outputFile,
@@ -968,7 +1022,7 @@ async function reviewFindingsByDrafter(
       state,
       name: "agent.reviewFindingsByDrafter",
       agentName: config.quorumConfig.designatedDrafter,
-      sessionId: session.id,
+      sessionId: handle.id,
       input: {
         requestId: state.requestId,
         round: state.round,
@@ -1030,6 +1084,7 @@ async function reviewFindingsByDrafter(
 
 async function runTargetedRebuttals(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -1056,8 +1111,14 @@ async function runTargetedRebuttals(
     agent: string,
     rebuttals: ActiveRebuttal[],
   ): Promise<Array<[string, RebuttalResponseRecord]>> {
-    const session = await createSession(config, `audit:${state.requestId}:${agent}:rebuttal:${state.round}`)
-    observeSession(observer, { sessionID: session.id, role: `auditor:${agent}`, requestId: state.requestId })
+    const handle = await createObservedHandle({
+      runtime,
+      role: agent,
+      title: `audit:${state.requestId}:${agent}:rebuttal:${state.round}`,
+      requestId: state.requestId,
+      observer,
+      displayRole: `auditor:${agent}`,
+    })
 
     const chainObservation = await telemetry?.run.startObservation({
       traceId: telemetry.run.traceId ?? "",
@@ -1073,7 +1134,7 @@ async function runTargetedRebuttals(
         requestId: state.requestId,
         round: state.round,
         agentName: agent,
-        sessionId: session.id,
+        sessionId: handle.id,
       },
     })
 
@@ -1084,10 +1145,9 @@ async function runTargetedRebuttals(
       const draftFile = `${outputPath}/draft-round-${state.round}.md`
       const outputFile = `${outputPath}/auditor-rebuttal-responses-${agent}-round-${state.round}.json`
 
-      const response = await promptAgent({
-        config,
-        sessionID: session.id,
-        agent,
+      const response = await runtime.prompt({
+        role: agent,
+        handle,
         prompt: rebuttalPrompt(config, promptBundle, state, outputFile),
         schema: rebuttalBatchResponseSchema,
         outputFile,
@@ -1112,7 +1172,7 @@ async function runTargetedRebuttals(
                 round: state.round,
                 status: state.status,
                 agentName: agent,
-                sessionId: session.id,
+                sessionId: handle.id,
               },
             },
       })
@@ -1205,6 +1265,7 @@ async function runTargetedRebuttals(
 
 async function reviewRebuttalResponses(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -1238,8 +1299,14 @@ async function reviewRebuttalResponses(
     })
   }
 
-  const session = await createSession(config, `research-drafter:${state.requestId}:review-rebuttal:${state.round}`)
-  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
+  const handle = await createObservedHandle({
+    runtime,
+    role: config.quorumConfig.designatedDrafter,
+    title: `research-drafter:${state.requestId}:review-rebuttal:${state.round}`,
+    requestId: state.requestId,
+    observer,
+    displayRole: "drafter",
+  })
 
   const maxRebuttalTurns = config.quorumConfig.maxRebuttalTurnsPerFinding
 
@@ -1252,10 +1319,9 @@ async function reviewRebuttalResponses(
   const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
   const outputFile = `${state.outputPath}/drafter-rebuttal-review-round-${state.round}.json`
 
-  const response = await promptAgent({
-    config,
-    sessionID: session.id,
-    agent: config.quorumConfig.designatedDrafter,
+  const response = await runtime.prompt({
+    role: config.quorumConfig.designatedDrafter,
+    handle,
     prompt: rebuttalReviewPrompt(
       config,
       promptBundle,
@@ -1274,7 +1340,7 @@ async function reviewRebuttalResponses(
       state,
       name: "agent.reviewRebuttalResponses",
       agentName: config.quorumConfig.designatedDrafter,
-      sessionId: session.id,
+      sessionId: handle.id,
       input: {
         requestId: state.requestId,
         round: state.round,
@@ -1595,6 +1661,7 @@ function summarizeNodeResult(result: unknown) {
 
 async function reviseDraft(
   config: RuntimeConfig,
+  runtime: AgentRuntime,
   promptBundle: PromptBundle,
   state: ResearchState,
   telemetry?: GraphTelemetry,
@@ -1605,8 +1672,14 @@ async function reviseDraft(
 
   await ensureRunDirPath(state.outputPath)
 
-  const session = await createSession(config, `research-drafter:${state.requestId}:revise:${state.round}`)
-  observeSession(observer, { sessionID: session.id, role: "drafter", requestId: state.requestId })
+  const handle = await createObservedHandle({
+    runtime,
+    role: config.quorumConfig.designatedDrafter,
+    title: `research-drafter:${state.requestId}:revise:${state.round}`,
+    requestId: state.requestId,
+    observer,
+    displayRole: "drafter",
+  })
 
   // Write unresolved findings to a temp JSON file for attachment
   const findingsFile = `${state.outputPath}/unresolved-findings-round-${state.round}.json`
@@ -1615,10 +1688,9 @@ async function reviseDraft(
   const nextRound = state.round + 1
   const outputFile = `${state.outputPath}/draft-round-${nextRound}.md`
 
-  const response = await promptAgent({
-    config,
-    sessionID: session.id,
-    agent: config.quorumConfig.designatedDrafter,
+  const response = await runtime.prompt({
+    role: config.quorumConfig.designatedDrafter,
+    handle,
     prompt: revisionPrompt(config, promptBundle, state, outputFile),
     outputFile,
     inputFiles: [
@@ -1630,7 +1702,7 @@ async function reviseDraft(
       state,
       name: "agent.reviseDraft",
       agentName: config.quorumConfig.designatedDrafter,
-      sessionId: session.id,
+      sessionId: handle.id,
       input: {
         requestId: state.requestId,
         round: state.round,
@@ -1989,10 +2061,12 @@ export function createGraph(
   input?: {
     observer?: RunObserver
     telemetry?: GraphTelemetry
+    runtime?: AgentRuntime
   },
 ) {
   const observer = input?.observer
   const graphTelemetry = input?.telemetry
+  const runtime = input?.runtime ?? createAgentRuntime(config)
 
   async function withNodeTelemetry<T>(node: string, state: ResearchState | GraphInput, fn: () => Promise<T>) {
     observeNode(observer, node, state)
@@ -2071,7 +2145,7 @@ export function createGraph(
     )
     .addNode("discoverReaderPrompt", async (state) =>
       withNodeTelemetry("discoverReaderPrompt", state, () =>
-        discoverReaderPrompt(config, promptBundle, state, graphTelemetry, observer),
+        discoverReaderPrompt(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("discoverReaderResume", async (state) =>
@@ -2081,27 +2155,27 @@ export function createGraph(
     )
     .addNode("draftFullDraft", async (state) =>
       withNodeTelemetry("draftFullDraft", state, () =>
-        draftFullDraft(config, promptBundle, state, graphTelemetry, observer),
+        draftFullDraft(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("runParallelAudits", async (state) =>
       withNodeTelemetry("runParallelAudits", state, () =>
-        runParallelAudits(config, promptBundle, state, graphTelemetry, observer),
+        runParallelAudits(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("reviewFindingsByDrafter", async (state) =>
       withNodeTelemetry("reviewFindingsByDrafter", state, () =>
-        reviewFindingsByDrafter(config, promptBundle, state, graphTelemetry, observer),
+        reviewFindingsByDrafter(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("runTargetedRebuttals", async (state) =>
       withNodeTelemetry("runTargetedRebuttals", state, () =>
-        runTargetedRebuttals(config, promptBundle, state, graphTelemetry, observer),
+        runTargetedRebuttals(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("reviewRebuttalResponses", async (state) =>
       withNodeTelemetry("reviewRebuttalResponses", state, () =>
-        reviewRebuttalResponses(config, promptBundle, state, graphTelemetry, observer),
+        reviewRebuttalResponses(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("aggregateConsensus", async (state) =>
@@ -2111,7 +2185,7 @@ export function createGraph(
       withNodeTelemetry("computeConfidence", state, () => computeConfidenceNode(config, state)),
     )
     .addNode("reviseDraft", async (state) =>
-      withNodeTelemetry("reviseDraft", state, () => reviseDraft(config, promptBundle, state, graphTelemetry, observer)),
+      withNodeTelemetry("reviseDraft", state, () => reviseDraft(config, runtime, promptBundle, state, graphTelemetry, observer)),
     )
     .addNode("finalizeApprovedDraft", async (state) =>
       withNodeTelemetry("finalizeApprovedDraft", state, () => finalizeApprovedDraft(config, state)),
