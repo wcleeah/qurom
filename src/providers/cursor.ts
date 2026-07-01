@@ -256,6 +256,10 @@ function cursorArtifactPath(outputFile: string) {
   return `artifacts/${basename(outputFile)}`
 }
 
+function cursorArtifactMatchesPath(actual: string, expected: string) {
+  return actual === expected || actual.endsWith(`/${expected}`)
+}
+
 async function downloadCursorArtifact(input: {
   agent: CursorAgentHandle
   handle: AgentRunHandle
@@ -267,12 +271,13 @@ async function downloadCursorArtifact(input: {
 
   const artifactPath = cursorArtifactPath(input.outputFile)
   const artifacts = await input.agent.listArtifacts()
-  const found = artifacts.find((artifact) => artifact.path === artifactPath)
+  const found = artifacts.find((artifact) => cursorArtifactMatchesPath(artifact.path, artifactPath))
   if (!found) {
-    throw new Error(`Cursor cloud agent did not produce required artifact ${artifactPath}`)
+    const available = artifacts.map((artifact) => artifact.path).join(", ") || "(none)"
+    throw new Error(`Cursor cloud agent did not produce required artifact ${artifactPath}; available artifacts: ${available}`)
   }
 
-  const buffer = await input.agent.downloadArtifact(artifactPath)
+  const buffer = await input.agent.downloadArtifact(found.path)
   await mkdir(dirname(input.outputFile), { recursive: true })
   await writeFile(input.outputFile, buffer)
 }

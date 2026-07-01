@@ -380,6 +380,31 @@ describe("cursorProvider", () => {
     expect(sendCalls[0]).not.toContain(outputFile)
   })
 
+  test("downloads Cursor cloud artifacts from nested agents/artifacts paths", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-cursor-nested-artifact-"))
+    const outputFile = join(dir, "reader-profile.json")
+    waitResult = { status: "finished", result: "OK" }
+    artifactPath = "agents/artifacts/reader-profile.json"
+    artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    const result = await cursorProvider.prompt({
+      config,
+      handle,
+      role: "research-drafter",
+      prompt: "return json",
+      schema: z.object({ ok: z.boolean() }),
+      outputFile,
+    })
+
+    expect(result.structured).toEqual({ ok: true })
+    expect(JSON.parse(await readFile(outputFile, "utf8"))).toEqual({ ok: true })
+  })
+
   test("rejects Cursor prompts without an output file", async () => {
     const handle = await cursorProvider.createRunHandle({
       config,
