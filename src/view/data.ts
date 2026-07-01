@@ -167,36 +167,36 @@ export function agentFrom(filename: string, prefix: string) {
 
 export function classifyFile(filename: string): FileClass {
   const round = roundFrom(filename)
-  if (filename === "request.json") return { group: "Run Metadata", subGroup: "Request", icon: "📋", label: "Request", description: "Original topic/input and request id" }
-  if (filename === "reader-profile.json") return { group: "Run Metadata", subGroup: "Reader", icon: "🎙", label: "Reader profile", description: "Interview-derived audience model" }
-  if (filename === "summary.json") return { group: "Run Metadata", subGroup: "Summaries", icon: "📊", label: "Summary", description: "Compact title/summary for the run" }
-  if (filename === "confidence.json") return { group: "Run Metadata", subGroup: "Summaries", icon: "📈", label: "Confidence", description: "Final confidence and caveat metadata" }
-  if (filename === "failure.json") return { group: "Run Metadata", subGroup: "Failures", icon: "💥", label: "Failure details", description: "Research failure payload" }
-  if (filename === "debug-log.jsonl") return { group: "Debug", subGroup: "Logs", icon: "🪵", label: "Debug log", description: "Chronological pipeline/recovery events" }
-  if (filename === "node-history.json") return { group: "Debug", subGroup: "Timelines", icon: "📋", label: "Node history", description: "Processed graph steps" }
-  if (filename === "live-status.json") return { group: "Debug", subGroup: "Live", icon: "🔄", label: "Live status", description: "Current dashboard snapshot" }
-  if (filename === "final.html") return { group: "Final Outputs", subGroup: "Published", icon: "🏆", label: "Final HTML", description: "Rendered design output" }
-  if (filename === "final.md") return { group: "Final Outputs", subGroup: "Published", icon: "✅", label: "Final markdown", description: "Approved research document" }
-  if (filename === "latest-draft.md") return { group: "Final Outputs", subGroup: "Fallbacks", icon: "📝", label: "Latest draft", description: "Most recent research draft" }
-  if (/^draft-round-\d+\.md$/.test(filename)) return { group: "Research Rounds", subGroup: "Drafts", icon: "📝", label: `Draft round ${round}`, description: "Research draft submitted to auditors" }
-  if (/^audits-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Audit Bundles", icon: "🔍", label: `Audit bundle round ${round}`, description: "Combined auditor results" }
+  if (filename === "request.json") return { group: "Run Metadata", subGroup: "Request", label: "Request", description: "Original topic/input and request id" }
+  if (filename === "reader-profile.json") return { group: "Run Metadata", subGroup: "Reader", label: "Reader profile", description: "Interview-derived audience model" }
+  if (filename === "summary.json") return { group: "Run Metadata", subGroup: "Summaries", label: "Summary", description: "Compact title/summary for the run" }
+  if (filename === "confidence.json") return { group: "Run Metadata", subGroup: "Summaries", label: "Confidence", description: "Final confidence and caveat metadata" }
+  if (filename === "failure.json") return { group: "Run Metadata", subGroup: "Failures", label: "Failure details", description: "Research failure payload" }
+  if (filename === "debug-log.jsonl") return { group: "Debug", subGroup: "Logs", label: "Debug log", description: "Chronological pipeline/recovery events" }
+  if (filename === "node-history.json") return { group: "Debug", subGroup: "Timelines", label: "Node history", description: "Processed graph steps" }
+  if (filename === "live-status.json") return { group: "Debug", subGroup: "Live", label: "Live status", description: "Current dashboard snapshot" }
+  if (filename === "final.html") return { group: "Final Outputs", subGroup: "Published", label: "Final HTML", description: "Rendered design output" }
+  if (filename === "final.md") return { group: "Final Outputs", subGroup: "Published", label: "Final markdown", description: "Approved research document" }
+  if (filename === "latest-draft.md") return { group: "Final Outputs", subGroup: "Fallbacks", label: "Latest draft", description: "Most recent research draft" }
+  if (/^draft-round-\d+\.md$/.test(filename)) return { group: "Research Rounds", subGroup: "Drafts", label: `Draft round ${round}`, description: "Research draft submitted to auditors" }
+  if (/^audits-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Audit Bundles", label: `Audit bundle round ${round}`, description: "Combined auditor results" }
   if (/^audit-[\w-]+-round-\d+\.json$/.test(filename)) {
     const agent = agentFrom(filename, "audit")
-    return { group: "Research Rounds", subGroup: "Per-Agent Audits", icon: "🔎", label: `${agent} round ${round}`, description: "Individual auditor result" }
+    return { group: "Research Rounds", subGroup: "Per-Agent Audits", label: `${agent} round ${round}`, description: "Individual auditor result" }
   }
-  if (/^drafter-finding-review-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Reviews", icon: "👀", label: `Drafter review round ${round}`, description: "Accepted findings and rebuttal choices" }
-  if (/^aggregated-findings-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Consensus", icon: "📊", label: `Consensus round ${round}`, description: "Aggregated unresolved findings/outcome" }
-  if (/^unresolved-findings-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Consensus", icon: "⚠️", label: `Unresolved findings round ${round}`, description: "Findings carried into revision" }
-  if (/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(filename)) return { group: "Rebuttals", subGroup: "Auditor Responses", icon: "💬", label: `Auditor rebuttal response round ${round}`, description: "Auditor response to drafter rebuttals" }
-  if (/^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/.test(filename)) return { group: "Rebuttals", subGroup: "Drafter Reviews", icon: "🔁", label: `Drafter rebuttal review round ${round}`, description: "Drafter review of auditor responses" }
-  if (/^design-html-round-\d+\.html$/.test(filename)) return { group: "Design Rounds", subGroup: "HTML Drafts", icon: "🎨", label: `HTML draft round ${round}`, description: "Design candidate sent to auditors" }
-  if (/^design-audits-round-\d+\.json$/.test(filename)) return { group: "Design Rounds", subGroup: "Audit Bundles", icon: "🧪", label: `Design audit bundle round ${round}`, description: "Combined design auditor results" }
+  if (/^drafter-finding-review-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Reviews", label: `Drafter review round ${round}`, description: "Accepted findings and rebuttal choices" }
+  if (/^aggregated-findings-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Consensus", label: `Consensus round ${round}`, description: "Aggregated unresolved findings/outcome" }
+  if (/^unresolved-findings-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Consensus", label: `Unresolved findings round ${round}`, description: "Findings carried into revision" }
+  if (/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(filename)) return { group: "Rebuttals", subGroup: "Auditor Responses", label: `Auditor rebuttal response round ${round}`, description: "Auditor response to drafter rebuttals" }
+  if (/^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/.test(filename)) return { group: "Rebuttals", subGroup: "Drafter Reviews", label: `Drafter rebuttal review round ${round}`, description: "Drafter review of auditor responses" }
+  if (/^design-html-round-\d+\.html$/.test(filename)) return { group: "Design Rounds", subGroup: "HTML Drafts", label: `HTML draft round ${round}`, description: "Design candidate sent to auditors" }
+  if (/^design-audits-round-\d+\.json$/.test(filename)) return { group: "Design Rounds", subGroup: "Audit Bundles", label: `Design audit bundle round ${round}`, description: "Combined design auditor results" }
   if (/^design-audit-[\w-]+-round-\d+\.json$/.test(filename)) {
     const agent = agentFrom(filename, "design-audit")
-    return { group: "Design Rounds", subGroup: "Per-Agent Audits", icon: "🧪", label: `${agent} round ${round}`, description: "Individual design auditor result" }
+    return { group: "Design Rounds", subGroup: "Per-Agent Audits", label: `${agent} round ${round}`, description: "Individual design auditor result" }
   }
-  if (/^design-consensus-round-\d+\.json$/.test(filename)) return { group: "Design Rounds", subGroup: "Consensus", icon: "📊", label: `Design consensus round ${round}`, description: "Design outcome and unresolved findings" }
-  if (/^design-findings-round-\d+\.json$/.test(filename)) return { group: "Design Rounds", subGroup: "Revision Inputs", icon: "⚠️", label: `Design findings round ${round}`, description: "Findings sent into HTML revision" }
-  if (filename === "design-failure.json") return { group: "Design Rounds", subGroup: "Failures", icon: "💥", label: "Design failure details", description: "Design quorum error payload" }
-  return { group: "Other", subGroup: "Unclassified", icon: "📎", label: filename, description: "Additional artifact" }
+  if (/^design-consensus-round-\d+\.json$/.test(filename)) return { group: "Design Rounds", subGroup: "Consensus", label: `Design consensus round ${round}`, description: "Design outcome and unresolved findings" }
+  if (/^design-findings-round-\d+\.json$/.test(filename)) return { group: "Design Rounds", subGroup: "Revision Inputs", label: `Design findings round ${round}`, description: "Findings sent into HTML revision" }
+  if (filename === "design-failure.json") return { group: "Design Rounds", subGroup: "Failures", label: "Design failure details", description: "Design quorum error payload" }
+  return { group: "Other", subGroup: "Unclassified", label: filename, description: "Additional artifact" }
 }

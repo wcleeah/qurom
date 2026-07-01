@@ -3,11 +3,11 @@ import type { AggregatedFindings, AuditFinding, AuditRecord, RebuttalEntry, Rebu
 
 export function outcomeLabel(outcome: string): string {
   switch (outcome) {
-    case "approved": return "✅ Approved"
-    case "approved_with_caveats": return "⚠️ Approved with caveats"
-    case "needs_revision": return "🔧 Needs revision"
-    case "failed_non_convergent": return "❌ Failed (non-convergent)"
-    default: return `📋 ${outcome}`
+    case "approved": return "Approved"
+    case "approved_with_caveats": return "Approved with caveats"
+    case "needs_revision": return "Needs revision"
+    case "failed_non_convergent": return "Failed (non-convergent)"
+    default: return outcome
   }
 }
 
@@ -19,18 +19,18 @@ export function outcomeClass(outcome: string): string {
 
 export function renderFindingRow(f: AuditFinding, compact?: boolean): string {
   const fixHtml = !compact && f.required_fix
-    ? `<div class="finding-required-fix">🔧 ${escapeHtml(f.required_fix)}</div>`
+    ? `<div class="finding-required-fix">${escapeHtml(f.required_fix)}</div>`
     : ""
 
   const evidenceHtml = !compact && f.evidence && f.evidence.length > 0
     ? `<details class="finding-evidence">
-  <summary>📚 Evidence (${f.evidence.length} source${f.evidence.length !== 1 ? "s" : ""})</summary>
+  <summary>Evidence (${f.evidence.length} source${f.evidence.length !== 1 ? "s" : ""})</summary>
   <ul>${f.evidence.map((e) => `<li>${escapeHtml(e)}</li>`).join("")}</ul>
 </details>`
     : ""
 
   const agentHtml = f.agent
-    ? `<div class="finding-agent">👤 ${escapeHtml(f.agent)}</div>`
+    ? `<div class="finding-agent">${escapeHtml(f.agent)}</div>`
     : ""
 
   return `<div class="finding">
@@ -59,7 +59,7 @@ export function renderRequestCard(data: unknown): string {
     if (s.title) rows.push(`<tr><td>Title</td><td>${escapeHtml(String(s.title))}</td></tr>`)
   }
   return `<div class="structured-card">
-  <div class="auditor-header">📋 Request</div>
+  <div class="auditor-header">Request</div>
   <table class="summary-table">${rows.join("")}</table>
 </div>`
 }
@@ -81,7 +81,7 @@ export function renderReaderProfileCard(data: unknown): string {
     return `<tr><td>${escapeHtml(c.concept)}</td><td class="${levelClass[c.level] ?? "concept-level-default"}">${lvl}</td><td class="evidence-muted">${ev}</td></tr>`
   }).join("")
   return `<div class="structured-card">
-  <div class="auditor-header">🎙 Reader profile</div>
+  <div class="auditor-header">Reader profile</div>
   <table class="summary-table">
     <tr><td>Learning goal</td><td colspan="2">${goal}</td></tr>
     ${concepts.length > 0 ? `<tr><th>Concept</th><th>Level</th><th>Evidence</th></tr>${conceptRows}` : "<tr><td colspan=\"3\" class=\"placeholder-muted\">(interview did not complete)</td></tr>"}
@@ -129,19 +129,17 @@ export function renderAuditRound(filename: string, data: unknown, isDesign?: boo
 
   const roundMatch = filename.match(/round-(\d+)/)
   const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
-  const phaseIcon = isDesign ? "🎨" : "🔍"
   const phaseLabel = isDesign ? "Design Audits" : "Audits"
 
-  let html = `<div class="section"><h2>${phaseIcon} ${phaseLabel} — ${roundLabel} (${audits.length} auditor${audits.length !== 1 ? "s" : ""})</h2>`
+  let html = `<div class="section"><h2>${phaseLabel} — ${roundLabel} (${audits.length} auditor${audits.length !== 1 ? "s" : ""})</h2>`
 
   for (const audit of audits) {
-    const voteIcon = audit.vote === "approve" ? "✅" : "❌"
     const totalFindings = audit.findings?.length ?? 0
 
     html += `<div class="structured-card">
   <div class="auditor-header">
-    <span>👤 ${escapeHtml(audit.agent)}</span>
-    <span class="auditor-vote ${escapeHtml(audit.vote)}">${voteIcon} ${audit.vote}${totalFindings > 0 ? ` · ${totalFindings} finding${totalFindings !== 1 ? "s" : ""}` : ""}</span>
+    <span>${escapeHtml(audit.agent)}</span>
+    <span class="auditor-vote ${escapeHtml(audit.vote)}">${audit.vote}${totalFindings > 0 ? ` · ${totalFindings} finding${totalFindings !== 1 ? "s" : ""}` : ""}</span>
   </div>`
 
     if (audit.summary) {
@@ -167,9 +165,8 @@ export function renderConsensusCard(filename: string, data: unknown, isDesign?: 
 
   const roundMatch = filename.match(/round-(\d+)/)
   const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
-  const phaseIcon = isDesign ? "🎨" : "📊"
   const phaseLabel = isDesign ? "Design Consensus" : "Consensus"
-  let html = `<div class="section"><h2>${phaseIcon} ${phaseLabel} — ${roundLabel}</h2>
+  let html = `<div class="section"><h2>${phaseLabel} — ${roundLabel}</h2>
 <div class="structured-card">
   <div class="outcome-banner ${outcomeClass(d.outcome)}">${outcomeLabel(d.outcome)}</div>`
 
@@ -210,12 +207,12 @@ export function renderDrafterReview(filename: string, data: unknown): string {
   const accepted = d.acceptedFindingIds ?? []
   const rebuttals = d.rebuttals ?? []
 
-  let html = `<div class="section"><h2>👀 Drafter Review — ${roundLabel}</h2>
+  let html = `<div class="section"><h2>Drafter Review — ${roundLabel}</h2>
 <div class="structured-card">`
 
   // Accepted
   html += `<div class="review-section">
-  <h4>✅ Accepted (${accepted.length} finding${accepted.length !== 1 ? "s" : ""})</h4>`
+  <h4>Accepted (${accepted.length} finding${accepted.length !== 1 ? "s" : ""})</h4>`
   if (accepted.length > 0) {
     html += `<div class="chip-list">`
     for (const id of accepted.slice(0, 30)) {
@@ -230,7 +227,7 @@ export function renderDrafterReview(filename: string, data: unknown): string {
 
   // Rebutted
   html += `<div class="review-section">
-  <h4>🗣️ Rebutted (${rebuttals.length} finding${rebuttals.length !== 1 ? "s" : ""})</h4>`
+  <h4>Rebutted (${rebuttals.length} finding${rebuttals.length !== 1 ? "s" : ""})</h4>`
   if (rebuttals.length > 0) {
     for (const r of rebuttals) {
       html += `<div class="rebuttal-entry">
@@ -240,7 +237,7 @@ export function renderDrafterReview(filename: string, data: unknown): string {
   </div>
   <div class="rebuttal-speaker">Drafter</div>
   <div class="rebuttal-text">${escapeHtml(r.argument)}</div>
-  ${r.evidence && r.evidence.length > 0 ? `<details class="finding-evidence"><summary>📚 Evidence (${r.evidence.length})</summary><ul>${r.evidence.map((e) => `<li>${escapeHtml(e)}</li>`).join("")}</ul></details>` : ""}
+  ${r.evidence && r.evidence.length > 0 ? `<details class="finding-evidence"><summary>Evidence (${r.evidence.length})</summary><ul>${r.evidence.map((e) => `<li>${escapeHtml(e)}</li>`).join("")}</ul></details>` : ""}
 </div>`
     }
   } else {
@@ -264,20 +261,20 @@ export function renderRebuttalResponses(filename: string, data: unknown): string
   const turnLabel = turnMatch ? `Turn ${turnMatch[1]}` : ""
   const entries = Object.entries(d)
 
-  let html = `<div class="section"><h2>💬 Rebuttal Responses — ${roundLabel}${turnLabel ? ", " + turnLabel : ""} (${entries.length} finding${entries.length !== 1 ? "s" : ""})</h2>
+  let html = `<div class="section"><h2>Rebuttal Responses — ${roundLabel}${turnLabel ? ", " + turnLabel : ""} (${entries.length} finding${entries.length !== 1 ? "s" : ""})</h2>
 <div class="structured-card">`
 
   for (const [findingId, response] of entries) {
     const decisionLabel =
-      response.decision === "withdraw" ? "✅ WITHDREW" :
-      response.decision === "soften" ? "🔽 SOFTENED" :
-      "✗ UPHELD"
+      response.decision === "withdraw" ? "WITHDREW" :
+      response.decision === "soften" ? "SOFTENED" :
+      "UPHELD"
 
     html += `<div class="rebuttal-entry">
   <div class="rebuttal-entry-header">
     <code class="short-id">${escapeHtml(findingId.slice(-40))}</code>
     <span class="rebuttal-decision ${escapeHtml(response.decision)}">${decisionLabel}</span>
-    <span class="short-id muted-text">👤 ${escapeHtml(response.agent)}</span>
+    <span class="short-id muted-text">${escapeHtml(response.agent)}</span>
   </div>
   <div class="rebuttal-speaker">Auditor response</div>
   <div class="rebuttal-text">${escapeHtml(response.argument)}</div>`

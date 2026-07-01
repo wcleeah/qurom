@@ -111,7 +111,7 @@ export interface RebuttalResponseEntry {
   updatedFinding?: Partial<AuditFinding>
 }
 
-export type FileClass = { group: string; subGroup: string; icon: string; label: string; description: string }
+export type FileClass = { group: string; subGroup: string; label: string; description: string }
 
 export interface DesignConsensusSummary {
   outcome: string

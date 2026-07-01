@@ -86,6 +86,6 @@ export function startViewServer(): void {
     },
   })
 
-  console.log(`📋 Runs viewer running at http://${HOST}:${PORT}`)
+  console.log(`Runs viewer running at http://${HOST}:${PORT}`)
   console.log(`   Serving: ${safeRunPath("").replace(/\/$/, "")}`)
 }

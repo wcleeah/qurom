@@ -51,7 +51,7 @@ export function renderLivePipeline(
   const researchDone = researchStatus === "approved" || researchStatus === "failed"
   const terminalLabel = researchStatus === "approved" ? "finalizeApprovedDraft" : researchStatus === "failed" ? "finalizeFailedRun" : "finalize"
 
-  let html = '<div class="section"><h2>📊 Pipeline</h2><div class="card stack-card stack-card-tight">'
+  let html = '<div class="section"><h2>Pipeline</h2><div class="card stack-card stack-card-tight">'
 
   // Research nodes
   html += nodeRow(1, "ingestRequest", true, isActive("ingestRequest"))
@@ -125,14 +125,14 @@ export function renderAgentActivity(liveStatus: LiveStatus | null): string {
     .filter(([, a]) => a.toolCalls.length > 0 || a.reasoning)
   if (agents.length === 0) return ""
 
-  let html = '<div class="section"><h2>🤖 Agent Activity</h2>'
+  let html = '<div class="section"><h2>Agent Activity</h2>'
 
   for (const [name, agent] of agents) {
     html += `<div class="card card-compact"><div class="agent-card-title">${statusDot(agent.status)} ${escapeHtml(name)} <span class="agent-card-status">(${agent.status})</span></div>`
 
     // Reasoning (latest chunk)
     if (agent.reasoning) {
-      html += `<details class="markdown-preview agent-reasoning"><summary>💭 Reasoning</summary><pre>${escapeHtml(agent.reasoning)}</pre></details>`
+      html += `<details class="markdown-preview agent-reasoning"><summary>Reasoning</summary><pre>${escapeHtml(agent.reasoning)}</pre></details>`
     }
 
     // Tool calls
@@ -166,7 +166,7 @@ export function renderNodeHistory(liveStatus: LiveStatus | null, runName: string
 
   const nodes = [...liveStatus.nodeHistory].reverse()
 
-  let html = '<div class="section"><h2>📋 Node History</h2><div class="card stack-card stack-card-history">'
+  let html = '<div class="section"><h2>Node History</h2><div class="card stack-card stack-card-history">'
 
   for (const entry of nodes) {
     const elapsed = entry.completedAt - entry.startedAt
@@ -217,14 +217,14 @@ export function renderInterviewChatCard(runName: string, liveStatus: LiveStatus 
   const answeredTurns = turns.length
   const historyHtml = turns.map((t, i) =>
     `<div class="chat-answered-turn">
-      <div class="chat-turn-label">✓ Turn ${i + 1} · answered</div>
-      ${t.q ? `<div class="interviewer-msg"><span class="chat-icon">🤖</span> <span class="chat-text">${escapeHtml(t.q)}</span></div>` : ""}
-      <div class="reader-msg"><span class="chat-icon">👤</span> <span class="chat-text">${escapeHtml(t.a)}</span></div>
+      <div class="chat-turn-label">Turn ${i + 1} · answered</div>
+      ${t.q ? `<div class="interviewer-msg"><span class="chat-icon">AI</span> <span class="chat-text">${escapeHtml(t.q)}</span></div>` : ""}
+      <div class="reader-msg"><span class="chat-icon">You</span> <span class="chat-text">${escapeHtml(t.a)}</span></div>
     </div>`
   ).join("")
   const historySection = answeredTurns > 0
     ? `<details class="interview-history">
-        <summary>📜 Answered history (${answeredTurns} turn${answeredTurns === 1 ? "" : "s"}) ▾</summary>
+        <summary>Answered history (${answeredTurns} turn${answeredTurns === 1 ? "" : "s"})</summary>
         <div class="chat-transcript">${historyHtml}</div>
       </details>`
     : ""
@@ -237,7 +237,7 @@ export function renderInterviewChatCard(runName: string, liveStatus: LiveStatus 
   const inputsHtml = questions.length > 0
     ? questions.map((q, i) =>
         `<div class="chat-question-block">
-          <div class="interviewer-msg"><span class="chat-icon">🤖</span> <span class="chat-text">${escapeHtml(q)}</span></div>
+          <div class="interviewer-msg"><span class="chat-icon">AI</span> <span class="chat-text">${escapeHtml(q)}</span></div>
           <textarea name="a_${i}" rows="3" placeholder="your answer..." required></textarea>
         </div>`
       ).join("")
@@ -246,7 +246,7 @@ export function renderInterviewChatCard(runName: string, liveStatus: LiveStatus 
       </div>`
   const currentTurn = awaiting.turn
   return `<div class="section interview-card">
-  <h2>🎙 Reader interview · turn ${currentTurn}</h2>
+  <h2>Reader interview · turn ${currentTurn}</h2>
   ${historySection}
   <div class="interview-current">
     <div class="chat-current-label">Answer this turn:</div>
@@ -299,7 +299,7 @@ export async function renderFailureBanner(
   }
 
   return `<div class="failure-banner">
-  <div class="failure-banner-title">❌ Run failed</div>
+  <div class="failure-banner-title">Run failed</div>
   <div class="failure-banner-detail">
     ${escapeHtml(failureReason)} · Round ${round} · ${unresolvedCount} findings unresolved
   </div>

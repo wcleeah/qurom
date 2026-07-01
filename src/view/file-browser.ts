@@ -32,7 +32,6 @@ export function renderFileBrowser(input: {
     const sz = fileSizes.get(item.name) ?? 0
     const szStr = sz > 0 ? formatBytes(sz) : ""
     return `<li><a href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(item.name)}">
-  <span class="file-icon">${item.icon}</span>
   <span class="file-main">
     <span class="file-label">${escapeHtml(item.label)}</span>
     <span class="file-desc">${escapeHtml(item.description)} · <span class="file-name">${escapeHtml(item.name)}</span></span>

@@ -41,7 +41,7 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
 
   let html = `<a class="back-link" href="/runs/${encodeURIComponent(runName)}">← Back to run</a>
 <div class="header-bar">
-  <h1>📋 Node: ${escapeHtml(nodeName)}</h1>
+  <h1>Node: ${escapeHtml(nodeName)}</h1>
   <p class="muted-note dim-text">Run: ${escapeHtml(runName)}</p>
 </div>`
 
@@ -51,11 +51,11 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
     const elapsed = entry.completedAt && entry.startedAt
       ? `${((entry.completedAt - entry.startedAt) / 1000).toFixed(1)}s`
       : "unknown"
-    const icon = entry.status === "completed" ? "✅" : "❌"
     const statusLabel = entry.status === "completed" ? "Completed" : "Error"
+    const statusCls = entry.status === "completed" ? "success-text" : "danger-text"
 
     html += `<div class="section">
-  <h2>${icon} Execution #${nodeEntries.length - i}</h2>
+  <h2>Execution #${nodeEntries.length - i} <span class="${statusCls} tiny-text">${statusLabel}</span></h2>
   <div class="card">
     <table class="summary-table">
       <tr><td>Status</td><td>${statusLabel}</td></tr>
@@ -81,7 +81,7 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
 
   if (relatedFiles.length > 0) {
     html += `<div class="section">
-  <h2>📎 Related artifacts</h2>
+  <h2>Related artifacts</h2>
   <ul class="file-list">
     ${relatedFiles.map((f) => `<li><a href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(f)}">${escapeHtml(f)}</a></li>`).join("")}
   </ul>
@@ -123,7 +123,7 @@ export async function renderDebugLog(runName: string, files: string[]): Promise<
 
   if (entries.length === 0) return ""
 
-  let html = '<div class="section"><details class="markdown-preview"><summary>🪵 Debug Log (' + entries.length + ' entries)</summary>'
+  let html = '<div class="section"><details class="markdown-preview"><summary>Debug Log (' + entries.length + ' entries)</summary>'
   html += '<div class="debug-log-scroll"><table class="summary-table summary-table-debug">'
   html += '<thead><tr><th>Time</th><th>Type</th><th>Data</th></tr></thead><tbody>'
 
@@ -235,14 +235,12 @@ export async function renderIndex(): Promise<Response> {
     for (const run of runs) {
       const roundLabel =
         run.roundCount > 0
-          ? `<span>🔄 ${run.roundCount} round${run.roundCount !== 1 ? "s" : ""}</span>`
+          ? `<span>${run.roundCount} round${run.roundCount !== 1 ? "s" : ""}</span>`
           : ""
-      const icons: string[] = []
-      if (run.hasFinalHtml) icons.push("🏆")
-      const iconsStr = icons.length ? " " + icons.join(" ") : ""
+      const iconsStr = run.hasFinalHtml ? ` <span class="tiny-text muted-text">html</span>` : ""
 
       const designBadge = run.designStatus
-        ? `<span class="badge ${run.designStatus === "approved" ? "badge-approved" : run.designStatus === "failed" ? "badge-failed" : "badge-running"} design-badge">🎨 ${run.designStatus}</span>`
+        ? `<span class="badge ${run.designStatus === "approved" ? "badge-approved" : run.designStatus === "failed" ? "badge-failed" : "badge-running"} design-badge">design: ${run.designStatus}</span>`
         : ""
 
       runCards += `<div class="run-card">
@@ -254,9 +252,9 @@ export async function renderIndex(): Promise<Response> {
   </div>
   <div class="run-card-meta">
     ${roundLabel}
-    ${run.designRoundCount > 0 ? `<span>🎨 ${run.designRoundCount} design round${run.designRoundCount !== 1 ? "s" : ""}</span>` : ""}
-    <span>📄 ${run.fileCount} file${run.fileCount !== 1 ? "s" : ""}</span>
-    <span>🕐 ${formatRelative(run.mtime)}</span>
+    ${run.designRoundCount > 0 ? `<span>${run.designRoundCount} design round${run.designRoundCount !== 1 ? "s" : ""}</span>` : ""}
+    <span>${run.fileCount} file${run.fileCount !== 1 ? "s" : ""}</span>
+    <span>${formatRelative(run.mtime)}</span>
     <span class="tiny-text dim-text">${escapeHtml(run.name.slice(-12))}</span>
   </div>
 </div>`
@@ -264,7 +262,7 @@ export async function renderIndex(): Promise<Response> {
   }
 
   const body = `
-<h1 class="page-title">📋 Runs</h1>
+<h1 class="page-title">Runs</h1>
 ${statsHtml}
 ${activeRunHtml}
 ${runCards}`
@@ -506,45 +504,37 @@ export async function renderRun(name: string): Promise<Response> {
   let phaseHtml = ""
 
   // Research phase
-  let researchIcon = "🔄"
   let researchLabel = "running"
   let researchClass = "badge-running"
   if (researchStatus === "approved") {
-    researchIcon = "✅"
     researchLabel = "approved"
     researchClass = "badge-approved"
   } else if (researchStatus === "failed") {
-    researchIcon = "❌"
     researchLabel = "failed"
     researchClass = "badge-failed"
   }
 
   const maxRound = draftCount > 0 ? draftCount - 1 : 0
   const researchLine = `<div class="phase-row">
-  <span class="badge ${researchClass}">${researchIcon} Research: ${researchLabel}</span>
+  <span class="badge ${researchClass}">Research: ${researchLabel}</span>
   <span class="phase-detail">${maxRound} round${maxRound !== 1 ? "s" : ""}, ${aggregatedCount} consensus</span>
 </div>`
 
   // Design phase
   let designLine = ""
   if (design && design.hasDesignFiles) {
-    let designIcon = "🔄"
     let designLabel = design.outcome
     let designClass = "badge-running"
     if (design.outcome === "approved") {
-      designIcon = "✅"
       designLabel = "approved"
       designClass = "badge-approved"
     } else if (design.outcome === "approved_with_caveats") {
-      designIcon = "⚠️"
       designLabel = "approved with caveats"
       designClass = "badge-approved"
     } else if (design.outcome === "failed_non_convergent" || design.hasFailure) {
-      designIcon = "❌"
       designLabel = "failed"
       designClass = "badge-failed"
     } else if (design.outcome === "needs_revision") {
-      designIcon = "🔧"
       designLabel = "needs revision"
       designClass = "badge-running"
     }
@@ -556,25 +546,25 @@ export async function renderRun(name: string): Promise<Response> {
     const sevStr = sevParts.length > 0 ? ` (${sevParts.join(", ")} unresolved)` : ""
 
     designLine = `<div class="phase-row">
-  <span class="badge ${designClass}">${designIcon} Design: ${designLabel}</span>
+  <span class="badge ${designClass}">Design: ${designLabel}</span>
   <span class="phase-detail">round ${design.round}${sevStr}</span>
 </div>`
   } else if (researchStatus === "approved" && !design) {
     // Research finished, design phase expected but no design files yet
     designLine = `<div class="phase-row">
-  <span class="badge badge-running">🔄 Design: running…</span>
+  <span class="badge badge-running">Design: running…</span>
   <span class="phase-detail">waiting for design artifacts</span>
 </div>`
   } else if (researchStatus === "approved" && design && !design.hasDesignFiles) {
     designLine = `<div class="phase-row">
-  <span class="badge badge-running">🔄 Design: running…</span>
+  <span class="badge badge-running">Design: running…</span>
   <span class="phase-detail">generating HTML</span>
 </div>`
   }
 
   if (researchLine || designLine) {
     phaseHtml = `<div class="section">
-  <h2>📊 Pipeline</h2>
+  <h2>Pipeline</h2>
   <div class="card stack-card stack-card-roomy">
     ${researchLine}
     ${designLine}
@@ -585,31 +575,31 @@ export async function renderRun(name: string): Promise<Response> {
   // ── Design summary card ──
   let designSummaryHtml = ""
   if (design && design.hasDesignFiles) {
-    const designOutcomeLabel = design.outcome === "approved" ? "✅ Approved"
-      : design.outcome === "approved_with_caveats" ? "⚠️ Approved with caveats"
-      : design.outcome === "failed_non_convergent" ? "❌ Failed"
-      : design.outcome === "needs_revision" ? "🔧 Needs revision"
-      : `📋 ${design.outcome}`
+    const designOutcomeLabel = design.outcome === "approved" ? "Approved"
+      : design.outcome === "approved_with_caveats" ? "Approved with caveats"
+      : design.outcome === "failed_non_convergent" ? "Failed"
+      : design.outcome === "needs_revision" ? "Needs revision"
+      : design.outcome
     const designOutcomeClass = design.outcome === "approved" ? "approved"
       : design.outcome === "approved_with_caveats" ? "approved"
       : design.outcome === "failed_non_convergent" ? "failed"
       : "needs-revision"
 
     const sevRows: string[] = []
-    if (design.severityBreakdown.blocker) sevRows.push(`<tr><td>🔴 Blocker</td><td>${design.severityBreakdown.blocker}</td></tr>`)
-    if (design.severityBreakdown.major) sevRows.push(`<tr><td>🟠 Major</td><td>${design.severityBreakdown.major}</td></tr>`)
-    if (design.severityBreakdown.minor) sevRows.push(`<tr><td>🟡 Minor</td><td>${design.severityBreakdown.minor}</td></tr>`)
+    if (design.severityBreakdown.blocker) sevRows.push(`<tr><td><span class="danger-text">Blocker</span></td><td>${design.severityBreakdown.blocker}</td></tr>`)
+    if (design.severityBreakdown.major) sevRows.push(`<tr><td><span class="running-text">Major</span></td><td>${design.severityBreakdown.major}</td></tr>`)
+    if (design.severityBreakdown.minor) sevRows.push(`<tr><td><span class="muted-text">Minor</span></td><td>${design.severityBreakdown.minor}</td></tr>`)
 
     designSummaryHtml = `<div class="section">
-  <h2>🎨 Design Quorum</h2>
+  <h2>Design Quorum</h2>
   <div class="structured-card">
     <div class="outcome-banner ${escapeHtml(designOutcomeClass)}">${designOutcomeLabel}</div>
     <table class="summary-table">
       <tr><td>Round</td><td>${design.round}</td></tr>
       <tr><td>Unresolved findings</td><td>${design.unresolvedCount}${design.outcome === "approved_with_caveats" ? " minor caveat(s)" : ""}</td></tr>
       ${sevRows.join("\n")}
-      ${design.hasFinalHtml ? `<tr><td>Final HTML</td><td>🏆 final.html ready</td></tr>` : ""}
-      ${design.hasFailure ? `<tr><td>Error</td><td>💥 design-failure.json</td></tr>` : ""}
+      ${design.hasFinalHtml ? `<tr><td>Final HTML</td><td>final.html ready</td></tr>` : ""}
+      ${design.hasFailure ? `<tr><td>Error</td><td class="danger-text">design-failure.json</td></tr>` : ""}
     </table>
   </div>
 </div>`
@@ -620,7 +610,6 @@ export async function renderRun(name: string): Promise<Response> {
   if (hasFinalHtml) {
     heroHtml = `<div class="card">
   <div class="row-inline card-compact">
-    <span class="hero-heading-icon">🏆</span>
     <h2 class="title-reset">Final rendered page</h2>
   </div>
   <a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.html" target="_blank" rel="noopener">
@@ -636,18 +625,18 @@ export async function renderRun(name: string): Promise<Response> {
   if (hasFinalMd) {
     const sz = fileSizes.get("final.md") ?? 0
     keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.md">
-  ✅ View final.md — approved draft (${formatBytes(sz)})
+  View final.md — approved draft (${formatBytes(sz)})
 </a>`)
   }
   if (hasLatestDraft) {
     const sz = fileSizes.get("latest-draft.md") ?? 0
     keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/latest-draft.md">
-  ❌ View latest-draft.md — failed run (${formatBytes(sz)})
+  View latest-draft.md — failed run (${formatBytes(sz)})
 </a>`)
   }
   if (hasFailureJson) {
     keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/failure.json">
-  💥 View failure.json — error details
+  View failure.json — error details
 </a>`)
   }
 
@@ -659,14 +648,14 @@ export async function renderRun(name: string): Promise<Response> {
       .pop()
     if (latestDesignConsensus) {
       keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/${encodeURIComponent(latestDesignConsensus)}">
-  🎨 View ${latestDesignConsensus} — outcome: ${design.outcome}
+  View ${latestDesignConsensus} — outcome: ${design.outcome}
 </a>`)
     }
   }
 
   if (keyLinks.length > 0) {
     keyOutputsHtml = `<div class="section">
-  <h2>🔑 Key outputs</h2>
+  <h2>Key outputs</h2>
   ${keyLinks.join("\n")}
 </div>`
   }
@@ -675,7 +664,7 @@ export async function renderRun(name: string): Promise<Response> {
   let requestInfoHtml = ""
   if (requestJson) {
     requestInfoHtml = `<div class="section">
-  <h2>📋 Request metadata</h2>
+  <h2>Request metadata</h2>
   <div class="card">
     ${renderJsonCard(requestJson, { defaultOpen: false })}
   </div>
@@ -713,7 +702,7 @@ export async function renderRun(name: string): Promise<Response> {
   const phaseSection = `<div id="phase-section">${phaseHtml}</div>`
   const designSummarySection = `<div id="design-summary-section">${designSummaryHtml}</div>`
   const filesSection = `<div id="files-section"><div class="section">
-  <h2>📎 All files</h2>
+  <h2>All files</h2>
   ${fileListHtml}
 </div></div>`
 

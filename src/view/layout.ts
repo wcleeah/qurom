@@ -13,10 +13,33 @@ export function layout(title: string, body: string, extraHead = ""): string {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <style>${CSS}</style>
+<script>
+(function(){try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}})();
+</script>
 ${extraHead}
 </head>
 <body>
+<button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme"></button>
 ${body}
+<script>
+(function(){
+  var root=document.documentElement;
+  var btn=document.querySelector("[data-theme-toggle]");
+  function current(){
+    var t=root.getAttribute("data-theme");
+    if(t)return t;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
+  }
+  function render(){btn.textContent=current()==="dark"?"Light":"Dark";}
+  render();
+  btn.addEventListener("click",function(){
+    var next=current()==="dark"?"light":"dark";
+    root.setAttribute("data-theme",next);
+    try{localStorage.setItem("theme",next);}catch(e){}
+    render();
+  });
+})();
+</script>
 </body>
 </html>`
 }

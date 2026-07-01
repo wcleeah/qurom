@@ -22,9 +22,11 @@ export const CSS = /* css */ `
   --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
 }
+/* Dark mode: grep near-black, deliberately tuned (not an inversion).
+   Applied when the OS prefers dark AND the user hasn't forced light,
+   or when the user explicitly selects dark via the theme toggle. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    /* Dark mode: grep near-black, deliberately tuned (not an inversion) */
+  :root:not([data-theme="light"]) {
     --bg: #0a0a0a;
     --bg-subtle: #0d0d0d;
     --fg: #ededed;
@@ -41,6 +43,23 @@ export const CSS = /* css */ `
     --muted: #8f8f8f;
     --code-bg: #141414;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --bg-subtle: #0d0d0d;
+  --fg: #ededed;
+  --bg-card: #0f0f0f;
+  --border: #1f1f1f;
+  --accent: #4c8dff;
+  --accent-dim: rgba(76, 141, 255, 0.12);
+  --green: #4ade80;
+  --green-bg: rgba(74, 222, 128, 0.12);
+  --red: #f87171;
+  --red-bg: rgba(248, 113, 113, 0.13);
+  --orange: #fb923c;
+  --orange-bg: rgba(251, 146, 60, 0.13);
+  --muted: #8f8f8f;
+  --code-bg: #141414;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -355,7 +374,7 @@ code {
 }
 .file-list li a {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.5rem;
   padding: 0.45rem 0.55rem;
@@ -367,7 +386,6 @@ code {
   border-color: var(--border);
   text-decoration: none;
 }
-.file-icon { font-size: 1rem; }
 .file-main {
   min-width: 0;
   display: flex;
@@ -905,6 +923,16 @@ code {
   gap: 0.5rem;
   align-items: flex-start;
 }
+.chat-icon {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-top: 0.15rem;
+  min-width: 1.8rem;
+}
 .interviewer-msg .chat-icon { color: var(--accent); }
 .reader-msg .chat-icon { color: var(--green); }
 .chat-text { white-space: pre-wrap; flex: 1; }
@@ -1086,6 +1114,30 @@ details[open] > .markdown-preview summary::before {
 .refresh-button:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* ── Theme toggle ── */
+.theme-toggle {
+  position: fixed;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.theme-toggle:hover {
+  color: var(--fg);
+  border-color: var(--muted);
 }
 
 /* ── Mobile fixes ── */
