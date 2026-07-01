@@ -1,6 +1,5 @@
-import { createSession, promptAgent } from "./opencode"
-
 import type { RuntimeConfig } from "./config"
+import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import { markdownSummarySchema, type MarkdownSummary } from "./schema"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
@@ -29,6 +28,7 @@ export async function summarizeMarkdown(input: {
   title: string
   markdown: string
   mode: "input" | "artifact"
+  runtime?: AgentRuntime
   telemetry?: {
     run: TelemetryRun
     parentObservation?: TraceObservation
@@ -38,11 +38,12 @@ export async function summarizeMarkdown(input: {
     metadata?: Record<string, unknown>
   }
 }): Promise<MarkdownSummary> {
-  const session = await createSession(input.config, input.title)
-  const response = await promptAgent({
-    config: input.config,
-    sessionID: session.id,
-    agent: input.config.quorumConfig.summarizerAgent,
+  const runtime = input.runtime ?? createAgentRuntime(input.config)
+  const role = input.config.quorumConfig.summarizerAgent
+  const handle = await runtime.createHandle(role, input.title)
+  const response = await runtime.prompt({
+    role,
+    handle,
     prompt: input.mode === "input" ? inputPrompt(input.markdown) : artifactPrompt(input.markdown),
     schema: markdownSummarySchema,
     telemetry: input.telemetry
@@ -54,6 +55,7 @@ export async function summarizeMarkdown(input: {
           name: input.telemetry.name,
           metadata: {
             agentName: input.config.quorumConfig.summarizerAgent,
+            sessionId: handle.id,
             mode: input.mode,
             ...input.telemetry.metadata,
           },

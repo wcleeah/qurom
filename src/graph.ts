@@ -311,7 +311,7 @@ async function persistAggregatedFindingsArtifact(state: ResearchState, input: Ag
   await writeRunJsonArtifact(state.outputPath, `aggregated-findings-round-${state.round}.json`, input)
 }
 
-export async function summarizeInputDocument(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
+export async function summarizeInputDocument(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry, runtime = createAgentRuntime(config)) {
   assertStatus(state, "drafting", "summarizeInputDocument")
 
   if (state.inputMode !== "document" || !state.documentText?.trim()) {
@@ -324,6 +324,7 @@ export async function summarizeInputDocument(config: RuntimeConfig, state: Resea
       title: `summary-input:${state.requestId}`,
       markdown: state.documentText,
       mode: "input",
+      runtime,
       telemetry: !telemetry
         ? undefined
         : {
@@ -1964,7 +1965,7 @@ export function routeAfterDesignAggregate(config: RuntimeConfig, state: Research
   return "reviseDesignHtml"
 }
 
-export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry) {
+export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry, runtime = createAgentRuntime(config)) {
   if (state.status !== "approved" && state.status !== "failed") {
     throw new Error(`Invalid status for summarizeOutputArtifact: ${state.status}`)
   }
@@ -1982,6 +1983,7 @@ export async function summarizeOutputArtifact(config: RuntimeConfig, state: Rese
       title: `summary-artifact:${state.requestId}`,
       markdown: await artifactFile.text(),
       mode: "artifact",
+      runtime,
       telemetry: !telemetry
         ? undefined
         : {
@@ -2138,7 +2140,7 @@ export function createGraph(
       { input: graphInputSchema },
     )
     .addNode("summarizeInputDocument", async (state) =>
-      withNodeTelemetry("summarizeInputDocument", state, () => summarizeInputDocument(config, state, graphTelemetry)),
+      withNodeTelemetry("summarizeInputDocument", state, () => summarizeInputDocument(config, state, graphTelemetry, runtime)),
     )
     .addNode("prepareOutputPath", async (state) =>
       withNodeTelemetry("prepareOutputPath", state, () => prepareOutputPath(config, state)),
@@ -2194,7 +2196,7 @@ export function createGraph(
       withNodeTelemetry("finalizeFailedRun", state, () => finalizeFailedRun(config, state)),
     )
     .addNode("summarizeOutputArtifact", async (state) =>
-      withNodeTelemetry("summarizeOutputArtifact", state, () => summarizeOutputArtifact(config, state, graphTelemetry)),
+      withNodeTelemetry("summarizeOutputArtifact", state, () => summarizeOutputArtifact(config, state, graphTelemetry, runtime)),
     )
     .addNode("runDesignHtml", async (state) =>
       withNodeTelemetry("runDesignHtml", state, () =>
