@@ -63,7 +63,8 @@ mock.module("@opencode-ai/sdk/v2", () => ({
   }),
 }))
 
-const { coerceJson, promptAgent, StructuredRecoveryError } = await import("../src/opencode")
+const { promptAgent } = await import("../src/opencode")
+const { coerceJson, StructuredRecoveryError } = await import("../src/agent-runtime/structured-output")
 const { auditWithRestart } = await import("../src/audit-restart")
 const { recoveryDriftDetector, SystemicDriftError } = await import("../src/recovery-drift")
 

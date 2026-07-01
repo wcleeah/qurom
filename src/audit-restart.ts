@@ -1,5 +1,5 @@
 import type { DebugLog } from "./debug-log"
-import { StructuredRecoveryError } from "./opencode"
+import { StructuredRecoveryError } from "./agent-runtime/structured-output"
 import { recoveryDriftDetector, SystemicDriftError } from "./recovery-drift"
 
 /**
