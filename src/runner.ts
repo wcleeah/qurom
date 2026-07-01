@@ -9,7 +9,7 @@ import { Command, GraphRecursionError } from "@langchain/langgraph"
 
 import type { RuntimeConfig } from "./config"
 import { researchStateSchema, type GraphInput, type InputRequest, type ResearchState } from "./schema"
-import type { validateRuntimePrerequisites } from "./opencode"
+import type { validateProviderPrerequisites } from "./providers/registry"
 import type { PromptBundle } from "./prompt-assets"
 
 export type GraphFactory = typeof createGraph
@@ -111,7 +111,7 @@ export type BridgeFactory = (
   },
 ) => Bridge
 
-export type RuntimePrerequisites = Awaited<ReturnType<typeof validateRuntimePrerequisites>>
+export type RuntimePrerequisites = Awaited<ReturnType<typeof validateProviderPrerequisites>>
 
 export type RuntimePromptBundle = PromptBundle
 

@@ -2,7 +2,7 @@ import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { loadRuntimeConfig } from "../config"
 import { ensureArtifactDir } from "../output"
-import { validateRuntimePrerequisites } from "../opencode"
+import { validateProviderPrerequisites } from "../providers/registry"
 import { ensureOpenCodeServer } from "../opencode-server"
 import { loadPromptBundle } from "../prompt-assets"
 import { App } from "./App"
@@ -17,7 +17,7 @@ const stopServer = await ensureOpenCodeServer({
 })
 
 await ensureArtifactDir(config.quorumConfig.artifactDir)
-const prerequisites = await validateRuntimePrerequisites(config)
+const prerequisites = await validateProviderPrerequisites(config)
 const promptBundle = await loadPromptBundle(config)
 
 const systemStatus = createSystemStatusStore()
