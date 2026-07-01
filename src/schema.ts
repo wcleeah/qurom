@@ -38,7 +38,7 @@ const designFindingCategorySchema = z.enum([
   "security",
 ])
 const designStatusSchema = z.enum(["pending", "running", "approved", "failed"])
-const designOutcomeSchema = z.enum(["approved", "needs_revision", "failed_non_convergent"])
+const designOutcomeSchema = z.enum(["approved", "approved_with_caveats", "needs_revision", "failed_non_convergent"])
 
 const topicInputSchema = z.object({
   inputMode: z.literal("topic"),

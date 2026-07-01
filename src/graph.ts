@@ -1812,7 +1812,7 @@ async function aggregateDesignFindingsNode(
 
   return researchStateSchema.parse({
     ...state,
-    designStatus: consensus.outcome === "approved" ? "approved" as const
+    designStatus: consensus.outcome === "approved" || consensus.outcome === "approved_with_caveats" ? "approved" as const
       : consensus.outcome === "failed_non_convergent" ? "failed" as const
       : "running" as const,
   })

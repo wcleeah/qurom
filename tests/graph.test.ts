@@ -14,7 +14,8 @@ import {
   summarizeInputDocument,
   summarizeOutputArtifact,
 } from "../src/graph.ts"
-import type { AggregatedFinding, AuditResultRecord, RebuttalResponseRecord, ResearchState } from "../src/schema.ts"
+import { aggregateDesignConsensus } from "../src/design-quorum.ts"
+import type { AggregatedFinding, AuditResultRecord, DesignAuditResultRecord, RebuttalResponseRecord, ResearchState } from "../src/schema.ts"
 import { resolveRunDir } from "../src/output.ts"
 
 const config = {
@@ -68,6 +69,10 @@ function audit(input: Partial<AuditResultRecord> & Pick<AuditResultRecord, "agen
     summary: input.summary,
     findings: input.findings,
   }
+}
+
+function designAudit(input: DesignAuditResultRecord): DesignAuditResultRecord {
+  return input
 }
 
 function response(input: RebuttalResponseRecord): RebuttalResponseRecord {
@@ -296,6 +301,56 @@ describe("graph helpers", () => {
     ).toBe("reviseDesignHtml")
     // design quorum disabled → __end__
     expect(routeAfterDesignAggregate(config, withDesign({ designStatus: "approved" }))).toBe("__end__")
+  })
+
+  test("aggregateDesignConsensus approves with caveats when terminal findings are minor-only", () => {
+    const designConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        designQuorum: {
+          enabled: true,
+          designatedDesigner: "html-designer",
+          auditors: ["visual-layout-auditor", "technical-html-auditor", "script-security-auditor"],
+          maxRounds: 2,
+        },
+      },
+    } satisfies RuntimeConfig
+
+    const audits = [
+      designAudit({
+        agent: "visual-layout-auditor",
+        vote: "revise",
+        summary: "Minor polish remains",
+        findings: [
+          {
+            findingId: "design:visual-layout-auditor:0",
+            severity: "minor",
+            category: "visual",
+            issue: "Spacing is slightly uneven",
+            evidence: ["The card gap varies in the lower section."],
+            required_fix: "Tighten spacing.",
+          },
+        ],
+      }),
+      designAudit({
+        agent: "technical-html-auditor",
+        vote: "approve",
+        summary: "Looks valid",
+        findings: [],
+      }),
+      designAudit({
+        agent: "script-security-auditor",
+        vote: "approve",
+        summary: "No risky scripts",
+        findings: [],
+      }),
+    ]
+
+    const result = aggregateDesignConsensus(designConfig, audits, undefined, 2)
+
+    expect(result.outcome).toBe("approved_with_caveats")
+    expect(result.failureReason).toBe("approved")
   })
 
   test("ingestRequest prefers cached documentText over rereading the file", async () => {

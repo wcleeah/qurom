@@ -258,14 +258,18 @@ export function aggregateDesignConsensus(
   const signature = unresolvedDesignSignature(deduped)
   const allAuditorsApproved = audits.every((a) => a.vote === "approve")
   const isApproved = allAuditorsApproved
+  const hasOnlyMinorFindings = deduped.length > 0 && deduped.every((finding) => finding.severity === "minor")
   const stagnated = deduped.length > 0 && previousSignature === signature
   const maxRoundsExhausted = deduped.length > 0 && round >= config.quorumConfig.designQuorum!.maxRounds
 
-  let outcome: "approved" | "needs_revision" | "failed_non_convergent" = "needs_revision"
+  let outcome: "approved" | "approved_with_caveats" | "needs_revision" | "failed_non_convergent" = "needs_revision"
   let failureReason: DesignStatus = "running"
 
   if (isApproved) {
     outcome = "approved"
+    failureReason = "approved"
+  } else if ((stagnated || maxRoundsExhausted) && hasOnlyMinorFindings) {
+    outcome = "approved_with_caveats"
     failureReason = "approved"
   } else if (stagnated) {
     outcome = "failed_non_convergent"
@@ -397,7 +401,7 @@ export async function runDesignQuorum(input: {
       failureReason: consensus.failureReason,
     })
 
-    if (consensus.outcome === "approved") {
+    if (consensus.outcome === "approved" || consensus.outcome === "approved_with_caveats") {
       status = "approved"
       await writeDesignHtmlArtifact(outputPath, html)
       return { html, status, round }
