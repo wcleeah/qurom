@@ -58,3 +58,22 @@ export async function validateProviderPrerequisites(config: RuntimeConfig) {
     providers: validations,
   }
 }
+
+export async function prepareConfiguredProviders(config: RuntimeConfig): Promise<() => Promise<void>> {
+  const uniqueProviders = new Set<AgentProvider>()
+  for (const role of configuredAgentRoles(config)) {
+    uniqueProviders.add(providerForRole(config, role))
+  }
+
+  const cleanups: Array<() => Promise<void>> = []
+  for (const provider of uniqueProviders) {
+    const prepared = await provider.prepare?.({ config })
+    if (prepared?.cleanup) cleanups.push(prepared.cleanup)
+  }
+
+  return async () => {
+    for (const cleanup of cleanups.reverse()) {
+      await cleanup().catch(() => {})
+    }
+  }
+}

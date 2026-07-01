@@ -1,5 +1,6 @@
 import { createOpencodeEventBridge } from "../opencode-event-bridge"
 import { abortSession, createSession, listAgents, promptAgent } from "../opencode"
+import { ensureOpenCodeServer } from "../opencode-server"
 import type { AgentProvider, AgentRunHandle, AgentRole, ProviderCapability } from "./types"
 
 const capabilities = new Set<ProviderCapability>([
@@ -23,6 +24,14 @@ function providerAgentForRole(config: Parameters<AgentProvider["createRunHandle"
 export const opencodeProvider: AgentProvider = {
   id: "opencode",
   capabilities,
+  async prepare(input) {
+    const opencodePort = new URL(input.config.env.OPENCODE_BASE_URL).port || "4096"
+    const cleanup = await ensureOpenCodeServer({
+      port: Number(opencodePort),
+      directory: input.config.env.OPENCODE_DIRECTORY,
+    })
+    return { cleanup }
+  },
   async createRunHandle(input): Promise<AgentRunHandle> {
     const session = await createSession(input.config, input.title, input.parentId)
     return {

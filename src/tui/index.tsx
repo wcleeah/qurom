@@ -2,19 +2,14 @@ import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { loadRuntimeConfig } from "../config"
 import { ensureArtifactDir } from "../output"
-import { validateProviderPrerequisites } from "../providers/registry"
-import { ensureOpenCodeServer } from "../opencode-server"
+import { prepareConfiguredProviders, validateProviderPrerequisites } from "../providers/registry"
 import { loadPromptBundle } from "../prompt-assets"
 import { App } from "./App"
 import { createSystemStatusStore, pushSystemStatus } from "./state/systemStatus"
 
 const config = await loadRuntimeConfig()
 
-const opencodePort = new URL(config.env.OPENCODE_BASE_URL).port || "4096"
-const stopServer = await ensureOpenCodeServer({
-  port: Number(opencodePort),
-  directory: config.env.OPENCODE_DIRECTORY,
-})
+const stopProviders = await prepareConfiguredProviders(config)
 
 await ensureArtifactDir(config.quorumConfig.artifactDir)
 const prerequisites = await validateProviderPrerequisites(config)
@@ -39,7 +34,7 @@ const exitApp = async () => {
     root.unmount()
   } finally {
     renderer.destroy()
-    await stopServer().catch(() => {})
+    await stopProviders().catch(() => {})
     process.exit(0)
   }
 }

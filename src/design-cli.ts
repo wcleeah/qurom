@@ -1,7 +1,7 @@
 import { loadRuntimeConfig } from "./config"
 import { loadPromptBundle } from "./prompt-assets"
 import { runDesignForExistingRun } from "./design-quorum"
-import { ensureOpenCodeServer } from "./opencode-server"
+import { prepareConfiguredProviders } from "./providers/registry"
 
 async function main() {
   const args = process.argv.slice(2)
@@ -21,11 +21,7 @@ async function main() {
     process.exit(1)
   }
 
-  const opencodePort = new URL(config.env.OPENCODE_BASE_URL).port || "4096"
-  const stopServer = await ensureOpenCodeServer({
-    port: Number(opencodePort),
-    directory: config.env.OPENCODE_DIRECTORY,
-  })
+  const stopProviders = await prepareConfiguredProviders(config)
 
   try {
     console.log(`Loading prompt bundle...`)
@@ -41,7 +37,7 @@ async function main() {
       console.log(`   HTML written to ${runDir}/final.html`)
     }
   } finally {
-    await stopServer().catch(() => {})
+    await stopProviders().catch(() => {})
   }
 }
 
