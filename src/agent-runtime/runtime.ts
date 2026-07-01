@@ -83,6 +83,8 @@ export function createAgentRuntime(
           bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "error" })
         }
         throw error
+      } finally {
+        await input.handle.dispose?.()
       }
     },
     async abort(handle) {
