@@ -76,7 +76,7 @@ describe("createAgentRuntime", () => {
     expect(events).toContainEqual({ kind: "session.status", sessionID: "handle:research-drafter", status: "completed" })
   })
 
-  test("inlines input files for providers without file attachment support", async () => {
+  test("inlines input files for providers with inline input context support", async () => {
     let seenPrompt = ""
     let seenInputFiles: unknown
     const dir = await mkdtemp(join(tmpdir(), "qurom-runtime-inline-"))
@@ -84,7 +84,7 @@ describe("createAgentRuntime", () => {
     await writeFile(filePath, "# Draft\n\nHello")
     const provider: AgentProvider = {
       id: "fake",
-      capabilities: new Set(["plainJsonOutput"]),
+      capabilities: new Set(["plainJsonOutput", "inlineInputContext"]),
       async createRunHandle(input) {
         return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
       },
@@ -113,12 +113,12 @@ describe("createAgentRuntime", () => {
     expect(seenPrompt).toContain("# Draft\n\nHello")
   })
 
-  test("passes input files through for providers with file attachment support", async () => {
+  test("passes input files through for providers with input file attachment support", async () => {
     let seenPrompt = ""
     let seenInputFiles: unknown
     const provider: AgentProvider = {
       id: "fake",
-      capabilities: new Set(["plainJsonOutput", "fileAttachments"]),
+      capabilities: new Set(["plainJsonOutput", "inputFileAttachments"]),
       async createRunHandle(input) {
         return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
       },
@@ -136,6 +136,28 @@ describe("createAgentRuntime", () => {
 
     expect(seenPrompt).toBe("Review this.")
     expect(seenInputFiles).toBe(inputFiles)
+  })
+
+  test("rejects input files when provider declares no input mode", async () => {
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt() {
+        return { text: "ok" }
+      },
+    }
+    const runtime = createAgentRuntime(config, undefined, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("source-auditor", "audit")
+
+    await expect(runtime.prompt({
+      role: "source-auditor",
+      handle,
+      prompt: "Review this.",
+      inputFiles: [{ path: "/tmp/draft.md", mime: "text/markdown", filename: "draft.md" }],
+    })).rejects.toThrow("does not support input files or inline input context")
   })
 
   test("injects role instructions only for providers that request them", async () => {

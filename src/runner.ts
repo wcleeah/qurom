@@ -202,7 +202,12 @@ async function runGraphWithInterviewResume<GraphT extends {
     }
 
     const interruptValue = interruptTask.interrupts[0]!.value
-    const questions = Array.isArray(interruptValue) ? (interruptValue as string[]) : [String(interruptValue)]
+    const pendingQuestions = Array.isArray(snapshot?.values?.pendingReaderQuestions)
+      ? (snapshot!.values.pendingReaderQuestions as string[])
+      : undefined
+    const questions = pendingQuestions && pendingQuestions.length > 0
+      ? pendingQuestions
+      : Array.isArray(interruptValue) ? (interruptValue as string[]) : [String(interruptValue)]
     const transcript = Array.isArray(snapshot?.values?.interviewTranscript)
       ? (snapshot!.values.interviewTranscript as { role: string; text: string }[])
       : []

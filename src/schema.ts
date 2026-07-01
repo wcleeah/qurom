@@ -333,6 +333,7 @@ export const researchStateObjectSchema = z.object({
     evidence: z.string().optional(),
   })).optional(),
   learningGoal: z.string().optional(),
+  pendingReaderQuestions: z.array(z.string()).optional(),
   interviewTranscript: z.array(z.object({
     role: z.enum(["interviewer", "reader"]),
     text: z.string(),

@@ -153,6 +153,19 @@ function renderRolePrompt(input: { prompt: string; instructions?: string }) {
   ].join("\n\n")
 }
 
+async function renderPromptInputs(provider: AgentProvider, prompt: string, inputFiles: PromptFileInput[] | undefined) {
+  if (provider.capabilities.has("inputFileAttachments")) {
+    return { prompt, inputFiles }
+  }
+  if (provider.capabilities.has("inlineInputContext")) {
+    return inlineInputFiles(prompt, inputFiles)
+  }
+  if (inputFiles && inputFiles.length > 0) {
+    throw new Error(`Provider ${provider.id} does not support input files or inline input context`)
+  }
+  return { prompt, inputFiles: undefined }
+}
+
 export function createAgentRuntime(
   config: RuntimeConfig,
   bus?: EventBus,
@@ -192,9 +205,7 @@ export function createAgentRuntime(
         bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "running" })
       }
       try {
-        const promptInput = provider.capabilities.has("fileAttachments")
-          ? { prompt, inputFiles: input.inputFiles }
-          : await inlineInputFiles(prompt, input.inputFiles)
+        const promptInput = await renderPromptInputs(provider, prompt, input.inputFiles)
         const result = await provider.prompt({
           config,
           bus,

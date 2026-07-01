@@ -7,9 +7,9 @@ import {
   type McpServerConfig,
   type SettingSource,
 } from "@cursor/sdk"
-import { readFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
 import type { RuntimeConfig } from "../config"
@@ -22,7 +22,7 @@ import type {
   ProviderConfigFormParameter,
 } from "./types"
 
-const capabilities = new Set<ProviderCapability>(["plainJsonOutput", "roleInstructions"])
+const capabilities = new Set<ProviderCapability>(["roleInstructions", "inlineInputContext", "fileOutput", "jsonFileOutput"])
 
 type CursorAgentHandle = Awaited<ReturnType<typeof Agent.create>>
 type CursorRunHandle = Awaited<ReturnType<CursorAgentHandle["send"]>>
@@ -252,6 +252,31 @@ function cursorToolName(toolCall: unknown) {
   return String(record.name ?? record.type ?? "tool")
 }
 
+function cursorArtifactPath(outputFile: string) {
+  return `artifacts/${basename(outputFile)}`
+}
+
+async function downloadCursorArtifact(input: {
+  agent: CursorAgentHandle
+  handle: AgentRunHandle
+  outputFile: string
+}) {
+  if (!input.handle.id.startsWith("bc-")) {
+    throw new Error("Cursor local agents do not support artifact download; use Cursor cloud for file output")
+  }
+
+  const artifactPath = cursorArtifactPath(input.outputFile)
+  const artifacts = await input.agent.listArtifacts()
+  const found = artifacts.find((artifact) => artifact.path === artifactPath)
+  if (!found) {
+    throw new Error(`Cursor cloud agent did not produce required artifact ${artifactPath}`)
+  }
+
+  const buffer = await input.agent.downloadArtifact(artifactPath)
+  await mkdir(dirname(input.outputFile), { recursive: true })
+  await writeFile(input.outputFile, buffer)
+}
+
 function emitCursorDelta(input: {
   event: unknown
   providerInput: Parameters<AgentProvider["prompt"]>[0]
@@ -362,6 +387,9 @@ export const cursorProvider: AgentProvider = {
     }
   },
   async prompt(input) {
+    if (!input.outputFile) {
+      throw new Error("Cursor provider requires outputFile; inline output is disabled")
+    }
     if (input.inputFiles && input.inputFiles.length > 0) {
       throw new Error("Cursor provider does not yet support file attachments in quorum prompts")
     }
@@ -379,8 +407,14 @@ export const cursorProvider: AgentProvider = {
       roleRuntime?.variant ? `Role variant: ${roleRuntime.variant}.` : undefined,
     ].filter(Boolean).join("\n")
 
+    const prompt = input.outputFile
+      ? input.prompt.split(input.outputFile).join(cursorArtifactPath(input.outputFile))
+      : input.prompt
+
     return runProviderStructuredPrompt({
-      prompt: `${promptPrefix}\n\n${input.prompt}`,
+      prompt: `${promptPrefix}\n\n${prompt}`,
+      providerOutputFile: input.outputFile,
+      outputInstructionFile: input.outputFile ? cursorArtifactPath(input.outputFile) : undefined,
       schema: input.schema,
       artifactFile: input.outputFile,
       async sendPrompt(prompt) {
@@ -396,6 +430,13 @@ export const cursorProvider: AgentProvider = {
             const status = (result as { status?: string }).status
             if (status && status !== "finished" && status !== "completed") {
               throw new CursorRunStatusError(run.id, status, result)
+            }
+            if (input.outputFile) {
+              await downloadCursorArtifact({
+                agent: active.agent,
+                handle: input.handle,
+                outputFile: input.outputFile,
+              })
             }
             return {
               text: extractRunText(result),

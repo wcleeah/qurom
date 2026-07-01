@@ -12,6 +12,8 @@ const sendCalls: string[] = []
 let waitResult: unknown = { status: "finished", result: "plain response" }
 let waitResults: unknown[] = []
 let waitErrors: unknown[] = []
+let artifactPath = "artifacts/reader-profile.json"
+let artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
 let cancelCalled = false
 let disposeCalled = false
 
@@ -59,7 +61,14 @@ mock.module("@cursor/sdk", () => {
       create: mock(async (options: unknown) => {
         createCalls.push(options)
         return {
-          agentId: "cursor-agent-1",
+          agentId: "bc-cursor-agent-1",
+          async listArtifacts() {
+            return [{ path: artifactPath, sizeBytes: artifactBytes.byteLength, updatedAt: new Date().toISOString() }]
+          },
+          async downloadArtifact(path: string) {
+            if (path !== artifactPath) throw new Error(`Missing artifact ${path}`)
+            return artifactBytes
+          },
           async send(prompt: string, options?: { onDelta?: (args: { update: unknown }) => void }) {
             sendCalls.push(prompt)
             options?.onDelta?.({ update: { type: "thinking-delta", text: "thinking..." } })
@@ -153,12 +162,19 @@ beforeEach(() => {
   waitResult = { status: "finished", result: "plain response" }
   waitResults = []
   waitErrors = []
+  artifactPath = "artifacts/reader-profile.json"
+  artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
   cancelCalled = false
   disposeCalled = false
   delete process.env.CURSOR_MCP_CONFIG_PATH
 })
 
 describe("cursorProvider", () => {
+  async function tempOutputFile(name = "cursor-output.txt") {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-cursor-output-"))
+    return join(dir, name)
+  }
+
   test("creates a cloud Cursor agent with per-role model by default", async () => {
     const handle = await cursorProvider.createRunHandle({
       config,
@@ -166,7 +182,7 @@ describe("cursorProvider", () => {
       title: "draft",
     })
 
-    expect(handle.id).toBe("cursor-agent-1")
+    expect(handle.id).toBe("bc-cursor-agent-1")
     expect(createCalls[0]).toMatchObject({
       apiKey: "cursor-test-key",
       name: "draft",
@@ -260,7 +276,10 @@ describe("cursorProvider", () => {
   })
 
   test("parses structured output through app-owned recovery", async () => {
-    waitResult = { status: "finished", result: JSON.stringify({ ok: true }) }
+    const outputFile = await tempOutputFile("reader-profile.json")
+    waitResult = { status: "finished", result: "OK" }
+    artifactPath = "artifacts/reader-profile.json"
+    artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
     const handle = await cursorProvider.createRunHandle({
       config,
       role: "research-drafter",
@@ -273,6 +292,7 @@ describe("cursorProvider", () => {
       role: "research-drafter",
       prompt: "return json",
       schema: z.object({ ok: z.boolean() }),
+      outputFile,
     })
 
     expect(result.structured).toEqual({ ok: true })
@@ -281,6 +301,9 @@ describe("cursorProvider", () => {
   })
 
   test("emits runner activity events from Cursor deltas", async () => {
+    const outputFile = await tempOutputFile("message.txt")
+    artifactPath = "artifacts/message.txt"
+    artifactBytes = Buffer.from("plain response")
     const bus = createEventBus()
     const events: RunnerEvent[] = []
     bus.on((event) => events.push(event))
@@ -296,6 +319,7 @@ describe("cursorProvider", () => {
       handle,
       role: "research-drafter",
       prompt: "hello",
+      outputFile,
     })
 
     expect(events.some((event) => event.kind === "agent.message.start" && event.sessionID === handle.id)).toBe(true)
@@ -327,12 +351,14 @@ describe("cursorProvider", () => {
     }))
   })
 
-  test("does not read stale artifact files for inline structured output", async () => {
+  test("downloads Cursor cloud artifact output over stale local files", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qurom-cursor-artifact-"))
     const outputFile = join(dir, "reader-profile.json")
     await mkdir(dir, { recursive: true })
     await writeFile(outputFile, JSON.stringify({ ok: false }))
-    waitResult = { status: "finished", result: JSON.stringify({ ok: true }) }
+    waitResult = { status: "finished", result: "OK" }
+    artifactPath = "artifacts/reader-profile.json"
+    artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
     const handle = await cursorProvider.createRunHandle({
       config,
       role: "research-drafter",
@@ -350,6 +376,23 @@ describe("cursorProvider", () => {
 
     expect(result.structured).toEqual({ ok: true })
     expect(JSON.parse(await readFile(outputFile, "utf8"))).toEqual({ ok: true })
+    expect(sendCalls[0]).toContain("artifacts/reader-profile.json")
+    expect(sendCalls[0]).not.toContain(outputFile)
+  })
+
+  test("rejects Cursor prompts without an output file", async () => {
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    await expect(cursorProvider.prompt({
+      config,
+      handle,
+      role: "research-drafter",
+      prompt: "return inline",
+    })).rejects.toThrow("inline output is disabled")
   })
 
   test("fails when a Cursor-bound role has no model", async () => {
@@ -374,6 +417,9 @@ describe("cursorProvider", () => {
   })
 
   test("cancels and disposes active runs", async () => {
+    const outputFile = await tempOutputFile("message.txt")
+    artifactPath = "artifacts/message.txt"
+    artifactBytes = Buffer.from("plain response")
     const handle = await cursorProvider.createRunHandle({
       config,
       role: "research-drafter",
@@ -384,6 +430,7 @@ describe("cursorProvider", () => {
       handle,
       role: "research-drafter",
       prompt: "hello",
+      outputFile,
     })
 
     await cursorProvider.abort?.(config, handle.id)
@@ -393,6 +440,9 @@ describe("cursorProvider", () => {
   })
 
   test("retries transient Cursor transport errors once", async () => {
+    const outputFile = await tempOutputFile("message.txt")
+    artifactPath = "artifacts/message.txt"
+    artifactBytes = Buffer.from("plain response")
     waitErrors = [new Error("[unknown] [internal] Stream closed with error code NGHTTP2_FRAME_SIZE_ERROR")]
     const handle = await cursorProvider.createRunHandle({
       config,
@@ -405,6 +455,7 @@ describe("cursorProvider", () => {
       handle,
       role: "research-drafter",
       prompt: "hello",
+      outputFile,
     })
 
     expect(result.text).toBe("plain response")
@@ -412,6 +463,9 @@ describe("cursorProvider", () => {
   })
 
   test("retries Cursor runs that return status error once", async () => {
+    const outputFile = await tempOutputFile("message.txt")
+    artifactPath = "artifacts/message.txt"
+    artifactBytes = Buffer.from("recovered response")
     waitResults = [
       { status: "error", result: "", message: "Stream closed with error code NGHTTP2_FRAME_SIZE_ERROR" },
       { status: "finished", result: "recovered response" },
@@ -428,6 +482,7 @@ describe("cursorProvider", () => {
       handle,
       role: "research-drafter",
       prompt: "hello",
+      outputFile,
       telemetry: {
         debugLog: {
           write(type, data) {
@@ -444,7 +499,7 @@ describe("cursorProvider", () => {
       type: "cursor.prompt.error",
       data: {
         role: "research-drafter",
-        agentId: "cursor-agent-1",
+        agentId: "bc-cursor-agent-1",
         attempt: 1,
         willRetry: true,
         name: "CursorRunStatusError",

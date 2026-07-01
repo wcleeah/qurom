@@ -8,7 +8,17 @@ import type { RuntimeConfig } from "../src/config"
 import { researchStateSchema, readerInterviewTurnSchema, readerProfileSchema, type ResearchState } from "../src/schema"
 
 // Pure-function imports — these don't touch the OpenCode client.
-const { createGraph, fullDraftPrompt, auditPrompt, rebuttalPrompt, rebuttalReviewPrompt, drafterReviewPrompt, readerContextBlock } = await import("../src/graph")
+const {
+  createGraph,
+  fullDraftPrompt,
+  auditPrompt,
+  rebuttalPrompt,
+  rebuttalReviewPrompt,
+  drafterReviewPrompt,
+  readerContextBlock,
+  readerInterviewFollowUpInstructions,
+  repeatsPreviousReaderQuestion,
+} = await import("../src/graph")
 const { loadPromptBundle } = await import("../src/prompt-assets")
 
 const testConfig: RuntimeConfig = {
@@ -131,10 +141,13 @@ describe("ResearchState reader fields", () => {
       ...base,
       readerProfile: [{ concept: "autograd", level: "unknown" }],
       learningGoal: "decide if MLX is worth learning",
+      pendingReaderQuestions: ["What are you trying to do?", "What have you read so far?\nMention file paths if relevant."],
       interviewTranscript: [{ role: "interviewer", text: "q?" }, { role: "reader", text: "a" }],
     })
     expect(withReader.readerProfile).toHaveLength(1)
     expect(withReader.learningGoal).toBe("decide if MLX is worth learning")
+    expect(withReader.pendingReaderQuestions).toHaveLength(2)
+    expect(withReader.pendingReaderQuestions?.[1]).toContain("file paths")
     expect(withReader.interviewTranscript).toHaveLength(2)
   })
 
@@ -158,6 +171,7 @@ describe("ResearchState reader fields", () => {
     const parsed = researchStateSchema.parse(base)
     expect(parsed.readerProfile).toBeUndefined()
     expect(parsed.learningGoal).toBeUndefined()
+    expect(parsed.pendingReaderQuestions).toBeUndefined()
     expect(parsed.interviewTranscript).toBeUndefined()
   })
 })
@@ -165,6 +179,24 @@ describe("ResearchState reader fields", () => {
 describe("readerDiscovery config", () => {
   test("the test config carries readerDiscovery with the kill-switch default", () => {
     expect(testConfig.quorumConfig.readerDiscovery).toEqual({ maxTurns: 6, enabled: true })
+  })
+})
+
+describe("reader interview follow-up prompting", () => {
+  test("adds explicit continuation guidance after the first turn", () => {
+    expect(readerInterviewFollowUpInstructions(0)).toContain("first interview turn")
+    expect(readerInterviewFollowUpInstructions(2)).toContain("continuing an existing reader interview")
+    expect(readerInterviewFollowUpInstructions(2)).toContain("Do not repeat any previous interviewer question")
+  })
+
+  test("detects repeated interviewer questions", () => {
+    const transcript = [
+      { role: "interviewer" as const, text: "What are you trying to learn or build with MLX?" },
+      { role: "reader" as const, text: "I am curious and trying to catch up." },
+    ]
+
+    expect(repeatsPreviousReaderQuestion(["What are you trying to learn or build with MLX?"], transcript)).toBe(true)
+    expect(repeatsPreviousReaderQuestion(["Have you used PyTorch or NumPy before?"], transcript)).toBe(false)
   })
 })
 

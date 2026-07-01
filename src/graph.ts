@@ -634,6 +634,36 @@ export async function ingestRequest(input: GraphInput) {
   })
 }
 
+export function readerInterviewFollowUpInstructions(transcriptLength: number) {
+  if (transcriptLength === 0) {
+    return "This is the first interview turn. Start by discovering the reader's learning goal."
+  }
+  return [
+    "You are continuing an existing reader interview.",
+    "Use the reader's latest answer to update the profile before deciding what to ask next.",
+    "Do not repeat any previous interviewer question.",
+    "If the learning goal has been answered, move on to the prerequisite concept that matters most.",
+    "Ask the single next best follow-up question, or set `done: true` if you have enough to calibrate the draft.",
+  ].join("\n")
+}
+
+function normalizeReaderQuestion(question: string) {
+  return question.toLowerCase().replace(/\s+/g, " ").trim()
+}
+
+export function repeatsPreviousReaderQuestion(
+  questions: string[],
+  transcript: Array<{ role: "interviewer" | "reader"; text: string }>,
+) {
+  const previousQuestions = new Set(
+    transcript
+      .filter((entry) => entry.role === "interviewer")
+      .map((entry) => normalizeReaderQuestion(entry.text))
+      .filter(Boolean),
+  )
+  return questions.some((question) => previousQuestions.has(normalizeReaderQuestion(question)))
+}
+
 async function discoverReaderPrompt(
   config: RuntimeConfig,
   runtime: AgentRuntime,
@@ -669,6 +699,7 @@ async function discoverReaderPrompt(
       ...state,
       readerProfile: undefined,
       learningGoal: undefined,
+      pendingReaderQuestions: undefined,
     })
   }
 
@@ -696,33 +727,47 @@ async function discoverReaderPrompt(
   const prompt = promptBundle.assets.readerInterview
     .replace("{requestContext}", requestContextBlock(state))
     .replace("{researchToolHint}", buildResearchToolHint(config))
-    .replace("{transcript}", transcriptText)
+    .replace("{transcript}", `${transcriptText}\n\nFollow-up guidance:\n${readerInterviewFollowUpInstructions(transcript.length)}`)
     .replace("{maxTurns}", String(maxTurns))
     .replace("{turn}", String(turn))
 
-  let response: { structured?: ReaderInterviewTurn }
+  let turnResult: ReaderInterviewTurn | undefined
   try {
-    response = await runtime.prompt({
-      role: "reader-interviewer",
-      handle,
-      prompt,
-      schema: readerInterviewTurnSchema,
-      outputFile,
-      telemetry: graphAgentTelemetry({
-        telemetry,
-        state,
-        name: "agent.discoverReader",
-        agentName: "reader-interviewer",
-        sessionId: sessionID,
-        input: { turn, transcriptLen: transcript.length },
-      }),
-    })
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const retryInstructions = attempt === 1
+        ? ""
+        : [
+          "",
+          "Correction:",
+          "Your previous response repeated a question that was already asked.",
+          "Do not ask the same question again. Use the reader's latest answer and ask the next useful follow-up, or set `done: true`.",
+        ].join("\n")
+      const response = await runtime.prompt({
+        role: "reader-interviewer",
+        handle,
+        prompt: `${prompt}${retryInstructions}`,
+        schema: readerInterviewTurnSchema,
+        outputFile,
+        telemetry: graphAgentTelemetry({
+          telemetry,
+          state,
+          name: "agent.discoverReader",
+          agentName: "reader-interviewer",
+          sessionId: sessionID,
+          input: { turn, transcriptLen: transcript.length, attempt },
+        }),
+      })
+      turnResult = response.structured
+      if (!turnResult || turnResult.done || !repeatsPreviousReaderQuestion(turnResult.questions, transcript) || attempt === 2) {
+        break
+      }
+      telemetry?.debugLog?.write("reader.interview_duplicate_question_retry", { turn, questions: turnResult.questions, attempt })
+    }
   } catch (error) {
     await disposeReaderInterviewerSession(state.requestId)
     throw error
   }
 
-  const turnResult = response.structured
   await ensureJsonArtifact(outputFile, turnResult, "reader profile")
   if (!turnResult || turnResult.done) {
     // Interview complete (or the agent returned nothing recoverable after the router).
@@ -732,14 +777,17 @@ async function discoverReaderPrompt(
       ...state,
       readerProfile: profile?.concepts,
       learningGoal: profile?.learningGoal,
+      pendingReaderQuestions: undefined,
     })
   }
 
   // Not done: append the question to the transcript and route to the resume node.
-  transcript.push({ role: "interviewer", text: turnResult.questions.join("\n") })
+  const pendingQuestions = [...turnResult.questions]
+  transcript.push({ role: "interviewer", text: pendingQuestions.join("\n") })
   return researchStateSchema.parse({
     ...state,
     interviewTranscript: transcript,
+    pendingReaderQuestions: pendingQuestions,
   })
 }
 
@@ -755,9 +803,11 @@ async function discoverReaderResume(
 ): Promise<ResearchState> {
   const transcript = [...(state.interviewTranscript ?? [])]
   const lastEntry = transcript[transcript.length - 1]
-  const questions = lastEntry && lastEntry.role === "interviewer"
-    ? lastEntry.text.split("\n")
-    : []
+  const questions = state.pendingReaderQuestions && state.pendingReaderQuestions.length > 0
+    ? state.pendingReaderQuestions
+    : lastEntry && lastEntry.role === "interviewer"
+      ? lastEntry.text.split("\n")
+      : []
 
   // interrupt() suspends the graph on the first pass; on resume it returns
   // the value passed to Command({ resume }). The node then appends the reply
@@ -767,6 +817,7 @@ async function discoverReaderResume(
   return researchStateSchema.parse({
     ...state,
     interviewTranscript: transcript,
+    pendingReaderQuestions: undefined,
   })
 }
 

@@ -23,6 +23,7 @@ export type StructuredPromptRunnerInput<T> = {
   prompt: string
   schema?: z.ZodType<T>
   providerOutputFile?: string
+  outputInstructionFile?: string
   artifactFile?: string
   sendPrompt: (prompt: string) => Promise<ProviderTextResponse>
   persistInlineFileOutput?: boolean
@@ -95,7 +96,20 @@ export async function runProviderStructuredPrompt<T>(
   }
 
   const jsonSchema = toJsonSchema(input.schema) as Record<string, unknown>
-  const initial = await input.sendPrompt(buildStructuredPrompt(input.prompt, jsonSchema))
+  const outputInstructionFile = input.outputInstructionFile ?? input.providerOutputFile
+  const initialPrompt = outputInstructionFile
+    ? [
+      input.prompt,
+      "Output requirements:",
+      `- Write only a single JSON object to \`${outputInstructionFile}\` matching the schema below.`,
+      "- Do not include markdown fences, commentary, or explanation.",
+      "- Respond with only `OK` after the file is written.",
+      "<required_json_schema>",
+      JSON.stringify(jsonSchema, null, 2),
+      "</required_json_schema>",
+    ].join("\n\n")
+    : buildStructuredPrompt(input.prompt, jsonSchema)
+  const initial = await input.sendPrompt(initialPrompt)
   let raw = (await readOutputFile(input.providerOutputFile)) ?? initial.text
   let outputSource: "file" | "inline" = input.providerOutputFile && raw !== initial.text ? "file" : "inline"
   let latest = initial
@@ -128,7 +142,7 @@ export async function runProviderStructuredPrompt<T>(
           schema: jsonSchema,
           previousResponse: raw,
           error,
-          providerOutputFile: input.providerOutputFile,
+          providerOutputFile: outputInstructionFile,
         }),
       )
       latest = repaired

@@ -43,7 +43,9 @@ Capabilities are runtime promises. If a capability is set, shared code will rely
 |---|---|
 | `plainJsonOutput` | Provider can return structured JSON inline in the model response. |
 | `jsonFileOutput` | Provider can write structured JSON to the local output file requested by the app. |
-| `fileAttachments` | Provider can receive local files as native prompt attachments. |
+| `fileOutput` | Provider can produce arbitrary text/file artifacts requested by the app. |
+| `inputFileAttachments` | Provider can receive local files as native prompt attachments. |
+| `inlineInputContext` | Provider can receive app-inlined file context inside the prompt text. |
 | `streamingEvents` | Provider can emit live session/message/tool events. |
 | `toolEvents` | Provider event stream includes tool execution state. |
 | `permissionEvents` | Provider event stream includes permission ask/reply state. |
@@ -51,7 +53,7 @@ Capabilities are runtime promises. If a capability is set, shared code will rely
 
 Do not set `jsonFileOutput` just because research-qurom wants a JSON artifact in `runs/`. Inline-only providers should return JSON inline. The app can persist parsed JSON to the artifact path after validation.
 
-Do not set `fileAttachments` unless the provider can consume local file paths directly. If it cannot, `AgentRuntime` can inline small attached files into the prompt text as a fallback.
+Do not set `inputFileAttachments` unless the provider can consume local file paths directly. If it cannot, set `inlineInputContext` only when the provider can safely receive small file contents in the prompt text. Providers that declare neither input capability will fail when graph code supplies `inputFiles`.
 
 Do not set streaming/event capabilities unless the provider can produce real-time event data. A provider without events can still work; the runtime emits coarse lifecycle events synchronously.
 
@@ -82,6 +84,7 @@ Split provider output from app artifact persistence:
 |---|---|---|---|
 | File-output provider | `input.outputFile` | `input.outputFile` | Provider writes JSON directly to the artifact path. |
 | Inline-only provider | unset | `input.outputFile` | Provider returns JSON inline; app validates and writes the parsed artifact after success. |
+| Remote artifact provider | local `input.outputFile`, provider-visible artifact path via `outputInstructionFile` | `input.outputFile` | Provider writes to its remote artifact store, downloads it, then app reads the local artifact path. |
 
 This distinction prevents stale artifact reads. Inline-only providers must never read an existing artifact file before parsing the latest model response.
 
@@ -107,14 +110,15 @@ When adding a new structured JSON prompt, keep the prompt asset focused on the t
 
 ---
 
-## File Attachments
+## Input Files
 
 The graph may attach draft markdown, findings JSON, rebuttal JSON, or other run artifacts.
 
 Provider behavior should follow capability:
 
-- With `fileAttachments`, pass local file paths using the provider's native attachment API.
-- Without `fileAttachments`, rely on `AgentRuntime` to inline supported files into the prompt.
+- With `inputFileAttachments`, pass local file paths using the provider's native attachment API.
+- With `inlineInputContext`, `AgentRuntime` inlines supported files into semantic context blocks.
+- With neither, `AgentRuntime` rejects prompts that include `inputFiles`.
 
 If a provider has low prompt-size limits, add explicit tests around attachment inlining and failure behavior. Do not silently drop attached files.
 
