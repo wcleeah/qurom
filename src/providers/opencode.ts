@@ -45,7 +45,7 @@ export const opencodeProvider: AgentProvider = {
       variant: input.variant ?? roleRuntime?.variant,
       inputFiles: input.inputFiles,
       outputFile: input.outputFile,
-      telemetry: undefined,
+      telemetry: input.telemetry,
     })
   },
   async abort(config, handleId) {

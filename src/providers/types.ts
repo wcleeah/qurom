@@ -3,6 +3,8 @@ import type { z } from "zod"
 import type { Bridge, EventBus } from "../runner"
 import type { RuntimeConfig } from "../config"
 import type { PromptFileInput } from "../opencode"
+import type { DebugLog } from "../debug-log"
+import type { TelemetryRun, TraceObservation } from "../telemetry"
 
 export type AgentProviderId = "opencode" | (string & {})
 
@@ -56,6 +58,16 @@ export type ProviderPromptInput<T> = {
   outputFile?: string
   structuredOutput?: {
     preferred: StructuredOutputMode[]
+  }
+  telemetry?: {
+    run: TelemetryRun
+    parentObservation?: TraceObservation
+    trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
+    trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
+    debugLog?: DebugLog
+    name: string
+    input?: unknown
+    metadata?: unknown
   }
   providerOptions?: Record<string, unknown>
 }
