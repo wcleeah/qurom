@@ -84,7 +84,9 @@ export function createAgentRuntime(
         }
         throw error
       } finally {
-        await input.handle.dispose?.()
+        if (!input.handle.keepAlive) {
+          await input.handle.dispose?.()
+        }
       }
     },
     async abort(handle) {

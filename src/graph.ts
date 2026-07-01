@@ -38,6 +38,7 @@ import {
   type RunDisplaySummary,
   type Rebuttal,
   type RebuttalResponseRecord,
+  type ReaderInterviewTurn,
   type ResearchState,
 } from "./schema"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
@@ -60,11 +61,17 @@ type GraphTelemetry = {
   debugLog?: DebugLog
 }
 
-// Cache of reader-interviewer sessionIDs by requestId. LangGraph re-executes
+// Cache of reader-interviewer handles by requestId. LangGraph re-executes
 // the discoverReader node from the top on each interrupt resume, so without
-// this the node would mint a fresh OpenCode session every turn. Cleared in
-// discoverReader when the interview completes or the turn budget is exhausted.
-const readerInterviewerSessions = new Map<string, string>()
+// this the node would mint a fresh agent session every turn. Cleared in
+// discoverReader when the interview completes, fails, or the turn budget is exhausted.
+const readerInterviewerSessions = new Map<string, AgentRunHandle>()
+
+async function disposeReaderInterviewerSession(requestId: string) {
+  const handle = readerInterviewerSessions.get(requestId)
+  readerInterviewerSessions.delete(requestId)
+  await handle?.dispose?.().catch(() => {})
+}
 
 function observeNode(observer: RunObserver | undefined, node: string, state: ResearchState | GraphInput) {
   observer?.onNodeStart?.(node, state)
@@ -635,7 +642,7 @@ async function discoverReaderPrompt(
 
   // Turn budget exhausted: no profile, drafter falls back to default.
   if (turn > maxTurns) {
-    readerInterviewerSessions.delete(state.requestId)
+    await disposeReaderInterviewerSession(state.requestId)
     return researchStateSchema.parse({
       ...state,
       readerProfile: undefined,
@@ -644,10 +651,11 @@ async function discoverReaderPrompt(
   }
 
   const outputFile = `${state.outputPath}/reader-profile.json`
-  // Reuse one OpenCode session across all interview turns.
-  let sessionID = readerInterviewerSessions.get(state.requestId)
-  let handle: AgentRunHandle | undefined
-  if (!sessionID) {
+  // Reuse one durable session across all interview turns. This preserves
+  // conversation state for Cursor cloud agents while still allowing normal
+  // one-shot draft/audit handles to be disposed after each prompt.
+  let handle = readerInterviewerSessions.get(state.requestId)
+  if (!handle) {
     handle = await createObservedHandle({
       runtime,
       role: "reader-interviewer",
@@ -655,16 +663,10 @@ async function discoverReaderPrompt(
       requestId: state.requestId,
       observer,
     })
-    sessionID = handle.id
-    readerInterviewerSessions.set(state.requestId, sessionID)
-  } else {
-    handle = {
-      id: sessionID,
-      providerId: runtime.providerForRole("reader-interviewer").id,
-      role: "reader-interviewer",
-      title: `reader-interviewer:${state.requestId}`,
-    }
+    handle.keepAlive = true
+    readerInterviewerSessions.set(state.requestId, handle)
   }
+  const sessionID = handle.id
 
   const transcriptText = transcript.length === 0
     ? "(none yet — this is the first question)"
@@ -677,27 +679,33 @@ async function discoverReaderPrompt(
     .replace("{turn}", String(turn))
     .replace("{outputFile}", outputFile)
 
-  const response = await runtime.prompt({
-    role: "reader-interviewer",
-    handle,
-    prompt,
-    schema: readerInterviewTurnSchema,
-    outputFile,
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.discoverReader",
-      agentName: "reader-interviewer",
-      sessionId: sessionID,
-      input: { turn, transcriptLen: transcript.length },
-    }),
-  })
+  let response: { structured?: ReaderInterviewTurn }
+  try {
+    response = await runtime.prompt({
+      role: "reader-interviewer",
+      handle,
+      prompt,
+      schema: readerInterviewTurnSchema,
+      outputFile,
+      telemetry: graphAgentTelemetry({
+        telemetry,
+        state,
+        name: "agent.discoverReader",
+        agentName: "reader-interviewer",
+        sessionId: sessionID,
+        input: { turn, transcriptLen: transcript.length },
+      }),
+    })
+  } catch (error) {
+    await disposeReaderInterviewerSession(state.requestId)
+    throw error
+  }
 
   const turnResult = response.structured
   if (!turnResult || turnResult.done) {
     // Interview complete (or the agent returned nothing recoverable after the router).
     const profile = turnResult?.profile
-    readerInterviewerSessions.delete(state.requestId)
+    await disposeReaderInterviewerSession(state.requestId)
     return researchStateSchema.parse({
       ...state,
       readerProfile: profile?.concepts,

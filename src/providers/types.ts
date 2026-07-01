@@ -27,6 +27,7 @@ export type AgentRunHandle = {
   role: AgentRole
   title: string
   providerAgent?: string
+  keepAlive?: boolean
   dispose?: () => Promise<void>
 }
 
