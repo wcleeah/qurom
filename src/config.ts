@@ -7,6 +7,7 @@ const envSchema = z.object({
   OPENCODE_BASE_URL: z.string().url().default("http://127.0.0.1:4096"),
   OPENCODE_DIRECTORY: z.string().min(1).default(process.cwd()),
   QUORUM_CHECKPOINT_PATH: z.string().min(1).default("runs/checkpoints.sqlite"),
+  QUORUM_CONFIG_DB_PATH: z.string().min(1).default("runs/quorum-config.sqlite"),
   QUORUM_CAPTURE_OPENCODE_EVENTS: z.enum(["0", "1"]).default("0"),
   QUORUM_CAPTURE_SYNC_HISTORY: z.enum(["0", "1"]).default("0"),
   LANGFUSE_PUBLIC_KEY: z.string().optional(),
@@ -14,7 +15,7 @@ const envSchema = z.object({
   LANGFUSE_BASE_URL: z.string().url().optional(),
 })
 
-const agentRuntimeRoleSchema = z.object({
+export const agentRuntimeRoleSchema = z.object({
   provider: z.string().min(1).optional(),
   providerAgent: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
@@ -22,14 +23,14 @@ const agentRuntimeRoleSchema = z.object({
   options: z.record(z.unknown()).default({}),
 })
 
-const agentRuntimeSchema = z
+export const agentRuntimeSchema = z
   .object({
     defaultProvider: z.string().min(1).default("opencode"),
     roles: z.record(agentRuntimeRoleSchema).default({}),
   })
   .default({ defaultProvider: "opencode", roles: {} })
 
-const quorumConfigSchema = z.object({
+export const quorumConfigSchema = z.object({
   designatedDrafter: z.string().min(1),
   auditors: z.array(z.string().min(1)).min(1),
   summarizerAgent: z.string().min(1),
@@ -80,9 +81,8 @@ const quorumConfigSchema = z.object({
 
 export async function loadRuntimeConfig() {
   const env = envSchema.parse(process.env)
-  const quorumConfig = quorumConfigSchema.parse(
-    JSON.parse(await Bun.file(new URL("../quorum.config.json", import.meta.url)).text()),
-  )
+  const { loadQuorumConfigFromStore } = await import("./config-store")
+  const quorumConfig = await loadQuorumConfigFromStore(env)
 
   return {
     env,

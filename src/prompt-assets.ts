@@ -1,27 +1,11 @@
 import { join } from "node:path"
 
 import type { RuntimeConfig } from "./config"
-
-const promptAssetFiles = {
-  deepDiveContract: "deep-dive-contract.md",
-  draftFullDraft: "draft-full-draft.md",
-  reviseDraft: "revise-draft.md",
-  audit: "audit.md",
-  reviewFindings: "review-findings.md",
-  rebuttal: "rebuttal.md",
-  reviewRebuttalResponses: "review-rebuttal-responses.md",
-  designHtml: "design-html.md",
-  auditDesign: "audit-design.md",
-  auditScriptSecurity: "audit-script-security.md",
-  reviseDesign: "revise-design.md",
-  readerInterview: "reader-interview.md",
-  enhanceDesign: "enhance-design.md",
-} as const
-
-export type PromptAssetKey = keyof typeof promptAssetFiles
+import { loadPromptAssetsFromStore } from "./config-store"
+import { promptAssetFiles, type PromptAssetKey } from "./prompt-asset-defs"
 
 export type PromptBundle = {
-  source: "local"
+  source: "sqlite" | "local"
   label: string
   dir: string
   assets: Record<PromptAssetKey, string>
@@ -51,14 +35,25 @@ export async function loadPromptBundle(config: RuntimeConfig): Promise<PromptBun
   }
 
   const dir = join(config.env.OPENCODE_DIRECTORY, config.quorumConfig.promptAssetsDir)
-  const assets = {} as Record<PromptAssetKey, string>
-
-  for (const [key, filename] of Object.entries(promptAssetFiles)) {
-    assets[key as PromptAssetKey] = await readPromptAsset(join(dir, filename), filename)
+  let assets: Record<PromptAssetKey, string>
+  try {
+    assets = await loadPromptAssetsFromStore(config.env)
+  } catch (error) {
+    console.warn(`[config] Falling back to file prompt assets: ${error instanceof Error ? error.message : String(error)}`)
+    assets = {} as Record<PromptAssetKey, string>
+    for (const [key, filename] of Object.entries(promptAssetFiles)) {
+      assets[key as PromptAssetKey] = await readPromptAsset(join(dir, filename), filename)
+    }
+    return {
+      source: "local",
+      label: config.quorumConfig.promptManagement.label,
+      dir,
+      assets,
+    }
   }
 
   return {
-    source: "local",
+    source: "sqlite",
     label: config.quorumConfig.promptManagement.label,
     dir,
     assets,

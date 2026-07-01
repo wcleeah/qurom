@@ -1,6 +1,7 @@
 import { createOpencodeEventBridge } from "../opencode-event-bridge"
 import { abortSession, createSession, listAgents, promptAgent } from "../opencode"
 import { ensureOpenCodeServer } from "../opencode-server"
+import { syncOpencodeAgentsFromStore } from "../config-store"
 import type { AgentProvider, AgentRunHandle, AgentRole, ProviderCapability } from "./types"
 
 const capabilities = new Set<ProviderCapability>([
@@ -25,6 +26,7 @@ export const opencodeProvider: AgentProvider = {
   id: "opencode",
   capabilities,
   async prepare(input) {
+    await syncOpencodeAgentsFromStore(input.config.env)
     const opencodePort = new URL(input.config.env.OPENCODE_BASE_URL).port || "4096"
     const cleanup = await ensureOpenCodeServer({
       port: Number(opencodePort),

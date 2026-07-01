@@ -1,5 +1,6 @@
 import { HOST, PORT, safeRunPath } from "./paths"
 import { renderIndex, renderNodePage, renderRun, serveRawFile } from "./pages"
+import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "./config"
 
 export function startViewServer(): void {
   Bun.serve({
@@ -14,6 +15,43 @@ export function startViewServer(): void {
           return await renderIndex()
         } catch (e) {
           console.error("GET / error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      if (path === "/config") {
+        try {
+          return await renderConfigIndex()
+        } catch (e) {
+          console.error("GET /config error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      if (path === "/config/roles") {
+        try {
+          return await renderConfigRoles()
+        } catch (e) {
+          console.error("GET /config/roles error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      if (path === "/config/prompts") {
+        try {
+          return await renderConfigPrompts()
+        } catch (e) {
+          console.error("GET /config/prompts error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      if (path.startsWith("/config/") && req.method === "POST") {
+        try {
+          const response = await handleConfigPost(req, path)
+          if (response) return response
+        } catch (e) {
+          console.error("POST /config error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }
