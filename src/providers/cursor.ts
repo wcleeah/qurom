@@ -1,4 +1,4 @@
-import { Agent, Cursor, CursorAgentError, type McpServerConfig, type SettingSource } from "@cursor/sdk"
+import { Agent, Cursor, CursorAgentError, CursorSdkError, type McpServerConfig, type SettingSource } from "@cursor/sdk"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
 import type { RuntimeConfig } from "../config"
@@ -19,6 +19,7 @@ type CursorModel = Awaited<ReturnType<typeof Cursor.models.list>>[number]
 
 const activeAgents = new Map<string, { agent: CursorAgentHandle; run?: CursorRunHandle }>()
 let cachedModels: { apiKey: string; models: CursorModel[] } | undefined
+const cursorTransportRetryAttempts = 2
 
 function roleConfig(config: RuntimeConfig, role: AgentRole) {
   return config.quorumConfig.agentRuntime.roles[role]
@@ -115,6 +116,30 @@ function extractRunText(result: unknown) {
   return ""
 }
 
+function isCursorTransportError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes("NGHTTP2_") || message.includes("ConnectError") || message.includes("Stream closed")
+}
+
+function shouldRetryCursorPrompt(error: unknown) {
+  return error instanceof CursorSdkError
+    ? error.isRetryable || isCursorTransportError(error)
+    : isCursorTransportError(error)
+}
+
+function cursorErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) return String(error)
+  if (!(error instanceof CursorSdkError)) return error.message
+
+  const details = [
+    error.code ? `code=${error.code}` : undefined,
+    error.status ? `status=${error.status}` : undefined,
+    error.requestId ? `requestId=${error.requestId}` : undefined,
+    error.isRetryable ? "retryable=true" : undefined,
+  ].filter(Boolean)
+  return details.length > 0 ? `${error.message} (${details.join(", ")})` : error.message
+}
+
 export const cursorProvider: AgentProvider = {
   id: "cursor",
   capabilities,
@@ -172,27 +197,33 @@ export const cursorProvider: AgentProvider = {
       schema: input.schema,
       outputFile: input.outputFile,
       async sendPrompt(prompt) {
-        try {
-          const run = await active.agent.send(prompt)
-          active.run = run
-          const result = await run.wait()
-          const status = (result as { status?: string }).status
-          if (status && status !== "finished" && status !== "completed") {
-            throw new Error(`Cursor run ${run.id} ended with status ${status}`)
+        for (let attempt = 1; attempt <= cursorTransportRetryAttempts; attempt++) {
+          try {
+            const run = await active.agent.send(prompt)
+            active.run = run
+            const result = await run.wait()
+            const status = (result as { status?: string }).status
+            if (status && status !== "finished" && status !== "completed") {
+              throw new Error(`Cursor run ${run.id} ended with status ${status}`)
+            }
+            return {
+              text: extractRunText(result),
+              model: roleRuntime?.model,
+              provider: "cursor",
+              variant: input.variant ?? roleRuntime?.variant,
+              raw: { agentId: input.handle.id, runId: run.id, result },
+            }
+          } catch (error) {
+            if (attempt < cursorTransportRetryAttempts && shouldRetryCursorPrompt(error)) {
+              continue
+            }
+            if (error instanceof CursorAgentError) {
+              throw new Error(`Cursor agent prompt failed: ${cursorErrorMessage(error)}`)
+            }
+            throw error
           }
-          return {
-            text: extractRunText(result),
-            model: roleRuntime?.model,
-            provider: "cursor",
-            variant: input.variant ?? roleRuntime?.variant,
-            raw: { agentId: input.handle.id, runId: run.id, result },
-          }
-        } catch (error) {
-          if (error instanceof CursorAgentError) {
-            throw new Error(`Cursor agent startup failed: ${error.message}`)
-          }
-          throw error
         }
+        throw new Error("Cursor agent prompt failed after retry budget was exhausted")
       },
     })
   },

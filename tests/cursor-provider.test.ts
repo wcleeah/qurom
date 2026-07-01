@@ -6,12 +6,33 @@ import type { RuntimeConfig } from "../src/config"
 const createCalls: unknown[] = []
 const sendCalls: string[] = []
 let waitResult: unknown = { status: "finished", result: "plain response" }
+let waitErrors: unknown[] = []
 let cancelCalled = false
 let disposeCalled = false
 
 mock.module("@cursor/sdk", () => {
-  class CursorAgentError extends Error {}
+  class CursorSdkError extends Error {
+    readonly isRetryable: boolean
+    readonly code?: string
+    readonly status?: number
+    readonly requestId?: string
+
+    constructor(message: string, options: {
+      isRetryable?: boolean
+      code?: string
+      status?: number
+      requestId?: string
+    } = {}) {
+      super(message)
+      this.isRetryable = options.isRetryable ?? false
+      this.code = options.code
+      this.status = options.status
+      this.requestId = options.requestId
+    }
+  }
+  class CursorAgentError extends CursorSdkError {}
   return {
+    CursorSdkError,
     CursorAgentError,
     Cursor: {
       models: {
@@ -45,6 +66,8 @@ mock.module("@cursor/sdk", () => {
                 cancelCalled = true
               },
               async wait() {
+                const error = waitErrors.shift()
+                if (error) throw error
                 return waitResult
               },
             }
@@ -105,6 +128,7 @@ beforeEach(() => {
   createCalls.length = 0
   sendCalls.length = 0
   waitResult = { status: "finished", result: "plain response" }
+  waitErrors = []
   cancelCalled = false
   disposeCalled = false
 })
@@ -185,5 +209,24 @@ describe("cursorProvider", () => {
 
     expect(cancelCalled).toBe(true)
     expect(disposeCalled).toBe(true)
+  })
+
+  test("retries transient Cursor transport errors once", async () => {
+    waitErrors = [new Error("[unknown] [internal] Stream closed with error code NGHTTP2_FRAME_SIZE_ERROR")]
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    const result = await cursorProvider.prompt({
+      config,
+      handle,
+      role: "research-drafter",
+      prompt: "hello",
+    })
+
+    expect(result.text).toBe("plain response")
+    expect(sendCalls).toHaveLength(2)
   })
 })
