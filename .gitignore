@@ -3,5 +3,6 @@ node_modules/
 .env.local
 dist/
 runs/
+!runs/quorum-config.sqlite
 runs/.drafts/
 .DS_Store

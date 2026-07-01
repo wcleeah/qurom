@@ -1,4 +1,12 @@
-import { Agent, Cursor, CursorAgentError, CursorSdkError, type McpServerConfig, type SettingSource } from "@cursor/sdk"
+import {
+  Agent,
+  Cursor,
+  CursorAgentError,
+  CursorSdkError,
+  type CloudAgentOptions,
+  type McpServerConfig,
+  type SettingSource,
+} from "@cursor/sdk"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
 import type { RuntimeConfig } from "../config"
@@ -21,6 +29,17 @@ const activeAgents = new Map<string, { agent: CursorAgentHandle; run?: CursorRun
 let cachedModels: { apiKey: string; models: CursorModel[] } | undefined
 const cursorTransportRetryAttempts = 2
 
+class CursorRunStatusError extends Error {
+  constructor(
+    readonly runId: string,
+    readonly status: string,
+    readonly result: unknown,
+  ) {
+    super(`Cursor run ${runId} ended with status ${status}: ${stringifyForError(result)}`)
+    this.name = "CursorRunStatusError"
+  }
+}
+
 function roleConfig(config: RuntimeConfig, role: AgentRole) {
   return config.quorumConfig.agentRuntime.roles[role]
 }
@@ -40,9 +59,11 @@ function cursorModelForRole(config: RuntimeConfig, role: AgentRole) {
 function cursorOptionsForRole(config: RuntimeConfig, role: AgentRole) {
   return roleConfig(config, role)?.options as
     | {
+        runtime?: "local" | "cloud"
         settingSources?: string[]
         mcpServers?: Record<string, McpServerConfig>
         modelParams?: Array<{ id: string; value: string }>
+        cloud?: CloudAgentOptions
       }
     | undefined
 }
@@ -116,15 +137,69 @@ function extractRunText(result: unknown) {
   return ""
 }
 
+function stringifyForError(value: unknown) {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
 function isCursorTransportError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   return message.includes("NGHTTP2_") || message.includes("ConnectError") || message.includes("Stream closed")
 }
 
 function shouldRetryCursorPrompt(error: unknown) {
+  if (error instanceof CursorRunStatusError) return error.status.toLowerCase() === "error"
   return error instanceof CursorSdkError
     ? error.isRetryable || isCursorTransportError(error)
     : isCursorTransportError(error)
+}
+
+function logCursorPromptError(input: {
+  debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
+  role: AgentRole
+  handleId: string
+  attempt: number
+  willRetry: boolean
+  error: unknown
+}) {
+  const { debugLog, role, handleId, attempt, willRetry, error } = input
+  if (!debugLog) return
+
+  debugLog.write("cursor.prompt.error", {
+    role,
+    agentId: handleId,
+    attempt,
+    willRetry,
+    name: error instanceof Error ? error.name : "UnknownError",
+    message: error instanceof Error ? error.message : String(error),
+    retryable: error instanceof CursorSdkError ? error.isRetryable : shouldRetryCursorPrompt(error),
+    runId: error instanceof CursorRunStatusError ? error.runId : undefined,
+    status: error instanceof CursorRunStatusError ? error.status : undefined,
+    result: error instanceof CursorRunStatusError ? error.result : undefined,
+  })
+}
+
+function cursorRuntimeOptions(
+  config: RuntimeConfig,
+  options: ReturnType<typeof cursorOptionsForRole>,
+): { local: { cwd: string; settingSources: SettingSource[] } } | { cloud: CloudAgentOptions } {
+  if (options?.runtime === "local") {
+    return {
+      local: {
+        cwd: config.env.QUORUM_WORKSPACE_DIRECTORY,
+        settingSources: (options.settingSources ?? []) as SettingSource[],
+      },
+    }
+  }
+
+  return {
+    // Omitting repos creates a cloud agent with an empty workspace, which is
+    // enough for quorum roles that operate on prompt text and explicit files.
+    cloud: options?.cloud ?? {},
+  }
 }
 
 function cursorErrorMessage(error: unknown) {
@@ -157,10 +232,7 @@ export const cursorProvider: AgentProvider = {
         id: model,
         ...(modelParams?.length ? { params: modelParams } : {}),
       },
-      local: {
-        cwd: input.config.env.QUORUM_WORKSPACE_DIRECTORY,
-        settingSources: (options?.settingSources ?? []) as SettingSource[],
-      },
+      ...cursorRuntimeOptions(input.config, options),
       ...(options?.mcpServers ? { mcpServers: options.mcpServers } : {}),
     })
     const agentId = agent.agentId
@@ -204,7 +276,7 @@ export const cursorProvider: AgentProvider = {
             const result = await run.wait()
             const status = (result as { status?: string }).status
             if (status && status !== "finished" && status !== "completed") {
-              throw new Error(`Cursor run ${run.id} ended with status ${status}`)
+              throw new CursorRunStatusError(run.id, status, result)
             }
             return {
               text: extractRunText(result),
@@ -214,7 +286,16 @@ export const cursorProvider: AgentProvider = {
               raw: { agentId: input.handle.id, runId: run.id, result },
             }
           } catch (error) {
-            if (attempt < cursorTransportRetryAttempts && shouldRetryCursorPrompt(error)) {
+            const willRetry = attempt < cursorTransportRetryAttempts && shouldRetryCursorPrompt(error)
+            logCursorPromptError({
+              debugLog: input.telemetry?.debugLog,
+              role: input.role,
+              handleId: input.handle.id,
+              attempt,
+              willRetry,
+              error,
+            })
+            if (willRetry) {
               continue
             }
             if (error instanceof CursorAgentError) {

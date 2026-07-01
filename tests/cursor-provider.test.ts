@@ -6,6 +6,7 @@ import type { RuntimeConfig } from "../src/config"
 const createCalls: unknown[] = []
 const sendCalls: string[] = []
 let waitResult: unknown = { status: "finished", result: "plain response" }
+let waitResults: unknown[] = []
 let waitErrors: unknown[] = []
 let cancelCalled = false
 let disposeCalled = false
@@ -68,6 +69,8 @@ mock.module("@cursor/sdk", () => {
               async wait() {
                 const error = waitErrors.shift()
                 if (error) throw error
+                const result = waitResults.shift()
+                if (result) return result
                 return waitResult
               },
             }
@@ -128,13 +131,14 @@ beforeEach(() => {
   createCalls.length = 0
   sendCalls.length = 0
   waitResult = { status: "finished", result: "plain response" }
+  waitResults = []
   waitErrors = []
   cancelCalled = false
   disposeCalled = false
 })
 
 describe("cursorProvider", () => {
-  test("creates a local Cursor agent with per-role model", async () => {
+  test("creates a cloud Cursor agent with per-role model by default", async () => {
     const handle = await cursorProvider.createRunHandle({
       config,
       role: "research-drafter",
@@ -146,7 +150,40 @@ describe("cursorProvider", () => {
       apiKey: "cursor-test-key",
       name: "draft",
       model: { id: "composer-2.5", params: [{ id: "fast", value: "true" }] },
-      local: { cwd: process.cwd(), settingSources: [] },
+      cloud: {},
+    })
+  })
+
+  test("can create a local Cursor agent when role options request it", async () => {
+    const localConfig: RuntimeConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        agentRuntime: {
+          ...config.quorumConfig.agentRuntime,
+          roles: {
+            "research-drafter": {
+              provider: "cursor",
+              model: "composer-2.5",
+              options: {
+                runtime: "local",
+                settingSources: ["project"],
+                modelParams: [{ id: "fast", value: "true" }],
+              },
+            },
+          },
+        },
+      },
+    }
+
+    await cursorProvider.createRunHandle({
+      config: localConfig,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    expect(createCalls[0]).toMatchObject({
+      local: { cwd: process.cwd(), settingSources: ["project"] },
     })
   })
 
@@ -228,5 +265,48 @@ describe("cursorProvider", () => {
 
     expect(result.text).toBe("plain response")
     expect(sendCalls).toHaveLength(2)
+  })
+
+  test("retries Cursor runs that return status error once", async () => {
+    waitResults = [
+      { status: "error", result: "", message: "Stream closed with error code NGHTTP2_FRAME_SIZE_ERROR" },
+      { status: "finished", result: "recovered response" },
+    ]
+    const debugEvents: Array<{ type: string; data?: Record<string, unknown> }> = []
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    const result = await cursorProvider.prompt({
+      config,
+      handle,
+      role: "research-drafter",
+      prompt: "hello",
+      telemetry: {
+        debugLog: {
+          write(type, data) {
+            debugEvents.push({ type, data })
+          },
+        },
+      } as never,
+    })
+
+    expect(result.text).toBe("recovered response")
+    expect(sendCalls).toHaveLength(2)
+    expect(debugEvents).toHaveLength(1)
+    expect(debugEvents[0]).toMatchObject({
+      type: "cursor.prompt.error",
+      data: {
+        role: "research-drafter",
+        agentId: "cursor-agent-1",
+        attempt: 1,
+        willRetry: true,
+        name: "CursorRunStatusError",
+        runId: "cursor-run-1",
+        status: "error",
+      },
+    })
   })
 })
