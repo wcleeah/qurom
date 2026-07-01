@@ -34,7 +34,7 @@ export async function loadPromptBundle(config: RuntimeConfig): Promise<PromptBun
     )
   }
 
-  const dir = join(config.env.OPENCODE_DIRECTORY, config.quorumConfig.promptAssetsDir)
+  const dir = join(config.env.QUORUM_WORKSPACE_DIRECTORY, config.quorumConfig.promptAssetsDir)
   let assets: Record<PromptAssetKey, string>
   try {
     assets = await loadPromptAssetsFromStore(config.env)

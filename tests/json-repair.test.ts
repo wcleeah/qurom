@@ -72,9 +72,12 @@ const testConfig: RuntimeConfig = {
   env: {
     OPENCODE_BASE_URL: "http://127.0.0.1:4096",
     OPENCODE_DIRECTORY: process.cwd(),
+    QUORUM_WORKSPACE_DIRECTORY: process.cwd(),
     QUORUM_CHECKPOINT_PATH: "runs/checkpoints.sqlite",
+    QUORUM_CONFIG_DB_PATH: "runs/quorum-config.sqlite",
     QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
     QUORUM_CAPTURE_SYNC_HISTORY: "0",
+    CURSOR_API_KEY: undefined,
     LANGFUSE_PUBLIC_KEY: undefined,
     LANGFUSE_SECRET_KEY: undefined,
     LANGFUSE_BASE_URL: undefined,

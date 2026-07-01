@@ -20,6 +20,7 @@ let dir: string
 function env() {
   return {
     OPENCODE_DIRECTORY: dir,
+    QUORUM_WORKSPACE_DIRECTORY: dir,
     QUORUM_CONFIG_DB_PATH: join(dir, "runs", "quorum-config.sqlite"),
   }
 }
@@ -54,6 +55,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "qurom-config-store-"))
   await writeFixtures()
   process.env.OPENCODE_DIRECTORY = dir
+  process.env.QUORUM_WORKSPACE_DIRECTORY = dir
   process.env.QUORUM_CONFIG_DB_PATH = join(dir, "runs", "quorum-config.sqlite")
 })
 

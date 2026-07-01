@@ -6,10 +6,12 @@ loadEnv()
 const envSchema = z.object({
   OPENCODE_BASE_URL: z.string().url().default("http://127.0.0.1:4096"),
   OPENCODE_DIRECTORY: z.string().min(1).default(process.cwd()),
+  QUORUM_WORKSPACE_DIRECTORY: z.string().min(1).default(process.cwd()),
   QUORUM_CHECKPOINT_PATH: z.string().min(1).default("runs/checkpoints.sqlite"),
   QUORUM_CONFIG_DB_PATH: z.string().min(1).default("runs/quorum-config.sqlite"),
   QUORUM_CAPTURE_OPENCODE_EVENTS: z.enum(["0", "1"]).default("0"),
   QUORUM_CAPTURE_SYNC_HISTORY: z.enum(["0", "1"]).default("0"),
+  CURSOR_API_KEY: z.string().min(1).optional(),
   LANGFUSE_PUBLIC_KEY: z.string().optional(),
   LANGFUSE_SECRET_KEY: z.string().optional(),
   LANGFUSE_BASE_URL: z.string().url().optional(),

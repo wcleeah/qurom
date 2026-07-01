@@ -8,7 +8,12 @@ import { promptAssetFiles, type PromptAssetKey } from "./prompt-asset-defs"
 
 type EnvBootstrap = {
   OPENCODE_DIRECTORY: string
+  QUORUM_WORKSPACE_DIRECTORY?: string
   QUORUM_CONFIG_DB_PATH?: string
+}
+
+function workspaceDirectory(env: EnvBootstrap) {
+  return env.QUORUM_WORKSPACE_DIRECTORY ?? env.OPENCODE_DIRECTORY
 }
 
 type ConfigProfileRow = {
@@ -164,7 +169,7 @@ CREATE TABLE IF NOT EXISTS config_audit_log (
 }
 
 export async function getConfigStore(env: EnvBootstrap): Promise<ConfigStore> {
-  const dbPath = env.QUORUM_CONFIG_DB_PATH ?? join(env.OPENCODE_DIRECTORY, "runs", "quorum-config.sqlite")
+  const dbPath = env.QUORUM_CONFIG_DB_PATH ?? join(workspaceDirectory(env), "runs", "quorum-config.sqlite")
   await ensureParentDir(dbPath)
   return openConfigStore(dbPath)
 }
@@ -256,7 +261,7 @@ export async function seedConfigStoreFromFiles(env: EnvBootstrap, store?: Config
   if (existing) return existing
 
   const profile = createProfile(store, "default")
-  const configPath = join(env.OPENCODE_DIRECTORY, "quorum.config.json")
+  const configPath = join(workspaceDirectory(env), "quorum.config.json")
   const rawConfig = await readJsonFile(configPath)
   const quorumConfig = quorumConfigSchema.parse(rawConfig)
   const configJson = JSON.stringify(quorumConfig, null, 2)
@@ -273,7 +278,7 @@ export async function seedConfigStoreFromFiles(env: EnvBootstrap, store?: Config
     after: configJson,
   })
 
-  const promptDir = join(env.OPENCODE_DIRECTORY, quorumConfig.promptAssetsDir)
+  const promptDir = join(workspaceDirectory(env), quorumConfig.promptAssetsDir)
   for (const [key, filename] of Object.entries(promptAssetFiles)) {
     const content = await readTextIfExists(join(promptDir, filename))
     if (!content) continue
@@ -289,7 +294,7 @@ export async function seedConfigStoreFromFiles(env: EnvBootstrap, store?: Config
     })
   }
 
-  const agentsDir = join(env.OPENCODE_DIRECTORY, ".opencode", "agents")
+  const agentsDir = join(workspaceDirectory(env), ".opencode", "agents")
   try {
     const entries = await readdir(agentsDir, { withFileTypes: true })
     for (const entry of entries) {
@@ -510,7 +515,7 @@ export async function listRoleDefinitions(env: EnvBootstrap) {
 
 export async function syncOpencodeAgentsFromStore(env: EnvBootstrap) {
   const roles = await listRoleDefinitions(env)
-  const agentsDir = join(env.OPENCODE_DIRECTORY, ".opencode", "agents")
+  const agentsDir = join(workspaceDirectory(env), ".opencode", "agents")
   await mkdir(agentsDir, { recursive: true })
   for (const role of roles) {
     if (!role.enabled) continue
