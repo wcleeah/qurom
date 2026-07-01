@@ -99,6 +99,8 @@ describe("provider-specific role forms", () => {
     expect(html).toContain("OpenCode role configuration is file-backed")
     expect(html).toContain(".opencode/agents/research-drafter.md")
     expect(html).toContain("drafter definition")
+    expect(html).toContain("data-save-actions hidden")
+    expect(html).toContain("data-role-instructions hidden")
     expect(html).not.toContain('placeholder="composer-2.5"')
   })
 

@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "../src/config"
+import { createEventBus, type RunnerEvent } from "../src/runner"
 
 const createCalls: unknown[] = []
 const sendCalls: string[] = []
@@ -59,8 +60,24 @@ mock.module("@cursor/sdk", () => {
         createCalls.push(options)
         return {
           agentId: "cursor-agent-1",
-          async send(prompt: string) {
+          async send(prompt: string, options?: { onDelta?: (args: { update: unknown }) => void }) {
             sendCalls.push(prompt)
+            options?.onDelta?.({ update: { type: "thinking-delta", text: "thinking..." } })
+            options?.onDelta?.({
+              update: {
+                type: "tool-call-started",
+                callId: "call-1",
+                toolCall: { type: "shell", args: { command: "echo hi" } },
+              },
+            })
+            options?.onDelta?.({
+              update: {
+                type: "tool-call-completed",
+                callId: "call-1",
+                toolCall: { type: "shell", result: { status: "success", value: "hi" } },
+              },
+            })
+            options?.onDelta?.({ update: { type: "text-delta", text: "hello" } })
             return {
               id: "cursor-run-1",
               supports(op: string) {
@@ -261,6 +278,53 @@ describe("cursorProvider", () => {
     expect(result.structured).toEqual({ ok: true })
     expect(result.provider).toBe("cursor")
     expect(sendCalls[0]).toContain("Output requirements:")
+  })
+
+  test("emits runner activity events from Cursor deltas", async () => {
+    const bus = createEventBus()
+    const events: RunnerEvent[] = []
+    bus.on((event) => events.push(event))
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    await cursorProvider.prompt({
+      config,
+      bus,
+      handle,
+      role: "research-drafter",
+      prompt: "hello",
+    })
+
+    expect(events.some((event) => event.kind === "agent.message.start" && event.sessionID === handle.id)).toBe(true)
+    expect(events).toContainEqual({
+      kind: "agent.reasoning",
+      sessionID: handle.id,
+      key: "cursor-thinking",
+      text: "thinking...",
+      done: false,
+    })
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "agent.tool",
+      tool: "shell",
+      status: "running",
+      callID: "call-1",
+      sessionID: handle.id,
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "agent.tool",
+      tool: "shell",
+      status: "completed",
+      callID: "call-1",
+      sessionID: handle.id,
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "agent.message.text",
+      sessionID: handle.id,
+      text: "hello",
+    }))
   })
 
   test("does not read stale artifact files for inline structured output", async () => {

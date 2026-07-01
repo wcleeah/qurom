@@ -246,6 +246,89 @@ function cursorErrorMessage(error: unknown) {
   return details.length > 0 ? `${error.message} (${details.join(", ")})` : error.message
 }
 
+function cursorToolName(toolCall: unknown) {
+  if (!toolCall || typeof toolCall !== "object") return "tool"
+  const record = toolCall as Record<string, unknown>
+  return String(record.name ?? record.type ?? "tool")
+}
+
+function emitCursorDelta(input: {
+  event: unknown
+  providerInput: Parameters<AgentProvider["prompt"]>[0]
+  messageID: string
+}) {
+  const { event, providerInput, messageID } = input
+  if (!providerInput.bus || !event || typeof event !== "object") return
+  const update = event as Record<string, unknown>
+  const type = update.type
+  const sessionID = providerInput.handle.id
+
+  if (type === "thinking-delta" && typeof update.text === "string") {
+    providerInput.bus.emit({
+      kind: "agent.reasoning",
+      sessionID,
+      key: "cursor-thinking",
+      text: update.text,
+      done: false,
+    })
+    return
+  }
+
+  if (type === "thinking-completed") {
+    providerInput.bus.emit({
+      kind: "agent.reasoning",
+      sessionID,
+      key: "cursor-thinking",
+      text: "",
+      done: true,
+    })
+    return
+  }
+
+  if (type === "text-delta" && typeof update.text === "string") {
+    providerInput.bus.emit({
+      kind: "agent.message.text",
+      sessionID,
+      key: "cursor-text",
+      text: update.text,
+      done: false,
+    })
+    return
+  }
+
+  if (type === "tool-call-started" && typeof update.callId === "string") {
+    const toolCall = update.toolCall
+    providerInput.bus.emit({
+      kind: "agent.tool",
+      tool: cursorToolName(toolCall),
+      status: "running",
+      callID: update.callId,
+      sessionID,
+      messageID,
+      partID: update.callId,
+      input: toolCall,
+    })
+    return
+  }
+
+  if (type === "tool-call-completed" && typeof update.callId === "string") {
+    const toolCall = update.toolCall as Record<string, unknown> | undefined
+    const result = toolCall && typeof toolCall === "object" ? toolCall.result : undefined
+    const isError = typeof result === "object" && result !== null && (result as Record<string, unknown>).status === "error"
+    providerInput.bus.emit({
+      kind: "agent.tool",
+      tool: cursorToolName(toolCall),
+      status: isError ? "error" : "completed",
+      callID: update.callId,
+      sessionID,
+      messageID,
+      partID: update.callId,
+      output: result,
+      error: isError ? stringifyForError(result) : undefined,
+    })
+  }
+}
+
 export const cursorProvider: AgentProvider = {
   id: "cursor",
   capabilities,
@@ -303,7 +386,11 @@ export const cursorProvider: AgentProvider = {
       async sendPrompt(prompt) {
         for (let attempt = 1; attempt <= cursorTransportRetryAttempts; attempt++) {
           try {
-            const run = await active.agent.send(prompt)
+            const messageID = `cursor:${input.handle.id}:${attempt}:${Date.now()}`
+            input.bus?.emit({ kind: "agent.message.start", sessionID: input.handle.id, messageID })
+            const run = await active.agent.send(prompt, {
+              onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
+            })
             active.run = run
             const result = await run.wait()
             const status = (result as { status?: string }).status

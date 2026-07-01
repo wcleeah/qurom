@@ -189,13 +189,15 @@ export async function renderConfigRoles(): Promise<Response> {
     const providerFormBlocks = providerIds
       .map((id) => providerFields(role.role, role.content, binding, descriptors.get(id)!, id === currentProvider, opencodeModel))
       .join("\n")
+    const opencodeActive = currentProvider === "opencode"
+    const roleInstructions = `<details data-role-instructions${opencodeActive ? " hidden" : ""}><summary>Role instructions</summary><p class="tiny-text muted-text">These instructions are app-owned and do not change when you switch providers.</p><pre>${escapeHtml(role.content)}</pre></details>`
     const form = `<form class="config-form" method="POST" action="/config/roles/${encodeURIComponent(role.role)}">
   ${providerTabs(role.role, currentProvider)}
   ${providerFormBlocks}
-  <div class="form-actions"><button type="submit" class="btn btn-primary">Save</button></div>
+  <div class="form-actions" data-save-actions${opencodeActive ? " hidden" : ""}><button type="submit" class="btn btn-primary">Save</button></div>
 </form>
-<details><summary>Role instructions</summary><p class="tiny-text muted-text">These instructions are app-owned and do not change when you switch providers.</p><pre>${escapeHtml(role.content)}</pre></details>`
-    return card(`<h3>${escapeHtml(role.role)}</h3>${form}`)
+${roleInstructions}`
+    return card(`<div data-role-card><h3>${escapeHtml(role.role)}</h3>${form}</div>`)
   }))
 
   const body = [
@@ -220,6 +222,15 @@ export async function renderConfigRoles(): Promise<Response> {
           input.disabled = !active;
         });
       });
+      var card = form.closest("[data-role-card]");
+      var isOpencode = provider === "opencode";
+      var saveActions = form.querySelector("[data-save-actions]");
+      if (saveActions) saveActions.hidden = isOpencode;
+      if (card) {
+        card.querySelectorAll("[data-role-instructions]").forEach(function(block){
+          block.hidden = isOpencode;
+        });
+      }
     }
     radios.forEach(function(radio){ radio.addEventListener("change", sync); });
     sync();

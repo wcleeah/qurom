@@ -50,6 +50,7 @@ export type CreateRunHandleInput = {
 
 export type ProviderPromptInput<T> = {
   config: RuntimeConfig
+  bus?: EventBus
   handle: AgentRunHandle
   role: AgentRole
   prompt: string

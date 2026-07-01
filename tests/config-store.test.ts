@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -100,12 +100,13 @@ describe("config store", () => {
     expect(assets.audit).toBe("updated audit prompt")
   })
 
-  test("syncOpencodeAgentsFromStore writes generated compatibility agent files", async () => {
+  test("OpenCode role definitions are rendered directly from agent files", async () => {
     await seedConfigStoreFromFiles(env())
-    await writeFile(join(dir, ".opencode", "agents", "research-drafter.md"), "old")
+    await writeFile(join(dir, ".opencode", "agents", "research-drafter.md"), "edited file definition")
     await syncOpencodeAgentsFromStore(env())
 
-    expect(await readFile(join(dir, ".opencode", "agents", "research-drafter.md"), "utf8")).toContain("drafter definition")
+    const rolesHtml = await renderConfigRoles().then((r) => r.text())
+    expect(rolesHtml).toContain("edited file definition")
   })
 
   test("view config routes render and update sqlite-backed settings", async () => {
@@ -113,8 +114,8 @@ describe("config store", () => {
 
     const rolesHtml = await renderConfigRoles().then((r) => r.text())
     expect(rolesHtml).toContain("source-auditor")
-    expect(rolesHtml).toContain("Role instructions")
-    expect(rolesHtml).toContain("OpenCode: agent name. Cursor: optional label only.")
+    expect(rolesHtml).toContain("data-role-instructions hidden")
+    expect(rolesHtml).toContain("OpenCode role configuration is file-backed")
 
     const promptHtml = await renderConfigPrompts().then((r) => r.text())
     expect(promptHtml).toContain("audit")

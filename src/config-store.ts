@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite"
-import { mkdir, readdir, writeFile } from "node:fs/promises"
+import { mkdir, readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { createHash } from "node:crypto"
 
@@ -252,6 +252,31 @@ function mergeRoleBindingsIntoConfig(config: unknown, bindings: RoleProviderBind
   })
 }
 
+async function readOpencodeRoleDefinitions(env: EnvBootstrap, profileId: number): Promise<RoleDefinitionRow[]> {
+  const agentsDir = join(workspaceDirectory(env), ".opencode", "agents")
+  const roles: RoleDefinitionRow[] = []
+  try {
+    const entries = await readdir(agentsDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue
+      const role = entry.name.replace(/\.md$/, "")
+      const content = await readTextIfExists(join(agentsDir, entry.name))
+      if (!content) continue
+      roles.push({
+        profile_id: profileId,
+        role,
+        content,
+        description: role,
+        capabilities_json: "[]",
+        enabled: 1,
+      })
+    }
+  } catch {
+    // OpenCode files are only relevant when the OpenCode provider is used.
+  }
+  return roles.sort((a, b) => a.role.localeCompare(b.role))
+}
+
 export async function seedConfigStoreFromFiles(env: EnvBootstrap, store?: ConfigStore) {
   const ownedStore = store ?? await getConfigStore(env)
   const shouldClose = !store
@@ -386,9 +411,7 @@ export async function listConfigSummary(env: EnvBootstrap) {
     const prompts = store.db
       .query<PromptAssetRow, [number]>("SELECT profile_id, key, content, version, active FROM prompt_assets WHERE profile_id = ? ORDER BY key")
       .all(profile.id)
-    const roles = store.db
-      .query<RoleDefinitionRow, [number]>("SELECT profile_id, role, content, description, capabilities_json, enabled FROM role_definitions WHERE profile_id = ? ORDER BY role")
-      .all(profile.id)
+    const roles = await readOpencodeRoleDefinitions(env, profile.id)
     const bindings = store.db
       .query<RoleProviderBindingRow, [number]>(`
 SELECT profile_id, role, provider, provider_agent, model, variant, output_mode, options_json
@@ -505,31 +528,21 @@ export async function listRoleDefinitions(env: EnvBootstrap) {
   const store = await getConfigStore(env)
   try {
     const profile = await seedConfigStoreFromFiles(env, store)
-    return store.db
-      .query<RoleDefinitionRow, [number]>("SELECT profile_id, role, content, description, capabilities_json, enabled FROM role_definitions WHERE profile_id = ? ORDER BY role")
-      .all(profile.id)
+    return await readOpencodeRoleDefinitions(env, profile.id)
   } finally {
     store.close()
   }
 }
 
 export async function syncOpencodeAgentsFromStore(env: EnvBootstrap) {
-  const roles = await listRoleDefinitions(env)
-  const agentsDir = join(workspaceDirectory(env), ".opencode", "agents")
-  await mkdir(agentsDir, { recursive: true })
-  for (const role of roles) {
-    if (!role.enabled) continue
-    await writeFile(join(agentsDir, `${role.role}.md`), role.content.trim() + "\n", "utf8")
-  }
   const store = await getConfigStore(env)
   try {
     const profile = await seedConfigStoreFromFiles(env, store)
     writeAudit(store, {
       profileId: profile.id,
       source: "provider:opencode",
-      action: "sync",
+      action: "use-files",
       subject: "opencode-agents",
-      after: JSON.stringify(roles.map((r) => r.role)),
     })
   } finally {
     store.close()

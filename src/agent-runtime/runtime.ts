@@ -89,6 +89,7 @@ export function createAgentRuntime(
           : await inlineInputFiles(input.prompt, input.inputFiles)
         const result = await provider.prompt({
           config,
+          bus,
           handle: input.handle,
           role: input.role,
           prompt: promptInput.prompt,
