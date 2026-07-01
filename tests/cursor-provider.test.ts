@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "../src/config"
@@ -135,6 +138,7 @@ beforeEach(() => {
   waitErrors = []
   cancelCalled = false
   disposeCalled = false
+  delete process.env.CURSOR_MCP_CONFIG_PATH
 })
 
 describe("cursorProvider", () => {
@@ -184,6 +188,57 @@ describe("cursorProvider", () => {
 
     expect(createCalls[0]).toMatchObject({
       local: { cwd: process.cwd(), settingSources: ["project"] },
+    })
+  })
+
+  test("copies configured MCP server definitions from Cursor mcp.json", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-cursor-mcp-"))
+    process.env.CURSOR_MCP_CONFIG_PATH = join(dir, "mcp.json")
+    await writeFile(process.env.CURSOR_MCP_CONFIG_PATH, JSON.stringify({
+      mcpServers: {
+        webfetch: { url: "https://mcp.example/webfetch" },
+        exa: { command: "npx", args: ["-y", "exa-mcp-server"] },
+        unused: { url: "https://mcp.example/unused" },
+      },
+    }))
+    const mcpConfig: RuntimeConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        researchTools: { prefer: ["webfetch", "exa"], webSearchProvider: "exa" },
+        agentRuntime: {
+          ...config.quorumConfig.agentRuntime,
+          roles: {
+            "research-drafter": {
+              provider: "cursor",
+              model: "composer-2.5",
+              options: {
+                mcpServers: {
+                  exa: { url: "https://override.example/exa" },
+                },
+              },
+            },
+          },
+        },
+      },
+    }
+
+    await cursorProvider.createRunHandle({
+      config: mcpConfig,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    expect(createCalls[0]).toMatchObject({
+      mcpServers: {
+        webfetch: { url: "https://mcp.example/webfetch" },
+        exa: { url: "https://override.example/exa" },
+      },
+    })
+    expect(createCalls[0]).not.toMatchObject({
+      mcpServers: {
+        unused: { url: "https://mcp.example/unused" },
+      },
     })
   })
 

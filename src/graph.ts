@@ -114,8 +114,8 @@ function assertStatus(state: ResearchState, expected: ResearchState["status"], n
   }
 }
 
-function researchToolBlock(config: RuntimeConfig) {
-  const lines = ["Tool preferences:"]
+export function buildResearchToolHint(config: RuntimeConfig) {
+  const lines = ["Research tool preferences:"]
 
   for (const tool of config.quorumConfig.researchTools.prefer) {
     lines.push(`- Prefer ${tool} when it matches the task.`)
@@ -152,7 +152,7 @@ export function readerContextBlock(state: ResearchState): string {
 export function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState, outputFile: string) {
   return [
     promptBundle.assets.deepDiveContract,
-    researchToolBlock(config),
+    buildResearchToolHint(config),
     requestContextBlock(state),
     readerContextBlock(state),
     promptBundle.assets.draftFullDraft.replace("{outputFile}", outputFile),
@@ -189,7 +189,7 @@ export function auditPrompt(
       .replace("{deltaContext}", deltaContext)
       .replace("{outputFile}", outputFile)
       .replace("{readerContext}", readerContextBlock(state) || "(no reader profile provided — judge clarity against a competent practitioner default)"),
-    researchToolBlock(config),
+    buildResearchToolHint(config),
   ].join("\n\n")
 }
 
@@ -203,7 +203,7 @@ export function drafterReviewPrompt(
   return [
     `You are the drafter-agent reviewing auditor findings for this ${request}.`,
     promptBundle.assets.reviewFindings.replace("{outputFile}", outputFile),
-    researchToolBlock(config),
+    buildResearchToolHint(config),
     readerContextBlock(state),
   ].join("\n\n")
 }
@@ -212,7 +212,7 @@ export function rebuttalPrompt(config: RuntimeConfig, promptBundle: PromptBundle
   const request = requestLabel(state)
   return [
     promptBundle.assets.rebuttal.replace("{outputFile}", outputFile),
-    researchToolBlock(config),
+    buildResearchToolHint(config),
     `Respond to the disputed findings for this ${request}.`,
     readerContextBlock(state),
     "Return only JSON that matches the requested schema.",
@@ -231,7 +231,7 @@ export function rebuttalReviewPrompt(
   const request = requestLabel(state)
   return [
     promptBundle.assets.reviewRebuttalResponses.replace("{outputFile}", outputFile),
-    researchToolBlock(config),
+    buildResearchToolHint(config),
     `Review the auditor rebuttal responses for this ${request}.`,
     readerContextBlock(state),
     "Return only JSON that matches the requested schema.",
@@ -244,7 +244,7 @@ function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state
   return [
     promptBundle.assets.deepDiveContract,
     promptBundle.assets.reviseDraft.replace("{outputFile}", outputFile),
-    researchToolBlock(config),
+    buildResearchToolHint(config),
     requestLabel(state),
   ].join("\n\n")
 }
@@ -671,6 +671,7 @@ async function discoverReaderPrompt(
     : transcript.map((t) => `${t.role === "interviewer" ? "🤖" : "👤"} ${t.text}`).join("\n")
   const prompt = promptBundle.assets.readerInterview
     .replace("{requestContext}", requestContextBlock(state))
+    .replace("{researchToolHint}", buildResearchToolHint(config))
     .replace("{transcript}", transcriptText)
     .replace("{maxTurns}", String(maxTurns))
     .replace("{turn}", String(turn))

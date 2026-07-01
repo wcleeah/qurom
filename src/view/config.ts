@@ -122,11 +122,20 @@ export async function renderConfigRoles(): Promise<Response> {
 
   const providerFields = (
     role: string,
+    roleContent: string,
     binding: (typeof summary.bindings)[number] | undefined,
     descriptor: ProviderConfigFormDescriptor,
     active: boolean,
     fallbackModel = "",
   ) => {
+    if (descriptor.providerId === "opencode") {
+      const filePath = `.opencode/agents/${role}.md`
+      return `<div class="provider-fields"${active ? "" : " hidden"} data-provider-fields="opencode">
+  <p class="tiny-text muted-text">OpenCode role configuration is file-backed. Edit <code>${escapeHtml(filePath)}</code> directly, then restart or revalidate the app config.</p>
+  <details open><summary>OpenCode agent file content</summary><pre>${escapeHtml(roleContent)}</pre></details>
+</div>`
+    }
+
     const fields = descriptor.fields ?? { providerAgent: true, model: "text", variant: true, outputMode: true }
     const options = parseOptionsJson(binding?.options_json)
     const savedParams = new Map(cursorModelParams(options).map((param) => [param.id, param.value]))
@@ -178,7 +187,7 @@ export async function renderConfigRoles(): Promise<Response> {
     const currentProvider = binding?.provider ?? summary.config?.agentRuntime.defaultProvider ?? "opencode"
     const opencodeModel = frontmatterModel(role.content)
     const providerFormBlocks = providerIds
-      .map((id) => providerFields(role.role, binding, descriptors.get(id)!, id === currentProvider, opencodeModel))
+      .map((id) => providerFields(role.role, role.content, binding, descriptors.get(id)!, id === currentProvider, opencodeModel))
       .join("\n")
     const form = `<form class="config-form" method="POST" action="/config/roles/${encodeURIComponent(role.role)}">
   ${providerTabs(role.role, currentProvider)}

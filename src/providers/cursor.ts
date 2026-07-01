@@ -7,6 +7,9 @@ import {
   type McpServerConfig,
   type SettingSource,
 } from "@cursor/sdk"
+import { readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
 import type { RuntimeConfig } from "../config"
@@ -75,6 +78,34 @@ function cursorModelParamsForRole(config: RuntimeConfig, role: AgentRole) {
     .filter((entry) => entry && typeof entry.id === "string" && typeof entry.value === "string")
     .map((entry) => ({ id: entry.id, value: entry.value }))
   return valid.length > 0 ? valid : undefined
+}
+
+async function loadCursorMcpServers(): Promise<Record<string, McpServerConfig>> {
+  const path = process.env.CURSOR_MCP_CONFIG_PATH || join(homedir(), ".cursor", "mcp.json")
+  try {
+    const raw = await readFile(path, "utf8")
+    const parsed = JSON.parse(raw) as { mcpServers?: unknown }
+    if (!parsed.mcpServers || typeof parsed.mcpServers !== "object" || Array.isArray(parsed.mcpServers)) {
+      return {}
+    }
+    return parsed.mcpServers as Record<string, McpServerConfig>
+  } catch {
+    return {}
+  }
+}
+
+async function resolveMcpServers(
+  config: RuntimeConfig,
+  options: ReturnType<typeof cursorOptionsForRole>,
+): Promise<Record<string, McpServerConfig> | undefined> {
+  const configured = await loadCursorMcpServers()
+  const selected = Object.fromEntries(
+    config.quorumConfig.researchTools.prefer
+      .filter((name) => configured[name])
+      .map((name) => [name, configured[name]!]),
+  ) as Record<string, McpServerConfig>
+  const merged = { ...selected, ...(options?.mcpServers ?? {}) }
+  return Object.keys(merged).length > 0 ? merged : undefined
 }
 
 async function listCursorModels(apiKey: string) {
@@ -225,6 +256,7 @@ export const cursorProvider: AgentProvider = {
     const model = cursorModelForRole(input.config, input.role)
     const options = cursorOptionsForRole(input.config, input.role)
     const modelParams = cursorModelParamsForRole(input.config, input.role)
+    const mcpServers = await resolveMcpServers(input.config, options)
     const agent = await Agent.create({
       apiKey,
       name: input.title,
@@ -233,7 +265,7 @@ export const cursorProvider: AgentProvider = {
         ...(modelParams?.length ? { params: modelParams } : {}),
       },
       ...cursorRuntimeOptions(input.config, options),
-      ...(options?.mcpServers ? { mcpServers: options.mcpServers } : {}),
+      ...(mcpServers ? { mcpServers } : {}),
     })
     const agentId = agent.agentId
     activeAgents.set(agentId, { agent })

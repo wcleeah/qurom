@@ -6,8 +6,12 @@ import { join } from "node:path"
 import { promptAssetFiles } from "../src/prompt-asset-defs"
 
 mock.module("@cursor/sdk", () => {
+  class CursorSdkError extends Error {
+    readonly isRetryable = false
+  }
   class CursorAgentError extends Error {}
   return {
+    CursorSdkError,
     CursorAgentError,
     Cursor: {
       models: {
@@ -87,6 +91,17 @@ afterEach(async () => {
 })
 
 describe("provider-specific role forms", () => {
+  test("renders OpenCode role configuration as file-backed read-only content", async () => {
+    await seedConfigStoreFromFiles(env())
+
+    const html = await renderConfigRoles().then((response) => response.text())
+
+    expect(html).toContain("OpenCode role configuration is file-backed")
+    expect(html).toContain(".opencode/agents/research-drafter.md")
+    expect(html).toContain("drafter definition")
+    expect(html).not.toContain('placeholder="composer-2.5"')
+  })
+
   test("renders Cursor model dropdown and parameter controls from catalog", async () => {
     await seedConfigStoreFromFiles(env())
     await updateRoleBinding(env(), "source-auditor", {
