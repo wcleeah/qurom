@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite"
-import { mkdir, readdir } from "node:fs/promises"
+import { mkdir, readdir, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { createHash } from "node:crypto"
 
@@ -31,12 +31,11 @@ type ConfigValueRow = {
   value_json: string
 }
 
-type PromptAssetRow = {
-  profile_id: number
-  key: string
+export type PromptAssetFileSummary = {
+  key: PromptAssetKey
   content: string
   version: number
-  active: number
+  active: 1
 }
 
 type RoleDefinitionRow = {
@@ -135,18 +134,6 @@ CREATE TABLE IF NOT EXISTS role_provider_bindings (
   FOREIGN KEY (profile_id) REFERENCES config_profiles(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS prompt_assets (
-  profile_id INTEGER NOT NULL,
-  key TEXT NOT NULL,
-  content TEXT NOT NULL,
-  version INTEGER NOT NULL DEFAULT 1,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  PRIMARY KEY (profile_id, key),
-  FOREIGN KEY (profile_id) REFERENCES config_profiles(id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS config_audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   profile_id INTEGER,
@@ -159,6 +146,7 @@ CREATE TABLE IF NOT EXISTS config_audit_log (
   created_at TEXT NOT NULL
 );
   `)
+  db.run("DROP TABLE IF EXISTS prompt_assets")
 
   return {
     db,
@@ -277,6 +265,41 @@ async function readOpencodeRoleDefinitions(env: EnvBootstrap, profileId: number)
   return roles.sort((a, b) => a.role.localeCompare(b.role))
 }
 
+async function readProviderNeutralRoleDefinitions(env: EnvBootstrap, profileId: number): Promise<RoleDefinitionRow[]> {
+  const rolesDir = join(workspaceDirectory(env), "assets", "roles")
+  const roles: RoleDefinitionRow[] = []
+  try {
+    const entries = await readdir(rolesDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue
+      const role = entry.name.replace(/\.md$/, "")
+      const content = await readTextIfExists(join(rolesDir, entry.name))
+      if (!content) continue
+      roles.push({
+        profile_id: profileId,
+        role,
+        content,
+        description: role,
+        capabilities_json: "[]",
+        enabled: 1,
+      })
+    }
+  } catch {
+    // Provider-neutral role files are optional for older workspaces.
+  }
+  return roles.sort((a, b) => a.role.localeCompare(b.role))
+}
+
+export async function listProviderNeutralRoleDefinitions(env: EnvBootstrap) {
+  const store = await getConfigStore(env)
+  try {
+    const profile = await seedConfigStoreFromFiles(env, store)
+    return await readProviderNeutralRoleDefinitions(env, profile.id)
+  } finally {
+    store.close()
+  }
+}
+
 export async function seedConfigStoreFromFiles(env: EnvBootstrap, store?: ConfigStore) {
   const ownedStore = store ?? await getConfigStore(env)
   const shouldClose = !store
@@ -302,22 +325,6 @@ export async function seedConfigStoreFromFiles(env: EnvBootstrap, store?: Config
     subject: "config:quorum",
     after: configJson,
   })
-
-  const promptDir = join(workspaceDirectory(env), quorumConfig.promptAssetsDir)
-  for (const [key, filename] of Object.entries(promptAssetFiles)) {
-    const content = await readTextIfExists(join(promptDir, filename))
-    if (!content) continue
-    store.db
-      .query("INSERT INTO prompt_assets (profile_id, key, content, version, active, created_at, updated_at) VALUES (?, ?, ?, 1, 1, ?, ?)")
-      .run(profile.id, key, content, ts, ts)
-    writeAudit(store, {
-      profileId: profile.id,
-      source: "seed-files",
-      action: "seed",
-      subject: `prompt:${key}`,
-      after: content,
-    })
-  }
 
   const agentsDir = join(workspaceDirectory(env), ".opencode", "agents")
   try {
@@ -380,22 +387,28 @@ WHERE profile_id = ?
   }
 }
 
-export async function loadPromptAssetsFromStore(env: EnvBootstrap): Promise<Record<PromptAssetKey, string>> {
+async function promptAssetsDirFromStore(env: EnvBootstrap, store: ConfigStore, profileId: number) {
+  const configRow = store.db
+    .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
+    .get(profileId, "quorum")
+  const config = configRow ? quorumConfigSchema.parse(JSON.parse(configRow.value_json)) : undefined
+  return join(workspaceDirectory(env), config?.promptAssetsDir ?? "assets/prompts")
+}
+
+export async function listPromptAssetsFromFiles(env: EnvBootstrap): Promise<PromptAssetFileSummary[]> {
   const store = await getConfigStore(env)
   try {
     const profile = await seedConfigStoreFromFiles(env, store)
-    const rows = store.db
-      .query<PromptAssetRow, [number]>("SELECT profile_id, key, content, version, active FROM prompt_assets WHERE profile_id = ? AND active = 1")
-      .all(profile.id)
-    const assets = {} as Record<PromptAssetKey, string>
-    for (const [key] of Object.entries(promptAssetFiles)) {
-      const row = rows.find((r) => r.key === key)
-      if (!row?.content.trim()) {
-        throw new Error(`Missing required prompt asset ${JSON.stringify(key)} in config store`)
+    const promptDir = await promptAssetsDirFromStore(env, store, profile.id)
+    const prompts: PromptAssetFileSummary[] = []
+    for (const [key, filename] of Object.entries(promptAssetFiles) as Array<[PromptAssetKey, string]>) {
+      const content = await readTextIfExists(join(promptDir, filename))
+      if (!content) {
+        throw new Error(`Missing required prompt asset ${JSON.stringify(key)} at ${join(promptDir, filename)}`)
       }
-      assets[key as PromptAssetKey] = row.content.trim()
+      prompts.push({ key, content, version: 1, active: 1 })
     }
-    return assets
+    return prompts
   } finally {
     store.close()
   }
@@ -408,9 +421,13 @@ export async function listConfigSummary(env: EnvBootstrap) {
     const configRow = store.db
       .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
       .get(profile.id, "quorum")
-    const prompts = store.db
-      .query<PromptAssetRow, [number]>("SELECT profile_id, key, content, version, active FROM prompt_assets WHERE profile_id = ? ORDER BY key")
-      .all(profile.id)
+    const promptDir = await promptAssetsDirFromStore(env, store, profile.id)
+    const prompts: PromptAssetFileSummary[] = []
+    for (const [key, filename] of Object.entries(promptAssetFiles) as Array<[PromptAssetKey, string]>) {
+      const content = await readTextIfExists(join(promptDir, filename))
+      if (!content) continue
+      prompts.push({ key, content, version: 1, active: 1 })
+    }
     const roles = await readOpencodeRoleDefinitions(env, profile.id)
     const bindings = store.db
       .query<RoleProviderBindingRow, [number]>(`
@@ -496,29 +513,9 @@ export async function updatePromptAsset(env: EnvBootstrap, key: string, content:
   const store = await getConfigStore(env)
   try {
     const profile = await seedConfigStoreFromFiles(env, store)
-    const before = store.db
-      .query<PromptAssetRow, [number, string]>("SELECT profile_id, key, content, version, active FROM prompt_assets WHERE profile_id = ? AND key = ?")
-      .get(profile.id, key)
-    const ts = nowIso()
-    store.db
-      .query(`
-INSERT INTO prompt_assets (profile_id, key, content, version, active, created_at, updated_at)
-VALUES (?, ?, ?, 1, 1, ?, ?)
-ON CONFLICT(profile_id, key) DO UPDATE SET
-  content = excluded.content,
-  version = prompt_assets.version + 1,
-  active = 1,
-  updated_at = excluded.updated_at
-      `)
-      .run(profile.id, key, content.trim(), ts, ts)
-    writeAudit(store, {
-      profileId: profile.id,
-      source: "view",
-      action: "update",
-      subject: `prompt:${key}`,
-      before: before?.content,
-      after: content.trim(),
-    })
+    const promptDir = await promptAssetsDirFromStore(env, store, profile.id)
+    const filename = promptAssetFiles[key as PromptAssetKey]
+    await writeFile(join(promptDir, filename), content.trim() + "\n", "utf8")
   } finally {
     store.close()
   }

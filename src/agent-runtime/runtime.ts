@@ -17,6 +17,16 @@ const INLINE_ATTACHMENT_MAX_BYTES = 1024 * 1024
 
 type OutputMode = "file" | "inline"
 
+const inputContextLabels: Record<string, string> = {
+  "draft.md": "draft",
+  "audits.json": "audit results",
+  "findings.json": "findings",
+  "rebuttals.json": "rebuttals",
+  "disputed.json": "disputed findings and responses",
+  "document.html": "HTML document",
+  "content.md": "markdown document",
+}
+
 export type RuntimePromptInput<T> = {
   role: AgentRole
   handle: AgentRunHandle
@@ -35,6 +45,11 @@ export type AgentRuntime = {
   providerForRole: (role: AgentRole) => AgentProvider
 }
 
+export type AgentRuntimeOptions = {
+  providerForRole?: (role: AgentRole) => AgentProvider
+  roleInstructions?: Record<string, string>
+}
+
 async function inlineInputFiles(prompt: string, inputFiles: PromptFileInput[] | undefined) {
   if (!inputFiles || inputFiles.length === 0) {
     return { prompt, inputFiles }
@@ -48,15 +63,21 @@ async function inlineInputFiles(prompt: string, inputFiles: PromptFileInput[] | 
       throw new Error(`Input file ${file.filename} is too large to inline (${size} bytes; max ${INLINE_ATTACHMENT_MAX_BYTES})`)
     }
     const text = await bunFile.text()
+    const label = inputContextLabels[file.filename] ?? file.filename.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ")
     blocks.push([
-      `<attached_file filename="${file.filename}" path="${file.path}" mime="${file.mime}" bytes="${size}">`,
+      `--- BEGIN CONTEXT: ${label} ---`,
+      "",
       text,
-      "</attached_file>",
+      `--- END CONTEXT: ${label} ---`,
     ].join("\n"))
   }
 
   return {
-    prompt: [prompt, "Attached file contents:", blocks.join("\n\n")].join("\n\n"),
+    prompt: [
+      prompt,
+      "The following context is included directly in this prompt. Use it as the source material; do not try to read or open external files.",
+      blocks.join("\n\n"),
+    ].join("\n\n"),
     inputFiles: undefined,
   }
 }
@@ -121,10 +142,21 @@ function renderPromptForOutputMode(input: {
   return [input.prompt.trim(), instructions].filter(Boolean).join("\n\n")
 }
 
+function renderRolePrompt(input: { prompt: string; instructions?: string }) {
+  const instructions = input.instructions?.trim()
+  if (!instructions) return input.prompt
+  return [
+    "## Role instructions",
+    instructions,
+    "## Task",
+    input.prompt.trim(),
+  ].join("\n\n")
+}
+
 export function createAgentRuntime(
   config: RuntimeConfig,
   bus?: EventBus,
-  options: { providerForRole?: (role: AgentRole) => AgentProvider } = {},
+  options: AgentRuntimeOptions = {},
 ): AgentRuntime {
   void bus
 
@@ -144,8 +176,14 @@ export function createAgentRuntime(
     async prompt(input) {
       const provider = resolveProvider(input.role)
       const outputMode = outputModeFor(provider, input.schema, input.outputFile)
+      const rolePrompt = provider.capabilities.has("roleInstructions")
+        ? renderRolePrompt({
+            prompt: input.prompt,
+            instructions: options.roleInstructions?.[input.role],
+          })
+        : input.prompt
       const prompt = renderPromptForOutputMode({
-        prompt: input.prompt,
+        prompt: rolePrompt,
         outputFile: input.outputFile,
         schema: input.schema,
         mode: outputMode,

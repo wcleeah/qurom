@@ -1,5 +1,5 @@
 Review the following deep dive document draft.
-The draft is attached as `draft.md`.
+The draft is provided in the `draft` context.
 
 {deltaContext}
 

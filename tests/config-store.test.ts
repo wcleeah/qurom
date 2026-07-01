@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import {
   getConfigStore,
-  loadPromptAssetsFromStore,
+  listPromptAssetsFromFiles,
   loadQuorumConfigFromStore,
   seedConfigStoreFromFiles,
   syncOpencodeAgentsFromStore,
@@ -64,16 +64,18 @@ afterEach(async () => {
 })
 
 describe("config store", () => {
-  test("seeds current file config, prompts, and role definitions into sqlite", async () => {
+  test("seeds current file config and role definitions into sqlite, while prompts stay file-backed", async () => {
     const store = await getConfigStore(env())
     const profile = await seedConfigStoreFromFiles(env(), store)
     const roleCount = store.db.query<{ count: number }, []>("SELECT count(*) as count FROM role_definitions").get()?.count
+    const promptTable = store.db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'prompt_assets'").get()
     store.close()
 
     expect(profile.name).toBe("default")
     expect(roleCount).toBe(3)
+    expect(promptTable).toBeNull()
     expect((await loadQuorumConfigFromStore(env())).designatedDrafter).toBe("research-drafter")
-    expect((await loadPromptAssetsFromStore(env())).audit).toBe("prompt:audit.md")
+    expect((await listPromptAssetsFromFiles(env())).find((prompt) => prompt.key === "audit")?.content).toBe("prompt:audit.md")
   })
 
   test("role binding updates are merged into loaded runtime config", async () => {
@@ -92,12 +94,12 @@ describe("config store", () => {
     })
   })
 
-  test("prompt updates replace active prompt content", async () => {
+  test("prompt updates write prompt asset files directly", async () => {
     await seedConfigStoreFromFiles(env())
     await updatePromptAsset(env(), "audit", "updated audit prompt")
 
-    const assets = await loadPromptAssetsFromStore(env())
-    expect(assets.audit).toBe("updated audit prompt")
+    const assets = await listPromptAssetsFromFiles(env())
+    expect(assets.find((prompt) => prompt.key === "audit")?.content).toBe("updated audit prompt")
   })
 
   test("OpenCode role definitions are rendered directly from agent files", async () => {

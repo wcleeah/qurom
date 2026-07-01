@@ -106,7 +106,10 @@ describe("createAgentRuntime", () => {
 
     expect(seenInputFiles).toBeUndefined()
     expect(seenPrompt).toContain("Review this.")
-    expect(seenPrompt).toContain('<attached_file filename="draft.md"')
+    expect(seenPrompt).toContain("The following context is included directly")
+    expect(seenPrompt).toContain("--- BEGIN CONTEXT: draft ---")
+    expect(seenPrompt).not.toContain("draft.md")
+    expect(seenPrompt).not.toContain(filePath)
     expect(seenPrompt).toContain("# Draft\n\nHello")
   })
 
@@ -133,5 +136,56 @@ describe("createAgentRuntime", () => {
 
     expect(seenPrompt).toBe("Review this.")
     expect(seenInputFiles).toBe(inputFiles)
+  })
+
+  test("injects role instructions only for providers that request them", async () => {
+    const prompts: string[] = []
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput", "roleInstructions"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt(input) {
+        prompts.push(input.prompt)
+        return { text: "ok" }
+      },
+    }
+    const runtime = createAgentRuntime(config, undefined, {
+      providerForRole: () => provider,
+      roleInstructions: { "source-auditor": "Only check source fidelity." },
+    })
+    const handle = await runtime.createHandle("source-auditor", "audit")
+
+    await runtime.prompt({ role: "source-auditor", handle, prompt: "Review draft." })
+
+    expect(prompts[0]).toContain("## Role instructions")
+    expect(prompts[0]).toContain("Only check source fidelity.")
+    expect(prompts[0]).toContain("## Task")
+    expect(prompts[0]).toContain("Review draft.")
+  })
+
+  test("does not inject role instructions for providers without the capability", async () => {
+    let seenPrompt = ""
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt(input) {
+        seenPrompt = input.prompt
+        return { text: "ok" }
+      },
+    }
+    const runtime = createAgentRuntime(config, undefined, {
+      providerForRole: () => provider,
+      roleInstructions: { "source-auditor": "Only check source fidelity." },
+    })
+    const handle = await runtime.createHandle("source-auditor", "audit")
+
+    await runtime.prompt({ role: "source-auditor", handle, prompt: "Review draft." })
+
+    expect(seenPrompt).toBe("Review draft.")
   })
 })

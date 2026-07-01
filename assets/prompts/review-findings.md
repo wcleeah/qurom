@@ -1,6 +1,6 @@
 Review the auditor findings as the drafter.
-The current draft is attached as `draft.md`.
-The audit results are attached as `audits.json`.
+The current draft is provided in the `draft` context.
+The audit results are provided in the `audit results` context.
 
 Output rules:
 - Accept findings that materially improve correctness, source fidelity, or gap closure.

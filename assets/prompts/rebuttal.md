@@ -1,6 +1,6 @@
 Respond to the drafter's rebuttals for your findings.
-The current draft is attached as `draft.md`.
-The rebuttals are attached as `rebuttals.json`.
+The current draft is provided in the `draft` context.
+The rebuttals are provided in the `rebuttals` context.
 
 Output rules:
 - Answer every requested finding ID exactly once.

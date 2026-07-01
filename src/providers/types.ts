@@ -16,6 +16,7 @@ export type ProviderCapability =
   | "permissionEvents"
   | "fileAttachments"
   | "fileOutput"
+  | "roleInstructions"
   | "providerManagedAgents"
   | "jsonFileOutput"
   | "plainJsonOutput"

@@ -1,7 +1,7 @@
 import { join } from "node:path"
+import { readdir } from "node:fs/promises"
 
 import type { RuntimeConfig } from "./config"
-import { loadPromptAssetsFromStore } from "./config-store"
 import { promptAssetFiles, type PromptAssetKey } from "./prompt-asset-defs"
 
 export type PromptBundle = {
@@ -9,6 +9,7 @@ export type PromptBundle = {
   label: string
   dir: string
   assets: Record<PromptAssetKey, string>
+  roleInstructions?: Record<string, string>
 }
 
 async function readPromptAsset(filePath: string, label: string) {
@@ -27,6 +28,22 @@ async function readPromptAsset(filePath: string, label: string) {
   return content
 }
 
+async function loadRoleInstructions(config: RuntimeConfig) {
+  const rolesDir = join(config.env.QUORUM_WORKSPACE_DIRECTORY, "assets", "roles")
+  const roles: Record<string, string> = {}
+  try {
+    const entries = await readdir(rolesDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue
+      const role = entry.name.replace(/\.md$/, "")
+      roles[role] = await readPromptAsset(join(rolesDir, entry.name), entry.name)
+    }
+  } catch (error) {
+    console.warn(`[config] No provider-neutral role instructions loaded: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  return roles
+}
+
 export async function loadPromptBundle(config: RuntimeConfig): Promise<PromptBundle> {
   if (config.quorumConfig.promptManagement.source !== "local") {
     throw new Error(
@@ -35,27 +52,17 @@ export async function loadPromptBundle(config: RuntimeConfig): Promise<PromptBun
   }
 
   const dir = join(config.env.QUORUM_WORKSPACE_DIRECTORY, config.quorumConfig.promptAssetsDir)
-  let assets: Record<PromptAssetKey, string>
-  try {
-    assets = await loadPromptAssetsFromStore(config.env)
-  } catch (error) {
-    console.warn(`[config] Falling back to file prompt assets: ${error instanceof Error ? error.message : String(error)}`)
-    assets = {} as Record<PromptAssetKey, string>
-    for (const [key, filename] of Object.entries(promptAssetFiles)) {
-      assets[key as PromptAssetKey] = await readPromptAsset(join(dir, filename), filename)
-    }
-    return {
-      source: "local",
-      label: config.quorumConfig.promptManagement.label,
-      dir,
-      assets,
-    }
+  const roleInstructions = await loadRoleInstructions(config)
+  const assets = {} as Record<PromptAssetKey, string>
+  for (const [key, filename] of Object.entries(promptAssetFiles)) {
+    assets[key as PromptAssetKey] = await readPromptAsset(join(dir, filename), filename)
   }
 
   return {
-    source: "sqlite",
+    source: "local",
     label: config.quorumConfig.promptManagement.label,
     dir,
     assets,
+    roleInstructions,
   }
 }

@@ -1,5 +1,5 @@
 Convert the provided markdown deep-dive document into a self-contained, beautifully styled HTML file.
-The markdown content is attached as `content.md`.
+The markdown content is provided in the `markdown document` context.
 
 Topic: {topic}
 

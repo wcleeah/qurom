@@ -1,6 +1,6 @@
 Revise the current draft to resolve the unresolved findings. Fix only what the findings identify — do not restructure the document.
-The current draft is attached as `draft.md`.
-The unresolved findings are attached as `findings.json`.
+The current draft is provided in the `draft` context.
+The unresolved findings are provided in the `findings` context.
 
 Surgical revision rules:
 - Return markdown only.

@@ -1,6 +1,6 @@
 Revise the current HTML document to resolve the unresolved design findings.
-The current HTML is attached as `document.html`.
-The unresolved design findings are attached as `findings.json`.
+The current HTML is provided in the `HTML document` context.
+The unresolved design findings are provided in the `findings` context.
 
 The HTML may contain interactive elements, scripts, or styles added by an enhancer. Preserve these when revising — do not strip out `<script>` tags, interactive CSS, or JavaScript-driven behavior unless a finding explicitly requires it.
 

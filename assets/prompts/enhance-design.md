@@ -1,4 +1,4 @@
-The HTML content to enhance is attached as `document.html`.
+The HTML content to enhance is provided in the `HTML document` context.
 
 Study the document: its topic, its structure, its audience. Then decide if it needs you.
 

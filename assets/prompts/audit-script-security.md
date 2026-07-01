@@ -1,5 +1,5 @@
 Review the following HTML deep-dive document for external script security.
-The HTML to review is attached as `document.html`.
+The HTML to review is provided in the `HTML document` context.
 
 General Audit Guide:
 - Findings must be concrete, evidence-backed (quote the relevant `<script src>` URL and surrounding context), and fixable.

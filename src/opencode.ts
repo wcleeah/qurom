@@ -235,7 +235,12 @@ export async function promptAgent<T>(input: {
           model: info.modelID,
         },
       })
-      throw new Error(`OpenCode assistant call failed in session ${activeSessionID}: ${JSON.stringify(info.error)}`)
+      throw new StructuredRecoveryError(
+        "transport",
+        1,
+        info.error,
+        `transport.assistant_failed: OpenCode assistant call failed in session ${activeSessionID}: ${JSON.stringify(info.error)}`,
+      )
     }
 
     const text = extractText(response.data.parts)

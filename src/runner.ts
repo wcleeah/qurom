@@ -498,7 +498,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
       bus.emit({ kind: "lifecycle", phase: "running", requestId, traceId: telemetry.traceId })
 
       const graph = graphFactory(config, promptBundle, {
-        runtime: createAgentRuntime(config, bus),
+        runtime: createAgentRuntime(config, bus, { roleInstructions: promptBundle.roleInstructions }),
         observer: {
           debugLog: { write(type, data) { debugLogRef.current?.write(type, data) } } as DebugLog,
           onNodeStart(node, state) {

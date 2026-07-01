@@ -415,7 +415,7 @@ export async function runDesignQuorum(input: {
     throw new Error("Design quorum invoked but not enabled in config")
   }
 
-  // Write markdown to a temp file so it can be attached
+  // Write markdown to a temp file so providers can receive it as input.
   const markdownFile = `${outputPath}/content.md`
   await writeRunTextArtifact(outputPath, "content.md", markdown)
 

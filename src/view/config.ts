@@ -1,5 +1,5 @@
 import { loadRuntimeConfig } from "../config"
-import { listConfigSummary, updatePromptAsset, updateRoleBinding } from "../config-store"
+import { listConfigSummary, listProviderNeutralRoleDefinitions, updatePromptAsset, updateRoleBinding } from "../config-store"
 import { availableProviderIds, providerConfigForm, validateProviderPrerequisites } from "../providers/registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
 import { card, section, summaryRow, summaryTable } from "./html"
@@ -83,6 +83,8 @@ export async function renderConfigIndex(): Promise<Response> {
 export async function renderConfigRoles(): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
+  const neutralRoles = await listProviderNeutralRoleDefinitions(config.env)
+  const neutralRoleByName = new Map(neutralRoles.map((role) => [role.role, role]))
   const bindingByRole = new Map(summary.bindings.map((b) => [b.role, b]))
   const providerIds = availableProviderIds()
   const field = (label: string, name: string, value: string, help: string, placeholder = "unset", disabled = false) =>
@@ -115,7 +117,7 @@ export async function renderConfigRoles(): Promise<Response> {
       return "Cursor runs this role through the Cursor Agent SDK. Set a per-role model; role instructions below remain app-owned."
     }
     if (provider === "opencode") {
-      return "OpenCode runs this role through the named provider agent. Role instructions below are synced to compatibility agent files."
+      return "OpenCode runs this role through the named provider agent. Edit the OpenCode agent file directly for OpenCode behavior and permissions."
     }
     return "This provider controls which runtime executes the role. Role instructions below stay separate from the provider binding."
   }
@@ -185,12 +187,13 @@ export async function renderConfigRoles(): Promise<Response> {
   const cards = await Promise.all(summary.roles.map(async (role) => {
     const binding = bindingByRole.get(role.role)
     const currentProvider = binding?.provider ?? summary.config?.agentRuntime.defaultProvider ?? "opencode"
+    const neutralRole = neutralRoleByName.get(role.role)
     const opencodeModel = frontmatterModel(role.content)
     const providerFormBlocks = providerIds
       .map((id) => providerFields(role.role, role.content, binding, descriptors.get(id)!, id === currentProvider, opencodeModel))
       .join("\n")
     const opencodeActive = currentProvider === "opencode"
-    const roleInstructions = `<details data-role-instructions${opencodeActive ? " hidden" : ""}><summary>Role instructions</summary><p class="tiny-text muted-text">These instructions are app-owned and do not change when you switch providers.</p><pre>${escapeHtml(role.content)}</pre></details>`
+    const roleInstructions = `<details data-role-instructions${opencodeActive ? " hidden" : ""}><summary>Role instructions</summary><p class="tiny-text muted-text">Cursor uses provider-neutral role instructions from <code>assets/roles/${escapeHtml(role.role)}.md</code>. OpenCode uses its agent file directly.</p><pre>${escapeHtml(neutralRole?.content ?? "(missing role instruction file)")}</pre></details>`
     const form = `<form class="config-form" method="POST" action="/config/roles/${encodeURIComponent(role.role)}">
   ${providerTabs(role.role, currentProvider)}
   ${providerFormBlocks}
