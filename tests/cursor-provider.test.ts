@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
@@ -261,6 +261,31 @@ describe("cursorProvider", () => {
     expect(result.structured).toEqual({ ok: true })
     expect(result.provider).toBe("cursor")
     expect(sendCalls[0]).toContain("Output requirements:")
+  })
+
+  test("does not read stale artifact files for inline structured output", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-cursor-artifact-"))
+    const outputFile = join(dir, "reader-profile.json")
+    await mkdir(dir, { recursive: true })
+    await writeFile(outputFile, JSON.stringify({ ok: false }))
+    waitResult = { status: "finished", result: JSON.stringify({ ok: true }) }
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    const result = await cursorProvider.prompt({
+      config,
+      handle,
+      role: "research-drafter",
+      prompt: "return json",
+      schema: z.object({ ok: z.boolean() }),
+      outputFile,
+    })
+
+    expect(result.structured).toEqual({ ok: true })
+    expect(JSON.parse(await readFile(outputFile, "utf8"))).toEqual({ ok: true })
   })
 
   test("fails when a Cursor-bound role has no model", async () => {

@@ -299,7 +299,7 @@ export const cursorProvider: AgentProvider = {
     return runProviderStructuredPrompt({
       prompt: `${promptPrefix}\n\n${input.prompt}`,
       schema: input.schema,
-      outputFile: input.outputFile,
+      artifactFile: input.outputFile,
       async sendPrompt(prompt) {
         for (let attempt = 1; attempt <= cursorTransportRetryAttempts; attempt++) {
           try {

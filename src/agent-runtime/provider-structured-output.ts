@@ -22,7 +22,8 @@ export type ProviderTextResponse = {
 export type StructuredPromptRunnerInput<T> = {
   prompt: string
   schema?: z.ZodType<T>
-  outputFile?: string
+  providerOutputFile?: string
+  artifactFile?: string
   sendPrompt: (prompt: string) => Promise<ProviderTextResponse>
   persistInlineFileOutput?: boolean
 }
@@ -44,7 +45,7 @@ function repairPromptForFault(input: {
   schema: Record<string, unknown>
   previousResponse: string
   error: unknown
-  outputFile?: string
+  providerOutputFile?: string
 }) {
   if (input.fault === "truncated") {
     return [
@@ -57,10 +58,10 @@ function repairPromptForFault(input: {
     ].join("\n\n")
   }
 
-  if (input.fault === "nooutput" && input.outputFile) {
+  if (input.fault === "nooutput" && input.providerOutputFile) {
     return [
       "You were asked to write valid JSON to the file path below but produced no usable output.",
-      `Write the complete JSON object to \`${input.outputFile}\` now.`,
+      `Write the complete JSON object to \`${input.providerOutputFile}\` now.`,
       "Do not respond inline. Do not include prose or markdown. Write the file, then respond OK.",
       "<required_json_schema>",
       JSON.stringify(input.schema, null, 2),
@@ -82,7 +83,7 @@ export async function runProviderStructuredPrompt<T>(
 ): Promise<ProviderPromptResult<T>> {
   if (!input.schema) {
     const response = await input.sendPrompt(input.prompt)
-    const fileText = await readOutputFile(input.outputFile)
+    const fileText = await readOutputFile(input.providerOutputFile)
     return {
       text: fileText ?? response.text,
       model: response.model,
@@ -95,8 +96,8 @@ export async function runProviderStructuredPrompt<T>(
 
   const jsonSchema = toJsonSchema(input.schema) as Record<string, unknown>
   const initial = await input.sendPrompt(buildStructuredPrompt(input.prompt, jsonSchema))
-  let raw = (await readOutputFile(input.outputFile)) ?? initial.text
-  let outputSource: "file" | "inline" = input.outputFile && raw !== initial.text ? "file" : "inline"
+  let raw = (await readOutputFile(input.providerOutputFile)) ?? initial.text
+  let outputSource: "file" | "inline" = input.providerOutputFile && raw !== initial.text ? "file" : "inline"
   let latest = initial
   const budget = { sameAgent: 2 }
   const maxAttempts = 4
@@ -104,8 +105,8 @@ export async function runProviderStructuredPrompt<T>(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const structured = parseStructuredResponse(input.schema, raw)
-      if (input.outputFile && outputSource === "inline" && input.persistInlineFileOutput !== false) {
-        await Bun.write(input.outputFile, JSON.stringify(structured, null, 2) + "\n")
+      if (input.artifactFile && outputSource === "inline" && input.persistInlineFileOutput !== false) {
+        await Bun.write(input.artifactFile, JSON.stringify(structured, null, 2) + "\n")
       }
       return {
         structured,
@@ -127,11 +128,11 @@ export async function runProviderStructuredPrompt<T>(
           schema: jsonSchema,
           previousResponse: raw,
           error,
-          outputFile: input.outputFile,
+          providerOutputFile: input.providerOutputFile,
         }),
       )
       latest = repaired
-      const fileText = await readOutputFile(input.outputFile)
+      const fileText = await readOutputFile(input.providerOutputFile)
       raw = fileText ?? repaired.text
       outputSource = fileText ? "file" : "inline"
     }

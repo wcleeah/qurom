@@ -7,8 +7,3 @@ Output rules:
 - Issue another rebuttal only when you have stronger, narrower evidence.
 - Keep the discussion tied to finding IDs.
 - If the auditor shows that the draft is slightly off or underexplained, prefer accepting the finding over defending near-correct wording.
-
-## Output instructions
-Write your review result as JSON to `{outputFile}`.
-Respond with only `OK` when the file is written.
-Do not include the JSON in your response.
