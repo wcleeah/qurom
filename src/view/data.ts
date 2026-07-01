@@ -165,16 +165,35 @@ export function agentFrom(filename: string, prefix: string) {
     .replace(/-round-\d+\.json$/, "")
 }
 
+export function readerProfileTurn(filename: string) {
+  const match = filename.match(/^reader-profile(?:-(\d+))?\.json$/)
+  return match ? match[1] : undefined
+}
+
 export function classifyFile(filename: string): FileClass {
   const round = roundFrom(filename)
+  const readerTurn = readerProfileTurn(filename)
   if (filename === "request.json") return { group: "Run Metadata", subGroup: "Request", label: "Request", description: "Original topic/input and request id" }
-  if (filename === "reader-profile.json") return { group: "Run Metadata", subGroup: "Reader", label: "Reader profile", description: "Interview-derived audience model" }
+  if (filename === "reader-profile.json" || readerTurn) {
+    return {
+      group: "Run Metadata",
+      subGroup: "Reader",
+      label: readerTurn ? `Reader profile turn ${readerTurn}` : "Reader profile",
+      description: "Interview-derived audience model",
+    }
+  }
   if (filename === "summary.json") return { group: "Run Metadata", subGroup: "Summaries", label: "Summary", description: "Compact title/summary for the run" }
   if (filename === "confidence.json") return { group: "Run Metadata", subGroup: "Summaries", label: "Confidence", description: "Final confidence and caveat metadata" }
   if (filename === "failure.json") return { group: "Run Metadata", subGroup: "Failures", label: "Failure details", description: "Research failure payload" }
   if (filename === "debug-log.jsonl") return { group: "Debug", subGroup: "Logs", label: "Debug log", description: "Chronological pipeline/recovery events" }
   if (filename === "node-history.json") return { group: "Debug", subGroup: "Timelines", label: "Node history", description: "Processed graph steps" }
   if (filename === "live-status.json") return { group: "Debug", subGroup: "Live", label: "Live status", description: "Current dashboard snapshot" }
+  if (/^cursor-[\w.-]+-call-\d+-attempt-\d+-[\w.-]+-(metadata|result|artifacts|conversation)\.json$/.test(filename)) {
+    return { group: "Debug", subGroup: "Cursor", label: filename, description: "Cursor provider diagnostic artifact" }
+  }
+  if (/^cursor-[\w.-]+-call-\d+-attempt-\d+-[\w.-]+-response\.txt$/.test(filename)) {
+    return { group: "Debug", subGroup: "Cursor", label: filename, description: "Cursor provider text response" }
+  }
   if (filename === "final.html") return { group: "Final Outputs", subGroup: "Published", label: "Final HTML", description: "Rendered design output" }
   if (filename === "final.md") return { group: "Final Outputs", subGroup: "Published", label: "Final markdown", description: "Approved research document" }
   if (filename === "latest-draft.md") return { group: "Final Outputs", subGroup: "Fallbacks", label: "Latest draft", description: "Most recent research draft" }

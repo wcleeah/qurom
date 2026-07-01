@@ -21,8 +21,8 @@ describe("view path helpers", () => {
 })
 
 describe("view artifact renderers", () => {
-  test("dispatches reader-profile.json to the reader profile card", () => {
-    const html = renderStructuredJson("reader-profile.json", {
+  test("dispatches reader-profile-N.json to the reader profile card", () => {
+    const html = renderStructuredJson("reader-profile-2.json", {
       profile: {
         learningGoal: "Understand quorum reads",
         concepts: [{ concept: "linearizability", level: "heard-of", evidence: "named it" }],
@@ -63,10 +63,14 @@ describe("view assets and html helpers", () => {
 
 describe("view file browser classification", () => {
   test("classifies design and reader artifacts into stable groups", () => {
-    expect(classifyFile("reader-profile.json")).toMatchObject({
+    expect(classifyFile("reader-profile-2.json")).toMatchObject({
       group: "Run Metadata",
       subGroup: "Reader",
-      label: "Reader profile",
+      label: "Reader profile turn 2",
+    })
+    expect(classifyFile("cursor-reader-interviewer-call-1-attempt-1-run-123-artifacts.json")).toMatchObject({
+      group: "Debug",
+      subGroup: "Cursor",
     })
     expect(classifyFile("design-consensus-round-2.json")).toMatchObject({
       group: "Design Rounds",
@@ -91,6 +95,17 @@ describe("view components", () => {
     expect(html).not.toContain('style="')
   })
 
+  test("marks discoverReader complete when numbered reader profile exists", () => {
+    const html = renderLivePipeline(
+      null,
+      ["request.json", "reader-profile-1.json"],
+      "running",
+      "example-run",
+    )
+
+    expect(html).toContain("profile ready")
+  })
+
   test("renders the interview reply form from live status", () => {
     const liveStatus: LiveStatus = {
       phase: "running",
@@ -101,7 +116,8 @@ describe("view components", () => {
       nodeHistory: [],
       awaitingReaderReply: {
         turn: 2,
-        questions: ["What do you already know?"],
+        answeredQuestions: [{ question: "First question?", answer: "First answer" }],
+        newQuestions: ["What do you already know?"],
         transcript: [
           { role: "interviewer", text: "First question?" },
           { role: "reader", text: "First answer" },
@@ -116,5 +132,40 @@ describe("view components", () => {
     expect(html).toContain("Answered history")
     expect(html).toContain("What do you already know?")
     expect(html).toContain('method="POST"')
+  })
+
+  test("renders batched interview history as numbered question and answer pairs", () => {
+    const liveStatus: LiveStatus = {
+      phase: "running",
+      node: "discoverReaderPrompt",
+      round: 0,
+      maxRounds: 2,
+      agents: {},
+      nodeHistory: [],
+      awaitingReaderReply: {
+        turn: 2,
+        answeredQuestions: [
+          { question: "What are you trying to accomplish?", answer: "Pure curiosity." },
+          { question: "How familiar are you with ML?", answer: "Quite new." },
+        ],
+        newQuestions: ["Next question?"],
+        transcript: [
+          { role: "interviewer", text: "What are you trying to accomplish?\nHow familiar are you with ML?" },
+          { role: "reader", text: "Answer 1: Pure curiosity.\n\nAnswer 2: Quite new." },
+          { role: "interviewer", text: "Next question?" },
+        ],
+      },
+    }
+
+    const html = renderInterviewChatCard("example-run", liveStatus)
+
+    expect(html).toContain("Question 1")
+    expect(html).toContain("What are you trying to accomplish?")
+    expect(html).toContain("Answer 1")
+    expect(html).toContain("Pure curiosity.")
+    expect(html).toContain("Question 2")
+    expect(html).toContain("How familiar are you with ML?")
+    expect(html).toContain("Answer 2")
+    expect(html).toContain("Quite new.")
   })
 })

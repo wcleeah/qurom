@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "../src/config"
@@ -297,7 +297,9 @@ describe("cursorProvider", () => {
 
     expect(result.structured).toEqual({ ok: true })
     expect(result.provider).toBe("cursor")
-    expect(sendCalls[0]).toContain("Output requirements:")
+    expect(sendCalls[0]).toBe("return json")
+    expect(sendCalls[0]).not.toContain("Output requirements:")
+    expect(sendCalls[0]).not.toContain("## Output instructions")
   })
 
   test("emits runner activity events from Cursor deltas", async () => {
@@ -376,15 +378,26 @@ describe("cursorProvider", () => {
 
     expect(result.structured).toEqual({ ok: true })
     expect(JSON.parse(await readFile(outputFile, "utf8"))).toEqual({ ok: true })
-    expect(await readFile(`${outputFile}.cursor-response.txt`, "utf8")).toBe("OK")
-    expect(JSON.parse(await readFile(`${outputFile}.cursor-response.json`, "utf8"))).toMatchObject({
+    const files = await readdir(dirname(outputFile))
+    expect(files).not.toContain("reader-profile.json.cursor-response.json")
+    const metadataFile = files.find((file) => /^cursor-research-drafter-call-1-attempt-1-cursor-run-1-metadata\.json$/.test(file))
+    const resultFile = files.find((file) => /^cursor-research-drafter-call-1-attempt-1-cursor-run-1-result\.json$/.test(file))
+    const responseFile = files.find((file) => /^cursor-research-drafter-call-1-attempt-1-cursor-run-1-response\.txt$/.test(file))
+    const artifactsFile = files.find((file) => /^cursor-research-drafter-call-1-attempt-1-cursor-run-1-artifacts\.json$/.test(file))
+    expect(metadataFile).toBeDefined()
+    expect(resultFile).toBeDefined()
+    expect(responseFile).toBeDefined()
+    expect(artifactsFile).toBeDefined()
+    expect(await readFile(join(dirname(outputFile), responseFile!), "utf8")).toBe("OK")
+    expect(JSON.parse(await readFile(join(dirname(outputFile), metadataFile!), "utf8"))).toMatchObject({
       agentId: "bc-cursor-agent-1",
       runId: "cursor-run-1",
-      requestedArtifact: "artifacts/reader-profile.json",
-      text: "OK",
+      requestedArtifact: "reader-profile.json",
     })
-    expect(sendCalls[0]).toContain("artifacts/reader-profile.json")
-    expect(sendCalls[0]).not.toContain(outputFile)
+    expect(JSON.parse(await readFile(join(dirname(outputFile), artifactsFile!), "utf8"))).toEqual([
+      expect.objectContaining({ path: "artifacts/reader-profile.json" }),
+    ])
+    expect(sendCalls[0]).toBe("return json")
   })
 
   test("downloads Cursor cloud artifacts from nested agents/artifacts paths", async () => {

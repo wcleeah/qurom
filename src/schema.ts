@@ -245,7 +245,7 @@ export const readerProfileSchema = z.array(z.object({
 }))
 
 export const readerInterviewTurnSchema = z.object({
-  questions: z.array(z.string()),
+  newQuestions: z.array(z.string()),
   done: z.boolean(),
   profile: z.object({
     learningGoal: z.string().optional(),
@@ -253,9 +253,9 @@ export const readerInterviewTurnSchema = z.object({
   }).optional(),
 }).superRefine((val, ctx) => {
   // A non-done turn must carry at least one question; a done turn may have
-  // an empty questions array (no further question to ask).
-  if (!val.done && val.questions.length === 0) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["questions"], message: "non-done turn must ask at least one question" })
+  // an empty newQuestions array (no further question to ask).
+  if (!val.done && val.newQuestions.length === 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["newQuestions"], message: "non-done turn must ask at least one new question" })
   }
 })
 
@@ -333,7 +333,7 @@ export const researchStateObjectSchema = z.object({
     evidence: z.string().optional(),
   })).optional(),
   learningGoal: z.string().optional(),
-  pendingReaderQuestions: z.array(z.string()).optional(),
+  pendingNewReaderQuestions: z.array(z.string()).optional(),
   interviewTranscript: z.array(z.object({
     role: z.enum(["interviewer", "reader"]),
     text: z.string(),

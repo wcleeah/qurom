@@ -170,6 +170,35 @@ describe("coerceJson", () => {
 })
 
 describe("RecoveryRouter matrix", () => {
+  test("initial structured file prompt is not wrapped with a second output contract", async () => {
+    const outputFile = join(tempDir, "audit.json")
+    const runtimePrompt = [
+      "Review the draft.",
+      "",
+      "## Output instructions",
+      `Write JSON to the output file \`${outputFile}\` matching this schema:`,
+      "{}",
+      "Respond with only `OK` when the file is written.",
+      "Do not include the JSON in your response.",
+    ].join("\n")
+    promptScript = [async () => assistantText(validAuditJson())]
+
+    await promptAgent({
+      config: testConfig,
+      sessionID: "s1",
+      agent: "source-auditor",
+      prompt: runtimePrompt,
+      schema: auditResultSchema,
+      outputFile,
+    })
+
+    const sent = promptCalls[0]?.parts[0]?.text ?? ""
+    expect(sent).toBe(runtimePrompt)
+    expect(sent.match(/## Output instructions/g)?.length).toBe(1)
+    expect(sent).not.toContain("Output requirements:")
+    expect(sent).not.toContain("<required_json_schema>")
+  })
+
   test("nooutput → A reprompt same-agent → valid", async () => {
     promptScript.push(
       () => assistantText(""),

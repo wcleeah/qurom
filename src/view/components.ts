@@ -1,4 +1,5 @@
 import { safeFilePath } from "./paths"
+import { answeredQuestionsFromTranscript } from "../reader-transcript"
 import { escapeHtml, statusDot } from "./utils"
 import type { LiveAgentStatus, LiveStatus, RunStatus } from "./types"
 
@@ -13,7 +14,7 @@ export function renderLivePipeline(
 
   // Determine node completion from files on disk
   const hasFile = (pattern: RegExp) => files.some((f) => pattern.test(f))
-  const hasReaderProfile = hasFile(/^reader-profile\.json$/)
+  const hasReaderProfile = hasFile(/^reader-profile(?:-\d+)?\.json$/)
   const hasDraft = hasFile(/^draft-round-\d+\.md$/)
   const hasAudits = hasFile(/^audits-round-\d+\.json$/)
   const hasDrafterReview = hasFile(/^drafter-finding-review-round-\d+\.json$/)
@@ -190,54 +191,37 @@ export function renderInterviewChatCard(runName: string, liveStatus: LiveStatus 
   const awaiting = liveStatus?.awaitingReaderReply
   if (!awaiting) return ""
   const fullTranscript = awaiting.transcript ?? []
-  const questions = awaiting.questions ?? []
-  // The checkpointed transcript's last entry is the current pending question
-  // (discoverReaderPrompt appended it before the resume node called interrupt).
-  // Everything before that is answered history — alternating interviewer (Q)
-  // and reader (A) entries, two per turn. Drop the last entry so the current
-  // questions (rendered below with per-question inputs) don't appear twice.
-  const historyEntries = questions.length > 0
-    ? fullTranscript.slice(0, -1)
-    : fullTranscript
+  const newQuestions = awaiting.newQuestions ?? []
+  const answeredQuestions = awaiting.answeredQuestions ?? answeredQuestionsFromTranscript(
+    fullTranscript.flatMap((entry) =>
+      entry.role === "interviewer" || entry.role === "reader"
+        ? [{ role: entry.role, text: entry.text }]
+        : []
+    ),
+  )
 
-  // Group answered history into turns (each turn = one Q entry + one A entry).
-  // Each group renders with a 'Turn N ✓ answered' label, dimmed, inside a
-  // collapsible <details> so the user can focus on the current question.
-  const turns: Array<{ q: string; a: string }> = []
-  for (let i = 0; i + 1 < historyEntries.length; i += 2) {
-    const qEntry = historyEntries[i]
-    const aEntry = historyEntries[i + 1]
-    if (qEntry && aEntry && qEntry.role === "interviewer" && aEntry.role === "reader") {
-      turns.push({ q: qEntry.text, a: aEntry.text })
-    } else if (qEntry && qEntry.role === "reader") {
-      // Stray reader reply with no preceding question — append as a lone answer.
-      turns.push({ q: "", a: qEntry.text })
-    }
-  }
-  const answeredTurns = turns.length
-  const historyHtml = turns.map((t, i) =>
+  const historyHtml = answeredQuestions.map((pair, i) =>
     `<div class="chat-answered-turn">
-      <div class="chat-turn-label">Turn ${i + 1} · answered</div>
-      ${t.q ? `<div class="interviewer-msg"><span class="chat-icon">AI</span> <span class="chat-text">${escapeHtml(t.q)}</span></div>` : ""}
-      <div class="reader-msg"><span class="chat-icon">You</span> <span class="chat-text">${escapeHtml(t.a)}</span></div>
+      <div class="interviewer-msg"><span class="chat-icon">Question ${i + 1}</span> <span class="chat-text">${escapeHtml(pair.question)}</span></div>
+      <div class="reader-msg"><span class="chat-icon">Answer ${i + 1}</span> <span class="chat-text">${escapeHtml(pair.answer)}</span></div>
     </div>`
   ).join("")
-  const historySection = answeredTurns > 0
+  const historySection = answeredQuestions.length > 0
     ? `<details class="interview-history">
-        <summary>Answered history (${answeredTurns} turn${answeredTurns === 1 ? "" : "s"})</summary>
+        <summary>Answered history (${answeredQuestions.length} question${answeredQuestions.length === 1 ? "" : "s"})</summary>
         <div class="chat-transcript">${historyHtml}</div>
       </details>`
     : ""
 
-  // Current pending questions: one bubble + one textarea each. No hidden
+  // Current pending newQuestions: one bubble + one textarea each. No hidden
   // question carry — the POST handler reads the answers by index only, and
   // the pairing with questions is reconstructed from transcript position at
   // prompt-build time (the interviewer sees the full transcript anyway).
   // required on every textarea = browser-level validation, no JS.
-  const inputsHtml = questions.length > 0
-    ? questions.map((q, i) =>
+  const inputsHtml = newQuestions.length > 0
+    ? newQuestions.map((q, i) =>
         `<div class="chat-question-block">
-          <div class="interviewer-msg"><span class="chat-icon">AI</span> <span class="chat-text">${escapeHtml(q)}</span></div>
+          <div class="interviewer-msg"><span class="chat-icon">${newQuestions.length > 1 ? `Question ${i + 1}` : "Question"}</span> <span class="chat-text">${escapeHtml(q)}</span></div>
           <textarea name="a_${i}" rows="3" placeholder="your answer..." required></textarea>
         </div>`
       ).join("")

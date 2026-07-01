@@ -3,7 +3,6 @@ import { z } from "zod"
 
 import type { ProviderPromptResult } from "../providers/types"
 import {
-  buildStructuredPrompt,
   buildStructuredRepairPrompt,
   classifyFault,
   parseStructuredResponse,
@@ -97,18 +96,7 @@ export async function runProviderStructuredPrompt<T>(
 
   const jsonSchema = toJsonSchema(input.schema) as Record<string, unknown>
   const outputInstructionFile = input.outputInstructionFile ?? input.providerOutputFile
-  const initialPrompt = outputInstructionFile
-    ? [
-      input.prompt,
-      "Output requirements:",
-      `- Write only a single JSON object to \`${outputInstructionFile}\` matching the schema below.`,
-      "- Do not include markdown fences, commentary, or explanation.",
-      "- Respond with only `OK` after the file is written.",
-      "<required_json_schema>",
-      JSON.stringify(jsonSchema, null, 2),
-      "</required_json_schema>",
-    ].join("\n\n")
-    : buildStructuredPrompt(input.prompt, jsonSchema)
+  const initialPrompt = input.prompt
   const initial = await input.sendPrompt(initialPrompt)
   let raw = (await readOutputFile(input.providerOutputFile)) ?? initial.text
   let outputSource: "file" | "inline" = input.providerOutputFile && raw !== initial.text ? "file" : "inline"

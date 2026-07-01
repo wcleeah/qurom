@@ -16,10 +16,11 @@ const {
   rebuttalReviewPrompt,
   drafterReviewPrompt,
   readerContextBlock,
-  readerInterviewFollowUpInstructions,
   repeatsPreviousReaderQuestion,
 } = await import("../src/graph")
 const { loadPromptBundle } = await import("../src/prompt-assets")
+const { promptAssetFiles } = await import("../src/prompt-asset-defs")
+const { formatReaderTranscriptForPrompt } = await import("../src/reader-transcript")
 
 const testConfig: RuntimeConfig = {
   env: {
@@ -64,25 +65,25 @@ afterEach(async () => {
 describe("readerInterviewTurnSchema", () => {
   test("accepts a non-done turn with one question", () => {
     const parsed = readerInterviewTurnSchema.parse({
-      questions: ["What are you trying to do with MLX?"],
+      newQuestions: ["What are you trying to do with MLX?"],
       done: false,
     })
     expect(parsed.done).toBe(false)
-    expect(parsed.questions).toHaveLength(1)
+    expect(parsed.newQuestions).toHaveLength(1)
     expect(parsed.profile).toBeUndefined()
   })
 
   test("accepts a non-done turn with multiple independent questions", () => {
     const parsed = readerInterviewTurnSchema.parse({
-      questions: ["Do you know PyTorch?", "Do you know Swift?"],
+      newQuestions: ["Do you know PyTorch?", "Do you know Swift?"],
       done: false,
     })
-    expect(parsed.questions).toHaveLength(2)
+    expect(parsed.newQuestions).toHaveLength(2)
   })
 
   test("accepts a done turn with a full profile", () => {
     const parsed = readerInterviewTurnSchema.parse({
-      questions: [],
+      newQuestions: [],
       done: true,
       profile: {
         learningGoal: "decide if MLX is worth learning",
@@ -98,12 +99,12 @@ describe("readerInterviewTurnSchema", () => {
   })
 
   test("rejects a non-done turn with no questions", () => {
-    expect(() => readerInterviewTurnSchema.parse({ questions: [], done: false })).toThrow()
+    expect(() => readerInterviewTurnSchema.parse({ newQuestions: [], done: false })).toThrow()
   })
 
   test("has no confidence field in the profile (per plan)", () => {
     const parsed = readerInterviewTurnSchema.parse({
-      questions: ["q"],
+      newQuestions: ["q"],
       done: true,
       profile: { learningGoal: "g", concepts: [{ concept: "c", level: "familiar" }] },
     })
@@ -141,13 +142,13 @@ describe("ResearchState reader fields", () => {
       ...base,
       readerProfile: [{ concept: "autograd", level: "unknown" }],
       learningGoal: "decide if MLX is worth learning",
-      pendingReaderQuestions: ["What are you trying to do?", "What have you read so far?\nMention file paths if relevant."],
+      pendingNewReaderQuestions: ["What are you trying to do?", "What have you read so far?\nMention file paths if relevant."],
       interviewTranscript: [{ role: "interviewer", text: "q?" }, { role: "reader", text: "a" }],
     })
     expect(withReader.readerProfile).toHaveLength(1)
     expect(withReader.learningGoal).toBe("decide if MLX is worth learning")
-    expect(withReader.pendingReaderQuestions).toHaveLength(2)
-    expect(withReader.pendingReaderQuestions?.[1]).toContain("file paths")
+    expect(withReader.pendingNewReaderQuestions).toHaveLength(2)
+    expect(withReader.pendingNewReaderQuestions?.[1]).toContain("file paths")
     expect(withReader.interviewTranscript).toHaveLength(2)
   })
 
@@ -171,7 +172,7 @@ describe("ResearchState reader fields", () => {
     const parsed = researchStateSchema.parse(base)
     expect(parsed.readerProfile).toBeUndefined()
     expect(parsed.learningGoal).toBeUndefined()
-    expect(parsed.pendingReaderQuestions).toBeUndefined()
+    expect(parsed.pendingNewReaderQuestions).toBeUndefined()
     expect(parsed.interviewTranscript).toBeUndefined()
   })
 })
@@ -182,11 +183,33 @@ describe("readerDiscovery config", () => {
   })
 })
 
-describe("reader interview follow-up prompting", () => {
-  test("adds explicit continuation guidance after the first turn", () => {
-    expect(readerInterviewFollowUpInstructions(0)).toContain("first interview turn")
-    expect(readerInterviewFollowUpInstructions(2)).toContain("continuing an existing reader interview")
-    expect(readerInterviewFollowUpInstructions(2)).toContain("Do not repeat any previous interviewer question")
+describe("reader interview prompt assets", () => {
+  test("keeps first, follow-up, and duplicate-correction guidance in prompt assets", async () => {
+    expect(promptAssetFiles.readerInterview).toBe("reader-interview.md")
+    expect(promptAssetFiles.readerInterviewFollowUp).toBe("reader-interview-follow-up.md")
+    expect(promptAssetFiles.readerInterviewDuplicateCorrection).toBe("reader-interview-duplicate-correction.md")
+
+    const bundle = await loadPromptBundle(testConfig)
+    expect(bundle.assets.readerInterview).toContain("first interview turn")
+    expect(bundle.assets.readerInterviewFollowUp).toContain("continuing an existing reader interview")
+    expect(bundle.assets.readerInterviewDuplicateCorrection).toContain("previous response repeated")
+    expect(bundle.assets.readerInterview).toContain("`newQuestions` array")
+    expect(bundle.assets.readerInterviewFollowUp).toContain("`newQuestions` array")
+    expect(bundle.assets.readerInterviewDuplicateCorrection).toContain("`newQuestions` array")
+    expect(bundle.assets.readerInterviewFollowUp).not.toContain("Follow-up guidance")
+  })
+
+  test("formats batched reader questions and answers as numbered pairs", () => {
+    const transcript = [
+      { role: "interviewer" as const, text: "What are you trying to accomplish?\nHow familiar are you with ML?" },
+      { role: "reader" as const, text: "Answer 1: Pure curiosity.\n\nAnswer 2: Quite new." },
+    ]
+
+    const formatted = formatReaderTranscriptForPrompt(transcript)
+    expect(formatted).toContain("Question 1: What are you trying to accomplish?")
+    expect(formatted).toContain("Answer 1: Pure curiosity.")
+    expect(formatted).toContain("Question 2: How familiar are you with ML?")
+    expect(formatted).toContain("Answer 2: Quite new.")
   })
 
   test("detects repeated interviewer questions", () => {
@@ -220,6 +243,8 @@ describe("createGraph wires the discoverReader node", () => {
         auditScriptSecurity: "audit-ss",
         reviseDesign: "revise-design",
         readerInterview: "interview {requestContext} {transcript} {maxTurns} {turn} {outputFile}",
+        readerInterviewFollowUp: "interview follow-up {requestContext} {transcript} {maxTurns} {turn} {outputFile}",
+        readerInterviewDuplicateCorrection: "interview correction {requestContext} {transcript} {maxTurns} {turn} {outputFile}",
         enhanceDesign: "enhance",
         rebuttalReview: "rr",
         drafterReview: "dr",
@@ -240,9 +265,9 @@ describe("createGraph wires the discoverReader node", () => {
   })
 })
 
-describe("reader-profile.json artifact shape", () => {
+describe("reader-profile-N.json artifact shape", () => {
   test("a profile written by the interviewer parses as readerProfileSchema", async () => {
-    const profileFile = join(tempDir, "reader-profile.json")
+    const profileFile = join(tempDir, "reader-profile-1.json")
     await mkdir(tempDir, { recursive: true })
     const profile = {
       learningGoal: "decide if MLX is worth learning",

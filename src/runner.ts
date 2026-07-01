@@ -12,6 +12,7 @@ import type { RuntimeConfig } from "./config"
 import { researchStateSchema, type GraphInput, type InputRequest, type ResearchState } from "./schema"
 import type { validateProviderPrerequisites } from "./providers/registry"
 import type { PromptBundle } from "./prompt-assets"
+import { answeredQuestionsFromTranscript } from "./reader-transcript"
 
 export type GraphFactory = typeof createGraph
 
@@ -154,7 +155,7 @@ function permissionKey(input: { sessionID: string; messageID?: string; callID?: 
 
 /**
  * Run a graph that may suspend on `interrupt()` inside the `discoverReader` node.
- * On suspend: write the current questions to live-status.json (awaitingReaderReply),
+ * On suspend: write the current newQuestions to live-status.json (awaitingReaderReply),
  * poll for a reader-reply.json file in the run dir, then resume with
  * `Command({ resume: replyText })`. Loops until the graph completes.
  *
@@ -175,7 +176,12 @@ async function runGraphWithInterviewResume<GraphT extends {
   baseConfig: { configurable: { thread_id: string }; recursionLimit: number; signal: AbortSignal },
   opts: {
     runDir: () => string | undefined
-    setAwaitingReaderReply: (value: { turn: number; questions: string[]; transcript: { role: string; text: string }[] } | undefined) => void
+    setAwaitingReaderReply: (value: {
+      turn: number
+      answeredQuestions: Array<{ question: string; answer: string }>
+      newQuestions: string[]
+      transcript: { role: string; text: string }[]
+    } | undefined) => void
     debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
   },
 ): Promise<Record<string, unknown>> {
@@ -202,10 +208,10 @@ async function runGraphWithInterviewResume<GraphT extends {
     }
 
     const interruptValue = interruptTask.interrupts[0]!.value
-    const pendingQuestions = Array.isArray(snapshot?.values?.pendingReaderQuestions)
-      ? (snapshot!.values.pendingReaderQuestions as string[])
+    const pendingQuestions = Array.isArray(snapshot?.values?.pendingNewReaderQuestions)
+      ? (snapshot!.values.pendingNewReaderQuestions as string[])
       : undefined
-    const questions = pendingQuestions && pendingQuestions.length > 0
+    const newQuestions = pendingQuestions && pendingQuestions.length > 0
       ? pendingQuestions
       : Array.isArray(interruptValue) ? (interruptValue as string[]) : [String(interruptValue)]
     const transcript = Array.isArray(snapshot?.values?.interviewTranscript)
@@ -213,8 +219,16 @@ async function runGraphWithInterviewResume<GraphT extends {
       : []
     const turn = Math.ceil(transcript.length / 2)
 
-    opts.debugLog?.write("reader.interview_suspend", { turn, questions, attempt })
-    opts.setAwaitingReaderReply({ turn, questions, transcript })
+    const answeredQuestions = answeredQuestionsFromTranscript(
+      transcript.flatMap((entry) =>
+        entry.role === "interviewer" || entry.role === "reader"
+          ? [{ role: entry.role, text: entry.text }]
+          : []
+      ),
+    )
+
+    opts.debugLog?.write("reader.interview_suspend", { turn, answeredQuestions, newQuestions, attempt })
+    opts.setAwaitingReaderReply({ turn, answeredQuestions, newQuestions, transcript })
 
     // Wait for the view-server to write reader-reply.json (the user submitted
     // the chat form). Poll the run dir; honor the abort signal.
@@ -249,7 +263,7 @@ async function waitForReaderReply(runDir: () => string | undefined, signal: Abor
           const raw = await readFile(replyPath, "utf8")
           // Preserve the reply for triage: rename reader-reply.json →
           // reader-reply-turn-N.json instead of deleting it. The run dir
-          // keeps the full reply trail alongside reader-profile.json.
+          // keeps the full reply trail alongside reader-profile-N.json.
           try { await rename(replyPath, join(dir, `reader-reply-turn-${turn}.json`)) } catch { /* best effort */ }
           // The view-server writes the reply body as JSON { reply: string } or raw text.
           try {

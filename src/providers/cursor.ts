@@ -253,7 +253,7 @@ function cursorToolName(toolCall: unknown) {
 }
 
 function cursorArtifactPath(outputFile: string) {
-  return `artifacts/${basename(outputFile)}`
+  return basename(outputFile)
 }
 
 function cursorArtifactMatchesPath(actual: string, expected: string) {
@@ -274,28 +274,57 @@ function safeJson(value: unknown) {
   }, 2)
 }
 
-async function saveCursorResponse(input: {
+function safeDebugSegment(value: string) {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "cursor"
+}
+
+async function writeJsonFile(path: string, data: unknown) {
+  await writeFile(path, safeJson(data) + "\n", "utf8")
+}
+
+async function saveCursorDebugFiles(input: {
   outputFile: string
+  role: AgentRole
   agentId: string
   runId: string
+  callIndex: number
+  attempt: number
   result: unknown
   text: string
   artifacts?: unknown
   conversation?: unknown
 }) {
-  const base = `${input.outputFile}.cursor-response`
   await mkdir(dirname(input.outputFile), { recursive: true })
-  await writeFile(`${base}.txt`, input.text, "utf8")
-  await writeFile(`${base}.json`, safeJson({
+  const runSegment = safeDebugSegment(input.runId)
+  const roleSegment = safeDebugSegment(input.role)
+  const base = `${dirname(input.outputFile)}/cursor-${roleSegment}-call-${input.callIndex}-attempt-${input.attempt}-${runSegment}`
+  const metadata = {
     agentId: input.agentId,
     runId: input.runId,
+    role: input.role,
+    callIndex: input.callIndex,
+    attempt: input.attempt,
     outputFile: input.outputFile,
     requestedArtifact: cursorArtifactPath(input.outputFile),
-    artifacts: input.artifacts,
-    result: input.result,
-    text: input.text,
-    conversation: input.conversation,
-  }) + "\n", "utf8")
+  }
+
+  const paths = {
+    metadata: `${base}-metadata.json`,
+    result: `${base}-result.json`,
+    response: `${base}-response.txt`,
+    artifacts: `${base}-artifacts.json`,
+    conversation: input.conversation === undefined ? undefined : `${base}-conversation.json`,
+  }
+
+  await writeJsonFile(paths.metadata, metadata)
+  await writeJsonFile(paths.result, input.result)
+  await writeFile(paths.response, input.text, "utf8")
+  await writeJsonFile(paths.artifacts, input.artifacts ?? [])
+  if (paths.conversation) {
+    await writeJsonFile(paths.conversation, input.conversation)
+  }
+
+  return paths
 }
 
 async function downloadCursorArtifact(input: {
@@ -303,6 +332,7 @@ async function downloadCursorArtifact(input: {
   handle: AgentRunHandle
   outputFile: string
   artifacts?: Awaited<ReturnType<CursorAgentHandle["listArtifacts"]>>
+  artifactsFile?: string
 }) {
   if (!input.handle.id.startsWith("bc-")) {
     throw new Error("Cursor local agents do not support artifact download; use Cursor cloud for file output")
@@ -313,7 +343,8 @@ async function downloadCursorArtifact(input: {
   const found = artifacts.find((artifact) => cursorArtifactMatchesPath(artifact.path, artifactPath))
   if (!found) {
     const available = artifacts.map((artifact) => artifact.path).join(", ") || "(none)"
-    throw new Error(`Cursor cloud agent did not produce required artifact ${artifactPath}; available artifacts: ${available}`)
+    const diagnostic = input.artifactsFile ? `; artifact list saved to ${input.artifactsFile}` : ""
+    throw new Error(`Cursor cloud agent did not produce required artifact ${artifactPath}; available artifacts: ${available}${diagnostic}`)
   }
 
   const buffer = await input.agent.downloadArtifact(found.path)
@@ -445,24 +476,16 @@ export const cursorProvider: AgentProvider = {
     }
 
     const roleRuntime = roleConfig(input.config, input.role)
-    const providerAgent = input.handle.providerAgent ?? roleRuntime?.providerAgent ?? input.role
-    const promptPrefix = [
-      `You are acting as the quorum role: ${input.role}.`,
-      providerAgent !== input.role ? `Provider role label: ${providerAgent}.` : undefined,
-      roleRuntime?.variant ? `Role variant: ${roleRuntime.variant}.` : undefined,
-    ].filter(Boolean).join("\n")
-
-    const prompt = input.outputFile
-      ? input.prompt.split(input.outputFile).join(cursorArtifactPath(input.outputFile))
-      : input.prompt
+    let callIndex = 0
 
     return runProviderStructuredPrompt({
-      prompt: `${promptPrefix}\n\n${prompt}`,
+      prompt: input.prompt,
       providerOutputFile: input.outputFile,
-      outputInstructionFile: input.outputFile ? cursorArtifactPath(input.outputFile) : undefined,
       schema: input.schema,
       artifactFile: input.outputFile,
       async sendPrompt(prompt) {
+        callIndex += 1
+        const currentCallIndex = callIndex
         for (let attempt = 1; attempt <= cursorTransportRetryAttempts; attempt++) {
           try {
             const messageID = `cursor:${input.handle.id}:${attempt}:${Date.now()}`
@@ -473,11 +496,15 @@ export const cursorProvider: AgentProvider = {
             active.run = run
             const result = await run.wait()
             const status = (result as { status?: string }).status
-            if (status && status !== "finished" && status !== "completed") {
-              throw new CursorRunStatusError(run.id, status, result)
-            }
             const text = extractRunText(result)
-            const artifacts = await active.agent.listArtifacts()
+            let artifacts: Awaited<ReturnType<CursorAgentHandle["listArtifacts"]>> = []
+            let artifactsPayload: unknown = artifacts
+            try {
+              artifacts = await active.agent.listArtifacts()
+              artifactsPayload = artifacts
+            } catch (error) {
+              artifactsPayload = { error: cursorErrorMessage(error) }
+            }
             let conversation: unknown
             if (run.supports("conversation")) {
               try {
@@ -486,20 +513,27 @@ export const cursorProvider: AgentProvider = {
                 conversation = { error: cursorErrorMessage(error) }
               }
             }
-            await saveCursorResponse({
+            const debugPaths = await saveCursorDebugFiles({
               outputFile,
+              role: input.role,
               agentId: input.handle.id,
               runId: run.id,
+              callIndex: currentCallIndex,
+              attempt,
               result,
               text,
-              artifacts,
+              artifacts: artifactsPayload,
               conversation,
             })
+            if (status && status !== "finished" && status !== "completed") {
+              throw new CursorRunStatusError(run.id, status, result)
+            }
             await downloadCursorArtifact({
               agent: active.agent,
               handle: input.handle,
               outputFile,
               artifacts,
+              artifactsFile: debugPaths.artifacts,
             })
             return {
               text,

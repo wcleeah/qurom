@@ -64,12 +64,11 @@ export function renderRequestCard(data: unknown): string {
 </div>`
 }
 
-// ── reader-profile.json ──
+// ── reader-profile-N.json ──
 
 export function renderReaderProfileCard(data: unknown): string {
-  // The interviewer writes the per-turn JSON to reader-profile.json each turn
-  // (auditor pattern). On the final turn the file holds the full turn object
-  // with `profile: { learningGoal, concepts: [...] }`.
+  // The interviewer writes one JSON artifact per turn. On the final turn the
+  // file holds the full turn object with `profile: { learningGoal, concepts }`.
   const d = data as Record<string, unknown>
   const profile = (d.profile ?? d) as { learningGoal?: string; concepts?: Array<{ concept: string; level: string; evidence?: string }> }
   const concepts = Array.isArray(profile.concepts) ? profile.concepts : []
@@ -297,7 +296,7 @@ export function renderRebuttalResponses(filename: string, data: unknown): string
 
 export function renderStructuredJson(filename: string, data: unknown): string {
   if (filename === "request.json") return renderRequestCard(data)
-  if (filename === "reader-profile.json") return renderReaderProfileCard(data)
+  if (/^reader-profile(?:-\d+)?\.json$/.test(filename)) return renderReaderProfileCard(data)
   if (filename === "summary.json") return renderSummaryCard(data)
   if (/^audits-round-\d+\.json$/.test(filename)) return renderAuditRound(filename, data)
   if (/^aggregated-findings-round-\d+\.json$/.test(filename)) return renderConsensusCard(filename, data)

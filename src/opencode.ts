@@ -9,7 +9,6 @@ import type { DebugLog } from "./debug-log"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 import {
   buildFileRepairPrompt,
-  buildStructuredPrompt,
   buildStructuredRepairPrompt,
   classifyFault,
   coerceJson,
@@ -355,7 +354,7 @@ export async function promptAgent<T>(input: {
     }
 
     const jsonSchema = toJsonSchema(input.schema) as Record<string, unknown>
-    const initialResponse = await sendPrompt(buildStructuredPrompt(input.prompt, jsonSchema))
+    const initialResponse = await sendPrompt(input.prompt)
 
     // If outputFile was requested, try reading it first (agent may have written structured output there)
     const fileContentRead = await readOutputFile()

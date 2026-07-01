@@ -44,7 +44,8 @@ export interface LiveStatus {
   error?: string
   awaitingReaderReply?: {
     turn: number
-    questions: string[]
+    answeredQuestions: Array<{ question: string; answer: string }>
+    newQuestions: string[]
     transcript: { role: string; text: string }[]
   }
 }

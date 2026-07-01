@@ -60,6 +60,9 @@ const promptBundle = {
     reviewFindings: "review-findings",
     rebuttal: "rebuttal",
     reviewRebuttalResponses: "review-rebuttal-responses",
+    readerInterview: "reader-interview",
+    readerInterviewFollowUp: "reader-interview-follow-up",
+    readerInterviewDuplicateCorrection: "reader-interview-duplicate-correction",
   },
 } as const
 

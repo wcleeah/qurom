@@ -11,6 +11,8 @@ export const promptAssetFiles = {
   auditScriptSecurity: "audit-script-security.md",
   reviseDesign: "revise-design.md",
   readerInterview: "reader-interview.md",
+  readerInterviewFollowUp: "reader-interview-follow-up.md",
+  readerInterviewDuplicateCorrection: "reader-interview-duplicate-correction.md",
   enhanceDesign: "enhance-design.md",
 } as const
 

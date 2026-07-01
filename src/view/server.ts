@@ -74,7 +74,7 @@ export function startViewServer(): void {
             ? params.get("reply") ?? raw
             : answers.length === 1
               ? answers[0]!
-              : answers.join("\n\n")
+              : answers.map((answer, answerIndex) => `Answer ${answerIndex + 1}: ${answer}`).join("\n\n")
           await Bun.write(`${runDir}/reader-reply.json`, JSON.stringify({ reply: replyText }))
           return new Response(null, {
             status: 303,
