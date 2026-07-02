@@ -13,6 +13,7 @@ import {
   attachTelemetryListener,
   createEventBus,
   describeRunnerEvent,
+  runDesignPipeline,
   runResearchPipeline,
 } from "../src/runner.ts"
 import type { RuntimeConfig } from "../src/config.ts"
@@ -633,6 +634,83 @@ describe("runResearchPipeline", () => {
     expect(traceUpdates[0]?.metadata?.agentVariants).toEqual({
       "research-drafter": "high",
     })
+  })
+})
+
+describe("runDesignPipeline", () => {
+  test("archives previous design artifacts and reruns from the HTML designer checkpoint", async () => {
+    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
+    const runDir = join(artifactDir, "design-rerun-req-design-1")
+    await mkdir(runDir, { recursive: true })
+    await Bun.write(join(runDir, "request.json"), JSON.stringify({
+      requestId: "req-design-1",
+      inputMode: "topic",
+      topic: "design rerun topic",
+    }))
+    await Bun.write(join(runDir, "design-html-round-0.html"), "<html>old</html>")
+    await Bun.write(join(runDir, "design-audits-round-0.json"), "[]")
+    await Bun.write(join(runDir, "design-consensus-round-0.json"), "{}")
+    await Bun.write(join(runDir, "final.html"), "<html>final</html>")
+    await Bun.write(join(runDir, "final.html.truncation-warning.txt"), "warning")
+    await Bun.write(join(runDir, "cursor-html-designer-call-1-attempt-1-run-response.txt"), "debug")
+    await Bun.write(join(runDir, "draft-round-0.md"), "keep me")
+
+    const bus = createEventBus()
+    const invokeConfigs: unknown[] = []
+    const graphFactory: GraphFactory = (() => ({
+      getStateHistory: async function* () {
+        yield {
+          next: ["finalizeDesign"],
+          config: { configurable: { thread_id: "req-design-1", checkpoint_id: "after-design" } },
+        }
+        yield {
+          next: ["runDesignHtml"],
+          config: { configurable: { thread_id: "req-design-1", checkpoint_id: "before-design" } },
+        }
+      },
+      invoke: async (_input: unknown, invokeConfig: unknown) => {
+        invokeConfigs.push(invokeConfig)
+        return {
+          requestId: "req-design-1",
+          status: "approved",
+          round: 0,
+          approvedAgents: ["source-auditor"],
+          unresolvedFindings: [],
+          outputPath: runDir,
+          designStatus: "approved",
+          designRound: 0,
+        }
+      },
+    })) as GraphFactory
+
+    await runDesignPipeline({
+      config: configWithTempArtifacts,
+      promptBundle,
+      runId: "req-design-1",
+      bus,
+      graphFactory,
+      bridgeFactory: () => ({ async start() {}, async stop() {} }),
+      telemetryFactory: async () => disabledTelemetry(),
+    })
+
+    expect(invokeConfigs[0]).toMatchObject({
+      configurable: { thread_id: "req-design-1", checkpoint_id: "before-design" },
+    })
+    expect(await Bun.file(join(runDir, "draft-round-0.md")).text()).toBe("keep me")
+    expect(await Bun.file(join(runDir, "final.html")).exists()).toBe(false)
+    expect(await Bun.file(join(runDir, "design-html-round-0.html")).exists()).toBe(false)
+
+    const archiveRoots = await readdir(join(runDir, "design-archive"))
+    expect(archiveRoots).toHaveLength(1)
+    const archivedFiles = await readdir(join(runDir, "design-archive", archiveRoots[0]!))
+    expect(archivedFiles.sort()).toEqual([
+      "cursor-html-designer-call-1-attempt-1-run-response.txt",
+      "design-audits-round-0.json",
+      "design-consensus-round-0.json",
+      "design-html-round-0.html",
+      "final.html",
+      "final.html.truncation-warning.txt",
+    ])
   })
 })
 

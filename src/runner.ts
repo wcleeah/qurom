@@ -513,6 +513,28 @@ async function resolveGraphResumeConfig(
   return { configurable: { thread_id: requestId, checkpoint_id: checkpointId } }
 }
 
+function isDesignRelatedArtifact(filename: string) {
+  return filename.startsWith("design-")
+    || filename === "final.html"
+    || filename.startsWith("final.html.")
+    || /^cursor-(html-designer|interactive-enhancer|visual-layout-auditor|technical-html-auditor|script-security-auditor|browser-qa-enhancer)-/.test(filename)
+}
+
+async function archiveDesignArtifacts(runDir: string) {
+  const { mkdir, readdir, rename } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+  const entries = await readdir(runDir, { withFileTypes: true })
+  const files = entries.filter((entry) => entry.isFile() && isDesignRelatedArtifact(entry.name))
+  if (files.length === 0) return undefined
+
+  const archiveDir = join(runDir, "design-archive", new Date().toISOString().replace(/[:.]/g, "-"))
+  await mkdir(archiveDir, { recursive: true })
+  for (const file of files) {
+    await rename(join(runDir, file.name), join(archiveDir, file.name))
+  }
+  return { archiveDir, files: files.map((file) => file.name) }
+}
+
 export async function runResearchPipeline(args: RunResearchPipelineArgs): Promise<RunResult> {
   const { config, prerequisites, promptBundle, bus, signal } = args
   void prerequisites
@@ -899,6 +921,12 @@ export async function runDesignPipeline(args: {
   runId: string
   bus: EventBus
   signal?: AbortSignal
+  graphFactory?: GraphFactory
+  bridgeFactory?: BridgeFactory
+  telemetryFactory?: (
+    config: RuntimeConfig,
+    input: { requestId: string; inputMode: "topic" | "document"; topic?: string; documentPath?: string },
+  ) => Promise<TelemetryRun>
 }) {
   const { config, promptBundle, runId, bus, signal } = args
 
@@ -906,8 +934,10 @@ export async function runDesignPipeline(args: {
   const runDir = resolvedRun.runDir
   const requestId = resolvedRun.requestId
 
-  const graphFactory = createGraph
-  const telemetry = await createTelemetry(config, { requestId, inputMode: "topic" })
+  const graphFactory = args.graphFactory ?? createGraph
+  const bridgeFactory = args.bridgeFactory ?? createOpencodeEventBridge
+  const telemetryFactory = args.telemetryFactory ?? createTelemetry
+  const telemetry = await telemetryFactory(config, { requestId, inputMode: "topic" })
   const actualAgentVariants = new Map<string, string>()
   const trackAgentMetadata = (input: { agent: string; sessionID: string; model?: string; variant?: string }) => {
     if (input.variant) actualAgentVariants.set(input.agent, input.variant)
@@ -918,7 +948,7 @@ export async function runDesignPipeline(args: {
   const liveStatusWriter = createLiveStatusWriter(bus, () => runDir, {
     maxRounds: config.quorumConfig.designQuorum?.maxRounds ?? config.quorumConfig.maxRounds,
   })
-  const bridge = createOpencodeEventBridge(config, { bus, getRunDir: () => runDir })
+  const bridge = bridgeFactory(config, { bus, getRunDir: () => runDir })
   const bridgeAbort = new AbortController()
 
   if (signal) {
@@ -957,17 +987,24 @@ export async function runDesignPipeline(args: {
       },
     })
 
-    // Find the latest checkpoint to resume from
-    const state = await graph.getState({ configurable: { thread_id: requestId } })
-    if (!state) throw new Error(`No checkpoint found for thread ${requestId}`)
+    const resumeConfig = await resolveGraphResumeConfig(
+      graph as unknown as Parameters<typeof resolveGraphResumeConfig>[0],
+      requestId,
+      { runId, node: "runDesignHtml" },
+    )
+    const checkpointId = resumeConfig.configurable.checkpoint_id
+    const archived = await archiveDesignArtifacts(runDir)
 
-    const checkpointId = state.config.configurable?.checkpoint_id
-    if (!checkpointId) throw new Error(`No checkpoint_id in state for thread ${requestId}`)
-
-    debugLog.write("pipeline.design_resume", { requestId, checkpointId })
+    debugLog.write("pipeline.design_resume", {
+      requestId,
+      checkpointId,
+      mode: "rerun_from_html_designer",
+      archiveDir: archived?.archiveDir,
+      archivedFiles: archived?.files,
+    })
 
     const result = await graph.invoke(null, {
-      configurable: { thread_id: requestId, checkpoint_id: checkpointId },
+      configurable: resumeConfig.configurable,
       recursionLimit: config.quorumConfig.recursionLimit,
       signal: bridgeAbort.signal,
     })
