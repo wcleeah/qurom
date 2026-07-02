@@ -166,7 +166,7 @@ export function createLiveStatusWriter(
       case "design.phase": {
         const phaseStr =
           event.phase === "drafting" ? "design: drafting"
-          : event.phase === "aggregating" ? `design: consensus round ${event.round}`
+          : event.phase === "browser_qa" ? "design: browser QA"
           : `design: ${event.phase} round ${event.round}`
         status.node = phaseStr
         status.nodeStartedAt = Date.now()

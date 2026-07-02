@@ -58,8 +58,6 @@ export const quorumConfigSchema = z.object({
     .object({
       enabled: z.boolean(),
       designatedDesigner: z.string().min(1),
-      auditors: z.array(z.string().min(1)).min(1),
-      maxRounds: z.number().int().positive(),
       browserQa: z
         .object({
           enabled: z.boolean(),

@@ -16,7 +16,7 @@ import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import type { AgentRunHandle } from "./providers/types"
 import type { PromptBundle } from "./prompt-assets"
 import { summarizeMarkdown } from "./summarizer"
-import { designHtml, runDesignAudits, aggregateDesignConsensus, reviseDesignHtml } from "./design-quorum"
+import { designHtml } from "./design-quorum"
 import { formatReaderTranscriptForPrompt } from "./reader-transcript"
 import {
   aggregatedFindingSchema,
@@ -51,7 +51,7 @@ export type RunObserver = {
   onNodeStart?: (node: string, state: ResearchState | GraphInput) => void
   onNodeEnd?: (node: string, state: ResearchState | GraphInput) => void
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
-  onDesignPhase?: (phase: "drafting" | "auditing" | "aggregating" | "revising", round: number) => void
+  onDesignPhase?: (phase: "drafting" | "enhancing" | "finalizing" | "browser_qa", round: number) => void
 }
 
 type GraphTelemetry = {
@@ -1881,6 +1881,7 @@ async function designHtmlNode(
 
   const htmlFile = `${state.outputPath}/design-html-round-${state.designRound ?? 0}.html`
 
+  observer?.onDesignPhase?.("drafting", state.designRound ?? 0)
   const html = await designHtml(config, promptBundle, draftPath, topic, htmlFile,
     telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
     observer,
@@ -1909,6 +1910,7 @@ async function interactiveEnhanceNode(
   const round = state.designRound ?? 0
   const htmlFile = `${state.outputPath}/design-html-round-${round}.html`
 
+  observer?.onDesignPhase?.("enhancing", round)
   const handle = await createObservedHandle({
     runtime,
     role: "interactive-enhancer",
@@ -1937,66 +1939,10 @@ async function interactiveEnhanceNode(
     await Bun.write(htmlFile, response.text)
   }
 
-  return researchStateSchema.parse({ ...state })
-}
-
-async function runDesignAuditsNode(
-  config: RuntimeConfig,
-  runtime: AgentRuntime,
-  promptBundle: PromptBundle,
-  state: ResearchState,
-  telemetry?: GraphTelemetry,
-  observer?: RunObserver,
-) {
-  if (!state.outputPath) throw new Error("Missing outputPath during runDesignAudits")
-  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
-
-  const round = state.designRound ?? 0
-  const htmlFile = `${state.outputPath}/design-html-round-${round}.html`
-
-  const audits = await runDesignAudits(config, promptBundle, htmlFile, state.outputPath, round,
-    telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
-    observer,
-    runtime,
-  )
-
-  // Persist audits
-  await writeRunJsonArtifact(state.outputPath, `design-audits-round-${round}.json`, audits)
-
-  return researchStateSchema.parse({ ...state })
-}
-
-async function aggregateDesignFindingsNode(
-  config: RuntimeConfig,
-  _promptBundle: PromptBundle,
-  state: ResearchState,
-  _telemetry?: GraphTelemetry,
-  _observer?: RunObserver,
-) {
-  if (!state.outputPath) throw new Error("Missing outputPath during aggregateDesignFindings")
-  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
-
-  const round = state.designRound ?? 0
-
-  // Read audits from disk
-  const auditsFile = Bun.file(`${state.outputPath}/design-audits-round-${round}.json`)
-  const audits = (await auditsFile.exists()) ? await auditsFile.json() as any[] : []
-
-  const consensus = aggregateDesignConsensus(config, audits, undefined, round)
-
-  // Persist consensus
-  await writeRunJsonArtifact(state.outputPath, `design-consensus-round-${round}.json`, {
-    outcome: consensus.outcome,
-    approvedAgents: consensus.approvedAgents,
-    unresolvedFindings: consensus.unresolved,
-    failureReason: consensus.failureReason,
-  })
-
+  const html = await Bun.file(htmlFile).text()
   return researchStateSchema.parse({
     ...state,
-    designStatus: consensus.outcome === "approved" || consensus.outcome === "approved_with_caveats" ? "approved" as const
-      : consensus.outcome === "failed_non_convergent" ? "failed" as const
-      : "running" as const,
+    designHtml: html,
   })
 }
 
@@ -2009,6 +1955,8 @@ async function finalizeDesignNode(
 ) {
   if (!state.outputPath) throw new Error("Missing outputPath during finalizeDesign")
   if (!_config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  _observer?.onDesignPhase?.("finalizing", state.designRound ?? 0)
 
   // Write the approved (or best-effort) design HTML as final.html.
   // state.designHtml holds the latest HTML the auditors reviewed; fall back to
@@ -2044,6 +1992,8 @@ export async function browserQaEnhanceNode(
   const htmlFile = `${state.outputPath}/final.html`
   if (!(await Bun.file(htmlFile).exists())) return researchStateSchema.parse(state)
 
+  observer?.onDesignPhase?.("browser_qa", state.designRound ?? 0)
+
   const handle = await createObservedHandle({
     runtime,
     role: "browser-qa-enhancer",
@@ -2078,53 +2028,6 @@ export async function browserQaEnhanceNode(
 
   const html = await Bun.file(htmlFile).text()
   return researchStateSchema.parse({ ...state, designHtml: html })
-}
-
-async function reviseDesignHtmlNode(
-  config: RuntimeConfig,
-  runtime: AgentRuntime,
-  promptBundle: PromptBundle,
-  state: ResearchState,
-  telemetry?: GraphTelemetry,
-  observer?: RunObserver,
-) {
-  if (!state.outputPath) throw new Error("Missing outputPath during reviseDesignHtml")
-  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
-
-  const round = state.designRound ?? 0
-  const nextRound = round + 1
-  const htmlFile = `${state.outputPath}/design-html-round-${round}.html`
-  const nextHtmlFile = `${state.outputPath}/design-html-round-${nextRound}.html`
-
-  // Read unresolved findings from the consensus file
-  const consensusFile = Bun.file(`${state.outputPath}/design-consensus-round-${round}.json`)
-  const consensus = (await consensusFile.exists()) ? await consensusFile.json() as any : { unresolvedFindings: [] }
-  const findings = consensus.unresolvedFindings ?? []
-
-  const html = await reviseDesignHtml(config, promptBundle, htmlFile, findings, nextHtmlFile, state.outputPath, round,
-    telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
-    observer,
-    runtime,
-  )
-
-  return researchStateSchema.parse({
-    ...state,
-    designHtml: html,
-    designRound: nextRound,
-  })
-}
-
-export function routeAfterDesignAggregate(config: RuntimeConfig, state: ResearchState): string {
-  const designQuorum = config.quorumConfig.designQuorum
-  if (!designQuorum?.enabled) return "__end__"
-
-  // Approved, failed, or rounds exhausted → finalize the design (write final.html)
-  // before ending. Otherwise loop back to revise.
-  if (state.designStatus === "approved") return "finalizeDesign"
-  if (state.designStatus === "failed") return "finalizeDesign"
-  if ((state.designRound ?? 0) >= designQuorum.maxRounds) return "finalizeDesign"
-
-  return "reviseDesignHtml"
 }
 
 export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry, runtime = createAgentRuntime(config)) {
@@ -2370,21 +2273,6 @@ export function createGraph(
         interactiveEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
-    .addNode("runDesignAudits", async (state) =>
-      withNodeTelemetry("runDesignAudits", state, () =>
-        runDesignAuditsNode(config, runtime, promptBundle, state, graphTelemetry, observer),
-      ),
-    )
-    .addNode("aggregateDesignFindings", async (state) =>
-      withNodeTelemetry("aggregateDesignFindings", state, () =>
-        aggregateDesignFindingsNode(config, promptBundle, state, graphTelemetry, observer),
-      ),
-    )
-    .addNode("reviseDesignHtml", async (state) =>
-      withNodeTelemetry("reviseDesignHtml", state, () =>
-        reviseDesignHtmlNode(config, runtime, promptBundle, state, graphTelemetry, observer),
-      ),
-    )
     .addNode("finalizeDesign", async (state) =>
       withNodeTelemetry("finalizeDesign", state, () =>
         finalizeDesignNode(config, promptBundle, state, graphTelemetry, observer),
@@ -2429,13 +2317,7 @@ export function createGraph(
       "__end__",
     ])
     .addEdge("runDesignHtml", "interactiveEnhance")
-    .addEdge("interactiveEnhance", "runDesignAudits")
-    .addEdge("runDesignAudits", "aggregateDesignFindings")
-    .addConditionalEdges("aggregateDesignFindings", (state) => routeAfterDesignAggregate(config, state), [
-      "reviseDesignHtml",
-      "finalizeDesign",
-    ])
-    .addEdge("reviseDesignHtml", "runDesignAudits")
+    .addEdge("interactiveEnhance", "finalizeDesign")
     .addEdge("finalizeDesign", "browserQaEnhance")
     .addEdge("browserQaEnhance", "__end__")
     .compile({

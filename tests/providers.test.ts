@@ -37,8 +37,6 @@ const baseConfig: RuntimeConfig = {
     designQuorum: {
       enabled: true,
       designatedDesigner: "html-designer",
-      auditors: ["visual-layout-auditor", "technical-html-auditor", "script-security-auditor"],
-      maxRounds: 2,
     },
     auditRestart: { maxRestarts: 1 },
     readerDiscovery: { maxTurns: 6, enabled: true },

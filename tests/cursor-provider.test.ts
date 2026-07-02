@@ -420,8 +420,6 @@ describe("cursorProvider", () => {
         designQuorum: {
           enabled: true,
           designatedDesigner: "html-designer",
-          auditors: ["visual-layout-auditor"],
-          maxRounds: 1,
           browserQa: { enabled: true, mcpServer: "playwright" },
         },
         agentRuntime: {

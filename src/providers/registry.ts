@@ -54,7 +54,6 @@ export function configuredAgentRoles(config: RuntimeConfig): AgentRole[] {
   if (config.quorumConfig.designQuorum?.enabled) {
     roles.push(
       config.quorumConfig.designQuorum.designatedDesigner,
-      ...config.quorumConfig.designQuorum.auditors,
       "interactive-enhancer",
     )
     if (browserQaEnabled(config)) {

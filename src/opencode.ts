@@ -728,7 +728,6 @@ export async function validateRuntimePrerequisites(config: RuntimeConfig) {
 
   if (config.quorumConfig.designQuorum?.enabled) {
     required.push(config.quorumConfig.designQuorum.designatedDesigner)
-    required.push(...config.quorumConfig.designQuorum.auditors)
   }
 
   const names = new Set(agents.map((entry) => entry.name))

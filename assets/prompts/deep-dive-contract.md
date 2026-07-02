@@ -1,11 +1,11 @@
 Write a source-backed deep dive for a gap-sensitive technical reader.
 
 Non-negotiable contract:
-- Your job is to draft, not to pre-audit. Auditors will review the draft independently and flag what you missed. Gather enough evidence to describe each mechanism confidently, then write. Do not chase every line of source code — a representative excerpt and a simplified sketch are often better than a wall of un-annotated source.
+- Your job is to draft, not to pre-audit. Auditors will review the draft independently and flag what you missed. Gather enough evidence to describe the topic's important mechanisms, relationships, or claims confidently, then write. Do not chase exhaustive background detail — a representative excerpt, worked example, or focused diagram is often better than a wall of un-annotated material.
 - If a search for a specific detail fails twice, describe what you know and move on. The draft is the deliverable.
 - Shape the document around the topic.
 - Unless specified otherwise, treat the reader as starting from zero on this topic.
-- Match the abstraction level of the question. If the question asks for mechanism or implementation, do not answer with architecture or taxonomy first.
+- Match the abstraction level of the question. If the question asks how something works in practice, do not answer with taxonomy or broad framing first.
 - Keep the reasoning explicit. If sentence B depends on sentence A, say why.
 - Define important terms before the draft relies on them.
 - Prefer exact words over broad labels.
@@ -16,17 +16,17 @@ Non-negotiable contract:
 - Tie non-obvious claims to evidence from primary sources when available.
 
 Source and certainty rules:
-- Prefer sources in this order when possible: source code, official docs, specs or standards, then high-quality technical articles or maintainer comments.
-- Match source specificity to claim specificity. If the draft uses exact implementation language, back it with exact implementation evidence.
+- Prefer primary and authoritative sources when possible: original texts, official documentation, standards, datasets, laws or policies, peer-reviewed work, direct observations, maintainer or expert statements, then high-quality secondary analysis.
+- Match source specificity to claim specificity. If the draft makes an exact claim, back it with evidence that is exact enough to support that claim.
 - Tie important claims to evidence in the body, then collect the sources again in `## Sources`.
 - If something was not directly verified, say so.
 
 Artifact guidance:
 - Use a concrete artifact when it materially improves understanding.
-- Prefer the smallest artifact that makes the mechanism or claim checkable: a short source excerpt, simplified code sketch, compact ASCII flow or state diagram, equation, invariant, or cost relation.
-- When quoting real code, keep only the lines that matter and explain the lines that carry the argument.
-- When source code is too noisy, pair a small real excerpt with a simplified sketch instead of paraphrasing the mechanism abstractly.
-- If the behavior depends on order, queues, wakeups, handoffs, or state transitions, prefer a compact ASCII rendering.
+- Prefer the smallest artifact that makes the mechanism, relationship, or claim checkable: a short source excerpt, worked example, compact diagram, timeline, comparison table, equation, data slice, decision tree, or cost relation.
+- When quoting primary material, keep only the parts that matter and explain the details that carry the argument.
+- When primary material is too noisy, pair a small real excerpt with a simplified sketch instead of paraphrasing the mechanism abstractly.
+- If the behavior depends on sequence, roles, incentives, constraints, feedback loops, decisions, or state changes, prefer a compact visual or structured rendering.
 - Do not add artifacts just to satisfy a template.
 - Do not leave the artifact uninterpreted. Explain the important lines, states, or terms.
 

@@ -23,12 +23,6 @@
   "designQuorum": {
     "enabled": true,
     "designatedDesigner": "html-designer",
-    "auditors": [
-      "visual-layout-auditor",
-      "technical-html-auditor",
-      "script-security-auditor"
-    ],
-    "maxRounds": 2,
     "browserQa": {
       "enabled": true
     }

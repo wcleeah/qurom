@@ -300,51 +300,32 @@ export async function getFileSizes(runName: string, files: string[]): Promise<Ma
   return sizes
 }
 
-export async function readDesignConsensus(runName: string, files: string[]): Promise<{
-  outcome: string
+export async function readDesignSummary(_runName: string, files: string[]): Promise<{
+  status: "approved" | "failed" | "running"
   round: number
-  unresolvedCount: number
-  severityBreakdown: Record<string, number>
   hasFinalHtml: boolean
   hasDesignFiles: boolean
   hasFailure: boolean
 } | null> {
-  const designConsensusFiles = files
-    .filter((f) => /^design-consensus-round-\d+\.json$/.test(f))
+  const designHtmlFiles = files
+    .filter((f) => /^design-html-round-\d+\.html$/.test(f))
     .sort()
 
-  if (designConsensusFiles.length === 0) {
-    // No design quorum ran at all
+  const hasFinalHtml = files.includes("final.html")
+  const hasFailure = files.includes("design-failure.json")
+  if (designHtmlFiles.length === 0 && !hasFinalHtml && !hasFailure) {
     return null
   }
 
-  // Read the latest consensus file
-  const latest = designConsensusFiles[designConsensusFiles.length - 1]
-  try {
-    const p = safeFilePath(runName, latest)
-    const data = await Bun.file(p).json() as {
-      outcome?: string
-      approvedAgents?: string[]
-      unresolvedFindings?: Array<{ severity: string }>
-    }
-    const roundMatch = latest.match(/round-(\d+)/)
-    const round = roundMatch ? parseInt(roundMatch[1]) : 0
-    const unresolvedCount = data.unresolvedFindings?.length ?? 0
-    const severityBreakdown: Record<string, number> = {}
-    for (const f of data.unresolvedFindings ?? []) {
-      severityBreakdown[f.severity] = (severityBreakdown[f.severity] ?? 0) + 1
-    }
-    return {
-      outcome: data.outcome ?? "unknown",
-      round,
-      unresolvedCount,
-      severityBreakdown,
-      hasFinalHtml: files.includes("final.html"),
-      hasDesignFiles: true,
-      hasFailure: files.includes("design-failure.json"),
-    }
-  } catch {
-    return { outcome: "unknown", round: 0, unresolvedCount: 0, severityBreakdown: {}, hasFinalHtml: false, hasDesignFiles: true, hasFailure: false }
+  const latest = designHtmlFiles[designHtmlFiles.length - 1]
+  const roundMatch = latest?.match(/round-(\d+)/)
+  const round = roundMatch ? parseInt(roundMatch[1]) : 0
+  return {
+    status: hasFailure ? "failed" : hasFinalHtml ? "approved" : "running",
+    round,
+    hasFinalHtml,
+    hasDesignFiles: designHtmlFiles.length > 0 || hasFinalHtml,
+    hasFailure,
   }
 }
 
@@ -389,18 +370,18 @@ export async function renderRun(name: string): Promise<Response> {
   else if (hasLatestDraft) researchStatus = "failed"
 
   // Design status
-  const design = await readDesignConsensus(name, files)
+  const design = await readDesignSummary(name, files)
 
   // Live status (if run is active)
   const liveStatus = await readLiveStatus(name)
 
   // Overall status: combine research + design
   let status: RunStatus = "running"
-  if (researchStatus === "approved" && (design?.outcome === "approved" || design?.outcome === "approved_with_caveats")) {
+  if (researchStatus === "approved" && design?.status === "approved") {
     status = "approved"
   } else if (researchStatus === "approved" && !design) {
     status = "approved" // research passed, no design phase
-  } else if (researchStatus === "approved" && design?.outcome === "failed_non_convergent") {
+  } else if (researchStatus === "approved" && design?.status === "failed") {
     status = "failed"
   } else if (researchStatus === "failed") {
     status = "failed"
@@ -477,28 +458,12 @@ export async function renderRun(name: string): Promise<Response> {
   </div>`
   }
 
-  // Design file counts
   if (design && design.hasDesignFiles) {
-    const designAuditCount = countByPattern(files, /^design-audits-round-\d+\.json$/)
-    const designConsensusCount = countByPattern(files, /^design-consensus-round-\d+\.json$/)
-    if (designAuditCount > 0) {
-      statsHtml += `
-  <div class="run-stat">
-    <div class="run-stat-value">${designAuditCount}</div>
-    <div class="run-stat-label">Design Audits</div>
-  </div>`
-    }
-    if (designConsensusCount > 0) {
-      statsHtml += `
-  <div class="run-stat">
-    <div class="run-stat-value">${designConsensusCount}</div>
-    <div class="run-stat-label">Design Consensus</div>
-  </div>`
-    }
+    const designHtmlCount = countByPattern(files, /^design-html-round-\d+\.html$/)
     statsHtml += `
   <div class="run-stat">
-    <div class="run-stat-value">${design.unresolvedCount}</div>
-    <div class="run-stat-label">Design Unresolved</div>
+    <div class="run-stat-value">${designHtmlCount}</div>
+    <div class="run-stat-label">Design HTML</div>
   </div>`
   }
 
@@ -527,31 +492,19 @@ export async function renderRun(name: string): Promise<Response> {
   // Design phase
   let designLine = ""
   if (design && design.hasDesignFiles) {
-    let designLabel = design.outcome
+    let designLabel = design.status
     let designClass = "badge-running"
-    if (design.outcome === "approved") {
+    if (design.status === "approved") {
       designLabel = "approved"
       designClass = "badge-approved"
-    } else if (design.outcome === "approved_with_caveats") {
-      designLabel = "approved with caveats"
-      designClass = "badge-approved"
-    } else if (design.outcome === "failed_non_convergent" || design.hasFailure) {
+    } else if (design.status === "failed" || design.hasFailure) {
       designLabel = "failed"
       designClass = "badge-failed"
-    } else if (design.outcome === "needs_revision") {
-      designLabel = "needs revision"
-      designClass = "badge-running"
     }
-
-    const sevParts: string[] = []
-    if (design.severityBreakdown.blocker) sevParts.push(`${design.severityBreakdown.blocker} blocker`)
-    if (design.severityBreakdown.major) sevParts.push(`${design.severityBreakdown.major} major`)
-    if (design.severityBreakdown.minor) sevParts.push(`${design.severityBreakdown.minor} minor`)
-    const sevStr = sevParts.length > 0 ? ` (${sevParts.join(", ")} unresolved)` : ""
 
     designLine = `<div class="phase-row">
   <span class="badge ${designClass}">Design: ${designLabel}</span>
-  <span class="phase-detail">round ${design.round}${sevStr}</span>
+  <span class="phase-detail">HTML generation${design.hasFinalHtml ? ", final.html ready" : ""}</span>
 </div>`
   } else if (researchStatus === "approved" && !design) {
     // Research finished, design phase expected but no design files yet
@@ -579,29 +532,19 @@ export async function renderRun(name: string): Promise<Response> {
   // ── Design summary card ──
   let designSummaryHtml = ""
   if (design && design.hasDesignFiles) {
-    const designOutcomeLabel = design.outcome === "approved" ? "Approved"
-      : design.outcome === "approved_with_caveats" ? "Approved with caveats"
-      : design.outcome === "failed_non_convergent" ? "Failed"
-      : design.outcome === "needs_revision" ? "Needs revision"
-      : design.outcome
-    const designOutcomeClass = design.outcome === "approved" ? "approved"
-      : design.outcome === "approved_with_caveats" ? "approved"
-      : design.outcome === "failed_non_convergent" ? "failed"
+    const designOutcomeLabel = design.status === "approved" ? "Approved"
+      : design.status === "failed" ? "Failed"
+      : "Running"
+    const designOutcomeClass = design.status === "approved" ? "approved"
+      : design.status === "failed" ? "failed"
       : "needs-revision"
 
-    const sevRows: string[] = []
-    if (design.severityBreakdown.blocker) sevRows.push(`<tr><td><span class="danger-text">Blocker</span></td><td>${design.severityBreakdown.blocker}</td></tr>`)
-    if (design.severityBreakdown.major) sevRows.push(`<tr><td><span class="running-text">Major</span></td><td>${design.severityBreakdown.major}</td></tr>`)
-    if (design.severityBreakdown.minor) sevRows.push(`<tr><td><span class="muted-text">Minor</span></td><td>${design.severityBreakdown.minor}</td></tr>`)
-
     designSummaryHtml = `<div class="section">
-  <h2>Design Quorum</h2>
+  <h2>Design</h2>
   <div class="structured-card">
     <div class="outcome-banner ${escapeHtml(designOutcomeClass)}">${designOutcomeLabel}</div>
     <table class="summary-table">
-      <tr><td>Round</td><td>${design.round}</td></tr>
-      <tr><td>Unresolved findings</td><td>${design.unresolvedCount}${design.outcome === "approved_with_caveats" ? " minor caveat(s)" : ""}</td></tr>
-      ${sevRows.join("\n")}
+      <tr><td>HTML drafts</td><td>${countByPattern(files, /^design-html-round-\d+\.html$/)}</td></tr>
       ${design.hasFinalHtml ? `<tr><td>Final HTML</td><td>final.html ready</td></tr>` : ""}
       ${design.hasFailure ? `<tr><td>Error</td><td class="danger-text">design-failure.json</td></tr>` : ""}
     </table>
@@ -646,13 +589,13 @@ export async function renderRun(name: string): Promise<Response> {
 
   // Design outputs
   if (design && design.hasDesignFiles) {
-    const latestDesignConsensus = files
-      .filter((f) => /^design-consensus-round-\d+\.json$/.test(f))
+    const latestDesignHtml = files
+      .filter((f) => /^design-html-round-\d+\.html$/.test(f))
       .sort()
       .pop()
-    if (latestDesignConsensus) {
-      keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/${encodeURIComponent(latestDesignConsensus)}">
-  View ${latestDesignConsensus} — outcome: ${design.outcome}
+    if (latestDesignHtml) {
+      keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/${encodeURIComponent(latestDesignHtml)}">
+  View ${latestDesignHtml} — design draft
 </a>`)
     }
   }

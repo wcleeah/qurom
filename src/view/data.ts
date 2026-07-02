@@ -33,7 +33,6 @@ export async function listRuns(): Promise<RunMeta[]> {
     let hasLatestDraft = false
     let fileCount = 0
     let mtime = 0
-    let designConsensusOutcome: string | null = null
     let hasDesignFailure = false
 
     try {
@@ -50,13 +49,9 @@ export async function listRuns(): Promise<RunMeta[]> {
         if (file.startsWith("draft-round-") && file.endsWith(".md")) {
           roundCount = Math.max(roundCount, parseInt(file.match(/round-(\d+)/)?.[1] ?? "0") + 1)
         }
-        const designConsensusMatch = file.match(/^design-consensus-round-(\d+)\.json$/)
-        if (designConsensusMatch) {
-          designRoundCount = Math.max(designRoundCount, parseInt(designConsensusMatch[1]) + 1)
-          try {
-            const consensusData = await Bun.file(join(dirPath, file)).json() as { outcome?: string }
-            if (consensusData.outcome) designConsensusOutcome = consensusData.outcome
-          } catch { /* ignore parse errors */ }
+        const designHtmlMatch = file.match(/^design-html-round-(\d+)\.html$/)
+        if (designHtmlMatch) {
+          designRoundCount = Math.max(designRoundCount, parseInt(designHtmlMatch[1]) + 1)
         }
         if (file === "final.html") hasFinalHtml = true
         if (file === "final.md") hasFinalMd = true
@@ -80,13 +75,10 @@ export async function listRuns(): Promise<RunMeta[]> {
     // Design status
     let designStatus: RunStatus | null = null
     if (designRoundCount > 0 || hasFinalHtml || hasDesignFailure) {
-      // The consensus outcome is authoritative — final.html is written on both
-      // approval and best-effort failure, so hasFinalHtml alone must not imply
-      // approved.
-      if (designConsensusOutcome === "approved" || designConsensusOutcome === "approved_with_caveats") {
-        designStatus = "approved"
-      } else if (designConsensusOutcome === "failed_non_convergent" || hasDesignFailure) {
+      if (hasDesignFailure) {
         designStatus = "failed"
+      } else if (hasFinalHtml) {
+        designStatus = "approved"
       } else if (designRoundCount > 0) {
         designStatus = "running"
       }
@@ -208,14 +200,7 @@ export function classifyFile(filename: string): FileClass {
   if (/^unresolved-findings-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Consensus", label: `Unresolved findings round ${round}`, description: "Findings carried into revision" }
   if (/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(filename)) return { group: "Rebuttals", subGroup: "Auditor Responses", label: `Auditor rebuttal response round ${round}`, description: "Auditor response to drafter rebuttals" }
   if (/^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/.test(filename)) return { group: "Rebuttals", subGroup: "Drafter Reviews", label: `Drafter rebuttal review round ${round}`, description: "Drafter review of auditor responses" }
-  if (/^design-html-round-\d+\.html$/.test(filename)) return { group: "Design Rounds", subGroup: "HTML Drafts", label: `HTML draft round ${round}`, description: "Design candidate sent to auditors" }
-  if (/^design-audits-round-\d+\.json$/.test(filename)) return { group: "Design Rounds", subGroup: "Audit Bundles", label: `Design audit bundle round ${round}`, description: "Combined design auditor results" }
-  if (/^design-audit-[\w-]+-round-\d+\.json$/.test(filename)) {
-    const agent = agentFrom(filename, "design-audit")
-    return { group: "Design Rounds", subGroup: "Per-Agent Audits", label: `${agent} round ${round}`, description: "Individual design auditor result" }
-  }
-  if (/^design-consensus-round-\d+\.json$/.test(filename)) return { group: "Design Rounds", subGroup: "Consensus", label: `Design consensus round ${round}`, description: "Design outcome and unresolved findings" }
-  if (/^design-findings-round-\d+\.json$/.test(filename)) return { group: "Design Rounds", subGroup: "Revision Inputs", label: `Design findings round ${round}`, description: "Findings sent into HTML revision" }
+  if (/^design-html-round-\d+\.html$/.test(filename)) return { group: "Design", subGroup: "HTML Drafts", label: `HTML draft round ${round}`, description: "Generated design HTML" }
   if (filename === "design-failure.json") return { group: "Design Rounds", subGroup: "Failures", label: "Design failure details", description: "Design quorum error payload" }
   return { group: "Other", subGroup: "Unclassified", label: filename, description: "Additional artifact" }
 }

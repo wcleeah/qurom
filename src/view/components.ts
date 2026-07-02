@@ -80,9 +80,6 @@ export function renderLivePipeline(
 
   // Design nodes (flattened into main graph)
   const hasDesignHtml = hasFile(/^design-html-round-0\.html$/)
-  const hasDesignAudits = hasFile(/^design-audits-round-\d+\.json$/)
-  const hasDesignConsensus = hasFile(/^design-consensus-round-\d+\.json$/)
-  const hasDesignHtmlNext = hasFile(/^design-html-round-[1-9]\d*\.html$/)
 
   // Always show design nodes — status varies by completion
   const designMeta = researchStatus === "approved"
@@ -94,23 +91,16 @@ export function renderLivePipeline(
     hasDesignHtml ? "" : designMeta, isActive("runDesignHtml") ? agentListHtml(liveAgents) : "")
   html += nodeRow(15, "interactiveEnhance", hasDesignHtml, isActive("interactiveEnhance"),
     "", isActive("interactiveEnhance") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(16, "runDesignAudits", hasDesignAudits, isActive("runDesignAudits"),
-    hasDesignAudits ? `· ${files.filter((f) => /^design-audits-round-\d+\.json$/.test(f)).length} rounds` : "",
-    isActive("runDesignAudits") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(17, "aggregateDesignFindings", hasDesignConsensus, isActive("aggregateDesignFindings"))
-  html += nodeRow(18, "reviseDesignHtml", hasDesignHtmlNext, isActive("reviseDesignHtml"),
-    hasDesignHtmlNext ? `· ${files.filter((f) => /^design-html-round-[1-9]\d*\.html$/.test(f)).length} revisions` : "",
-    isActive("reviseDesignHtml") ? agentListHtml(liveAgents) : "")
   // finalizeDesign writes final.html; it's the terminal step for the design phase.
   // Show it whenever a design phase ran. Active only briefly before __end__.
   const hasFinalHtmlFile = files.includes("final.html")
-  const designRan = hasDesignHtml || hasDesignAudits || hasDesignConsensus || hasDesignHtmlNext
+  const designRan = hasDesignHtml
   const browserQaCompleted = Boolean(liveStatus?.nodeHistory?.some((entry) => entry.node === "browserQaEnhance" && entry.status === "completed"))
   if (designRan) {
-    html += nodeRow(19, "finalizeDesign", hasFinalHtmlFile, isActive("finalizeDesign"),
+    html += nodeRow(16, "finalizeDesign", hasFinalHtmlFile, isActive("finalizeDesign"),
       hasFinalHtmlFile ? "· final.html written" : "",
       isActive("finalizeDesign") ? agentListHtml(liveAgents) : "")
-    html += nodeRow(20, "browserQaEnhance", browserQaCompleted, isActive("browserQaEnhance"),
+    html += nodeRow(17, "browserQaEnhance", browserQaCompleted, isActive("browserQaEnhance"),
       browserQaCompleted ? "· browser checked" : "",
       isActive("browserQaEnhance") ? agentListHtml(liveAgents) : "")
   }

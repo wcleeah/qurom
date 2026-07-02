@@ -12,14 +12,12 @@ import {
   ingestRequest,
   prepareOutputPath,
   routeAfterAggregate,
-  routeAfterDesignAggregate,
   routeAfterDrafterReview,
   routeAfterRebuttalResponses,
   summarizeInputDocument,
   summarizeOutputArtifact,
 } from "../src/graph.ts"
-import { aggregateDesignConsensus } from "../src/design-quorum.ts"
-import type { AggregatedFinding, AuditResultRecord, DesignAuditResultRecord, RebuttalResponseRecord, ResearchState } from "../src/schema.ts"
+import type { AggregatedFinding, AuditResultRecord, RebuttalResponseRecord, ResearchState } from "../src/schema.ts"
 import { resolveRunDir } from "../src/output.ts"
 import type { AgentRuntime } from "../src/agent-runtime/runtime.ts"
 
@@ -60,8 +58,6 @@ const config = {
     designQuorum: {
       enabled: true,
       designatedDesigner: "html-designer",
-      auditors: ["visual-layout-auditor", "technical-html-auditor", "script-security-auditor"],
-      maxRounds: 2,
     },
     auditRestart: { maxRestarts: 1 },
     readerDiscovery: { maxTurns: 6, enabled: true },
@@ -91,10 +87,6 @@ function audit(input: Partial<AuditResultRecord> & Pick<AuditResultRecord, "agen
     summary: input.summary,
     findings: input.findings,
   }
-}
-
-function designAudit(input: DesignAuditResultRecord): DesignAuditResultRecord {
-  return input
 }
 
 function response(input: RebuttalResponseRecord): RebuttalResponseRecord {
@@ -390,95 +382,6 @@ describe("graph helpers", () => {
     expect(routeAfterAggregate(baseState({ status: "approved" }))).toBe("finalizeApprovedDraft")
     expect(routeAfterAggregate(baseState({ status: "failed" }))).toBe("finalizeFailedRun")
     expect(routeAfterAggregate(baseState({ status: "revising" }))).toBe("reviseDraft")
-  })
-
-  test("routeAfterDesignAggregate routes approved/failed/exhausted to finalizeDesign, otherwise to revise", () => {
-    const designConfig = {
-      ...config,
-      quorumConfig: {
-        ...config.quorumConfig,
-        designQuorum: {
-          enabled: true,
-          designatedDesigner: "html-designer",
-          auditors: ["visual-layout-auditor", "technical-html-auditor", "script-security-auditor"],
-          maxRounds: 2,
-        },
-      },
-    } satisfies RuntimeConfig
-
-    const withDesign = (overrides: Partial<ResearchState> = {}) =>
-      baseState({ status: "approved", designRound: 0, ...overrides })
-
-    // approved → finalize (writes final.html), not __end__
-    expect(routeAfterDesignAggregate(designConfig, withDesign({ designStatus: "approved" }))).toBe("finalizeDesign")
-    // failed → finalize (best-effort HTML), not __end__
-    expect(routeAfterDesignAggregate(designConfig, withDesign({ designStatus: "failed" }))).toBe("finalizeDesign")
-    // rounds exhausted but still running → finalize
-    expect(
-      routeAfterDesignAggregate(designConfig, withDesign({ designStatus: "running", designRound: 2 })),
-    ).toBe("finalizeDesign")
-    // rounds remaining, not yet approved → revise
-    expect(
-      routeAfterDesignAggregate(designConfig, withDesign({ designStatus: "running", designRound: 0 })),
-    ).toBe("reviseDesignHtml")
-    // design quorum disabled → __end__
-    expect(routeAfterDesignAggregate({
-      ...config,
-      quorumConfig: {
-        ...config.quorumConfig,
-        designQuorum: undefined,
-      },
-    }, withDesign({ designStatus: "approved" }))).toBe("__end__")
-  })
-
-  test("aggregateDesignConsensus approves with caveats when terminal findings are minor-only", () => {
-    const designConfig = {
-      ...config,
-      quorumConfig: {
-        ...config.quorumConfig,
-        designQuorum: {
-          enabled: true,
-          designatedDesigner: "html-designer",
-          auditors: ["visual-layout-auditor", "technical-html-auditor", "script-security-auditor"],
-          maxRounds: 2,
-        },
-      },
-    } satisfies RuntimeConfig
-
-    const audits = [
-      designAudit({
-        agent: "visual-layout-auditor",
-        vote: "revise",
-        summary: "Minor polish remains",
-        findings: [
-          {
-            findingId: "design:visual-layout-auditor:0",
-            severity: "minor",
-            category: "visual",
-            issue: "Spacing is slightly uneven",
-            evidence: ["The card gap varies in the lower section."],
-            required_fix: "Tighten spacing.",
-          },
-        ],
-      }),
-      designAudit({
-        agent: "technical-html-auditor",
-        vote: "approve",
-        summary: "Looks valid",
-        findings: [],
-      }),
-      designAudit({
-        agent: "script-security-auditor",
-        vote: "approve",
-        summary: "No risky scripts",
-        findings: [],
-      }),
-    ]
-
-    const result = aggregateDesignConsensus(designConfig, audits, undefined, 2)
-
-    expect(result.outcome).toBe("approved_with_caveats")
-    expect(result.failureReason).toBe("approved")
   })
 
   test("ingestRequest prefers cached documentText over rereading the file", async () => {

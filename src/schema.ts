@@ -28,17 +28,7 @@ const researchStatusSchema = z.enum([
   "failed",
 ])
 
-const designFindingSeveritySchema = z.enum(["blocker", "major", "minor"])
-const designFindingCategorySchema = z.enum([
-  "visual",
-  "structure",
-  "accessibility",
-  "self-containedness",
-  "interactivity",
-  "security",
-])
 const designStatusSchema = z.enum(["pending", "running", "approved", "failed"])
-const designOutcomeSchema = z.enum(["approved", "approved_with_caveats", "needs_revision", "failed_non_convergent"])
 
 const topicInputSchema = z.object({
   inputMode: z.literal("topic"),
@@ -383,91 +373,4 @@ export type AggregatedFinding = z.infer<typeof aggregatedFindingSchema>
 export type AggregatedFindings = z.infer<typeof aggregatedFindingsSchema>
 export type ResearchState = z.infer<typeof researchStateSchema>
 
-const designAuditFindingSchema = z.object({
-  severity: designFindingSeveritySchema,
-  category: designFindingCategorySchema,
-  issue: nonEmptyStringSchema,
-  evidence: z.array(nonEmptyStringSchema).min(1),
-  required_fix: nonEmptyStringSchema,
-})
-
-const designIdentifiedFindingSchema = designAuditFindingSchema.extend({
-  findingId: findingIdSchema,
-})
-
-const validateDesignAuditResult = (
-  value: { vote: z.infer<typeof auditVoteSchema>; findings: Array<{ severity?: unknown }> },
-  ctx: z.RefinementCtx,
-) => {
-  if (value.vote === "approve" && value.findings.length > 0) {
-    const hasNonMinor = value.findings.some(
-      (f) => f.severity === "blocker" || f.severity === "major",
-    )
-    if (hasNonMinor) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "Approve vote carries blocker or major findings. Either downgrade those findings to minor or change the vote to revise.",
-        path: ["findings"],
-      })
-    }
-  }
-  if (value.vote === "revise" && value.findings.length === 0) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Revision audits must include at least one finding",
-      path: ["findings"],
-    })
-  }
-}
-
-export const designAuditResultSchema = z
-  .object({
-    vote: auditVoteSchema,
-    summary: nonEmptyStringSchema,
-    findings: z.array(designAuditFindingSchema),
-  })
-  .superRefine(validateDesignAuditResult)
-
-export const designAuditResultRecordSchema = z
-  .object({
-    agent: agentNameSchema,
-    vote: auditVoteSchema,
-    summary: nonEmptyStringSchema,
-    findings: z.array(designIdentifiedFindingSchema),
-  })
-  .superRefine(validateDesignAuditResult)
-
-const designAggregatedFindingSchema = designIdentifiedFindingSchema.extend({
-  agent: agentNameSchema,
-})
-
-export const designAggregatedFindingsSchema = z
-  .object({
-    outcome: designOutcomeSchema,
-    approvedAgents: z.array(agentNameSchema),
-    unresolvedFindings: z.array(designAggregatedFindingSchema),
-    failureReason: failureReasonSchema.optional(),
-  })
-  .superRefine((value, ctx) => {
-    if (value.outcome === "approved" && value.unresolvedFindings.length > 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Approved outcomes must not contain unresolved findings",
-        path: ["unresolvedFindings"],
-      })
-    }
-    if (value.outcome === "needs_revision" && value.unresolvedFindings.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Revision outcomes must include unresolved findings",
-        path: ["unresolvedFindings"],
-      })
-    }
-  })
-
-export type DesignAuditResult = z.infer<typeof designAuditResultSchema>
-export type DesignAuditResultRecord = z.infer<typeof designAuditResultRecordSchema>
-export type DesignAggregatedFinding = z.infer<typeof designAggregatedFindingSchema>
-export type DesignAggregatedFindings = z.infer<typeof designAggregatedFindingsSchema>
 export type DesignStatus = z.infer<typeof designStatusSchema>

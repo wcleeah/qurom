@@ -14,7 +14,7 @@ Surgical revision rules:
 - A finding about a missing source → add the source. Do not re-research the claim.
 - A finding about a confusing diagram → fix or clarify the diagram. Do not redraw the entire document.
 - If a finding exposes a genuine inferential gap, add the smallest possible explanation to close it — a sentence or two, not a new section.
-- Adding a concrete artifact (source excerpt, code sketch, ASCII diagram) is fine when a finding specifically calls for it.
+- Adding a concrete artifact (source excerpt, worked example, diagram, table, timeline, calculation, or data slice) is fine when a finding specifically calls for it.
 - Do not add new explanatory content beyond what the findings require.
 - Do not reorder sections, rename sections, or change the document's structure unless a finding explicitly demands it.
 - If two findings about the same topic conflict, prefer the more precise one.

@@ -302,7 +302,5 @@ export function renderStructuredJson(filename: string, data: unknown): string {
   if (/^aggregated-findings-round-\d+\.json$/.test(filename)) return renderConsensusCard(filename, data)
   if (/^drafter-finding-review-round-\d+\.json$/.test(filename)) return renderDrafterReview(filename, data)
   if (/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(filename)) return renderRebuttalResponses(filename, data)
-  if (/^design-audits-round-\d+\.json$/.test(filename)) return renderAuditRound(filename, data, true)
-  if (/^design-consensus-round-\d+\.json$/.test(filename)) return renderConsensusCard(filename, data, true)
   return renderJsonCard(data, { defaultOpen: true })
 }

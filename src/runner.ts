@@ -66,7 +66,7 @@ export type RunnerEvent =
   | { kind: "result"; runResult: unknown }
   | {
       kind: "design.phase"
-      phase: "drafting" | "auditing" | "aggregating" | "revising"
+      phase: "drafting" | "enhancing" | "finalizing" | "browser_qa"
       round: number
     }
 
@@ -517,7 +517,7 @@ function isDesignRelatedArtifact(filename: string) {
   return filename.startsWith("design-")
     || filename === "final.html"
     || filename.startsWith("final.html.")
-    || /^cursor-(html-designer|interactive-enhancer|visual-layout-auditor|technical-html-auditor|script-security-auditor|browser-qa-enhancer)-/.test(filename)
+    || /^cursor-(html-designer|interactive-enhancer|browser-qa-enhancer)-/.test(filename)
 }
 
 async function archiveDesignArtifacts(runDir: string) {
@@ -946,7 +946,7 @@ export async function runDesignPipeline(args: {
 
   const debugLog = createDebugLog(runDir)
   const liveStatusWriter = createLiveStatusWriter(bus, () => runDir, {
-    maxRounds: config.quorumConfig.designQuorum?.maxRounds ?? config.quorumConfig.maxRounds,
+    maxRounds: config.quorumConfig.maxRounds,
   })
   const bridge = bridgeFactory(config, { bus, getRunDir: () => runDir })
   const bridgeAbort = new AbortController()

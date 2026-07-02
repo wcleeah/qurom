@@ -648,8 +648,6 @@ describe("runDesignPipeline", () => {
       topic: "design rerun topic",
     }))
     await Bun.write(join(runDir, "design-html-round-0.html"), "<html>old</html>")
-    await Bun.write(join(runDir, "design-audits-round-0.json"), "[]")
-    await Bun.write(join(runDir, "design-consensus-round-0.json"), "{}")
     await Bun.write(join(runDir, "final.html"), "<html>final</html>")
     await Bun.write(join(runDir, "final.html.truncation-warning.txt"), "warning")
     await Bun.write(join(runDir, "cursor-html-designer-call-1-attempt-1-run-response.txt"), "debug")
@@ -705,8 +703,6 @@ describe("runDesignPipeline", () => {
     const archivedFiles = await readdir(join(runDir, "design-archive", archiveRoots[0]!))
     expect(archivedFiles.sort()).toEqual([
       "cursor-html-designer-call-1-attempt-1-run-response.txt",
-      "design-audits-round-0.json",
-      "design-consensus-round-0.json",
       "design-html-round-0.html",
       "final.html",
       "final.html.truncation-warning.txt",

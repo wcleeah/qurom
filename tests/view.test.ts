@@ -72,10 +72,10 @@ describe("view file browser classification", () => {
       group: "Debug",
       subGroup: "Cursor",
     })
-    expect(classifyFile("design-consensus-round-2.json")).toMatchObject({
-      group: "Design Rounds",
-      subGroup: "Consensus",
-      label: "Design consensus round 2",
+    expect(classifyFile("design-html-round-0.html")).toMatchObject({
+      group: "Design",
+      subGroup: "HTML Drafts",
+      label: "HTML draft round 0",
     })
   })
 })
