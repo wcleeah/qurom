@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
-import { RUNS_DIR, safeFilePath, safeRunPath } from "./paths"
+import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
+import { listStarredRunNames } from "./starred-store"
 import { isSqliteFile } from "./utils"
 import type { FileClass, LiveStatus, RequestJson, RunMeta, RunStats, RunStatus } from "./types"
 
@@ -16,7 +17,7 @@ export async function readLiveStatus(runName: string): Promise<LiveStatus | null
 }
 
 export async function listRuns(): Promise<RunMeta[]> {
-  const entries = await readdir(RUNS_DIR, { withFileTypes: true })
+  const entries = await readdir(getRunsDir(), { withFileTypes: true })
   const dirs = entries.filter(
     (e) => e.isDirectory() && !e.name.startsWith(".") && !isSqliteFile(e.name),
   )
@@ -24,7 +25,7 @@ export async function listRuns(): Promise<RunMeta[]> {
   const metas: RunMeta[] = []
 
   for (const dir of dirs) {
-    const dirPath = join(RUNS_DIR, dir.name)
+    const dirPath = join(getRunsDir(), dir.name)
     let requestJson: RequestJson | null = null
     let roundCount = 0
     let designRoundCount = 0
@@ -109,10 +110,19 @@ export async function listRuns(): Promise<RunMeta[]> {
       fileCount,
       designStatus,
       designRoundCount,
+      starred: false,
     })
   }
 
-  metas.sort((a, b) => b.mtime - a.mtime)
+  const starred = await listStarredRunNames()
+  for (const meta of metas) {
+    meta.starred = starred.has(meta.name)
+  }
+
+  metas.sort((a, b) => {
+    if (a.starred !== b.starred) return a.starred ? -1 : 1
+    return b.mtime - a.mtime
+  })
   return metas
 }
 

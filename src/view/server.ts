@@ -1,6 +1,8 @@
 import { HOST, PORT, safeRunPath } from "./paths"
 import { renderIndex, renderNodePage, renderRun, serveRawFile } from "./pages"
 import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "./config"
+import { setRunStarred } from "./starred-store"
+import { stat } from "node:fs/promises"
 
 export function startViewServer(): void {
   Bun.serve({
@@ -12,7 +14,7 @@ export function startViewServer(): void {
 
       if (path === "/") {
         try {
-          return await renderIndex()
+          return await renderIndex(url.searchParams)
         } catch (e) {
           console.error("GET / error:", e)
           return new Response("Internal error", { status: 500 })
@@ -52,6 +54,45 @@ export function startViewServer(): void {
           if (response) return response
         } catch (e) {
           console.error("POST /config error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const starMatch = path.match(/^\/runs\/(.+?)\/star$/)
+      if (starMatch && req.method === "POST") {
+        const runName = decodeURIComponent(starMatch[1])
+        try {
+          const runDir = safeRunPath(runName)
+          const runStat = await stat(runDir)
+          if (!runStat.isDirectory()) {
+            return new Response("Not found", { status: 404 })
+          }
+          const raw = await req.text()
+          let starred = false
+          if (raw.trim().startsWith("{")) {
+            const parsed = JSON.parse(raw) as { starred?: unknown }
+            starred = parsed.starred === true
+          } else {
+            const params = new URLSearchParams(raw)
+            starred = params.get("starred") === "true"
+          }
+          await setRunStarred(runName, starred)
+          const wantsJson =
+            url.searchParams.get("json") === "1"
+            || (req.headers.get("accept") ?? "").includes("application/json")
+          if (wantsJson) {
+            return Response.json({ ok: true, starred })
+          }
+          const referer = req.headers.get("referer")
+          return new Response(null, {
+            status: 303,
+            headers: { Location: referer ?? `/runs/${encodeURIComponent(runName)}` },
+          })
+        } catch (e) {
+          if (e instanceof Error && e.message === "Path traversal blocked") {
+            return new Response("Not found", { status: 404 })
+          }
+          console.error("POST /star error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

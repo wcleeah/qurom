@@ -6,9 +6,17 @@ import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard, rend
 import { computeStats, getRunFiles, listRuns, readLiveStatus } from "./data"
 import { renderFileBrowser } from "./file-browser"
 import { badge, formatRelative, layout } from "./layout"
-import { RUNS_DIR, safeFilePath, safeRunPath } from "./paths"
+import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
+import { STAR_SCRIPT } from "./star-script"
+import { isRunStarred } from "./starred-store"
 import { contentType, escapeHtml, formatBytes, formatElapsed, renderJsonCard, renderMarkdown, statusDot } from "./utils"
 import type { RequestJson, RunStatus } from "./types"
+
+function renderStarButton(runName: string, starred: boolean): string {
+  const activeClass = starred ? " star-button-active" : ""
+  const label = starred ? "Unstar run" : "Star run"
+  return `<button type="button" class="star-button${activeClass}" data-star-toggle data-run-name="${escapeHtml(runName)}" data-starred="${starred ? "true" : "false"}" aria-pressed="${starred ? "true" : "false"}" aria-label="${label}">★</button>`
+}
 
 export async function renderNodePage(runName: string, nodeName: string): Promise<Response> {
   let dirPath: string
@@ -147,7 +155,7 @@ export async function renderDebugLog(runName: string, files: string[]): Promise<
 export async function renderRunNav(currentName: string): Promise<string> {
   let names: string[]
   try {
-    const entries = await readdir(RUNS_DIR, { withFileTypes: true })
+    const entries = await readdir(getRunsDir(), { withFileTypes: true })
     names = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !/\.sqlite/.test(e.name))
       .map((e) => e.name)
@@ -173,8 +181,12 @@ export async function renderRunNav(currentName: string): Promise<string> {
 // Route: GET /
 // ---------------------------------------------------------------------------
 
-export async function renderIndex(): Promise<Response> {
-  const runs = await listRuns()
+export async function renderIndex(searchParams = new URLSearchParams()): Promise<Response> {
+  const showStarredOnly = searchParams.get("starred") === "1"
+  let runs = await listRuns()
+  if (showStarredOnly) {
+    runs = runs.filter((run) => run.starred)
+  }
   const stats = computeStats(runs)
 
   // Stats dashboard
@@ -230,7 +242,9 @@ export async function renderIndex(): Promise<Response> {
   // Run cards
   let runCards = ""
   if (runs.length === 0) {
-    runCards = `<div class="empty-state">No runs found in <code>${escapeHtml(RUNS_DIR)}</code></div>`
+    runCards = showStarredOnly
+      ? `<div class="empty-state">No starred runs yet. <a href="/">Show all runs</a></div>`
+      : `<div class="empty-state">No runs found in <code>${escapeHtml(getRunsDir())}</code></div>`
   } else {
     for (const run of runs) {
       const roundLabel =
@@ -245,6 +259,7 @@ export async function renderIndex(): Promise<Response> {
 
       runCards += `<div class="run-card">
   <div class="run-card-top">
+    ${renderStarButton(run.name, run.starred)}
     <div class="run-card-title">
       <a href="/runs/${encodeURIComponent(run.name)}">${escapeHtml(run.topic)}${iconsStr}</a>
     </div>
@@ -261,15 +276,22 @@ export async function renderIndex(): Promise<Response> {
     }
   }
 
+  const filterHtml = `<div class="run-filters">
+  <a href="/"${showStarredOnly ? "" : ' class="active"'}>All</a>
+  <a href="/?starred=1"${showStarredOnly ? ' class="active"' : ""}>Starred</a>
+</div>`
+
   const body = `
 <div class="site-nav">
   <a href="/" class="active">Runs</a>
   <a href="/config">Config</a>
 </div>
 <h1 class="page-title">Runs</h1>
+${filterHtml}
 ${statsHtml}
 ${activeRunHtml}
-${runCards}`
+<div id="run-card-list">${runCards}</div>
+${STAR_SCRIPT}`
 
   const extraHead = hasActiveRun ? `<meta http-equiv="refresh" content="8">` : ""
   const html = layout("Runs — quorum", body, extraHead)
@@ -393,6 +415,8 @@ export async function renderRun(name: string): Promise<Response> {
     requestJson?.inputSummary?.title ??
     requestJson?.topic ??
     name
+
+  const starred = await isRunStarred(name)
 
   // ── Counts for quick stats ──
   const draftCount = countByPattern(files, /^draft-round-\d+\.md$/)
@@ -664,7 +688,10 @@ ${liveStatus?.phase === "running" ? `<div class="refresh-controls">
 ${interviewChatSection}
 <div class="header-bar">
   <div class="header-main">
-    <h1>${escapeHtml(topic)}</h1>
+    <div class="header-title-row">
+      ${renderStarButton(name, starred)}
+      <h1>${escapeHtml(topic)}</h1>
+    </div>
     <div class="meta-row">
       <span class="meta-item">${badge(status)}</span>
       <span class="meta-item">ID: <strong>${escapeHtml(requestJson?.requestId ?? name)}</strong></span>
@@ -686,6 +713,7 @@ ${heroSection}
 ${keyOutputsSection}
 ${requestInfoHtml}
 ${filesSection}
+${STAR_SCRIPT}
 ${liveStatus?.phase === "running" ? POLLING_SCRIPT : ""}`
 
   const html = layout(`${escapeHtml(topic)} — quorum run`, body, extraHead)

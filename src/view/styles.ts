@@ -199,6 +199,70 @@ a:hover { text-decoration: underline; }
   align-items: flex-start;
   gap: 0.5rem;
 }
+.star-button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.star-button:hover {
+  color: var(--orange);
+  border-color: var(--orange);
+}
+.star-button-active,
+.star-button[aria-pressed="true"] {
+  color: var(--orange);
+  border-color: var(--orange);
+  background: var(--orange-bg);
+}
+.star-button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.header-title-row h1 {
+  margin: 0;
+}
+.run-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+.run-filters a {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.run-filters a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.run-filters a.active {
+  color: var(--fg);
+  border-color: var(--fg);
+  font-weight: 600;
+}
 .run-card-title {
   font-weight: 600;
   font-size: 0.95rem;

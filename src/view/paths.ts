@@ -1,13 +1,22 @@
 import { basename, resolve } from "node:path"
 import { isSqliteFile } from "./utils"
 
-export const RUNS_DIR = resolve(import.meta.dirname, "..", "..", "runs")
+export function getRunsDir(): string {
+  return process.env.QUORUM_RUNS_DIR
+    ? resolve(process.env.QUORUM_RUNS_DIR)
+    : resolve(import.meta.dirname, "..", "..", "runs")
+}
+
+/** @deprecated Prefer getRunsDir() — evaluated once at import for display-only use. */
+export const RUNS_DIR = getRunsDir()
+
 export const PORT = parseInt(process.env.VIEW_PORT ?? "3000", 10)
 export const HOST = process.env.VIEW_HOST ?? "0.0.0.0"
 
 export function safeRunPath(runName: string): string {
-  const resolved = resolve(RUNS_DIR, runName)
-  if (!resolved.startsWith(RUNS_DIR + "/") && resolved !== RUNS_DIR) {
+  const runsDir = getRunsDir()
+  const resolved = resolve(runsDir, runName)
+  if (!resolved.startsWith(runsDir + "/") && resolved !== runsDir) {
     throw new Error("Path traversal blocked")
   }
   return resolved
