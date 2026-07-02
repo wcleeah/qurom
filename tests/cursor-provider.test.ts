@@ -540,10 +540,10 @@ describe("cursorProvider", () => {
       schema: z.object({ ok: z.boolean() }),
     })
 
-    expect(instructions).toContain("Create a downloadable Cursor Cloud artifact named `reader-profile-1.json`")
+    expect(instructions).toContain("Write the downloadable Cursor Cloud artifact to `/opt/cursor/artifacts/reader-profile-1.json`")
+    expect(instructions).toContain("The artifact must be named exactly `reader-profile-1.json`")
     expect(instructions).toContain("\"ok\"")
     expect(instructions).not.toContain("/tmp/reader-profile-1.json")
-    expect(instructions).not.toContain("/opt/cursor/artifacts")
   })
 
   test("emits runner activity events from Cursor deltas", async () => {

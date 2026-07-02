@@ -501,7 +501,8 @@ export const cursorProvider: AgentProvider = {
       const schema = JSON.stringify(toJsonSchema(input.schema), null, 2)
       return [
         "## Output instructions",
-        `Create a downloadable Cursor Cloud artifact named \`${name}\` using the correct Cursor Cloud artifact location.`,
+        `Write the downloadable Cursor Cloud artifact to \`/opt/cursor/artifacts/${name}\`.`,
+        `The artifact must be named exactly \`${name}\`.`,
         "The artifact content must be exactly one JSON object matching this schema:",
         schema,
         "Respond with only `OK` after the artifact is created.",
@@ -510,7 +511,8 @@ export const cursorProvider: AgentProvider = {
     }
     return [
       "## Output instructions",
-      `Create a downloadable Cursor Cloud artifact named \`${name}\` using the correct Cursor Cloud artifact location.`,
+      `Write the downloadable Cursor Cloud artifact to \`/opt/cursor/artifacts/${name}\`.`,
+      `The artifact must be named exactly \`${name}\`.`,
       "Write the complete output content into that downloadable artifact.",
       "Respond with only `OK` after the artifact is created.",
       "Do not include the output content in your response.",
