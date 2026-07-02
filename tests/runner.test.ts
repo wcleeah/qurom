@@ -443,6 +443,63 @@ describe("runResearchPipeline", () => {
     })
   })
 
+  test("retries a named node from the checkpoint before that node", async () => {
+    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
+    const runDir = join(artifactDir, "retry-node-req-node-1")
+    await mkdir(runDir, { recursive: true })
+    await Bun.write(join(runDir, "request.json"), JSON.stringify({
+      requestId: "req-node-1",
+      inputMode: "topic",
+      topic: "retry node topic",
+    }))
+
+    const bus = createEventBus()
+    const invokeConfigs: unknown[] = []
+    const prerequisites = { agents: [] } as unknown as RunResearchPipelineArgs["prerequisites"]
+
+    const graphFactory: GraphFactory = (() => ({
+      getStateHistory: async function* () {
+        yield {
+          next: ["runParallelAudits"],
+          config: { configurable: { thread_id: "req-node-1", checkpoint_id: "checkpoint-after-draft" } },
+          metadata: { step: 4 },
+        }
+        yield {
+          next: ["draftFullDraft"],
+          config: { configurable: { thread_id: "req-node-1", checkpoint_id: "checkpoint-before-draft" } },
+          metadata: { step: 3 },
+        }
+      },
+      invoke: async (_input: unknown, invokeConfig: unknown) => {
+        invokeConfigs.push(invokeConfig)
+        return {
+          requestId: "req-node-1",
+          status: "approved",
+          round: 0,
+          approvedAgents: ["source-auditor"],
+          unresolvedFindings: [],
+          failureReason: undefined,
+          outputPath: runDir,
+        }
+      },
+    })) as GraphFactory
+
+    await runResearchPipeline({
+      config: configWithTempArtifacts,
+      prerequisites,
+      promptBundle,
+      resume: { runId: "req-node-1#draftFullDraft" },
+      bus,
+      bridgeFactory: () => ({ async start() {}, async stop() {} }),
+      telemetryFactory: async () => disabledTelemetry(),
+      graphFactory,
+    })
+
+    expect(invokeConfigs[0]).toMatchObject({
+      configurable: { thread_id: "req-node-1", checkpoint_id: "checkpoint-before-draft" },
+    })
+  })
+
   test("uses the interrupt checkpoint when resuming a reader interview", async () => {
     const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
     const runDir = join(artifactDir, "interview-resume-req-1")

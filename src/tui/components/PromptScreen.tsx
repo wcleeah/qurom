@@ -113,7 +113,7 @@ export const PromptScreen = ({ onSubmit, onResumeSubmit, onDesignSubmit }: Promp
               />
             ) : mode === "resume" ? (
               <input
-                placeholder="run directory name or request ID"
+                placeholder="run directory/request ID, optionally #nodeName to retry a node"
                 focused
                 width="100%"
                 value={resumeRunId}

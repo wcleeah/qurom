@@ -123,7 +123,7 @@ export type RunResearchPipelineArgs = {
   prerequisites: RuntimePrerequisites
   promptBundle: RuntimePromptBundle
   request?: InputRequest
-  resume?: { runId: string }
+  resume?: { runId: string; node?: string; checkpointId?: string }
   bus: EventBus
   signal?: AbortSignal
   graphFactory?: GraphFactory
@@ -458,6 +458,61 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
   return { trackSessionObservation, dispose }
 }
 
+function parseResumeTarget(resume: NonNullable<RunResearchPipelineArgs["resume"]>) {
+  const hashIndex = resume.runId.indexOf("#")
+  if (hashIndex < 0) return resume
+  return {
+    ...resume,
+    runId: resume.runId.slice(0, hashIndex),
+    node: resume.node ?? resume.runId.slice(hashIndex + 1),
+  }
+}
+
+async function resolveGraphResumeConfig(
+  graph: {
+    getState?: (config: unknown) => Promise<{
+      config: Record<string, unknown> & { configurable?: Record<string, unknown> }
+    }>
+    getStateHistory?: (config: unknown) => AsyncIterable<{
+      next?: string[]
+      config: Record<string, unknown> & { configurable?: Record<string, unknown> }
+      metadata?: Record<string, unknown>
+    }>
+  },
+  requestId: string,
+  resume: NonNullable<RunResearchPipelineArgs["resume"]>,
+) {
+  const baseConfig = { configurable: { thread_id: requestId } }
+
+  if (resume.checkpointId) {
+    return { configurable: { thread_id: requestId, checkpoint_id: resume.checkpointId } }
+  }
+
+  if (resume.node) {
+    if (typeof graph.getStateHistory !== "function") {
+      throw new Error("Graph does not support checkpoint history for node retry")
+    }
+    for await (const snapshot of graph.getStateHistory(baseConfig)) {
+      if (snapshot.next?.includes(resume.node)) {
+        const configurable = snapshot.config.configurable
+        const checkpointId = configurable?.checkpoint_id
+        if (typeof checkpointId !== "string") {
+          throw new Error(`Checkpoint before node ${resume.node} is missing checkpoint_id`)
+        }
+        return { configurable: { ...configurable, thread_id: requestId, checkpoint_id: checkpointId } }
+      }
+    }
+    throw new Error(`No checkpoint found before node "${resume.node}" for thread ${requestId}`)
+  }
+
+  const state = typeof graph.getState === "function"
+    ? await graph.getState(baseConfig)
+    : undefined
+  const checkpointId = state?.config?.configurable?.checkpoint_id
+  if (typeof checkpointId !== "string") throw new Error(`No checkpoint_id in state for thread ${requestId}`)
+  return { configurable: { thread_id: requestId, checkpoint_id: checkpointId } }
+}
+
 export async function runResearchPipeline(args: RunResearchPipelineArgs): Promise<RunResult> {
   const { config, prerequisites, promptBundle, bus, signal } = args
   void prerequisites
@@ -466,7 +521,8 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   const abortSessionFn = args.abortSessionFn ?? abortSession
   const telemetryFactory = args.telemetryFactory ?? createTelemetry
 
-  const resolvedResume = args.resume ? await resolveRunForResume(args.resume.runId, config.quorumConfig.artifactDir) : undefined
+  const parsedResume = args.resume ? parseResumeTarget(args.resume) : undefined
+  const resolvedResume = parsedResume ? await resolveRunForResume(parsedResume.runId, config.quorumConfig.artifactDir) : undefined
   const request = resolvedResume?.request ?? args.request
   if (!request) {
     throw new Error("runResearchPipeline requires either request or resume")
@@ -583,16 +639,22 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
         signal: bridgeAbort.signal,
       }
 
-      if (resolvedResume) {
-        const state = typeof graph.getState === "function"
-          ? await graph.getState({ configurable: { thread_id: requestId } })
-          : undefined
-        const checkpointId = state?.config?.configurable?.checkpoint_id as string | undefined
-        if (!checkpointId) throw new Error(`No checkpoint_id in state for thread ${requestId}`)
-        debugLogRef.current?.write("pipeline.resume", { requestId, runDir: resolvedResume.runDir, checkpointId })
+      if (resolvedResume && parsedResume) {
+        const resumeConfig = await resolveGraphResumeConfig(
+          graph as unknown as Parameters<typeof resolveGraphResumeConfig>[0],
+          requestId,
+          parsedResume,
+        )
+        const checkpointId = resumeConfig.configurable.checkpoint_id
+        debugLogRef.current?.write("pipeline.resume", {
+          requestId,
+          runDir: resolvedResume.runDir,
+          checkpointId,
+          node: parsedResume.node,
+        })
         initialInput = null
         initialConfig = {
-          configurable: { thread_id: requestId, checkpoint_id: checkpointId },
+          configurable: resumeConfig.configurable,
           recursionLimit: config.quorumConfig.recursionLimit,
           signal: bridgeAbort.signal,
         }
