@@ -287,7 +287,7 @@ describe("cursorProvider", () => {
       mcpServers: {
         context7: {
           command: "context7-mcp",
-          env: { CONTEXT7_API_KEY: "{env:CONTEXT7_API_KEY}" },
+          env: { CONTEXT7_API_KEY: "${env:CONTEXT7_API_KEY}" },
         },
         generic: {
           command: "generic-mcp",
@@ -338,8 +338,8 @@ describe("cursorProvider", () => {
               options: {
                 mcpServers: {
                   search: {
-                    url: "https://mcp.example/search?key=${SEARCH_API_KEY}",
-                    headers: { Authorization: "Bearer ${SEARCH_API_KEY}" },
+                    url: "https://mcp.example/search?key=${env:SEARCH_API_KEY}",
+                    headers: { Authorization: "Bearer ${env:SEARCH_API_KEY}" },
                     env: { SEARCH_API_KEY: "${SEARCH_API_KEY}" },
                   },
                 },

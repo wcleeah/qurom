@@ -97,8 +97,8 @@ async function loadCursorMcpServers(): Promise<Record<string, McpServerConfig>> 
 
 function interpolateEnvString(value: string, env: RuntimeConfig["env"]) {
   const runtimeEnv = env as Record<string, string | undefined>
-  return value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, lowerEnvName: string | undefined, upperEnvName: string | undefined, shellName: string | undefined) => {
-    const envName = lowerEnvName ?? upperEnvName
+  return value.replace(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}|\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, shellLowerEnvName: string | undefined, shellUpperEnvName: string | undefined, lowerEnvName: string | undefined, upperEnvName: string | undefined, shellName: string | undefined) => {
+    const envName = shellLowerEnvName ?? shellUpperEnvName ?? lowerEnvName ?? upperEnvName
     const name = envName ?? shellName
     if (!name) return _match
     const resolved = runtimeEnv[name] ?? process.env[name]
@@ -109,7 +109,7 @@ function interpolateEnvString(value: string, env: RuntimeConfig["env"]) {
   })
 }
 
-function interpolateMcpConfigEnv<T>(value: T, env: RuntimeConfig["env"]): T {
+export function interpolateMcpConfigEnv<T>(value: T, env: RuntimeConfig["env"]): T {
   if (typeof value === "string") {
     return interpolateEnvString(value, env) as T
   }

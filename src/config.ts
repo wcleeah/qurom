@@ -12,6 +12,8 @@ const envSchema = z.object({
   QUORUM_CAPTURE_OPENCODE_EVENTS: z.enum(["0", "1"]).default("0"),
   QUORUM_CAPTURE_SYNC_HISTORY: z.enum(["0", "1"]).default("0"),
   CURSOR_API_KEY: z.string().min(1).optional(),
+  CONTEXT7_API_KEY: z.string().min(1).optional(),
+  EXA_API_KEY: z.string().min(1).optional(),
   LANGFUSE_PUBLIC_KEY: z.string().optional(),
   LANGFUSE_SECRET_KEY: z.string().optional(),
   LANGFUSE_BASE_URL: z.string().url().optional(),
