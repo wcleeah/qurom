@@ -60,6 +60,12 @@ export const quorumConfigSchema = z.object({
       designatedDesigner: z.string().min(1),
       auditors: z.array(z.string().min(1)).min(1),
       maxRounds: z.number().int().positive(),
+      browserQa: z
+        .object({
+          enabled: z.boolean(),
+          mcpServer: z.string().min(1).optional(),
+        })
+        .optional(),
     })
     .optional(),
   /**
@@ -95,3 +101,11 @@ export async function loadRuntimeConfig() {
 }
 
 export type RuntimeConfig = Awaited<ReturnType<typeof loadRuntimeConfig>>
+
+export function browserQaEnabled(config: RuntimeConfig) {
+  return config.quorumConfig.designQuorum?.browserQa?.enabled === true
+}
+
+export function browserQaMcpServer(config: RuntimeConfig) {
+  return browserQaEnabled(config) ? config.quorumConfig.designQuorum?.browserQa?.mcpServer : undefined
+}

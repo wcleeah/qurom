@@ -14,6 +14,7 @@ export const promptAssetFiles = {
   readerInterviewFollowUp: "reader-interview-follow-up.md",
   readerInterviewDuplicateCorrection: "reader-interview-duplicate-correction.md",
   enhanceDesign: "enhance-design.md",
+  browserQaEnhance: "browser-qa-enhance.md",
 } as const
 
 export type PromptAssetKey = keyof typeof promptAssetFiles

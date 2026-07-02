@@ -1,4 +1,5 @@
 import type { RuntimeConfig } from "../config"
+import { browserQaEnabled } from "../config"
 import { cursorProvider } from "./cursor"
 import { opencodeProvider } from "./opencode"
 import type { AgentProvider, AgentProviderId, AgentRole, ProviderConfigFormDescriptor } from "./types"
@@ -56,6 +57,9 @@ export function configuredAgentRoles(config: RuntimeConfig): AgentRole[] {
       ...config.quorumConfig.designQuorum.auditors,
       "interactive-enhancer",
     )
+    if (browserQaEnabled(config)) {
+      roles.push("browser-qa-enhancer")
+    }
   }
 
   return [...new Set(roles)]

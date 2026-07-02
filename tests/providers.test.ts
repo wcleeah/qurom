@@ -13,6 +13,8 @@ const baseConfig: RuntimeConfig = {
     QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
     QUORUM_CAPTURE_SYNC_HISTORY: "0",
     CURSOR_API_KEY: undefined,
+    CONTEXT7_API_KEY: undefined,
+    EXA_API_KEY: undefined,
     LANGFUSE_PUBLIC_KEY: undefined,
     LANGFUSE_SECRET_KEY: undefined,
     LANGFUSE_BASE_URL: undefined,
@@ -57,7 +59,23 @@ describe("provider registry", () => {
     expect(roles).toContain("html-designer")
     expect(roles).toContain("interactive-enhancer")
     expect(roles).toContain("json-fixer")
+    expect(roles).not.toContain("browser-qa-enhancer")
     expect(new Set(roles).size).toBe(roles.length)
+  })
+
+  test("includes browser QA role only when browser QA is enabled", () => {
+    const config: RuntimeConfig = {
+      ...baseConfig,
+      quorumConfig: {
+        ...baseConfig.quorumConfig,
+        designQuorum: {
+          ...baseConfig.quorumConfig.designQuorum!,
+          browserQa: { enabled: true },
+        },
+      },
+    }
+
+    expect(configuredAgentRoles(config)).toContain("browser-qa-enhancer")
   })
 
   test("uses the default provider when a role has no override", () => {

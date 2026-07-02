@@ -125,6 +125,8 @@ const config: RuntimeConfig = {
     QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
     QUORUM_CAPTURE_SYNC_HISTORY: "0",
     CURSOR_API_KEY: "cursor-test-key",
+    CONTEXT7_API_KEY: undefined,
+    EXA_API_KEY: undefined,
     LANGFUSE_PUBLIC_KEY: undefined,
     LANGFUSE_SECRET_KEY: undefined,
     LANGFUSE_BASE_URL: undefined,
@@ -321,6 +323,63 @@ describe("cursorProvider", () => {
         },
       },
     })
+  })
+
+  test("selects configured browser QA MCP server for browser QA role", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-cursor-browser-mcp-"))
+    process.env.CURSOR_MCP_CONFIG_PATH = join(dir, "mcp.json")
+    await writeFile(process.env.CURSOR_MCP_CONFIG_PATH, JSON.stringify({
+      mcpServers: {
+        playwright: {
+          command: "npx",
+          args: ["-y", "@playwright/mcp"],
+        },
+        context7: {
+          url: "https://mcp.context7.com/mcp",
+        },
+      },
+    }))
+    const mcpConfig: RuntimeConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        researchTools: { prefer: ["context7"], webSearchProvider: "exa" },
+        designQuorum: {
+          enabled: true,
+          designatedDesigner: "html-designer",
+          auditors: ["visual-layout-auditor"],
+          maxRounds: 1,
+          browserQa: { enabled: true, mcpServer: "playwright" },
+        },
+        agentRuntime: {
+          ...config.quorumConfig.agentRuntime,
+          roles: {
+            ...config.quorumConfig.agentRuntime.roles,
+            "browser-qa-enhancer": {
+              provider: "cursor",
+              model: "composer-2.5",
+              options: {},
+            },
+          },
+        },
+      },
+    }
+
+    await cursorProvider.createRunHandle({
+      config: mcpConfig,
+      role: "browser-qa-enhancer",
+      title: "browser qa",
+    })
+
+    expect(createCalls[0]).toMatchObject({
+      mcpServers: {
+        playwright: {
+          command: "npx",
+          args: ["-y", "@playwright/mcp"],
+        },
+      },
+    })
+    expect(createCalls[0]?.mcpServers).not.toHaveProperty("context7")
   })
 
   test("interpolates environment placeholders in role-level Cursor MCP overrides", async () => {

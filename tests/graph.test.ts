@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import type { RuntimeConfig } from "../src/config.ts"
 import {
   aggregateConsensus,
+  browserQaEnhanceNode,
   dedupeFindings,
   effectiveResponsesByFinding,
   ingestRequest,
@@ -17,6 +21,7 @@ import {
 import { aggregateDesignConsensus } from "../src/design-quorum.ts"
 import type { AggregatedFinding, AuditResultRecord, DesignAuditResultRecord, RebuttalResponseRecord, ResearchState } from "../src/schema.ts"
 import { resolveRunDir } from "../src/output.ts"
+import type { AgentRuntime } from "../src/agent-runtime/runtime.ts"
 
 const config = {
   env: {
@@ -28,6 +33,8 @@ const config = {
     QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
     QUORUM_CAPTURE_SYNC_HISTORY: "0",
     CURSOR_API_KEY: undefined,
+    CONTEXT7_API_KEY: undefined,
+    EXA_API_KEY: undefined,
     LANGFUSE_PUBLIC_KEY: undefined,
     LANGFUSE_SECRET_KEY: undefined,
     LANGFUSE_BASE_URL: undefined,
@@ -49,6 +56,18 @@ const config = {
     researchTools: {
       prefer: ["context7", "exa"],
       webSearchProvider: "exa",
+    },
+    designQuorum: {
+      enabled: true,
+      designatedDesigner: "html-designer",
+      auditors: ["visual-layout-auditor", "technical-html-auditor", "script-security-auditor"],
+      maxRounds: 2,
+    },
+    auditRestart: { maxRestarts: 1 },
+    readerDiscovery: { maxTurns: 6, enabled: true },
+    agentRuntime: {
+      defaultProvider: "opencode",
+      roles: {},
     },
   },
 } satisfies RuntimeConfig
@@ -102,7 +121,107 @@ function baseState(overrides: Partial<ResearchState> = {}): ResearchState {
   }
 }
 
+function browserQaRuntime(responseText: string) {
+  const prompts: Array<{ role: string; prompt: string; outputFile?: string }> = []
+  return {
+    prompts,
+    runtime: {
+      async createHandle(role: string) {
+        return {
+          id: "browser-qa-handle",
+          role,
+          keepAlive: false,
+          dispose: async () => {},
+        }
+      },
+      async prompt(input: { role: string; prompt: string; outputFile?: string }) {
+        prompts.push(input)
+        return { text: responseText }
+      },
+      async abort() {},
+      providerForRole() {
+        throw new Error("providerForRole should not be called")
+      },
+    } as AgentRuntime,
+  }
+}
+
 describe("graph helpers", () => {
+  test("browser QA node no-ops when browser QA is not enabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-browser-qa-off-"))
+    const htmlPath = join(dir, "final.html")
+    await Bun.write(htmlPath, "<html><body>Original</body></html>")
+    const { runtime, prompts } = browserQaRuntime("<html><body>Changed</body></html>")
+
+    const result = await browserQaEnhanceNode(
+      config,
+      runtime,
+      { assets: { browserQaEnhance: "qa prompt" } } as any,
+      baseState({ outputPath: dir, designHtml: "Original" }),
+    )
+
+    expect(prompts).toHaveLength(0)
+    expect(await Bun.file(htmlPath).text()).toBe("<html><body>Original</body></html>")
+    expect(result.designHtml).toBe("Original")
+  })
+
+  test("browser QA node writes returned HTML when browser QA is enabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-browser-qa-on-"))
+    const htmlPath = join(dir, "final.html")
+    await Bun.write(htmlPath, "<html><body>Original</body></html>")
+    const { runtime, prompts } = browserQaRuntime("<html><body>Changed</body></html>")
+    const qaConfig: RuntimeConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        designQuorum: {
+          ...config.quorumConfig.designQuorum!,
+          browserQa: { enabled: true },
+        },
+      },
+    }
+
+    const result = await browserQaEnhanceNode(
+      qaConfig,
+      runtime,
+      { assets: { browserQaEnhance: "qa prompt" } } as any,
+      baseState({ outputPath: dir, designHtml: "Original" }),
+    )
+
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]?.role).toBe("browser-qa-enhancer")
+    expect(prompts[0]?.prompt).not.toContain("Configured browser MCP server")
+    expect(await Bun.file(htmlPath).text()).toBe("<html><body>Changed</body></html>")
+    expect(result.designHtml).toBe("<html><body>Changed</body></html>")
+  })
+
+  test("browser QA node keeps file unchanged on OK", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-browser-qa-ok-"))
+    const htmlPath = join(dir, "final.html")
+    await Bun.write(htmlPath, "<html><body>Original</body></html>")
+    const { runtime } = browserQaRuntime("OK")
+    const qaConfig: RuntimeConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        designQuorum: {
+          ...config.quorumConfig.designQuorum!,
+          browserQa: { enabled: true },
+        },
+      },
+    }
+
+    const result = await browserQaEnhanceNode(
+      qaConfig,
+      runtime,
+      { assets: { browserQaEnhance: "qa prompt" } } as any,
+      baseState({ outputPath: dir, designHtml: "Original" }),
+    )
+
+    expect(await Bun.file(htmlPath).text()).toBe("<html><body>Original</body></html>")
+    expect(result.designHtml).toBe("<html><body>Original</body></html>")
+  })
+
   test("dedupeFindings keeps latest findingId entry and sorts by severity then fields", () => {
     const result = dedupeFindings([
       finding({ findingId: "b", agent: "logic-auditor", issue: "Issue B", severity: "minor" }),
@@ -303,7 +422,13 @@ describe("graph helpers", () => {
       routeAfterDesignAggregate(designConfig, withDesign({ designStatus: "running", designRound: 0 })),
     ).toBe("reviseDesignHtml")
     // design quorum disabled → __end__
-    expect(routeAfterDesignAggregate(config, withDesign({ designStatus: "approved" }))).toBe("__end__")
+    expect(routeAfterDesignAggregate({
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        designQuorum: undefined,
+      },
+    }, withDesign({ designStatus: "approved" }))).toBe("__end__")
   })
 
   test("aggregateDesignConsensus approves with caveats when terminal findings are minor-only", () => {

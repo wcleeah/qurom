@@ -28,7 +28,10 @@
       "technical-html-auditor",
       "script-security-auditor"
     ],
-    "maxRounds": 2
+    "maxRounds": 2,
+    "browserQa": {
+      "enabled": true
+    }
   },
   "readerDiscovery": {
     "maxTurns": 6,

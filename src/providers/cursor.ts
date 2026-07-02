@@ -13,7 +13,7 @@ import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
-import type { RuntimeConfig } from "../config"
+import { browserQaMcpServer, type RuntimeConfig } from "../config"
 import type {
   AgentProvider,
   AgentRunHandle,
@@ -126,11 +126,15 @@ export function interpolateMcpConfigEnv<T>(value: T, env: RuntimeConfig["env"]):
 
 async function resolveMcpServers(
   config: RuntimeConfig,
+  role: AgentRole,
   options: ReturnType<typeof cursorOptionsForRole>,
 ): Promise<Record<string, McpServerConfig> | undefined> {
   const configured = await loadCursorMcpServers()
+  const preferred = role === "browser-qa-enhancer"
+    ? [browserQaMcpServer(config)].filter((name): name is string => Boolean(name))
+    : config.quorumConfig.researchTools.prefer
   const selected = Object.fromEntries(
-    config.quorumConfig.researchTools.prefer
+    preferred
       .filter((name) => configured[name])
       .map((name) => [name, configured[name]!]),
   ) as Record<string, McpServerConfig>
@@ -490,7 +494,7 @@ export const cursorProvider: AgentProvider = {
     const model = cursorModelForRole(input.config, input.role)
     const options = cursorOptionsForRole(input.config, input.role)
     const modelParams = cursorModelParamsForRole(input.config, input.role)
-    const mcpServers = await resolveMcpServers(input.config, options)
+    const mcpServers = await resolveMcpServers(input.config, input.role, options)
     const agent = await Agent.create({
       apiKey,
       name: input.title,
