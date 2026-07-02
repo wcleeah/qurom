@@ -31,5 +31,6 @@ Non-negotiable contract:
 - Mobile: the document must be readable on narrow screens without horizontal scrolling.
 - The <title> must match the document's title.
 - Do not mention this contract, the quorum process, or design revision history in the output.
+- There will be other agents responsible for a browser based check, do not initiate a full html testing.
 
 In the process, if you encountered any write / edit timeout or error, split the changes in batches, and do it one by one. If it is a full write, split the content, append to the file batch by batch.

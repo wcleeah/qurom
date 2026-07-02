@@ -19,4 +19,3 @@ Surgical revision rules:
 - Do not reorder sections, rename sections, or change the document's structure unless a finding explicitly demands it.
 - If two findings about the same topic conflict, prefer the more precise one.
 - If the draft was already correct and a finding is mistaken (e.g., auditor misunderstood), preserve the original text.
-
