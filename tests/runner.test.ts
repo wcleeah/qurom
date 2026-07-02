@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test"
-import { mkdtemp, readdir } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -387,6 +387,132 @@ describe("runResearchPipeline", () => {
     })
 
     expect(bridgeRunDir).toContain("hybrid-reranking-in-qdrant-req-1")
+  })
+
+  test("resumes a research run from the latest checkpoint", async () => {
+    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
+    const runDir = join(artifactDir, "resume-topic-req-resume-1")
+    await mkdir(runDir, { recursive: true })
+    await Bun.write(join(runDir, "request.json"), JSON.stringify({
+      requestId: "req-resume-1",
+      inputMode: "topic",
+      topic: "resume topic",
+    }))
+
+    const bus = createEventBus()
+    const invokeInputs: unknown[] = []
+    const invokeConfigs: unknown[] = []
+    const prerequisites = { agents: [] } as unknown as RunResearchPipelineArgs["prerequisites"]
+
+    const graphFactory: GraphFactory = (() => ({
+      getState: async () => ({
+        tasks: [],
+        values: {},
+        config: { configurable: { thread_id: "req-resume-1", checkpoint_id: "checkpoint-7" } },
+      }),
+      invoke: async (input: unknown, invokeConfig: unknown) => {
+        invokeInputs.push(input)
+        invokeConfigs.push(invokeConfig)
+        return {
+          requestId: "req-resume-1",
+          status: "approved",
+          round: 0,
+          approvedAgents: ["source-auditor"],
+          unresolvedFindings: [],
+          failureReason: undefined,
+          outputPath: runDir,
+        }
+      },
+    })) as GraphFactory
+
+    const result = await runResearchPipeline({
+      config: configWithTempArtifacts,
+      prerequisites,
+      promptBundle,
+      resume: { runId: "req-resume-1" },
+      bus,
+      bridgeFactory: () => ({ async start() {}, async stop() {} }),
+      telemetryFactory: async () => disabledTelemetry(),
+      graphFactory,
+    })
+
+    expect(result.requestId).toBe("req-resume-1")
+    expect(invokeInputs).toEqual([null])
+    expect(invokeConfigs[0]).toMatchObject({
+      configurable: { thread_id: "req-resume-1", checkpoint_id: "checkpoint-7" },
+    })
+  })
+
+  test("uses the interrupt checkpoint when resuming a reader interview", async () => {
+    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
+    const runDir = join(artifactDir, "interview-resume-req-1")
+    await mkdir(runDir, { recursive: true })
+    await Bun.write(join(runDir, "reader-reply.json"), JSON.stringify({ reply: "I know checkpoints." }))
+
+    const bus = createEventBus()
+    const invokeInputs: unknown[] = []
+    const invokeConfigs: unknown[] = []
+    let getStateCalls = 0
+    const prerequisites = { agents: [] } as unknown as RunResearchPipelineArgs["prerequisites"]
+
+    const graphFactory: GraphFactory = ((_, __, input) => ({
+      invoke: async (invokeInput: unknown, invokeConfig: unknown) => {
+        invokeInputs.push(invokeInput)
+        invokeConfigs.push(invokeConfig)
+        input?.observer?.onNodeEnd?.("prepareOutputPath", {
+          inputMode: "topic",
+          topic: "interview resume",
+          requestId: "req-1",
+          outputPath: runDir,
+        } as never)
+        if (invokeInputs.length === 1) return {}
+        return {
+          requestId: "req-1",
+          status: "approved",
+          round: 0,
+          approvedAgents: ["source-auditor"],
+          unresolvedFindings: [],
+          failureReason: undefined,
+          outputPath: runDir,
+        }
+      },
+      getState: async () => {
+        getStateCalls += 1
+        if (getStateCalls === 1) {
+          return {
+            tasks: [{ name: "discoverReaderResume", interrupts: [{ value: ["What do you know?"] }] }],
+            values: {
+              pendingNewReaderQuestions: ["What do you know?"],
+              interviewTranscript: [{ role: "interviewer", text: "What do you know?" }],
+            },
+            config: { configurable: { thread_id: "req-1", checkpoint_id: "interrupt-checkpoint" } },
+          }
+        }
+        return {
+          tasks: [],
+          values: {},
+          config: { configurable: { thread_id: "req-1", checkpoint_id: "after-resume" } },
+        }
+      },
+    })) as GraphFactory
+
+    await runResearchPipeline({
+      config: configWithTempArtifacts,
+      prerequisites,
+      promptBundle,
+      request: { inputMode: "topic", topic: "interview resume" },
+      bus,
+      bridgeFactory: () => ({ async start() {}, async stop() {} }),
+      telemetryFactory: async () => disabledTelemetry(),
+      graphFactory,
+    })
+
+    expect(invokeInputs[0]).toMatchObject({ inputMode: "topic", topic: "interview resume" })
+    expect(invokeInputs[1]).toBeDefined()
+    expect(invokeInputs[1]).not.toBeNull()
+    expect(invokeConfigs[1]).toMatchObject({
+      configurable: { checkpoint_id: "interrupt-checkpoint" },
+    })
   })
 
   test("adds actual used agent variants to trace metadata", async () => {

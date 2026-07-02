@@ -108,6 +108,42 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
     [config, promptBundle],
   )
 
+  const startResume = useCallback(
+    (runId: string) => {
+      const bus = createEventBus()
+      const store = createRunStore()
+      const binding = bindBusToStore({ bus, store })
+      const ac = new AbortController()
+      const promise = runResearchPipeline({ config, prerequisites, promptBundle, resume: { runId }, bus, signal: ac.signal })
+
+      const ctx: RunCtx = { store, unbind: binding.unbind, ac, promise }
+      setRunCtx(ctx)
+      setScreen("running")
+
+      const port = process.env.VIEW_PORT ?? "3000"
+      const host = process.env.VIEW_HOST ?? "localhost"
+      const offLifecycle = bus.on((event) => {
+        if (event.kind === "lifecycle" && event.requestId) {
+          setViewUrl(`http://${host}:${port}/runs/${event.requestId}`)
+          offLifecycle()
+        }
+      })
+      const offTerminal = bus.on((event) => {
+        if (event.kind === "lifecycle" && (event.phase === "complete" || event.phase === "error")) {
+          setScreen("complete")
+          offTerminal()
+        }
+      })
+
+      promise
+        .catch(() => {})
+        .finally(() => {
+          binding.flushAndUnbind()
+        })
+    },
+    [config, prerequisites, promptBundle],
+  )
+
   const restart = useCallback(() => {
     runCtx?.unbind()
     setRunCtx(undefined)
@@ -134,7 +170,7 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
   if (screen === "prompt") {
     return (
       <box flexGrow={1} position="relative">
-        <PromptScreen onSubmit={startRun} onDesignSubmit={startDesign} />
+        <PromptScreen onSubmit={startRun} onResumeSubmit={startResume} onDesignSubmit={startDesign} />
       </box>
     )
   }

@@ -13,6 +13,7 @@ import { researchStateSchema, type GraphInput, type InputRequest, type ResearchS
 import type { validateProviderPrerequisites } from "./providers/registry"
 import type { PromptBundle } from "./prompt-assets"
 import { answeredQuestionsFromTranscript } from "./reader-transcript"
+import { resolveRunForResume } from "./run-resume"
 
 export type GraphFactory = typeof createGraph
 
@@ -121,7 +122,8 @@ export type RunResearchPipelineArgs = {
   config: RuntimeConfig
   prerequisites: RuntimePrerequisites
   promptBundle: RuntimePromptBundle
-  request: InputRequest
+  request?: InputRequest
+  resume?: { runId: string }
   bus: EventBus
   signal?: AbortSignal
   graphFactory?: GraphFactory
@@ -172,7 +174,7 @@ async function runGraphWithInterviewResume<GraphT extends {
   }>
 }>(
   graph: GraphT,
-  initialInput: Record<string, unknown>,
+  initialInput: unknown,
   baseConfig: { configurable: { thread_id: string }; recursionLimit: number; signal: AbortSignal },
   opts: {
     runDir: () => string | undefined
@@ -187,11 +189,16 @@ async function runGraphWithInterviewResume<GraphT extends {
 ): Promise<Record<string, unknown>> {
   const { configurable, recursionLimit, signal } = baseConfig
   let input: unknown = initialInput
+  let currentConfig: { configurable: Record<string, unknown>; recursionLimit: number; signal: AbortSignal } = {
+    configurable,
+    recursionLimit,
+    signal,
+  }
   let attempt = 0
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const result = await graph.invoke(input, { configurable, recursionLimit, signal })
+    const result = await graph.invoke(input, currentConfig)
     attempt += 1
 
     // Detect an interrupt: getState().tasks[].interrupts[].value holds the
@@ -245,8 +252,8 @@ async function runGraphWithInterviewResume<GraphT extends {
       signal,
     }
     input = new Command({ resume: replyText })
+    currentConfig = resumeConfig
     // Re-enter the loop; the next invoke continues from the interrupt.
-    void resumeConfig
   }
 }
 
@@ -452,16 +459,21 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
 }
 
 export async function runResearchPipeline(args: RunResearchPipelineArgs): Promise<RunResult> {
-  const { config, prerequisites, promptBundle, request, bus, signal } = args
+  const { config, prerequisites, promptBundle, bus, signal } = args
   void prerequisites
   const graphFactory = args.graphFactory ?? createGraph
   const bridgeFactory = args.bridgeFactory ?? createOpencodeEventBridge
   const abortSessionFn = args.abortSessionFn ?? abortSession
   const telemetryFactory = args.telemetryFactory ?? createTelemetry
 
-  const requestId = crypto.randomUUID()
-  let runDir: string | undefined
-  let interviewRunDir: string | undefined
+  const resolvedResume = args.resume ? await resolveRunForResume(args.resume.runId, config.quorumConfig.artifactDir) : undefined
+  const request = resolvedResume?.request ?? args.request
+  if (!request) {
+    throw new Error("runResearchPipeline requires either request or resume")
+  }
+  const requestId = resolvedResume?.requestId ?? crypto.randomUUID()
+  let runDir: string | undefined = resolvedResume?.runDir
+  let interviewRunDir: string | undefined = resolvedResume?.runDir
 
   const telemetry = await telemetryFactory(config, {
     requestId,
@@ -564,14 +576,32 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
         },
       })
 
-      const invocation = await runGraphWithInterviewResume(
-        graph as unknown as Parameters<typeof runGraphWithInterviewResume>[0],
-        { ...request, requestId },
-        {
-          configurable: { thread_id: requestId },
+      let initialInput: Record<string, unknown> | null = { ...request, requestId }
+      let initialConfig: { configurable: { thread_id: string; checkpoint_id?: string }; recursionLimit: number; signal: AbortSignal } = {
+        configurable: { thread_id: requestId },
+        recursionLimit: config.quorumConfig.recursionLimit,
+        signal: bridgeAbort.signal,
+      }
+
+      if (resolvedResume) {
+        const state = typeof graph.getState === "function"
+          ? await graph.getState({ configurable: { thread_id: requestId } })
+          : undefined
+        const checkpointId = state?.config?.configurable?.checkpoint_id as string | undefined
+        if (!checkpointId) throw new Error(`No checkpoint_id in state for thread ${requestId}`)
+        debugLogRef.current?.write("pipeline.resume", { requestId, runDir: resolvedResume.runDir, checkpointId })
+        initialInput = null
+        initialConfig = {
+          configurable: { thread_id: requestId, checkpoint_id: checkpointId },
           recursionLimit: config.quorumConfig.recursionLimit,
           signal: bridgeAbort.signal,
-        },
+        }
+      }
+
+      const invocation = await runGraphWithInterviewResume(
+        graph as unknown as Parameters<typeof runGraphWithInterviewResume>[0],
+        initialInput,
+        initialConfig,
         {
           runDir: () => interviewRunDir ?? runDir,
           setAwaitingReaderReply: (value) => liveStatusWriter?.setAwaitingReaderReply(value),
@@ -810,40 +840,9 @@ export async function runDesignPipeline(args: {
 }) {
   const { config, promptBundle, runId, bus, signal } = args
 
-  // Resolve run directory from runId (could be full path, dir name, or requestId)
-  const { readdir } = await import("node:fs/promises")
-  const { resolve, join } = await import("node:path")
-
-  const runsDir = resolve(process.cwd(), "runs")
-  let runDir = runId
-
-  // If it's not an existing path, search runs/ for a matching directory
-  try {
-    const st = await import("node:fs/promises").then((m) => m.stat(runId))
-    if (!st.isDirectory()) throw new Error("Not a directory")
-  } catch {
-    // Try as directory name under runs/
-    const candidate = join(runsDir, runId)
-    try {
-      await import("node:fs/promises").then((m) => m.stat(candidate))
-      runDir = candidate
-    } catch {
-      // Try finding by requestId (directory name contains the ID)
-      const dirs = await readdir(runsDir)
-      const match = dirs.find((d) => d.includes(runId))
-      if (!match) throw new Error(`No run directory found matching "${runId}"`)
-      runDir = join(runsDir, match)
-    }
-  }
-
-  // Read requestId from request.json
-  const requestFile = Bun.file(join(runDir, "request.json"))
-  if (!(await requestFile.exists())) {
-    throw new Error(`No request.json found in ${runDir}`)
-  }
-  const requestJson = await requestFile.json() as { requestId?: string }
-  const requestId = requestJson.requestId
-  if (!requestId) throw new Error(`No requestId in ${runDir}/request.json`)
+  const resolvedRun = await resolveRunForResume(runId, config.quorumConfig.artifactDir)
+  const runDir = resolvedRun.runDir
+  const requestId = resolvedRun.requestId
 
   const graphFactory = createGraph
   const telemetry = await createTelemetry(config, { requestId, inputMode: "topic" })

@@ -3,18 +3,20 @@ import { useState } from "react"
 import type { InputRequest } from "../../schema"
 import { theme } from "../theme"
 
-export type PromptMode = "topic" | "document" | "design"
+export type PromptMode = "topic" | "document" | "resume" | "design"
 
 export interface PromptScreenProps {
   onSubmit: (request: InputRequest) => void
+  onResumeSubmit?: (runId: string) => void
   onDesignSubmit?: (runId: string) => void
 }
 
-export const PromptScreen = ({ onSubmit, onDesignSubmit }: PromptScreenProps) => {
+export const PromptScreen = ({ onSubmit, onResumeSubmit, onDesignSubmit }: PromptScreenProps) => {
   const { width, height } = useTerminalDimensions()
   const [mode, setMode] = useState<PromptMode>("topic")
   const [topic, setTopic] = useState("")
   const [documentPath, setDocumentPath] = useState("")
+  const [resumeRunId, setResumeRunId] = useState("")
   const [designRunId, setDesignRunId] = useState("")
 
   const submitTopic = () => {
@@ -35,11 +37,18 @@ export const PromptScreen = ({ onSubmit, onDesignSubmit }: PromptScreenProps) =>
     onDesignSubmit?.(trimmed)
   }
 
+  const submitResume = () => {
+    const trimmed = resumeRunId.trim()
+    if (trimmed.length === 0) return
+    onResumeSubmit?.(trimmed)
+  }
+
   useKeyboard((key) => {
     if (key.name === "tab") {
       setMode((current) => {
         if (current === "topic") return "document"
-        if (current === "document") return "design"
+        if (current === "document") return "resume"
+        if (current === "resume") return "design"
         return "topic"
       })
       return
@@ -47,6 +56,7 @@ export const PromptScreen = ({ onSubmit, onDesignSubmit }: PromptScreenProps) =>
     if (key.name === "return") {
       if (mode === "topic") submitTopic()
       else if (mode === "document") submitDocument()
+      else if (mode === "resume") submitResume()
       else submitDesign()
       return
     }
@@ -68,6 +78,9 @@ export const PromptScreen = ({ onSubmit, onDesignSubmit }: PromptScreenProps) =>
             </text>
             <text fg={mode === "document" ? theme.text : theme.textMuted}>
               {mode === "document" ? "● document" : "○ document"}
+            </text>
+            <text fg={mode === "resume" ? theme.text : theme.textMuted}>
+              {mode === "resume" ? "● resume" : "○ resume"}
             </text>
             <text fg={mode === "design" ? theme.text : theme.textMuted}>
               {mode === "design" ? "● design" : "○ design"}
@@ -98,9 +111,17 @@ export const PromptScreen = ({ onSubmit, onDesignSubmit }: PromptScreenProps) =>
                 value={documentPath}
                 onInput={setDocumentPath}
               />
-            ) : (
+            ) : mode === "resume" ? (
               <input
                 placeholder="run directory name or request ID"
+                focused
+                width="100%"
+                value={resumeRunId}
+                onInput={setResumeRunId}
+              />
+            ) : (
+              <input
+                placeholder="run directory name or request ID for design resume"
                 focused
                 width="100%"
                 value={designRunId}
@@ -110,7 +131,7 @@ export const PromptScreen = ({ onSubmit, onDesignSubmit }: PromptScreenProps) =>
           </box>
 
           <text fg={theme.textMuted}>
-            Enter: run · Tab: {mode === "topic" ? "document" : mode === "document" ? "design" : "topic"} mode · Ctrl-C: quit
+            Enter: run · Tab: {mode === "topic" ? "document" : mode === "document" ? "resume" : mode === "resume" ? "design" : "topic"} mode · Ctrl-C: quit
           </text>
         </box>
       </box>
