@@ -1,7 +1,7 @@
 import { loadRuntimeConfig } from "./config"
 import { loadPromptBundle } from "./prompt-assets"
-import { runDesignForExistingRun } from "./design-quorum"
 import { prepareConfiguredProviders } from "./providers/registry"
+import { createEventBus, runDesignPipeline } from "./runner"
 
 async function main() {
   const args = process.argv.slice(2)
@@ -12,7 +12,7 @@ async function main() {
     process.exit(1)
   }
 
-  const runDir = args[0]
+  const runId = args[0]
 
   const config = await loadRuntimeConfig()
 
@@ -27,14 +27,16 @@ async function main() {
     console.log(`Loading prompt bundle...`)
     const promptBundle = await loadPromptBundle(config)
 
-    console.log(`Running design quorum for ${runDir}...`)
-    const result = await runDesignForExistingRun({ config, promptBundle, runDir })
+    console.log(`Resuming design quorum for ${runId}...`)
+    const bus = createEventBus()
+    const result = await runDesignPipeline({ config, promptBundle, runId, bus })
+    const outputPath = result.outputPath ?? runId
 
-    if (result.status === "approved") {
-      console.log(`✅ Design approved after ${result.round} round(s) → ${runDir}/final.html`)
+    if (result.designStatus === "approved") {
+      console.log(`✅ Design approved after ${result.designRound ?? 0} round(s) → ${outputPath}/final.html`)
     } else {
-      console.log(`⚠️  Design pipeline finished with status: ${result.status} after ${result.round} round(s)`)
-      console.log(`   HTML written to ${runDir}/final.html`)
+      console.log(`⚠️  Design pipeline finished with status: ${result.designStatus ?? result.status} after ${result.designRound ?? result.round} round(s)`)
+      console.log(`   HTML written to ${outputPath}/final.html`)
     }
   } finally {
     await stopProviders().catch(() => {})

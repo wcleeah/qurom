@@ -10,10 +10,11 @@ import {
   seedConfigStoreFromFiles,
   syncOpencodeAgentsFromStore,
   updatePromptAsset,
+  updateQuorumConfig,
   updateRoleBinding,
 } from "../src/config-store"
 import { promptAssetFiles } from "../src/prompt-asset-defs"
-import { handleConfigPost, renderConfigPrompts, renderConfigRoles } from "../src/view/config"
+import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "../src/view/config"
 
 let dir: string
 
@@ -94,6 +95,24 @@ describe("config store", () => {
     })
   })
 
+  test("quorum config updates are validated and saved to the active profile", async () => {
+    await seedConfigStoreFromFiles(env())
+    const current = await loadQuorumConfigFromStore(env())
+    await updateQuorumConfig(env(), JSON.stringify({
+      ...current,
+      designQuorum: {
+        enabled: true,
+        designatedDesigner: "html-designer",
+        auditors: ["visual-layout-auditor"],
+        maxRounds: 1,
+        browserQa: { enabled: true },
+      },
+    }))
+
+    const config = await loadQuorumConfigFromStore(env())
+    expect(config.designQuorum?.browserQa?.enabled).toBe(true)
+  })
+
   test("prompt updates write prompt asset files directly", async () => {
     await seedConfigStoreFromFiles(env())
     await updatePromptAsset(env(), "audit", "updated audit prompt")
@@ -114,6 +133,10 @@ describe("config store", () => {
   test("view config routes render and update sqlite-backed settings", async () => {
     await seedConfigStoreFromFiles(env())
 
+    const indexHtml = await renderConfigIndex().then((r) => r.text())
+    expect(indexHtml).toContain("Save quorum config")
+    expect(indexHtml).toContain("quorum.config.json")
+
     const rolesHtml = await renderConfigRoles().then((r) => r.text())
     expect(rolesHtml).toContain("source-auditor")
     expect(rolesHtml).toContain("data-role-instructions hidden")
@@ -129,5 +152,25 @@ describe("config store", () => {
     const response = await handleConfigPost(req, "/config/roles/source-auditor")
     expect(response?.status).toBe(303)
     expect((await loadQuorumConfigFromStore(env())).agentRuntime.roles["source-auditor"]?.providerAgent).toBe("custom-agent")
+
+    const current = await loadQuorumConfigFromStore(env())
+    const quorumReq = new Request("http://localhost/config/quorum", {
+      method: "POST",
+      body: new URLSearchParams({
+        content: JSON.stringify({
+          ...current,
+          designQuorum: {
+            enabled: true,
+            designatedDesigner: "html-designer",
+            auditors: ["visual-layout-auditor"],
+            maxRounds: 1,
+            browserQa: { enabled: true },
+          },
+        }),
+      }),
+    })
+    const quorumResponse = await handleConfigPost(quorumReq, "/config/quorum")
+    expect(quorumResponse?.status).toBe(303)
+    expect((await loadQuorumConfigFromStore(env())).designQuorum?.browserQa?.enabled).toBe(true)
   })
 })

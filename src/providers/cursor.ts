@@ -72,12 +72,41 @@ function cursorOptionsForRole(config: RuntimeConfig, role: AgentRole) {
     | undefined
 }
 
-function cursorModelParamsForRole(config: RuntimeConfig, role: AgentRole) {
+function modelVariantParams(model: CursorModel): Array<{ id: string; value: string }> {
+  const record = model as unknown as Record<string, unknown>
+  const variants = Array.isArray(record.variants) ? variantsFromRecord(record.variants) : []
+  const defaultVariant = variants.find((variant) => variant.isDefault) ?? variants[0]
+  return defaultVariant?.params ?? []
+}
+
+function variantsFromRecord(variants: unknown[]): Array<{ isDefault?: boolean; params: Array<{ id: string; value: string }> }> {
+  return variants.flatMap((variant) => {
+    if (!variant || typeof variant !== "object") return []
+    const record = variant as Record<string, unknown>
+    const rawParams = Array.isArray(record.params) ? record.params : []
+    const params = rawParams.flatMap((param) => {
+      if (!param || typeof param !== "object") return []
+      const item = param as Record<string, unknown>
+      return typeof item.id === "string" && typeof item.value === "string"
+        ? [{ id: item.id, value: item.value }]
+        : []
+    })
+    return params.length > 0 ? [{ isDefault: record.isDefault === true, params }] : []
+  })
+}
+
+function cursorModelParamsForRole(config: RuntimeConfig, role: AgentRole, model: CursorModel | undefined) {
   const params = cursorOptionsForRole(config, role)?.modelParams
-  if (!Array.isArray(params)) return undefined
-  const valid = params
-    .filter((entry) => entry && typeof entry.id === "string" && typeof entry.value === "string")
-    .map((entry) => ({ id: entry.id, value: entry.value }))
+  const saved = Array.isArray(params)
+    ? params
+      .filter((entry) => entry && typeof entry.id === "string" && typeof entry.value === "string")
+      .map((entry) => ({ id: entry.id, value: entry.value }))
+    : []
+  const merged = new Map((model ? modelVariantParams(model) : []).map((entry) => [entry.id, entry.value]))
+  for (const entry of saved) {
+    merged.set(entry.id, entry.value)
+  }
+  const valid = [...merged.entries()].map(([id, value]) => ({ id, value }))
   return valid.length > 0 ? valid : undefined
 }
 
@@ -493,7 +522,8 @@ export const cursorProvider: AgentProvider = {
 
     const model = cursorModelForRole(input.config, input.role)
     const options = cursorOptionsForRole(input.config, input.role)
-    const modelParams = cursorModelParamsForRole(input.config, input.role)
+    const catalogModel = (await listCursorModels(apiKey)).find((entry) => entry.id === model)
+    const modelParams = cursorModelParamsForRole(input.config, input.role, catalogModel)
     const mcpServers = await resolveMcpServers(input.config, input.role, options)
     const agent = await Agent.create({
       apiKey,

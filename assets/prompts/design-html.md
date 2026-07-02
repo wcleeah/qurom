@@ -17,6 +17,7 @@ Non-negotiable contract:
 - Make the document pleasant to read: generous line-height, comfortable measure (~65-75ch), clear visual hierarchy, distinct heading levels, good use of whitespace.
 - Use color intentionally, not decoratively. The base is black, white, grey. One saturated accent. Content-layer highlights (warnings, phases, syntax) use color for meaning — that stays. Do not let warmth leak into backgrounds, borders, or structural surfaces.
 - Add interactive elements where they improve understanding — collapsible sections for deep tangents, tabs for alternative explanations, hover annotations for terms, simple toggleable diagrams.
+- Treat ASCII-based artifacts as design opportunities. When a table, flow, state sketch, timeline, comparison, or diagram is currently expressed in plain text, consider whether a richer visual treatment would make it easier to scan or understand. Preserve the underlying meaning exactly, but choose the representation that best fits the content. If the plain-text form is already the clearest or the structure is ambiguous, keep it and style it thoughtfully.
 - Progressive enhancement: the document must be fully readable without JS. Interactivity is a bonus, not a requirement.
 - Code blocks must be syntax-highlighted with a readable theme. Use a minimal inline highlighter or a tiny external library.
 - Print stylesheet: include a basic @media print block so the document prints cleanly.

@@ -4,6 +4,8 @@ Study the document: its topic, structure, audience, and behavior across screen s
 
 Inspect candidate areas such as complex explanations, diagrams, sequences, comparisons, workflows, dense code or tables, long navigation, repeated structures, and small-screen ergonomics. For each promising candidate, research an appropriate lightweight browser/CDN library or native web-platform approach one by one, then implement it if the benefit is clear.
 
+Look for plain-text artifacts such as ASCII tables, diagrams, flows, timelines, and sketches. If a more visual or interactive treatment would materially improve comprehension, enhance the representation while preserving the original meaning.
+
 Preserve authored textual content and meaning. Do not rewrite, delete, paraphrase, reorder claims, change examples, or alter technical substance. Only change the representation layer: markup wrappers, styles, layout, scripts, controls, visual rendering, responsive behavior, accessibility metadata, and equivalent fallback presentation.
 
 Prefer focused, high-value enhancements over many small widgets. Do not add features solely because they are available or fashionable. If, after reviewing comprehension, navigation, accessibility, responsive reading, and representation opportunities, no enhancement has clear reader value, leave the file unchanged and respond `OK`.

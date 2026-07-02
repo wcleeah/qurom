@@ -1,5 +1,5 @@
 import { loadRuntimeConfig } from "../config"
-import { listConfigSummary, listProviderNeutralRoleDefinitions, updatePromptAsset, updateRoleBinding } from "../config-store"
+import { listConfigSummary, listProviderNeutralRoleDefinitions, updatePromptAsset, updateQuorumConfig, updateRoleBinding } from "../config-store"
 import { availableProviderIds, providerConfigForm, validateProviderPrerequisites } from "../providers/registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
 import { card, section, summaryRow, summaryTable } from "./html"
@@ -66,6 +66,12 @@ export async function renderConfigIndex(): Promise<Response> {
     summaryRow("Default provider", escapeHtml(summary.config?.agentRuntime.defaultProvider ?? "unknown")),
   ])}
 </div>`
+  const quorumConfigJson = JSON.stringify(summary.config ?? config.quorumConfig, null, 2)
+  const quorumConfigForm = `<form class="config-form" method="POST" action="/config/quorum">
+  <p class="tiny-text muted-text">This edits the active live config profile stored in SQLite. <code>quorum.config.json</code> is used only to seed the first profile.</p>
+  <textarea name="content" rows="24">${escapeHtml(quorumConfigJson)}</textarea>
+  <div class="form-actions"><button type="submit" class="btn btn-primary">Save quorum config</button></div>
+</form>`
 
   const body = [
     backLink(),
@@ -73,6 +79,7 @@ export async function renderConfigIndex(): Promise<Response> {
     `<div class="header-bar"><div class="header-main"><h1>Configuration</h1><div class="meta-row"><span class="meta-item">Active profile: <strong>${escapeHtml(summary.profile.name)}</strong></span></div></div></div>`,
     section("Status", statusCard),
     `<form class="config-form" method="POST" action="/config/validate"><div class="form-actions"><button type="submit" class="btn btn-primary">Validate providers</button></div></form>`,
+    section("Quorum config", quorumConfigForm),
   ].join("\n")
 
   return new Response(layout("Configuration", body), {
@@ -278,6 +285,12 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
   const config = await loadRuntimeConfig()
   if (path === "/config/validate") {
     await validateProviderPrerequisites(config)
+    return new Response(null, { status: 303, headers: { Location: "/config" } })
+  }
+
+  if (path === "/config/quorum") {
+    const params = new URLSearchParams(await req.text())
+    await updateQuorumConfig(config.env, params.get("content") ?? "")
     return new Response(null, { status: 303, headers: { Location: "/config" } })
   }
 

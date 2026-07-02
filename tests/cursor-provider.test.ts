@@ -54,6 +54,34 @@ mock.module("@cursor/sdk", () => {
               { value: "true", displayName: "Fast" },
             ],
           }],
+        }, {
+          id: "claude-opus-4-8",
+          name: "Opus 4.8",
+          parameters: [{
+            id: "thinking",
+            displayName: "Thinking",
+            values: [
+              { value: "false" },
+              { value: "true" },
+            ],
+          }, {
+            id: "context",
+            displayName: "Context",
+            values: [
+              { value: "300k" },
+              { value: "1m" },
+            ],
+          }],
+          variants: [{
+            isDefault: true,
+            params: [
+              { id: "cyber", value: "false" },
+              { id: "thinking", value: "true" },
+              { id: "context", value: "1m" },
+              { id: "effort", value: "high" },
+              { id: "fast", value: "false" },
+            ],
+          }],
         }]),
       },
     },
@@ -226,6 +254,51 @@ describe("cursorProvider", () => {
 
     expect(createCalls[0]).toMatchObject({
       local: { cwd: process.cwd(), settingSources: ["project"] },
+    })
+  })
+
+  test("merges saved model params over the catalog default variant", async () => {
+    const mcpConfig: RuntimeConfig = {
+      ...config,
+      quorumConfig: {
+        ...config.quorumConfig,
+        agentRuntime: {
+          ...config.quorumConfig.agentRuntime,
+          roles: {
+            "research-drafter": {
+              provider: "cursor",
+              model: "claude-opus-4-8",
+              options: {
+                modelParams: [
+                  { id: "thinking", value: "true" },
+                  { id: "context", value: "300k" },
+                  { id: "effort", value: "low" },
+                  { id: "fast", value: "false" },
+                ],
+              },
+            },
+          },
+        },
+      },
+    }
+
+    await cursorProvider.createRunHandle({
+      config: mcpConfig,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    expect(createCalls[0]).toMatchObject({
+      model: {
+        id: "claude-opus-4-8",
+        params: [
+          { id: "cyber", value: "false" },
+          { id: "thinking", value: "true" },
+          { id: "context", value: "300k" },
+          { id: "effort", value: "low" },
+          { id: "fast", value: "false" },
+        ],
+      },
     })
   })
 

@@ -137,7 +137,7 @@ bun run dev      # launch the TUI
 Other entry points:
 ```bash
 bun run view     # web dashboard for live + past runs at http://localhost:3000
-bun run design <run-directory>   # re-run the design quorum for an existing approved run
+bun run design <run-directory-or-request-id>   # resume the design phase from the run checkpoint
 bun run design   # in the TUI, paste a run ID to resume the design phase from checkpoint
 ```
 
@@ -192,13 +192,13 @@ Every recovery tier emits a standardized debug-log event so post-hoc triage can 
 
 ## Design Quorum
 
-When `designQuorum.enabled` is true in `quorum.config.json`, an approved research run can be turned into a single self-contained HTML document by a second quorum loop (`src/design-quorum.ts`). It mirrors the research loop: a designated `html-designer` drafts, three design auditors (`visual-layout-auditor`, `technical-html-auditor`, `script-security-auditor`) review in parallel, findings are aggregated, and the designer revises until approved or `designQuorum.maxRounds` is hit. An `interactive-enhancer` pass adds lightweight interactivity to the approved HTML.
+When `designQuorum.enabled` is true in `quorum.config.json`, an approved research run can be turned into a single self-contained HTML document by the main graph's design phase. It mirrors the research loop: a designated `html-designer` drafts, `interactive-enhancer` adds representation-layer improvements, three design auditors (`visual-layout-auditor`, `technical-html-auditor`, `script-security-auditor`) review in parallel, findings are aggregated, and the designer revises until approved or `designQuorum.maxRounds` is hit. If `designQuorum.browserQa.enabled` is true, `browser-qa-enhancer` performs a final browser/computer-use QA pass after `final.html` is written.
 
-Run it on an existing approved run directory:
+Resume it for an existing approved run directory or request id:
 ```bash
 bun run design runs/my-topic-abc123
 ```
-Or from the TUI by pasting a run ID to resume the design phase from its checkpoint. Output is written to `<run-directory>/final.html`.
+The CLI and TUI both resume the original graph checkpoint, so reruns use the same design pipeline as normal approved research runs. Output is written to `<run-directory>/final.html`.
 
 ## Improvements / Enhancements
 - A LOT, see `references/docs/pending`, a bunch of uiux polish, functional enhancement, checkpoint recovery, real cli packaging

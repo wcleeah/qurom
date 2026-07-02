@@ -106,6 +106,50 @@ describe("view components", () => {
     expect(html).toContain("profile ready")
   })
 
+  test("renders browser QA in the design pipeline from node history", () => {
+    const html = renderLivePipeline(
+      {
+        phase: "complete",
+        node: "browserQaEnhance",
+        round: 2,
+        maxRounds: 3,
+        agents: {},
+        nodeHistory: [
+          { node: "browserQaEnhance", startedAt: 1, completedAt: 2, status: "completed", round: 2 },
+        ],
+      },
+      ["final.md", "design-html-round-0.html", "final.html"],
+      "approved",
+      "example-run",
+    )
+
+    expect(html).toContain("browserQaEnhance")
+    expect(html).toContain("browser checked")
+    expect(html).toContain("/runs/example-run/node/browserQaEnhance")
+  })
+
+  test("renders active browser QA agent activity in the pipeline", () => {
+    const html = renderLivePipeline(
+      {
+        phase: "running",
+        node: "browserQaEnhance",
+        round: 2,
+        maxRounds: 3,
+        agents: {
+          "browser-qa-enhancer": { status: "running", toolCalls: [], messages: [], reasoning: "" },
+        },
+        nodeHistory: [],
+      },
+      ["final.md", "design-html-round-0.html", "final.html"],
+      "approved",
+      "example-run",
+    )
+
+    expect(html).toContain("browserQaEnhance")
+    expect(html).toContain("browser-qa-enhancer")
+    expect(html).toContain("pipeline-node active")
+  })
+
   test("renders the interview reply form from live status", () => {
     const liveStatus: LiveStatus = {
       phase: "running",

@@ -507,6 +507,38 @@ ON CONFLICT(profile_id, role) DO UPDATE SET
   }
 }
 
+export async function updateQuorumConfig(env: EnvBootstrap, content: string) {
+  const parsed = quorumConfigSchema.parse(JSON.parse(content))
+  const store = await getConfigStore(env)
+  try {
+    const profile = await seedConfigStoreFromFiles(env, store)
+    const before = store.db
+      .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
+      .get(profile.id, "quorum")
+    const configJson = JSON.stringify(parsed, null, 2)
+    const ts = nowIso()
+    store.db
+      .query(`
+INSERT INTO config_values (profile_id, domain, version, value_json, created_at, updated_at)
+VALUES (?, 'quorum', 1, ?, ?, ?)
+ON CONFLICT(profile_id, domain) DO UPDATE SET
+  value_json = excluded.value_json,
+  updated_at = excluded.updated_at
+      `)
+      .run(profile.id, configJson, ts, ts)
+    writeAudit(store, {
+      profileId: profile.id,
+      source: "view",
+      action: "update",
+      subject: "config:quorum",
+      before: before?.value_json,
+      after: configJson,
+    })
+  } finally {
+    store.close()
+  }
+}
+
 export async function updatePromptAsset(env: EnvBootstrap, key: string, content: string) {
   if (!(key in promptAssetFiles)) throw new Error(`Unknown prompt asset ${JSON.stringify(key)}`)
   if (!content.trim()) throw new Error("Prompt content cannot be empty")
