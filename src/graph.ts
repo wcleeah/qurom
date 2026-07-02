@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { START, StateGraph, interrupt } from "@langchain/langgraph"
 
 import { BunSqliteSaver } from "./checkpointer"
-import { browserQaEnabled, browserQaMcpServer, type RuntimeConfig } from "./config"
+import type { RuntimeConfig } from "./config"
 import {
   ensureRunDirPath,
   resolveRunDir,
@@ -51,7 +51,7 @@ export type RunObserver = {
   onNodeStart?: (node: string, state: ResearchState | GraphInput) => void
   onNodeEnd?: (node: string, state: ResearchState | GraphInput) => void
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
-  onDesignPhase?: (phase: "drafting" | "enhancing" | "finalizing" | "browser_qa", round: number) => void
+  onDesignPhase?: (phase: "drafting" | "enhancing" | "finalizing", round: number) => void
 }
 
 type GraphTelemetry = {
@@ -1977,59 +1977,6 @@ async function finalizeDesignNode(
   return researchStateSchema.parse(state)
 }
 
-export async function browserQaEnhanceNode(
-  config: RuntimeConfig,
-  runtime: AgentRuntime,
-  promptBundle: PromptBundle,
-  state: ResearchState,
-  telemetry?: GraphTelemetry,
-  observer?: RunObserver,
-) {
-  if (!state.outputPath) throw new Error("Missing outputPath during browserQaEnhance")
-  const mcpServer = browserQaMcpServer(config)
-  if (!config.quorumConfig.designQuorum?.enabled || !browserQaEnabled(config)) return researchStateSchema.parse(state)
-
-  const htmlFile = `${state.outputPath}/final.html`
-  if (!(await Bun.file(htmlFile).exists())) return researchStateSchema.parse(state)
-
-  observer?.onDesignPhase?.("browser_qa", state.designRound ?? 0)
-
-  const handle = await createObservedHandle({
-    runtime,
-    role: "browser-qa-enhancer",
-    title: `browser-qa-enhancer:${state.requestId}`,
-    requestId: state.requestId,
-    observer,
-  })
-
-  const prompt = [
-    promptBundle.assets.browserQaEnhance as string,
-    mcpServer ? `Configured browser MCP server, if useful: ${mcpServer}` : undefined,
-  ].filter(Boolean).join("\n\n")
-  const response = await runtime.prompt({
-    role: "browser-qa-enhancer",
-    handle,
-    prompt,
-    outputFile: htmlFile,
-    inputFiles: [
-      { path: htmlFile, mime: "text/plain", filename: "document.html" },
-    ],
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.browserQaEnhance",
-      agentName: "browser-qa-enhancer",
-      sessionId: handle.id,
-    }),
-  })
-  if (response.text && response.text.trim() && response.text.trim() !== "OK") {
-    await Bun.write(htmlFile, response.text)
-  }
-
-  const html = await Bun.file(htmlFile).text()
-  return researchStateSchema.parse({ ...state, designHtml: html })
-}
-
 export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry, runtime = createAgentRuntime(config)) {
   if (state.status !== "approved" && state.status !== "failed") {
     throw new Error(`Invalid status for summarizeOutputArtifact: ${state.status}`)
@@ -2278,11 +2225,6 @@ export function createGraph(
         finalizeDesignNode(config, promptBundle, state, graphTelemetry, observer),
       ),
     )
-    .addNode("browserQaEnhance", async (state) =>
-      withNodeTelemetry("browserQaEnhance", state, () =>
-        browserQaEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
-      ),
-    )
     .addEdge(START, "ingestRequest")
     .addEdge("ingestRequest", "summarizeInputDocument")
     .addEdge("summarizeInputDocument", "prepareOutputPath")
@@ -2318,8 +2260,7 @@ export function createGraph(
     ])
     .addEdge("runDesignHtml", "interactiveEnhance")
     .addEdge("interactiveEnhance", "finalizeDesign")
-    .addEdge("finalizeDesign", "browserQaEnhance")
-    .addEdge("browserQaEnhance", "__end__")
+    .addEdge("finalizeDesign", "__end__")
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),
       name: "research-quorum",

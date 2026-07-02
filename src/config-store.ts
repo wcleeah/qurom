@@ -76,6 +76,8 @@ function parseJson<T>(text: string, fallback: T): T {
   }
 }
 
+const LEGACY_BROWSER_QA_ROLE = "browser-qa-enhancer"
+
 async function ensureParentDir(path: string) {
   await mkdir(dirname(path), { recursive: true })
 }
@@ -219,10 +221,49 @@ async function readTextIfExists(path: string) {
   return (await file.text()).trim()
 }
 
-function mergeRoleBindingsIntoConfig(config: unknown, bindings: RoleProviderBindingRow[]) {
+function normalizeQuorumConfig(config: unknown) {
   const parsed = quorumConfigSchema.parse(config)
   const roles = { ...parsed.agentRuntime.roles }
+  delete roles[LEGACY_BROWSER_QA_ROLE]
+  return quorumConfigSchema.parse({
+    ...parsed,
+    agentRuntime: {
+      ...parsed.agentRuntime,
+      roles,
+    },
+  })
+}
+
+function pruneLegacyBrowserQaRows(store: ConfigStore, profileId: number) {
+  const before = store.db
+    .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
+    .get(profileId, "quorum")
+  if (before) {
+    const normalized = JSON.stringify(normalizeQuorumConfig(JSON.parse(before.value_json)), null, 2)
+    if (normalized !== before.value_json) {
+      store.db
+        .query("UPDATE config_values SET value_json = ?, updated_at = ? WHERE profile_id = ? AND domain = ?")
+        .run(normalized, nowIso(), profileId, "quorum")
+      writeAudit(store, {
+        profileId,
+        source: "migration",
+        action: "prune",
+        subject: "config:browser-qa",
+        before: before.value_json,
+        after: normalized,
+      })
+    }
+  }
+
+  store.db.query("DELETE FROM role_provider_bindings WHERE profile_id = ? AND role = ?").run(profileId, LEGACY_BROWSER_QA_ROLE)
+  store.db.query("DELETE FROM role_definitions WHERE profile_id = ? AND role = ?").run(profileId, LEGACY_BROWSER_QA_ROLE)
+}
+
+function mergeRoleBindingsIntoConfig(config: unknown, bindings: RoleProviderBindingRow[]) {
+  const parsed = normalizeQuorumConfig(config)
+  const roles = { ...parsed.agentRuntime.roles }
   for (const binding of bindings) {
+    if (binding.role === LEGACY_BROWSER_QA_ROLE) continue
     roles[binding.role] = {
       provider: binding.provider ?? undefined,
       providerAgent: binding.provider_agent ?? undefined,
@@ -306,12 +347,15 @@ export async function seedConfigStoreFromFiles(env: EnvBootstrap, store?: Config
   store = ownedStore
   try {
   const existing = activeProfile(store)
-  if (existing) return existing
+  if (existing) {
+    pruneLegacyBrowserQaRows(store, existing.id)
+    return existing
+  }
 
   const profile = createProfile(store, "default")
   const configPath = join(workspaceDirectory(env), "quorum.config.json")
   const rawConfig = await readJsonFile(configPath)
-  const quorumConfig = quorumConfigSchema.parse(rawConfig)
+  const quorumConfig = normalizeQuorumConfig(rawConfig)
   const configJson = JSON.stringify(quorumConfig, null, 2)
   const ts = nowIso()
 
@@ -359,6 +403,7 @@ VALUES (?, ?, 'opencode', ?, '{}', ?, ?)
     // block config DB creation for other providers.
   }
 
+  pruneLegacyBrowserQaRows(store, profile.id)
   return profile
   } finally {
     if (shouldClose) store.close()
@@ -391,7 +436,7 @@ async function promptAssetsDirFromStore(env: EnvBootstrap, store: ConfigStore, p
   const configRow = store.db
     .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
     .get(profileId, "quorum")
-  const config = configRow ? quorumConfigSchema.parse(JSON.parse(configRow.value_json)) : undefined
+  const config = configRow ? normalizeQuorumConfig(JSON.parse(configRow.value_json)) : undefined
   return join(workspaceDirectory(env), config?.promptAssetsDir ?? "assets/prompts")
 }
 
@@ -439,7 +484,7 @@ ORDER BY role
       .all(profile.id)
     return {
       profile,
-      config: configRow ? quorumConfigSchema.parse(JSON.parse(configRow.value_json)) : undefined,
+      config: configRow ? normalizeQuorumConfig(JSON.parse(configRow.value_json)) : undefined,
       prompts,
       roles,
       bindings,
@@ -460,6 +505,10 @@ export async function updateRoleBinding(env: EnvBootstrap, role: string, input: 
   const store = await getConfigStore(env)
   try {
     const profile = await seedConfigStoreFromFiles(env, store)
+    if (role === LEGACY_BROWSER_QA_ROLE) {
+      pruneLegacyBrowserQaRows(store, profile.id)
+      return
+    }
     const before = store.db
       .query<RoleProviderBindingRow, [number, string]>(`
 SELECT profile_id, role, provider, provider_agent, model, variant, output_mode, options_json
@@ -508,7 +557,7 @@ ON CONFLICT(profile_id, role) DO UPDATE SET
 }
 
 export async function updateQuorumConfig(env: EnvBootstrap, content: string) {
-  const parsed = quorumConfigSchema.parse(JSON.parse(content))
+  const parsed = normalizeQuorumConfig(JSON.parse(content))
   const store = await getConfigStore(env)
   try {
     const profile = await seedConfigStoreFromFiles(env, store)

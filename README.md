@@ -54,7 +54,6 @@ Research quorum:
 Design quorum (when `designQuorum.enabled` is true):
 - `html-designer`
 - `interactive-enhancer`
-- `browser-qa-enhancer` (when `designQuorum.browserQa.enabled` is true)
 
 Recovery helpers (used by the structured-output recovery router):
 - `json-fixer`
@@ -190,7 +189,7 @@ Every recovery tier emits a standardized debug-log event so post-hoc triage can 
 
 ## Design Quorum
 
-When `designQuorum.enabled` is true in `quorum.config.json`, an approved research run can be turned into a single self-contained HTML document by the main graph's design phase. The design phase is linear: `html-designer` drafts `design-html-round-0.html`, `interactive-enhancer` adds representation-layer improvements, `finalizeDesign` writes `final.html`, and, when `designQuorum.browserQa.enabled` is true, `browser-qa-enhancer` performs a final browser/computer-use QA pass.
+When `designQuorum.enabled` is true in `quorum.config.json`, an approved research run can be turned into a single self-contained HTML document by the main graph's design phase. The design phase is linear: `html-designer` drafts `design-html-round-0.html`, `interactive-enhancer` adds representation-layer improvements, and `finalizeDesign` writes `final.html`.
 
 Resume it for an existing approved run directory or request id:
 ```bash

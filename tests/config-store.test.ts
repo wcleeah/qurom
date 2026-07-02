@@ -103,12 +103,46 @@ describe("config store", () => {
       designQuorum: {
         enabled: true,
         designatedDesigner: "html-designer",
-        browserQa: { enabled: true },
       },
     }))
 
     const config = await loadQuorumConfigFromStore(env())
-    expect(config.designQuorum?.browserQa?.enabled).toBe(true)
+    expect(config.designQuorum?.designatedDesigner).toBe("html-designer")
+  })
+
+  test("legacy browser QA config and bindings are pruned from sqlite profiles", async () => {
+    await seedConfigStoreFromFiles(env())
+    const current = await loadQuorumConfigFromStore(env())
+    await updateQuorumConfig(env(), JSON.stringify({
+      ...current,
+      designQuorum: {
+        enabled: true,
+        designatedDesigner: "html-designer",
+        browserQa: { enabled: true },
+      },
+      agentRuntime: {
+        ...current.agentRuntime,
+        roles: {
+          ...current.agentRuntime.roles,
+          "browser-qa-enhancer": { provider: "cursor", options: {} },
+        },
+      },
+    }))
+    await updateRoleBinding(env(), "browser-qa-enhancer", {
+      provider: "cursor",
+      providerAgent: "browser-qa-enhancer",
+    })
+
+    const config = await loadQuorumConfigFromStore(env())
+    const store = await getConfigStore(env())
+    const binding = store.db
+      .query<{ role: string }, []>("SELECT role FROM role_provider_bindings WHERE role = 'browser-qa-enhancer'")
+      .get()
+    store.close()
+
+    expect((config.designQuorum as Record<string, unknown> | undefined)?.browserQa).toBeUndefined()
+    expect(config.agentRuntime.roles["browser-qa-enhancer"]).toBeUndefined()
+    expect(binding).toBeNull()
   })
 
   test("prompt updates write prompt asset files directly", async () => {
@@ -134,6 +168,7 @@ describe("config store", () => {
     const indexHtml = await renderConfigIndex().then((r) => r.text())
     expect(indexHtml).toContain("Save quorum config")
     expect(indexHtml).toContain("quorum.config.json")
+    expect(indexHtml).not.toContain("browserQa")
 
     const rolesHtml = await renderConfigRoles().then((r) => r.text())
     expect(rolesHtml).toContain("source-auditor")
@@ -160,13 +195,12 @@ describe("config store", () => {
           designQuorum: {
             enabled: true,
             designatedDesigner: "html-designer",
-            browserQa: { enabled: true },
           },
         }),
       }),
     })
     const quorumResponse = await handleConfigPost(quorumReq, "/config/quorum")
     expect(quorumResponse?.status).toBe(303)
-    expect((await loadQuorumConfigFromStore(env())).designQuorum?.browserQa?.enabled).toBe(true)
+    expect((await loadQuorumConfigFromStore(env())).designQuorum?.designatedDesigner).toBe("html-designer")
   })
 })

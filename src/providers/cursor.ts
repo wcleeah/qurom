@@ -13,7 +13,7 @@ import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
-import { browserQaMcpServer, type RuntimeConfig } from "../config"
+import type { RuntimeConfig } from "../config"
 import type {
   AgentProvider,
   AgentRunHandle,
@@ -155,13 +155,10 @@ export function interpolateMcpConfigEnv<T>(value: T, env: RuntimeConfig["env"]):
 
 async function resolveMcpServers(
   config: RuntimeConfig,
-  role: AgentRole,
   options: ReturnType<typeof cursorOptionsForRole>,
 ): Promise<Record<string, McpServerConfig> | undefined> {
   const configured = await loadCursorMcpServers()
-  const preferred = role === "browser-qa-enhancer"
-    ? [browserQaMcpServer(config)].filter((name): name is string => Boolean(name))
-    : config.quorumConfig.researchTools.prefer
+  const preferred = config.quorumConfig.researchTools.prefer
   const selected = Object.fromEntries(
     preferred
       .filter((name) => configured[name])
@@ -171,8 +168,13 @@ async function resolveMcpServers(
   return Object.keys(merged).length > 0 ? interpolateMcpConfigEnv(merged, config.env) : undefined
 }
 
-async function listCursorModels(apiKey: string) {
-  if (cachedModels?.apiKey === apiKey) return cachedModels.models
+async function listCursorModels(apiKey: string, requiredModelId?: string) {
+  if (
+    cachedModels?.apiKey === apiKey
+    && (!requiredModelId || cachedModels.models.some((model) => model.id === requiredModelId))
+  ) {
+    return cachedModels.models
+  }
   const models = await Cursor.models.list({ apiKey })
   cachedModels = { apiKey, models }
   return models
@@ -524,9 +526,9 @@ export const cursorProvider: AgentProvider = {
 
     const model = cursorModelForRole(input.config, input.role)
     const options = cursorOptionsForRole(input.config, input.role)
-    const catalogModel = (await listCursorModels(apiKey)).find((entry) => entry.id === model)
+    const catalogModel = (await listCursorModels(apiKey, model)).find((entry) => entry.id === model)
     const modelParams = cursorModelParamsForRole(input.config, input.role, catalogModel)
-    const mcpServers = await resolveMcpServers(input.config, input.role, options)
+    const mcpServers = await resolveMcpServers(input.config, options)
     const agent = await Agent.create({
       apiKey,
       name: input.title,

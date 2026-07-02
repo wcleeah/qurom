@@ -66,7 +66,7 @@ export type RunnerEvent =
   | { kind: "result"; runResult: unknown }
   | {
       kind: "design.phase"
-      phase: "drafting" | "enhancing" | "finalizing" | "browser_qa"
+      phase: "drafting" | "enhancing" | "finalizing"
       round: number
     }
 
@@ -517,7 +517,7 @@ function isDesignRelatedArtifact(filename: string) {
   return filename.startsWith("design-")
     || filename === "final.html"
     || filename.startsWith("final.html.")
-    || /^cursor-(html-designer|interactive-enhancer|browser-qa-enhancer)-/.test(filename)
+    || /^cursor-(html-designer|interactive-enhancer)-/.test(filename)
 }
 
 async function archiveDesignArtifacts(runDir: string) {

@@ -95,14 +95,10 @@ export function renderLivePipeline(
   // Show it whenever a design phase ran. Active only briefly before __end__.
   const hasFinalHtmlFile = files.includes("final.html")
   const designRan = hasDesignHtml
-  const browserQaCompleted = Boolean(liveStatus?.nodeHistory?.some((entry) => entry.node === "browserQaEnhance" && entry.status === "completed"))
   if (designRan) {
     html += nodeRow(16, "finalizeDesign", hasFinalHtmlFile, isActive("finalizeDesign"),
       hasFinalHtmlFile ? "· final.html written" : "",
       isActive("finalizeDesign") ? agentListHtml(liveAgents) : "")
-    html += nodeRow(17, "browserQaEnhance", browserQaCompleted, isActive("browserQaEnhance"),
-      browserQaCompleted ? "· browser checked" : "",
-      isActive("browserQaEnhance") ? agentListHtml(liveAgents) : "")
   }
 
   html += '</div></div>'

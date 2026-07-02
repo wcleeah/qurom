@@ -61,21 +61,6 @@ describe("provider registry", () => {
     expect(new Set(roles).size).toBe(roles.length)
   })
 
-  test("includes browser QA role only when browser QA is enabled", () => {
-    const config: RuntimeConfig = {
-      ...baseConfig,
-      quorumConfig: {
-        ...baseConfig.quorumConfig,
-        designQuorum: {
-          ...baseConfig.quorumConfig.designQuorum!,
-          browserQa: { enabled: true },
-        },
-      },
-    }
-
-    expect(configuredAgentRoles(config)).toContain("browser-qa-enhancer")
-  })
-
   test("uses the default provider when a role has no override", () => {
     expect(providerForRole(baseConfig, "research-drafter").id).toBe("opencode")
   })

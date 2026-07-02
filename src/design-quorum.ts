@@ -9,7 +9,7 @@ import type { DebugLog } from "./debug-log"
 export type RunObserver = {
   debugLog?: DebugLog
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
-  onDesignPhase?: (phase: "drafting" | "enhancing" | "finalizing" | "browser_qa", round: number) => void
+  onDesignPhase?: (phase: "drafting" | "enhancing" | "finalizing", round: number) => void
 }
 
 type DesignTelemetry = {

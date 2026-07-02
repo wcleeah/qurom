@@ -106,11 +106,34 @@ describe("view components", () => {
     expect(html).toContain("profile ready")
   })
 
-  test("renders browser QA in the design pipeline from node history", () => {
+  test("renders finalizeDesign as the terminal design pipeline node", () => {
     const html = renderLivePipeline(
       {
         phase: "complete",
-        node: "browserQaEnhance",
+        node: "finalizeDesign",
+        round: 2,
+        maxRounds: 3,
+        agents: {},
+        nodeHistory: [
+          { node: "finalizeDesign", startedAt: 1, completedAt: 2, status: "completed", round: 2 },
+        ],
+      },
+      ["final.md", "design-html-round-0.html", "final.html"],
+      "approved",
+      "example-run",
+    )
+
+    expect(html).toContain("finalizeDesign")
+    expect(html).toContain("final.html written")
+    expect(html).toContain("/runs/example-run/node/finalizeDesign")
+    expect(html).not.toContain("browserQaEnhance")
+  })
+
+  test("ignores stale browser QA node history in the design pipeline", () => {
+    const html = renderLivePipeline(
+      {
+        phase: "complete",
+        node: "finalizeDesign",
         round: 2,
         maxRounds: 3,
         agents: {},
@@ -123,31 +146,9 @@ describe("view components", () => {
       "example-run",
     )
 
-    expect(html).toContain("browserQaEnhance")
-    expect(html).toContain("browser checked")
-    expect(html).toContain("/runs/example-run/node/browserQaEnhance")
-  })
-
-  test("renders active browser QA agent activity in the pipeline", () => {
-    const html = renderLivePipeline(
-      {
-        phase: "running",
-        node: "browserQaEnhance",
-        round: 2,
-        maxRounds: 3,
-        agents: {
-          "browser-qa-enhancer": { status: "running", toolCalls: [], messages: [], reasoning: "" },
-        },
-        nodeHistory: [],
-      },
-      ["final.md", "design-html-round-0.html", "final.html"],
-      "approved",
-      "example-run",
-    )
-
-    expect(html).toContain("browserQaEnhance")
-    expect(html).toContain("browser-qa-enhancer")
-    expect(html).toContain("pipeline-node active")
+    expect(html).toContain("finalizeDesign")
+    expect(html).not.toContain("browserQaEnhance")
+    expect(html).not.toContain("browser-qa-enhancer")
   })
 
   test("renders the interview reply form from live status", () => {

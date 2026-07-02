@@ -22,10 +22,7 @@
   },
   "designQuorum": {
     "enabled": true,
-    "designatedDesigner": "html-designer",
-    "browserQa": {
-      "enabled": true
-    }
+    "designatedDesigner": "html-designer"
   },
   "readerDiscovery": {
     "maxTurns": 6,
