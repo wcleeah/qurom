@@ -1,4 +1,5 @@
-The HTML content to enhance is provided in the `HTML document` context.
+The HTML content to enhance is provided in the `HTML document` context. Write the document to a local file first.
+In the process, if you encountered any write / edit timeout or error, split the changes in batches, and do it one by one. If it is a full write, split the content, append to the file batch by batch.
 
 Study the document: its topic, structure, audience, and behavior across screen sizes. Look for places where interaction, visual representation, technical readability, accessibility, navigation, or mobile reading could materially improve the reader experience.
 

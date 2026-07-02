@@ -32,3 +32,4 @@ Non-negotiable contract:
 - The <title> must match the document's title.
 - Do not mention this contract, the quorum process, or design revision history in the output.
 
+In the process, if you encountered any write / edit timeout or error, split the changes in batches, and do it one by one. If it is a full write, split the content, append to the file batch by batch.

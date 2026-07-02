@@ -1,6 +1,7 @@
-The HTML content to verify is provided in the `HTML document` context.
-
 Use your available browser or computer-use capability to open the target HTML file and inspect it as a reader would. If a browser MCP is configured, you may use it; otherwise use the runtime's built-in desktop/browser environment. Capture or inspect at least one desktop viewport and one mobile viewport before deciding whether to edit.
+
+The HTML content to inspect is provided in the `HTML document` context. Write to a local file first.
+In the process, if you encountered any write / edit timeout or error, split the changes in batches, and do it one by one. If it is a full write, split the content, append to the file batch by batch.
 
 Check for browser-observed representation issues:
 - mobile responsiveness, horizontal overflow, clipped content, awkward wrapping, cramped controls, and unusable navigation
