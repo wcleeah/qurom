@@ -19,6 +19,7 @@ export type ProviderCapability =
   | "fileOutput"
   | "roleInstructions"
   | "providerManagedAgents"
+  | "plainTextOutput"
   | "jsonFileOutput"
   | "plainJsonOutput"
 

@@ -141,7 +141,7 @@ mock.module("@cursor/sdk", () => {
   }
 })
 
-const { cursorProvider } = await import("../src/providers/cursor")
+const { cursorProvider, clampCursorAgentName } = await import("../src/providers/cursor")
 
 const config: RuntimeConfig = {
   env: {
@@ -208,6 +208,14 @@ describe("cursorProvider", () => {
     return join(dir, name)
   }
 
+  test("clampCursorAgentName keeps short names and truncates long ones", () => {
+    expect(clampCursorAgentName("draft")).toBe("draft")
+    const long = "html-ask:" + "a".repeat(120)
+    const clamped = clampCursorAgentName(long)
+    expect(clamped.length).toBe(100)
+    expect(clamped).toMatch(/-[a-f0-9]{8}$/)
+  })
+
   test("creates a cloud Cursor agent with per-role model by default", async () => {
     const handle = await cursorProvider.createRunHandle({
       config,
@@ -222,6 +230,19 @@ describe("cursorProvider", () => {
       model: { id: "composer-2.5", params: [{ id: "fast", value: "true" }] },
       cloud: {},
     })
+  })
+
+  test("clamps long agent titles before calling Cursor create", async () => {
+    const longTitle = "audit:" + "x".repeat(120)
+    await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: longTitle,
+    })
+
+    const createOptions = createCalls[0] as { name?: string }
+    expect(createOptions.name).toBe(clampCursorAgentName(longTitle))
+    expect(createOptions.name!.length).toBe(100)
   })
 
   test("can create a local Cursor agent when role options request it", async () => {

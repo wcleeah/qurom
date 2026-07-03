@@ -226,5 +226,6 @@ describe("html viewer renderer", () => {
     expect(html).toContain('data-html-notes-form')
     expect(html).toContain("data-html-save-indicator")
     expect(html).toContain("Download")
+    expect(html).toContain('data-html-tab="ask"')
   })
 })

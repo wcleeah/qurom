@@ -50,6 +50,36 @@ function rowToHighlight(row: {
   }
 }
 
+export async function getHtmlReaderHighlight(
+  runName: string,
+  filePath: string,
+  id: string,
+): Promise<HtmlReaderHighlight | null> {
+  validateHtmlReaderTarget(runName, filePath)
+  return withHtmlReaderDb((db) => {
+    const row = db.query<
+      {
+        id: string
+        run_name: string
+        file_path: string
+        color: string
+        quote: string
+        prefix: string
+        suffix: string
+        created_at: string
+        updated_at: string
+      },
+      [string, string, string]
+    >(
+      `SELECT id, run_name, file_path, color, quote, prefix, suffix, created_at, updated_at
+       FROM html_reader_highlights
+       WHERE run_name = ? AND file_path = ? AND id = ?
+       LIMIT 1`,
+    ).get(runName, filePath, id)
+    return row ? rowToHighlight(row) : null
+  })
+}
+
 export async function listHtmlReaderHighlights(
   runName: string,
   filePath: string,

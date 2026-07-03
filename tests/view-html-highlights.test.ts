@@ -97,12 +97,31 @@ describe("html reader highlights store", () => {
 })
 
 describe("html viewer highlights UI", () => {
+  test("highlightsToJson escapes quotes for HTML attributes", async () => {
+    const { highlightsToJson } = await import("../src/view/html-viewer-highlights.ts")
+    const json = highlightsToJson([{
+      id: "abc",
+      runName: "run",
+      filePath: "final.html",
+      color: "yellow",
+      quote: 'Say "hello"',
+      prefix: "",
+      suffix: "",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }])
+    expect(json).toContain("&quot;")
+    expect(json).not.toContain('":"Say "')
+    const parsed = JSON.parse(json.replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"))
+    expect(parsed[0]?.quote).toBe('Say "hello"')
+  })
+
   test("renders tabbed highlights panel with embedded highlight data", async () => {
     const highlight = await createHtmlReaderHighlight({
       runName: "alpha-run",
       filePath: "final.html",
       color: "blue",
-      quote: "quorum reads",
+      quote: 'Say "hello" and 65% C++',
       prefix: "",
       suffix: "",
     })
@@ -113,8 +132,8 @@ describe("html viewer highlights UI", () => {
     expect(html).toContain('data-html-panel="highlights"')
     expect(html).toContain("data-html-highlight-list")
     expect(html).toContain("data-html-highlight-selection")
-    expect(html).toContain("quorum reads")
+    expect(html).not.toContain('data-highlights="[{"')
+    expect(html).toContain("&quot;id&quot;")
     expect(html).toContain("Hide panel")
-    expect(html).toContain('"id":"' + highlight.id + '"')
   })
 })

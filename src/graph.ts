@@ -15,6 +15,7 @@ import { auditWithRestart } from "./audit-restart"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import type { AgentRunHandle } from "./providers/types"
 import type { PromptBundle } from "./prompt-assets"
+import { buildResearchToolHint } from "./research-tools"
 import { summarizeMarkdown } from "./summarizer"
 import { designHtml } from "./design-quorum"
 import { formatReaderTranscriptForPrompt } from "./reader-transcript"
@@ -122,16 +123,7 @@ function assertStatus(state: ResearchState, expected: ResearchState["status"], n
   }
 }
 
-export function buildResearchToolHint(config: RuntimeConfig) {
-  const lines = ["Research tool preferences:"]
-
-  for (const tool of config.quorumConfig.researchTools.prefer) {
-    lines.push(`- Prefer ${tool} when it matches the task.`)
-  }
-
-  lines.push(`- Preferred web search provider: ${config.quorumConfig.researchTools.webSearchProvider}. Favor online sources over local files when gathering evidence.`)
-  return lines.join("\n")
-}
+export { buildResearchToolHint } from "./research-tools"
 
 function requestContextBlock(state: ResearchState) {
   if (state.inputMode === "topic") {
