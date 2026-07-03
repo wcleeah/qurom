@@ -1485,6 +1485,7 @@ body.html-viewer-body {
   border-left: 1px solid var(--border);
   background: var(--bg-card);
   min-height: 0;
+  overflow: hidden;
   transition: width 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
 }
 
@@ -1541,6 +1542,188 @@ body.html-viewer-body {
 .html-viewer-sidebar-hint {
   font-size: 0.75rem;
   margin-top: 0.15rem;
+}
+
+.html-viewer-sidebar-tabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.html-viewer-tab {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.html-viewer-tab-active {
+  color: var(--fg);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.html-viewer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.html-viewer-panel[hidden] {
+  display: none !important;
+}
+
+.html-viewer-panel-header {
+  flex-shrink: 0;
+}
+
+.html-viewer-highlight-unsupported {
+  font-size: 0.75rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--orange);
+  border-radius: var(--radius-sm);
+  background: var(--orange-bg);
+}
+
+.html-viewer-highlight-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.html-viewer-highlight-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.html-viewer-highlight-selection {
+  width: 100%;
+  resize: vertical;
+  min-height: 4rem;
+  padding: 0.55rem;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--fg);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.html-viewer-highlight-colors {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.html-viewer-color-swatch {
+  width: 1.35rem;
+  height: 1.35rem;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.html-viewer-color-swatch-active {
+  border-color: var(--fg);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.html-viewer-highlight-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.html-viewer-highlight-save {
+  font-weight: 600;
+}
+
+.html-viewer-highlight-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.html-viewer-highlight-empty {
+  font-size: 0.75rem;
+}
+
+.html-viewer-highlight-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.html-viewer-highlight-item-main {
+  display: flex;
+  gap: 0.45rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.html-viewer-highlight-swatch {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 999px;
+  margin-top: 0.25rem;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+
+.html-viewer-highlight-item-text {
+  min-width: 0;
+}
+
+.html-viewer-highlight-quote {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.html-viewer-highlight-meta {
+  font-size: 0.68rem;
+  margin-top: 0.2rem;
+}
+
+.html-viewer-highlight-missing {
+  font-size: 0.68rem;
+  color: var(--orange);
+}
+
+.html-viewer-highlight-delete {
+  flex-shrink: 0;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.68rem;
+  color: var(--red);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.html-viewer-highlight-delete:hover {
+  border-color: var(--red);
+  background: var(--red-bg);
 }
 
 .html-viewer-notes-form {

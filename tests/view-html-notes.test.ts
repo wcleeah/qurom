@@ -52,7 +52,7 @@ describe("html reader notes store", () => {
 
   test("rejects non-html files", async () => {
     await expect(setHtmlReaderNotes("alpha-run", "request.json", "nope")).rejects.toThrow(
-      "Only HTML files support reader notes",
+      "Only HTML files support reader annotations",
     )
   })
 
@@ -63,7 +63,7 @@ describe("html reader notes store", () => {
 
 describe("html viewer page", () => {
   test("renders iframe shell with navbar, download, and notes sidebar", () => {
-    const html = renderHtmlViewerPage("alpha-run", "final.html", "Saved note")
+    const html = renderHtmlViewerPage("alpha-run", "final.html", "Saved note", [])
 
     expect(html).toContain('class="html-viewer-shell"')
     expect(html).toContain('class="html-viewer-navbar"')
@@ -75,6 +75,7 @@ describe("html viewer page", () => {
     expect(html).toContain('data-html-notes-input')
     expect(html).toContain("Saved note")
     expect(html).toContain("data-html-save-indicator")
+    expect(html).toContain("data-html-tab=\"highlights\"")
     expect(html).toContain("data-html-sidebar-toggle")
     expect(html).toContain("data-html-sidebar-close")
   })

@@ -5,6 +5,7 @@ import { renderStructuredJson } from "./artifact-renderers"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard, renderLivePipeline, renderNodeHistory } from "./components"
 import { computeStats, getRunFiles, listRuns, readLiveStatus } from "./data"
 import { renderFileBrowser } from "./file-browser"
+import { listHtmlReaderHighlights } from "./html-highlights-store"
 import { getHtmlReaderNotes } from "./html-notes-store"
 import { renderHtmlViewerPage } from "./html-viewer"
 import { badge, formatRelative, layout } from "./layout"
@@ -775,7 +776,8 @@ ${htmlBody}`,
   // For .html files, render viewer shell by default; ?source=1 gives raw bytes for iframe/download
   if ((ext === "html" || ext === "htm") && searchParams.get("source") !== "1") {
     const notes = await getHtmlReaderNotes(runName, filePath)
-    const html = renderHtmlViewerPage(runName, filePath, notes)
+    const highlights = await listHtmlReaderHighlights(runName, filePath)
+    const html = renderHtmlViewerPage(runName, filePath, notes, highlights)
     return new Response(html, {
       headers: { "content-type": "text/html; charset=utf-8" },
     })

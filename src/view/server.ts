@@ -1,5 +1,9 @@
 import { stat } from "node:fs/promises"
 import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "./config"
+import {
+  createHtmlReaderHighlight,
+  deleteHtmlReaderHighlight,
+} from "./html-highlights-store"
 import { setHtmlReaderNotes } from "./html-notes-store"
 import { renderIndex, renderNodePage, renderRun, serveRawFile } from "./pages"
 import { safeFilePath, HOST, PORT, safeRunPath } from "./paths"
@@ -160,10 +164,100 @@ export function startViewServer(): void {
           const result = await setHtmlReaderNotes(runName, file, notes)
           return Response.json({ ok: true, updatedAt: result.updatedAt })
         } catch (e) {
-          if (e instanceof Error && (e.message === "Path traversal blocked" || e.message === "Only HTML files support reader notes")) {
+          if (e instanceof Error && (e.message === "Path traversal blocked" || e.message === "Only HTML files support reader annotations")) {
             return new Response("Not found", { status: 404 })
           }
           console.error("POST /html-notes error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const htmlHighlightsMatch = path.match(/^\/runs\/(.+?)\/html-highlights(?:\/([^/]+))?$/)
+      if (htmlHighlightsMatch) {
+        const runName = decodeURIComponent(htmlHighlightsMatch[1])
+        const highlightId = htmlHighlightsMatch[2] ? decodeURIComponent(htmlHighlightsMatch[2]) : undefined
+        try {
+          const runDir = safeRunPath(runName)
+          const runStat = await stat(runDir)
+          if (!runStat.isDirectory()) {
+            return new Response("Not found", { status: 404 })
+          }
+
+          if (req.method === "POST" && !highlightId) {
+            const raw = await req.text()
+            let file = ""
+            let color = ""
+            let quote = ""
+            let prefix = ""
+            let suffix = ""
+            if (raw.trim().startsWith("{")) {
+              const parsed = JSON.parse(raw) as {
+                file?: unknown
+                color?: unknown
+                quote?: unknown
+                prefix?: unknown
+                suffix?: unknown
+              }
+              file = typeof parsed.file === "string" ? parsed.file : ""
+              color = typeof parsed.color === "string" ? parsed.color : ""
+              quote = typeof parsed.quote === "string" ? parsed.quote : ""
+              prefix = typeof parsed.prefix === "string" ? parsed.prefix : ""
+              suffix = typeof parsed.suffix === "string" ? parsed.suffix : ""
+            } else {
+              const params = new URLSearchParams(raw)
+              file = params.get("file") ?? ""
+              color = params.get("color") ?? ""
+              quote = params.get("quote") ?? ""
+              prefix = params.get("prefix") ?? ""
+              suffix = params.get("suffix") ?? ""
+            }
+            if (!file) {
+              return new Response("Missing file", { status: 400 })
+            }
+            const resolved = safeFilePath(runName, file)
+            const fileStat = await stat(resolved)
+            if (!fileStat.isFile()) {
+              return new Response("Not found", { status: 404 })
+            }
+            const highlight = await createHtmlReaderHighlight({
+              runName,
+              filePath: file,
+              color,
+              quote,
+              prefix,
+              suffix,
+            })
+            return Response.json({ ok: true, highlight })
+          }
+
+          if (req.method === "DELETE" && highlightId) {
+            const file = url.searchParams.get("file") ?? ""
+            if (!file) {
+              return new Response("Missing file", { status: 400 })
+            }
+            const resolved = safeFilePath(runName, file)
+            const fileStat = await stat(resolved)
+            if (!fileStat.isFile()) {
+              return new Response("Not found", { status: 404 })
+            }
+            const deleted = await deleteHtmlReaderHighlight(runName, file, highlightId)
+            if (!deleted) {
+              return new Response("Not found", { status: 404 })
+            }
+            return Response.json({ ok: true })
+          }
+        } catch (e) {
+          if (e instanceof Error && (
+            e.message === "Path traversal blocked"
+            || e.message === "Only HTML files support reader annotations"
+            || e.message === "Highlight quote is required"
+            || e.message === "Invalid highlight color"
+          )) {
+            return new Response(e.message === "Path traversal blocked" ? "Not found" : "Bad request", {
+              status: e.message === "Path traversal blocked" ? 404 : 400,
+            })
+          }
+          console.error("HTML highlights error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

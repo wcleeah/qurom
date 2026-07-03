@@ -219,7 +219,7 @@ describe("view components", () => {
 
 describe("html viewer renderer", () => {
   test("includes sticky navbar controls and notes form action", () => {
-    const html = renderHtmlViewerPage("example-run", "design-html-round-0.html", "")
+    const html = renderHtmlViewerPage("example-run", "design-html-round-0.html", "", [])
 
     expect(html).toContain("html-viewer-navbar")
     expect(html).toContain("/runs/example-run/html-notes")

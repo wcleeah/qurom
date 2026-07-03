@@ -1,4 +1,10 @@
 import { basename } from "node:path"
+import {
+  HIGHLIGHT_COLOR_RGBA,
+  HIGHLIGHT_COLORS,
+  type HtmlReaderHighlight,
+} from "./html-highlights-store"
+import { highlightsToJson, HTML_HIGHLIGHTS_SCRIPT } from "./html-viewer-highlights"
 import { layoutHtmlViewer } from "./layout"
 import { escapeHtml } from "./utils"
 
@@ -42,12 +48,12 @@ export const HTML_VIEWER_SCRIPT = /* html */ `
     if (!(toggleBtn instanceof HTMLButtonElement)) return
     if (isMobile()) {
       const open = sidebar instanceof HTMLElement && sidebar.classList.contains("html-viewer-sidebar-open")
-      toggleBtn.textContent = open ? "Hide notes" : "Notes"
+      toggleBtn.textContent = open ? "Hide panel" : "Panel"
       toggleBtn.setAttribute("aria-expanded", open ? "true" : "false")
       return
     }
     const collapsed = shell.classList.contains("html-viewer-sidebar-collapsed")
-    toggleBtn.textContent = collapsed ? "Show notes" : "Hide notes"
+    toggleBtn.textContent = collapsed ? "Show panel" : "Hide panel"
     toggleBtn.setAttribute("aria-expanded", collapsed ? "false" : "true")
   }
 
@@ -134,7 +140,20 @@ export const HTML_VIEWER_SCRIPT = /* html */ `
 })();
 </script>`
 
-export function renderHtmlViewerPage(runName: string, filePath: string, notes: string): string {
+function renderColorSwatches(): string {
+  return HIGHLIGHT_COLORS.map((color, index) => {
+    const rgba = HIGHLIGHT_COLOR_RGBA[color]
+    const activeClass = index === 0 ? " html-viewer-color-swatch-active" : ""
+    return `<button type="button" class="html-viewer-color-swatch${activeClass}" data-highlight-color="${color}" style="background:${rgba}" aria-label="${escapeHtml(color)} highlight" aria-pressed="${index === 0 ? "true" : "false"}"></button>`
+  }).join("")
+}
+
+export function renderHtmlViewerPage(
+  runName: string,
+  filePath: string,
+  notes: string,
+  highlights: HtmlReaderHighlight[],
+): string {
   const baseName = basename(filePath)
   const runHref = `/runs/${encodeURIComponent(runName)}`
   const rawHref = `/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(filePath)}`
@@ -143,15 +162,17 @@ export function renderHtmlViewerPage(runName: string, filePath: string, notes: s
   const notesAction = `/runs/${encodeURIComponent(runName)}/html-notes`
   const initialSaveState = notes.trim().length > 0 ? "saved" : "idle"
   const initialSaveLabel = notes.trim().length > 0 ? "All changes saved" : "Notes auto-save"
+  const highlightsJson = highlightsToJson(highlights)
 
   const body = `<div class="html-viewer-shell">
+  <div data-html-highlights-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-highlights="${highlightsJson}"></div>
   <header class="html-viewer-navbar">
     <div class="html-viewer-navbar-start">
       <a class="html-viewer-back" href="${runHref}">← Back to run</a>
       <span class="html-viewer-filename" title="${escapeHtml(filePath)}">${escapeHtml(baseName)}</span>
     </div>
     <div class="html-viewer-navbar-actions">
-      <button type="button" class="html-viewer-sidebar-toggle" data-html-sidebar-toggle aria-expanded="true">Hide notes</button>
+      <button type="button" class="html-viewer-sidebar-toggle" data-html-sidebar-toggle aria-expanded="true">Hide panel</button>
       <a class="html-viewer-action" href="${rawHref}?source=1">View raw</a>
       <a class="html-viewer-action html-viewer-download" href="${downloadHref}" download="${escapeHtml(baseName)}">Download</a>
       <button type="button" class="theme-toggle html-viewer-theme-toggle" data-theme-toggle aria-label="Toggle color theme"></button>
@@ -164,28 +185,52 @@ export function renderHtmlViewerPage(runName: string, filePath: string, notes: s
     <aside class="html-viewer-sidebar" data-html-viewer-sidebar>
       <div class="html-viewer-sidebar-header">
         <div class="html-viewer-sidebar-title-row">
-          <h2 class="html-viewer-sidebar-title">Notes</h2>
+          <h2 class="html-viewer-sidebar-title">Reader panel</h2>
+        </div>
+        <button type="button" class="html-viewer-sidebar-close" data-html-sidebar-close aria-label="Hide panel">×</button>
+      </div>
+      <div class="html-viewer-sidebar-tabs" role="tablist">
+        <button type="button" class="html-viewer-tab html-viewer-tab-active" data-html-tab="notes" role="tab">Notes</button>
+        <button type="button" class="html-viewer-tab" data-html-tab="highlights" role="tab">Highlights</button>
+      </div>
+      <div class="html-viewer-panel" data-html-panel="notes" role="tabpanel">
+        <div class="html-viewer-panel-header">
           <div class="html-viewer-save-indicator" data-html-save-indicator data-state="${initialSaveState}">
             <span class="html-viewer-save-dot" aria-hidden="true"></span>
             <span class="html-viewer-save-label" data-html-save-label>${escapeHtml(initialSaveLabel)}</span>
           </div>
         </div>
-        <button type="button" class="html-viewer-sidebar-close" data-html-sidebar-close aria-label="Hide notes">×</button>
+        <p class="html-viewer-sidebar-hint muted-text">Comments while reading this page</p>
+        <form class="html-viewer-notes-form" data-html-notes-form data-file="${escapeHtml(filePath)}" action="${notesAction}">
+          <textarea
+            class="html-viewer-notes"
+            data-html-notes-input
+            name="notes"
+            rows="12"
+            placeholder="Write your notes here..."
+          >${escapeHtml(notes)}</textarea>
+        </form>
       </div>
-      <p class="html-viewer-sidebar-hint muted-text">Comments while reading this page</p>
-      <form class="html-viewer-notes-form" data-html-notes-form data-file="${escapeHtml(filePath)}" action="${notesAction}">
-        <textarea
-          class="html-viewer-notes"
-          data-html-notes-input
-          name="notes"
-          rows="12"
-          placeholder="Write your notes here..."
-        >${escapeHtml(notes)}</textarea>
-      </form>
+      <div class="html-viewer-panel" data-html-panel="highlights" role="tabpanel" hidden>
+        <p class="html-viewer-highlight-unsupported muted-text" data-html-highlight-unsupported hidden>
+          Highlights require a browser with CSS Highlight API support.
+        </p>
+        <div class="html-viewer-highlight-compose" data-html-highlight-compose hidden>
+          <label class="html-viewer-highlight-label" for="html-highlight-selection">Selected text</label>
+          <textarea id="html-highlight-selection" class="html-viewer-highlight-selection" data-html-highlight-selection rows="3" readonly placeholder="Select text in the page..."></textarea>
+          <div class="html-viewer-highlight-colors" data-html-highlight-colors>${renderColorSwatches()}</div>
+          <div class="html-viewer-highlight-actions">
+            <button type="button" class="html-viewer-action html-viewer-highlight-save" data-html-highlight-save disabled>Save highlight</button>
+            <button type="button" class="html-viewer-action" data-html-highlight-clear disabled>Clear selection</button>
+          </div>
+        </div>
+        <div class="html-viewer-highlight-list" data-html-highlight-list></div>
+      </div>
     </aside>
   </div>
 </div>
-${HTML_VIEWER_SCRIPT}`
+${HTML_VIEWER_SCRIPT}
+${HTML_HIGHLIGHTS_SCRIPT}`
 
   return layoutHtmlViewer(`${baseName} — ${escapeHtml(runName)}`, body)
 }
