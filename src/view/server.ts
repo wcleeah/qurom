@@ -4,18 +4,34 @@ import {
   createHtmlReaderHighlight,
   deleteHtmlReaderHighlight,
 } from "./html-highlights-store"
+import {
+  handleDeleteAskThread,
+  handleListAskMessages,
+  handleListAskThreads,
+  handlePostAskMessage,
+} from "./html-ask-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
 import { renderIndex, renderNodePage, renderRun, serveRawFile } from "./pages"
 import { safeFilePath, HOST, PORT, safeRunPath } from "./paths"
 import { setRunStarred } from "./starred-store"
+import { MARKED_UMD_PATH, MARKED_UMD_URL } from "./html-viewer-markdown"
 
 export function startViewServer(): void {
   Bun.serve({
     port: PORT,
     hostname: HOST,
-    async fetch(req): Promise<Response> {
+    async fetch(req, server): Promise<Response> {
       const url = new URL(req.url)
       const path = url.pathname
+
+      if (path === MARKED_UMD_URL) {
+        return new Response(Bun.file(MARKED_UMD_PATH), {
+          headers: {
+            "Content-Type": "application/javascript; charset=utf-8",
+            "Cache-Control": "public, max-age=86400",
+          },
+        })
+      }
 
       if (path === "/") {
         try {
@@ -258,6 +274,47 @@ export function startViewServer(): void {
             })
           }
           console.error("HTML highlights error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const htmlAskThreadsMatch = path.match(/^\/runs\/(.+?)\/html-ask\/threads(?:\/([^/]+))?(?:\/messages)?$/)
+      if (htmlAskThreadsMatch) {
+        const runName = decodeURIComponent(htmlAskThreadsMatch[1])
+        const threadId = htmlAskThreadsMatch[2] ? decodeURIComponent(htmlAskThreadsMatch[2]) : undefined
+        const isMessages = path.endsWith("/messages")
+        try {
+          const file = url.searchParams.get("file") ?? ""
+          if (!file) {
+            return new Response("Missing file", { status: 400 })
+          }
+          if (req.method === "GET" && !threadId && !isMessages) {
+            return await handleListAskThreads(runName, file)
+          }
+          if (req.method === "GET" && threadId && isMessages) {
+            return await handleListAskMessages(runName, file, threadId)
+          }
+          if (req.method === "DELETE" && threadId && !isMessages) {
+            return await handleDeleteAskThread(runName, file, threadId)
+          }
+        } catch (e) {
+          if (e instanceof Error && (e.message === "Path traversal blocked" || e.message === "Not found" || e.message === "Only HTML files support reader annotations")) {
+            return new Response("Not found", { status: 404 })
+          }
+          console.error("HTML ask threads error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const htmlAskMessagesMatch = path.match(/^\/runs\/(.+?)\/html-ask\/messages$/)
+      if (htmlAskMessagesMatch && req.method === "POST") {
+        // Ask streams SSE while the provider agent runs; disable Bun's 10s idle timeout.
+        server.timeout(req, 0)
+        const runName = decodeURIComponent(htmlAskMessagesMatch[1])
+        try {
+          return await handlePostAskMessage(req, runName)
+        } catch (e) {
+          console.error("POST /html-ask/messages error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

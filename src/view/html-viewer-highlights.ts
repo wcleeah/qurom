@@ -1,16 +1,17 @@
 import { HIGHLIGHT_COLOR_RGBA, type HtmlReaderHighlight } from "./html-highlights-store"
+import { escapeHtml } from "./utils"
 
 export { HIGHLIGHT_COLOR_RGBA }
 
 export function highlightsToJson(highlights: HtmlReaderHighlight[]): string {
-  return JSON.stringify(highlights.map((h) => ({
+  return escapeHtml(JSON.stringify(highlights.map((h) => ({
     id: h.id,
     color: h.color,
     quote: h.quote,
     prefix: h.prefix,
     suffix: h.suffix,
     createdAt: h.createdAt,
-  }))).replace(/</g, "\\u003c")
+  }))))
 }
 
 export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
@@ -27,10 +28,16 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   const apiBase = "/runs/" + encodeURIComponent(runName) + "/html-highlights"
   const tabStorageKey = "html-viewer-tab:" + filePath
 
+  function isMobile() {
+    return window.matchMedia("(max-width: 860px)").matches
+  }
+
   const notesTab = document.querySelector('[data-html-tab="notes"]')
   const highlightsTab = document.querySelector('[data-html-tab="highlights"]')
+  const askTab = document.querySelector('[data-html-tab="ask"]')
   const notesPanel = document.querySelector('[data-html-panel="notes"]')
   const highlightsPanel = document.querySelector('[data-html-panel="highlights"]')
+  const askPanel = document.querySelector('[data-html-panel="ask"]')
   const selectionInput = document.querySelector("[data-html-highlight-selection]")
   const composeBlock = document.querySelector("[data-html-highlight-compose]")
   const listEl = document.querySelector("[data-html-highlight-list]")
@@ -221,8 +228,10 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
         '<div class="html-viewer-highlight-quote">' + escapeHtml(item.quote) + badge + '</div>' +
         '<div class="html-viewer-highlight-meta muted-text">' + escapeHtml(formatTime(item.createdAt)) + '</div>' +
         '</div></div>' +
+        '<div class="html-viewer-highlight-item-actions">' +
+        '<button type="button" class="html-viewer-action html-viewer-highlight-ask" data-highlight-ask="' + escapeHtml(item.id) + '">Ask</button>' +
         '<button type="button" class="html-viewer-highlight-delete" data-highlight-delete="' + escapeHtml(item.id) + '" aria-label="Delete highlight">Delete</button>' +
-        '</div>'
+        '</div></div>'
     }).join("")
   }
 
@@ -244,20 +253,29 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   }
 
   function setActiveTab(tab) {
-    const isNotes = tab === "notes"
-    notesTab?.classList.toggle("html-viewer-tab-active", isNotes)
-    highlightsTab?.classList.toggle("html-viewer-tab-active", !isNotes)
-    if (notesPanel instanceof HTMLElement) notesPanel.hidden = !isNotes
-    if (highlightsPanel instanceof HTMLElement) highlightsPanel.hidden = isNotes
+    const tabs = [
+      ["notes", notesTab, notesPanel],
+      ["highlights", highlightsTab, highlightsPanel],
+      ["ask", askTab, askPanel],
+    ]
+    for (const [name, button, panel] of tabs) {
+      button?.classList.toggle("html-viewer-tab-active", tab === name)
+      if (panel instanceof HTMLElement) panel.hidden = tab !== name
+    }
     try { localStorage.setItem(tabStorageKey, tab) } catch {}
-    if (!isNotes) syncCompose()
+    if (tab !== "ask") {
+      shell?.classList.remove("html-viewer-ask-sheet-open")
+    } else if (isMobile()) {
+      shell?.classList.add("html-viewer-ask-sheet-open")
+    }
+    if (tab === "highlights") syncCompose()
   }
 
   function restoreTab() {
     let tab = "notes"
     try {
       const stored = localStorage.getItem(tabStorageKey)
-      if (stored === "notes" || stored === "highlights") tab = stored
+      if (stored === "notes" || stored === "highlights" || stored === "ask") tab = stored
     } catch {}
     setActiveTab(tab)
   }
@@ -353,11 +371,21 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
 
   notesTab?.addEventListener("click", () => setActiveTab("notes"))
   highlightsTab?.addEventListener("click", () => setActiveTab("highlights"))
+  askTab?.addEventListener("click", () => setActiveTab("ask"))
+  window.addEventListener("html-ask-open", () => setActiveTab("ask"))
   saveBtn?.addEventListener("click", () => { void saveHighlight() })
   clearBtn?.addEventListener("click", clearSelection)
   listEl?.addEventListener("click", (event) => {
     const target = event.target
     if (!(target instanceof Element)) return
+    const askBtn = target.closest("[data-highlight-ask]")
+    if (askBtn instanceof HTMLElement) {
+      const id = askBtn.dataset.highlightAsk
+      if (id) {
+        window.dispatchEvent(new CustomEvent("html-ask-open", { detail: { highlightId: id } }))
+      }
+      return
+    }
     const btn = target.closest("[data-highlight-delete]")
     if (!(btn instanceof HTMLElement)) return
     const id = btn.dataset.highlightDelete

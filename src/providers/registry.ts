@@ -44,6 +44,7 @@ export function providerForRole(config: RuntimeConfig, role: AgentRole): AgentPr
 export function configuredAgentRoles(config: RuntimeConfig): AgentRole[] {
   const roles = [
     "reader-interviewer",
+    "html-reading-companion",
     config.quorumConfig.designatedDrafter,
     ...config.quorumConfig.auditors,
     config.quorumConfig.summarizerAgent,

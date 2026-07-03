@@ -4,6 +4,9 @@ import {
   HIGHLIGHT_COLORS,
   type HtmlReaderHighlight,
 } from "./html-highlights-store"
+import { askThreadsToJson, HTML_ASK_SCRIPT } from "./html-viewer-ask"
+import { HTML_VIEWER_MARKDOWN_SCRIPT } from "./html-viewer-markdown"
+import type { HtmlReaderAskThread } from "./html-ask-store"
 import { highlightsToJson, HTML_HIGHLIGHTS_SCRIPT } from "./html-viewer-highlights"
 import { layoutHtmlViewer } from "./layout"
 import { escapeHtml } from "./utils"
@@ -153,6 +156,7 @@ export function renderHtmlViewerPage(
   filePath: string,
   notes: string,
   highlights: HtmlReaderHighlight[],
+  askThreads: HtmlReaderAskThread[] = [],
 ): string {
   const baseName = basename(filePath)
   const runHref = `/runs/${encodeURIComponent(runName)}`
@@ -163,9 +167,11 @@ export function renderHtmlViewerPage(
   const initialSaveState = notes.trim().length > 0 ? "saved" : "idle"
   const initialSaveLabel = notes.trim().length > 0 ? "All changes saved" : "Notes auto-save"
   const highlightsJson = highlightsToJson(highlights)
+  const askThreadsJson = askThreadsToJson(askThreads)
 
   const body = `<div class="html-viewer-shell">
   <div data-html-highlights-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-highlights="${highlightsJson}"></div>
+  <div data-html-ask-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-threads="${askThreadsJson}" data-highlights="${highlightsJson}"></div>
   <header class="html-viewer-navbar">
     <div class="html-viewer-navbar-start">
       <a class="html-viewer-back" href="${runHref}">← Back to run</a>
@@ -192,6 +198,7 @@ export function renderHtmlViewerPage(
       <div class="html-viewer-sidebar-tabs" role="tablist">
         <button type="button" class="html-viewer-tab html-viewer-tab-active" data-html-tab="notes" role="tab">Notes</button>
         <button type="button" class="html-viewer-tab" data-html-tab="highlights" role="tab">Highlights</button>
+        <button type="button" class="html-viewer-tab" data-html-tab="ask" role="tab">Ask</button>
       </div>
       <div class="html-viewer-panel" data-html-panel="notes" role="tabpanel">
         <div class="html-viewer-panel-header">
@@ -226,11 +233,37 @@ export function renderHtmlViewerPage(
         </div>
         <div class="html-viewer-highlight-list" data-html-highlight-list></div>
       </div>
+      <div class="html-viewer-panel" data-html-panel="ask" role="tabpanel" hidden>
+        <div class="html-viewer-ask-sheet" data-html-ask-sheet hidden>
+          <div class="html-viewer-ask-sheet-handle" aria-hidden="true"></div>
+        </div>
+        <div class="html-viewer-ask-layout">
+          <div class="html-viewer-ask-chat-list" data-html-ask-chat-list></div>
+          <div class="html-viewer-ask-bootstrap" data-html-ask-bootstrap hidden>
+            <label class="html-viewer-ask-bootstrap-label" for="html-ask-bootstrap-select">Starting from</label>
+            <select id="html-ask-bootstrap-select" class="html-viewer-ask-bootstrap-select" data-html-ask-bootstrap-select>
+              <option value="page">Whole page</option>
+            </select>
+          </div>
+          <div class="html-viewer-ask-context muted-text" data-html-ask-context hidden></div>
+          <div class="html-viewer-ask-messages" data-html-ask-messages></div>
+          <p class="html-viewer-ask-status muted-text" data-html-ask-status></p>
+          <form class="html-viewer-ask-form" data-html-ask-form>
+            <textarea class="html-viewer-ask-input" data-html-ask-input rows="2" placeholder="Ask about this document..." required></textarea>
+            <div class="html-viewer-ask-actions">
+              <button type="submit" class="html-viewer-action html-viewer-ask-send" data-html-ask-send>Send</button>
+              <button type="button" class="html-viewer-action" data-html-ask-new>New chat</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </aside>
   </div>
 </div>
 ${HTML_VIEWER_SCRIPT}
-${HTML_HIGHLIGHTS_SCRIPT}`
+${HTML_HIGHLIGHTS_SCRIPT}
+${HTML_VIEWER_MARKDOWN_SCRIPT}
+${HTML_ASK_SCRIPT}`
 
   return layoutHtmlViewer(`${baseName} — ${escapeHtml(runName)}`, body)
 }

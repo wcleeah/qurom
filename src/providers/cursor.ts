@@ -8,6 +8,7 @@ import {
   type SettingSource,
 } from "@cursor/sdk"
 import { toJsonSchema } from "@langchain/core/utils/json_schema"
+import { createHash } from "node:crypto"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
@@ -23,7 +24,7 @@ import type {
   ProviderConfigFormParameter,
 } from "./types"
 
-const capabilities = new Set<ProviderCapability>(["roleInstructions", "inlineInputContext", "fileOutput", "jsonFileOutput"])
+const capabilities = new Set<ProviderCapability>(["roleInstructions", "inlineInputContext", "fileOutput", "jsonFileOutput", "plainTextOutput"])
 
 type CursorAgentHandle = Awaited<ReturnType<typeof Agent.create>>
 type CursorRunHandle = Awaited<ReturnType<CursorAgentHandle["send"]>>
@@ -32,6 +33,14 @@ type CursorModel = Awaited<ReturnType<typeof Cursor.models.list>>[number]
 const activeAgents = new Map<string, { agent: CursorAgentHandle; run?: CursorRunHandle }>()
 let cachedModels: { apiKey: string; models: CursorModel[] } | undefined
 const cursorTransportRetryAttempts = 2
+const cursorAgentNameMaxLength = 100
+
+export function clampCursorAgentName(name: string): string {
+  if (name.length <= cursorAgentNameMaxLength) return name
+  const hash = createHash("sha256").update(name).digest("hex").slice(0, 8)
+  const prefixLength = cursorAgentNameMaxLength - hash.length - 1
+  return `${name.slice(0, prefixLength)}-${hash}`
+}
 
 class CursorRunStatusError extends Error {
   constructor(
@@ -531,7 +540,7 @@ export const cursorProvider: AgentProvider = {
     const mcpServers = await resolveMcpServers(input.config, options)
     const agent = await Agent.create({
       apiKey,
-      name: input.title,
+      name: clampCursorAgentName(input.title),
       model: {
         id: model,
         ...(modelParams?.length ? { params: modelParams } : {}),
@@ -551,20 +560,82 @@ export const cursorProvider: AgentProvider = {
     }
   },
   async prompt(input) {
-    if (!input.outputFile) {
-      throw new Error("Cursor provider requires outputFile; inline output is disabled")
-    }
-    if (input.inputFiles && input.inputFiles.length > 0) {
-      throw new Error("Cursor provider does not yet support file attachments in quorum prompts")
-    }
-    const outputFile = input.outputFile
-
     const active = activeAgents.get(input.handle.id)
     if (!active) {
       throw new Error(`Cursor agent handle ${input.handle.id} is not active`)
     }
 
     const roleRuntime = roleConfig(input.config, input.role)
+
+    if (!input.outputFile && !input.schema) {
+      if (input.inputFiles && input.inputFiles.length > 0) {
+        throw new Error("Cursor provider expects input files to be inlined by the agent runtime")
+      }
+      for (let attempt = 1; attempt <= cursorTransportRetryAttempts; attempt++) {
+        try {
+          const messageID = `cursor:${input.handle.id}:${attempt}:${Date.now()}`
+          input.bus?.emit({ kind: "agent.message.start", sessionID: input.handle.id, messageID })
+          input.bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "running" })
+          const run = await active.agent.send(input.prompt, {
+            onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
+          })
+          active.run = run
+          const result = await run.wait()
+          const status = (result as { status?: string }).status
+          const text = extractRunText(result)
+          if (status && status !== "finished" && status !== "completed") {
+            throw new CursorRunStatusError(run.id, status, result)
+          }
+          input.bus?.emit({
+            kind: "agent.message.text",
+            sessionID: input.handle.id,
+            key: "cursor-text",
+            text: "",
+            done: true,
+          })
+          input.bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "completed" })
+          return {
+            text,
+            model: roleRuntime?.model,
+            provider: "cursor",
+            variant: input.variant ?? roleRuntime?.variant,
+            raw: { agentId: input.handle.id, runId: run.id, result },
+          }
+        } catch (error) {
+          const willRetry = attempt < cursorTransportRetryAttempts && shouldRetryCursorPrompt(error)
+          logCursorPromptError({
+            debugLog: input.telemetry?.debugLog,
+            role: input.role,
+            handleId: input.handle.id,
+            attempt,
+            willRetry,
+            error,
+          })
+          if (willRetry) continue
+          input.bus?.emit({
+            kind: "session.error",
+            sessionID: input.handle.id,
+            name: error instanceof Error ? error.name : "UnknownError",
+            message: error instanceof Error ? error.message : String(error),
+          })
+          input.bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "error" })
+          if (error instanceof CursorAgentError) {
+            throw new Error(`Cursor agent prompt failed: ${cursorErrorMessage(error)}`)
+          }
+          throw error
+        }
+      }
+      throw new Error("Cursor agent chat prompt failed after retry budget was exhausted")
+    }
+
+    if (!input.outputFile) {
+      throw new Error("Cursor provider requires outputFile for structured prompts")
+    }
+    if (input.inputFiles && input.inputFiles.length > 0) {
+      throw new Error("Cursor provider does not yet support file attachments in quorum prompts")
+    }
+    const outputFile = input.outputFile
+
     let callIndex = 0
 
     return runProviderStructuredPrompt({

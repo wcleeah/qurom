@@ -1847,6 +1847,324 @@ body.html-viewer-body {
   }
 }
 
+.html-viewer-highlight-item-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.html-viewer-highlight-ask {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.html-viewer-panel[data-html-panel="ask"] {
+  overflow: hidden;
+}
+
+.html-viewer-ask-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-height: 0;
+  flex: 1;
+  height: 100%;
+}
+
+.html-viewer-ask-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 9rem;
+  overflow: auto;
+  flex-shrink: 0;
+}
+
+.html-viewer-ask-chat-list-header {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.html-viewer-ask-chat-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.html-viewer-ask-chat-row-active .html-viewer-ask-chat-open {
+  border-color: var(--accent);
+  background: var(--accent-bg, rgba(59, 130, 246, 0.08));
+}
+
+.html-viewer-ask-chat-open {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.html-viewer-ask-chat-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.html-viewer-ask-chat-meta {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.html-viewer-ask-chat-badge {
+  display: inline-block;
+  padding: 0.05rem 0.3rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.html-viewer-ask-chat-delete {
+  flex: 0 0 auto;
+  width: 1.75rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.html-viewer-ask-chat-delete:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.html-viewer-ask-bootstrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.html-viewer-ask-bootstrap-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.html-viewer-ask-bootstrap-select {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.45rem;
+  font-size: 0.78rem;
+}
+
+.html-viewer-ask-thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 8rem;
+  overflow: auto;
+}
+
+.html-viewer-ask-thread {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.html-viewer-ask-thread-active {
+  border-color: var(--accent);
+  background: var(--accent-bg, rgba(59, 130, 246, 0.08));
+}
+
+.html-viewer-ask-context {
+  font-size: 0.78rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.html-viewer-ask-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.25rem 0;
+}
+
+.html-viewer-ask-empty {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.html-viewer-ask-message {
+  display: flex;
+}
+
+.html-viewer-ask-message-user {
+  justify-content: flex-end;
+}
+
+.html-viewer-ask-message-assistant {
+  justify-content: flex-start;
+}
+
+.html-viewer-ask-message-body {
+  max-width: 92%;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.html-viewer-ask-message-user .html-viewer-ask-message-body {
+  background: var(--accent-bg, rgba(59, 130, 246, 0.12));
+  border: 1px solid var(--border);
+}
+
+.html-viewer-ask-message-assistant .html-viewer-ask-message-body {
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+.html-viewer-ask-message-assistant .html-viewer-ask-message-body.md-content {
+  white-space: normal;
+}
+
+.html-viewer-ask-message-assistant .md-content > :first-child {
+  margin-top: 0;
+}
+
+.html-viewer-ask-message-assistant .md-content > :last-child {
+  margin-bottom: 0;
+}
+
+.html-viewer-ask-message-assistant .md-content pre {
+  overflow-x: auto;
+}
+
+.html-viewer-ask-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+.html-viewer-ask-status {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.html-viewer-ask-input {
+  width: 100%;
+  min-height: 3rem;
+  max-height: 8rem;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.55rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.html-viewer-ask-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.html-viewer-ask-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.html-viewer-ask-send {
+  flex: 1;
+}
+
+.html-viewer-ask-status-error {
+  color: var(--red, #dc2626);
+}
+
+.html-viewer-ask-sheet {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .html-viewer-panel[data-html-panel="ask"] {
+    position: relative;
+  }
+
+  .html-viewer-ask-sheet-open .html-viewer-ask-sheet {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+  }
+
+  .html-viewer-ask-sheet-open .html-viewer-panel[data-html-panel="ask"]:not([hidden]) {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 55;
+    max-height: min(78vh, 640px);
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+    padding: 0.75rem;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .html-viewer-ask-sheet-handle {
+    width: 2.5rem;
+    height: 0.25rem;
+    border-radius: 999px;
+    background: var(--border);
+    margin: 0.5rem auto 0;
+  }
+
+  .html-viewer-ask-messages {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
 /* ── Mobile fixes ── */
 @media (max-width: 400px) {
   .run-card-top { flex-direction: column; }
