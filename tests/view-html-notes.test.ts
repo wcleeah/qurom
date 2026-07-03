@@ -74,6 +74,9 @@ describe("html viewer page", () => {
     expect(html).toContain("download=1")
     expect(html).toContain('data-html-notes-input')
     expect(html).toContain("Saved note")
+    expect(html).toContain("data-html-save-indicator")
+    expect(html).toContain("data-html-sidebar-toggle")
+    expect(html).toContain("data-html-sidebar-close")
   })
 })
 

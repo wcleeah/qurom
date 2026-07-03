@@ -224,6 +224,7 @@ describe("html viewer renderer", () => {
     expect(html).toContain("html-viewer-navbar")
     expect(html).toContain("/runs/example-run/html-notes")
     expect(html).toContain('data-html-notes-form')
+    expect(html).toContain("data-html-save-indicator")
     expect(html).toContain("Download")
   })
 })
