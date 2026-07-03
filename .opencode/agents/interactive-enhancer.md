@@ -1,7 +1,7 @@
 ---
 description: Interactive enhancer for design quorum HTML
 mode: subagent
-model: opencode-go/kimi-k2.7-code
+model: opencode/big-pickle
 variant: high
 permission:
   read:

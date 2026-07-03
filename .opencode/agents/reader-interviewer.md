@@ -1,7 +1,7 @@
 ---
 description: Reader interviewer for quorum runs — discovers baseline knowledge and learning goal before drafting
 mode: subagent
-model: opencode-go/glm-5.2
+model: opencode/big-pickle
 permission:
   read:
     "runs/**": allow

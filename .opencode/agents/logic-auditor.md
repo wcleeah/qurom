@@ -1,7 +1,7 @@
 ---
 description: Reasoning and coherence auditor for quorum drafts
 mode: subagent
-model: opencode-go/deepseek-v4-pro
+model: opencode/big-pickle
 variant: max
 permission:
   read:

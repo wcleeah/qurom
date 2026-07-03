@@ -1,7 +1,7 @@
 ---
 description: Designated research drafter for quorum runs
 mode: subagent
-model: opencode-go/glm-5.2
+model: opencode/big-pickle
 variant: max
 permission:
   read:

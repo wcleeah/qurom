@@ -1,7 +1,7 @@
 ---
 description: Source and citation auditor for quorum drafts
 mode: subagent
-model: opencode-go/minimax-m3
+model: opencode/big-pickle
 variant: thinking
 permission:
   read:

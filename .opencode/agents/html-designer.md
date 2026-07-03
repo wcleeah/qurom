@@ -1,7 +1,7 @@
 ---
 description: HTML designer for quorum — converts markdown to self-contained, styled HTML
 mode: subagent
-model: opencode-go/glm-5.2
+model: opencode/big-pickle
 variant: max
 permission:
   read:
