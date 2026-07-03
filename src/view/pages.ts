@@ -5,6 +5,8 @@ import { renderStructuredJson } from "./artifact-renderers"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard, renderLivePipeline, renderNodeHistory } from "./components"
 import { computeStats, getRunFiles, listRuns, readLiveStatus } from "./data"
 import { renderFileBrowser } from "./file-browser"
+import { getHtmlReaderNotes } from "./html-notes-store"
+import { renderHtmlViewerPage } from "./html-viewer"
 import { badge, formatRelative, layout } from "./layout"
 import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
 import { STAR_SCRIPT } from "./star-script"
@@ -768,6 +770,23 @@ ${htmlBody}`,
     return new Response(html, {
       headers: { "content-type": "text/html; charset=utf-8" },
     })
+  }
+
+  // For .html files, render viewer shell by default; ?source=1 gives raw bytes for iframe/download
+  if ((ext === "html" || ext === "htm") && searchParams.get("source") !== "1") {
+    const notes = await getHtmlReaderNotes(runName, filePath)
+    const html = renderHtmlViewerPage(runName, filePath, notes)
+    return new Response(html, {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    })
+  }
+
+  if ((ext === "html" || ext === "htm") && searchParams.get("source") === "1") {
+    const headers: Record<string, string> = { "content-type": "text/html; charset=utf-8" }
+    if (searchParams.get("download") === "1") {
+      headers["content-disposition"] = `attachment; filename="${basename(filePath).replace(/"/g, "")}"`
+    }
+    return new Response(file, { headers })
   }
 
   // For .json files, render a structured page by type

@@ -1,8 +1,9 @@
-import { HOST, PORT, safeRunPath } from "./paths"
-import { renderIndex, renderNodePage, renderRun, serveRawFile } from "./pages"
-import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "./config"
-import { setRunStarred } from "./starred-store"
 import { stat } from "node:fs/promises"
+import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "./config"
+import { setHtmlReaderNotes } from "./html-notes-store"
+import { renderIndex, renderNodePage, renderRun, serveRawFile } from "./pages"
+import { safeFilePath, HOST, PORT, safeRunPath } from "./paths"
+import { setRunStarred } from "./starred-store"
 
 export function startViewServer(): void {
   Bun.serve({
@@ -123,6 +124,46 @@ export function startViewServer(): void {
           })
         } catch (e) {
           console.error("POST /reply error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const htmlNotesMatch = path.match(/^\/runs\/(.+?)\/html-notes$/)
+      if (htmlNotesMatch && req.method === "POST") {
+        const runName = decodeURIComponent(htmlNotesMatch[1])
+        try {
+          const runDir = safeRunPath(runName)
+          const runStat = await stat(runDir)
+          if (!runStat.isDirectory()) {
+            return new Response("Not found", { status: 404 })
+          }
+          const raw = await req.text()
+          let file = ""
+          let notes = ""
+          if (raw.trim().startsWith("{")) {
+            const parsed = JSON.parse(raw) as { file?: unknown; notes?: unknown }
+            file = typeof parsed.file === "string" ? parsed.file : ""
+            notes = typeof parsed.notes === "string" ? parsed.notes : ""
+          } else {
+            const params = new URLSearchParams(raw)
+            file = params.get("file") ?? ""
+            notes = params.get("notes") ?? ""
+          }
+          if (!file) {
+            return new Response("Missing file", { status: 400 })
+          }
+          const resolved = safeFilePath(runName, file)
+          const fileStat = await stat(resolved)
+          if (!fileStat.isFile()) {
+            return new Response("Not found", { status: 404 })
+          }
+          const result = await setHtmlReaderNotes(runName, file, notes)
+          return Response.json({ ok: true, updatedAt: result.updatedAt })
+        } catch (e) {
+          if (e instanceof Error && (e.message === "Path traversal blocked" || e.message === "Only HTML files support reader notes")) {
+            return new Response("Not found", { status: 404 })
+          }
+          console.error("POST /html-notes error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

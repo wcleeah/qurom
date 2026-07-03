@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { renderStructuredJson } from "../src/view/artifact-renderers.ts"
 import { POLLING_SCRIPT } from "../src/view/client-script.ts"
 import { renderInterviewChatCard, renderLivePipeline } from "../src/view/components.ts"
+import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 import { classifyFile } from "../src/view/file-browser.ts"
 import { card, section, summaryRow, summaryTable } from "../src/view/html.ts"
 import { RUNS_DIR, safeFilePath, safeRunPath } from "../src/view/paths.ts"
@@ -45,6 +46,7 @@ describe("view artifact renderers", () => {
 describe("view assets and html helpers", () => {
   test("keeps styles and client script split into focused modules", () => {
     expect(CSS).toContain(".stack-card")
+    expect(CSS).toContain(".html-viewer-shell")
     expect(CSS).not.toContain("<script>")
     expect(POLLING_SCRIPT).toContain("<script>")
     expect(POLLING_SCRIPT).toContain("data-refresh-now")
@@ -212,5 +214,16 @@ describe("view components", () => {
     expect(html).toContain("How familiar are you with ML?")
     expect(html).toContain("Answer 2")
     expect(html).toContain("Quite new.")
+  })
+})
+
+describe("html viewer renderer", () => {
+  test("includes sticky navbar controls and notes form action", () => {
+    const html = renderHtmlViewerPage("example-run", "design-html-round-0.html", "")
+
+    expect(html).toContain("html-viewer-navbar")
+    expect(html).toContain("/runs/example-run/html-notes")
+    expect(html).toContain('data-html-notes-form')
+    expect(html).toContain("Download")
   })
 })
