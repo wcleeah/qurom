@@ -8,6 +8,7 @@ import {
   deleteHtmlReaderHighlight,
   HIGHLIGHT_COLORS,
   listHtmlReaderHighlights,
+  updateHtmlReaderHighlightNote,
 } from "../src/view/html-highlights-store.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 
@@ -58,6 +59,7 @@ describe("html reader highlights store", () => {
     })
 
     expect(created.quote).toBe("Hello")
+    expect(created.note).toBe("")
     expect(HIGHLIGHT_COLORS).toContain(created.color)
 
     const listed = await listHtmlReaderHighlights("alpha-run", "final.html")
@@ -66,6 +68,29 @@ describe("html reader highlights store", () => {
 
     expect(await deleteHtmlReaderHighlight("alpha-run", "final.html", created.id)).toBe(true)
     expect(await listHtmlReaderHighlights("alpha-run", "final.html")).toEqual([])
+  })
+
+  test("updates highlight note", async () => {
+    const created = await createHtmlReaderHighlight({
+      runName: "alpha-run",
+      filePath: "final.html",
+      color: "yellow",
+      quote: "Hello",
+    })
+
+    const updated = await updateHtmlReaderHighlightNote(
+      "alpha-run",
+      "final.html",
+      created.id,
+      "Important passage",
+    )
+    expect(updated?.note).toBe("Important passage")
+    expect(updated?.updatedAt).not.toBe(created.updatedAt)
+
+    const listed = await listHtmlReaderHighlights("alpha-run", "final.html")
+    expect(listed[0]?.note).toBe("Important passage")
+
+    expect(await updateHtmlReaderHighlightNote("alpha-run", "final.html", "missing", "x")).toBeNull()
   })
 
   test("rejects empty quote and invalid color", async () => {
@@ -107,6 +132,7 @@ describe("html viewer highlights UI", () => {
       quote: 'Say "hello"',
       prefix: "",
       suffix: "",
+      note: "My note",
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     }])
@@ -132,6 +158,8 @@ describe("html viewer highlights UI", () => {
     expect(html).toContain('data-html-panel="highlights"')
     expect(html).toContain("data-html-highlight-list")
     expect(html).toContain("data-html-highlight-selection")
+    expect(html).toContain("data-highlight-open")
+    expect(html).toContain("data-highlight-note")
     expect(html).not.toContain('data-highlights="[{"')
     expect(html).toContain("&quot;id&quot;")
     expect(html).toContain("Hide panel")

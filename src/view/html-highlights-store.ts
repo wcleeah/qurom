@@ -11,6 +11,7 @@ export interface HtmlReaderHighlight {
   quote: string
   prefix: string
   suffix: string
+  note: string
   createdAt: string
   updatedAt: string
 }
@@ -34,6 +35,7 @@ function rowToHighlight(row: {
   quote: string
   prefix: string
   suffix: string
+  note: string
   created_at: string
   updated_at: string
 }): HtmlReaderHighlight {
@@ -45,10 +47,14 @@ function rowToHighlight(row: {
     quote: row.quote,
     prefix: row.prefix,
     suffix: row.suffix,
+    note: row.note,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
+
+const HIGHLIGHT_SELECT = `SELECT id, run_name, file_path, color, quote, prefix, suffix, note, created_at, updated_at
+       FROM html_reader_highlights`
 
 export async function getHtmlReaderHighlight(
   runName: string,
@@ -66,13 +72,13 @@ export async function getHtmlReaderHighlight(
         quote: string
         prefix: string
         suffix: string
+        note: string
         created_at: string
         updated_at: string
       },
       [string, string, string]
     >(
-      `SELECT id, run_name, file_path, color, quote, prefix, suffix, created_at, updated_at
-       FROM html_reader_highlights
+      `${HIGHLIGHT_SELECT}
        WHERE run_name = ? AND file_path = ? AND id = ?
        LIMIT 1`,
     ).get(runName, filePath, id)
@@ -95,13 +101,13 @@ export async function listHtmlReaderHighlights(
         quote: string
         prefix: string
         suffix: string
+        note: string
         created_at: string
         updated_at: string
       },
       [string, string]
     >(
-      `SELECT id, run_name, file_path, color, quote, prefix, suffix, created_at, updated_at
-       FROM html_reader_highlights
+      `${HIGHLIGHT_SELECT}
        WHERE run_name = ? AND file_path = ?
        ORDER BY created_at ASC`,
     ).all(runName, filePath)
@@ -132,8 +138,8 @@ export async function createHtmlReaderHighlight(input: {
   await withHtmlReaderDb((db) => {
     db.query(
       `INSERT INTO html_reader_highlights
-       (id, run_name, file_path, color, quote, prefix, suffix, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, run_name, file_path, color, quote, prefix, suffix, note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
     ).run(id, input.runName, input.filePath, input.color, quote, prefix, suffix, now, now)
   })
   return {
@@ -144,9 +150,32 @@ export async function createHtmlReaderHighlight(input: {
     quote,
     prefix,
     suffix,
+    note: "",
     createdAt: now,
     updatedAt: now,
   }
+}
+
+export async function updateHtmlReaderHighlightNote(
+  runName: string,
+  filePath: string,
+  id: string,
+  note: string,
+): Promise<HtmlReaderHighlight | null> {
+  validateHtmlReaderTarget(runName, filePath)
+  const updatedAt = nowIso()
+  const changed = await withHtmlReaderDb((db) => {
+    const result = db.query(
+      `UPDATE html_reader_highlights
+       SET note = ?, updated_at = ?
+       WHERE run_name = ? AND file_path = ? AND id = ?`,
+    ).run(note, updatedAt, runName, filePath, id)
+    return result.changes > 0
+  })
+  if (!changed) {
+    return null
+  }
+  return getHtmlReaderHighlight(runName, filePath, id)
 }
 
 export async function deleteHtmlReaderHighlight(

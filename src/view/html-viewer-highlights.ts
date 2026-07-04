@@ -10,6 +10,7 @@ export function highlightsToJson(highlights: HtmlReaderHighlight[]): string {
     quote: h.quote,
     prefix: h.prefix,
     suffix: h.suffix,
+    note: h.note,
     createdAt: h.createdAt,
   }))))
 }
@@ -54,9 +55,13 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   }
 
   let pendingSelection = null
+  let selectedHighlightId = null
   let selectedColor = "yellow"
   let cssHighlightSupported = false
   const painted = new Map()
+  const noteSaveTimers = new Map()
+  const noteLastSaved = new Map()
+  const noteSaveInFlight = new Map()
 
   function escapeHtml(text) {
     return String(text)
@@ -221,18 +226,91 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
       const resolved = doc ? !!resolveAnchor(doc, item) : false
       const badge = resolved ? "" : ' <span class="html-viewer-highlight-missing">could not locate</span>'
       const rgba = COLOR_RGBA[item.color] ?? COLOR_RGBA.yellow
-      return '<div class="html-viewer-highlight-item" data-highlight-id="' + escapeHtml(item.id) + '">' +
-        '<div class="html-viewer-highlight-item-main">' +
+      const expanded = selectedHighlightId === item.id
+      const hasNote = !!(item.note && item.note.trim())
+      const noteBadge = hasNote && !expanded ? ' <span class="html-viewer-highlight-has-note">note</span>' : ""
+      const noteSection = expanded
+        ? '<div class="html-viewer-highlight-note">' +
+          '<label class="html-viewer-highlight-note-label" for="html-highlight-note-' + escapeHtml(item.id) + '">Note</label>' +
+          '<textarea id="html-highlight-note-' + escapeHtml(item.id) + '" class="html-viewer-highlight-note-input" data-highlight-note="' + escapeHtml(item.id) + '" rows="3" placeholder="Add a note for this highlight...">' + escapeHtml(item.note ?? "") + '</textarea>' +
+          '<span class="html-viewer-highlight-note-status muted-text" data-highlight-note-status="' + escapeHtml(item.id) + '"></span>' +
+          '</div>'
+        : ""
+      return '<div class="html-viewer-highlight-item' + (expanded ? " html-viewer-highlight-item-expanded" : "") + '" data-highlight-id="' + escapeHtml(item.id) + '">' +
+        '<div class="html-viewer-highlight-item-row">' +
+        '<button type="button" class="html-viewer-highlight-item-main" data-highlight-open="' + escapeHtml(item.id) + '" aria-expanded="' + (expanded ? "true" : "false") + '">' +
         '<span class="html-viewer-highlight-swatch" style="background:' + rgba + '"></span>' +
         '<div class="html-viewer-highlight-item-text">' +
-        '<div class="html-viewer-highlight-quote">' + escapeHtml(item.quote) + badge + '</div>' +
+        '<div class="html-viewer-highlight-quote">' + escapeHtml(item.quote) + badge + noteBadge + '</div>' +
         '<div class="html-viewer-highlight-meta muted-text">' + escapeHtml(formatTime(item.createdAt)) + '</div>' +
-        '</div></div>' +
+        '</div></button>' +
         '<div class="html-viewer-highlight-item-actions">' +
         '<button type="button" class="html-viewer-action html-viewer-highlight-ask" data-highlight-ask="' + escapeHtml(item.id) + '">Ask</button>' +
         '<button type="button" class="html-viewer-highlight-delete" data-highlight-delete="' + escapeHtml(item.id) + '" aria-label="Delete highlight">Delete</button>' +
-        '</div></div>'
+        '</div></div>' +
+        noteSection +
+        '</div>'
     }).join("")
+    for (const item of highlights) {
+      noteLastSaved.set(item.id, item.note ?? "")
+    }
+  }
+
+  function setHighlightNoteStatus(id, state, label) {
+    const statusEl = listEl?.querySelector('[data-highlight-note-status="' + id + '"]')
+    if (!(statusEl instanceof HTMLElement)) return
+    statusEl.dataset.state = state
+    statusEl.textContent = label
+  }
+
+  function toggleHighlightOpen(id) {
+    selectedHighlightId = selectedHighlightId === id ? null : id
+    const doc = iframe.contentDocument
+    renderList(doc)
+    if (selectedHighlightId) {
+      const input = listEl?.querySelector('[data-highlight-note="' + selectedHighlightId + '"]')
+      if (input instanceof HTMLTextAreaElement) {
+        input.focus()
+      }
+    }
+  }
+
+  async function saveHighlightNote(id, note) {
+    if (noteSaveInFlight.get(id)) return
+    const lastSaved = noteLastSaved.get(id) ?? ""
+    if (note === lastSaved) return
+    noteSaveInFlight.set(id, true)
+    setHighlightNoteStatus(id, "saving", "Saving...")
+    try {
+      const resp = await fetch(apiBase + "/" + encodeURIComponent(id), {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ file: filePath, note }),
+      })
+      if (!resp.ok) throw new Error("save failed")
+      const data = await resp.json()
+      const item = data.highlight
+      if (!item) throw new Error("missing highlight")
+      highlights = highlights.map((entry) => entry.id === id ? item : entry)
+      noteLastSaved.set(id, note)
+      const time = item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString() : ""
+      setHighlightNoteStatus(id, "saved", time ? "Saved at " + time : "Saved")
+    } catch {
+      setHighlightNoteStatus(id, "error", "Save failed")
+    } finally {
+      noteSaveInFlight.set(id, false)
+    }
+  }
+
+  function queueHighlightNoteSave(id, note) {
+    clearTimeout(noteSaveTimers.get(id))
+    const lastSaved = noteLastSaved.get(id) ?? ""
+    if (note !== lastSaved) {
+      setHighlightNoteStatus(id, "unsaved", "Unsaved changes")
+    }
+    noteSaveTimers.set(id, setTimeout(() => {
+      void saveHighlightNote(id, note)
+    }, 500))
   }
 
   function syncCompose() {
@@ -358,6 +436,10 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
       })
       if (!resp.ok) throw new Error("delete failed")
       highlights = highlights.filter((item) => item.id !== id)
+      if (selectedHighlightId === id) selectedHighlightId = null
+      noteSaveTimers.delete(id)
+      noteLastSaved.delete(id)
+      noteSaveInFlight.delete(id)
       const doc = iframe.contentDocument
       if (doc) {
         unpaintHighlight(doc, id)
@@ -386,10 +468,26 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
       }
       return
     }
+    const openBtn = target.closest("[data-highlight-open]")
+    if (openBtn instanceof HTMLElement) {
+      const id = openBtn.dataset.highlightOpen
+      if (id) toggleHighlightOpen(id)
+      return
+    }
     const btn = target.closest("[data-highlight-delete]")
     if (!(btn instanceof HTMLElement)) return
     const id = btn.dataset.highlightDelete
     if (id) void deleteHighlight(id)
+  })
+
+  listEl?.addEventListener("input", (event) => {
+    const target = event.target
+    if (!(target instanceof HTMLTextAreaElement)) return
+    const id = target.dataset.highlightNote
+    if (!id) return
+    const item = highlights.find((entry) => entry.id === id)
+    if (item) item.note = target.value
+    queueHighlightNoteSave(id, target.value)
   })
 
   if (swatchRoot instanceof HTMLElement) {

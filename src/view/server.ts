@@ -11,6 +11,7 @@ import {
 import {
   createHtmlReaderHighlight,
   deleteHtmlReaderHighlight,
+  updateHtmlReaderHighlightNote,
 } from "./html-highlights-store"
 import {
   handleDeleteAskThread,
@@ -350,6 +351,34 @@ export function startViewServer(): void {
               return new Response("Not found", { status: 404 })
             }
             return Response.json({ ok: true })
+          }
+
+          if (req.method === "PATCH" && highlightId) {
+            const raw = await req.text()
+            let file = ""
+            let note = ""
+            if (raw.trim().startsWith("{")) {
+              const parsed = JSON.parse(raw) as { file?: unknown; note?: unknown }
+              file = typeof parsed.file === "string" ? parsed.file : ""
+              note = typeof parsed.note === "string" ? parsed.note : ""
+            } else {
+              const params = new URLSearchParams(raw)
+              file = params.get("file") ?? ""
+              note = params.get("note") ?? ""
+            }
+            if (!file) {
+              return new Response("Missing file", { status: 400 })
+            }
+            const resolved = safeFilePath(resolvedName, file)
+            const fileStat = await stat(resolved)
+            if (!fileStat.isFile()) {
+              return new Response("Not found", { status: 404 })
+            }
+            const highlight = await updateHtmlReaderHighlightNote(resolvedName, file, highlightId, note)
+            if (!highlight) {
+              return new Response("Not found", { status: 404 })
+            }
+            return Response.json({ ok: true, highlight })
           }
         } catch (e) {
           if (e instanceof Error && (

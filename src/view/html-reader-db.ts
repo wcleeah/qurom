@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS html_reader_highlights (
   updated_at TEXT NOT NULL
 );
   `)
+  migrateHtmlReaderHighlightNotes(db)
   db.run(`
 CREATE INDEX IF NOT EXISTS idx_html_reader_highlights_run_file
   ON html_reader_highlights (run_name, file_path);
@@ -104,6 +105,16 @@ CREATE INDEX IF NOT EXISTS idx_html_reader_ask_messages_thread
   ON html_reader_ask_messages (thread_id, created_at);
   `)
   return db
+}
+
+function migrateHtmlReaderHighlightNotes(db: Database): void {
+  const columns = db.query<{ name: string }, []>(
+    "PRAGMA table_info(html_reader_highlights)",
+  ).all()
+  if (columns.some((column) => column.name === "note")) {
+    return
+  }
+  db.run("ALTER TABLE html_reader_highlights ADD COLUMN note TEXT NOT NULL DEFAULT ''")
 }
 
 function migrateHtmlReaderAskThreads(db: Database): void {

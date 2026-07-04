@@ -2432,8 +2432,7 @@ body.html-viewer-body {
 
 .html-viewer-highlight-item {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 0.45rem;
   padding: 0.55rem;
   border: 1px solid var(--border);
@@ -2441,11 +2440,35 @@ body.html-viewer-body {
   background: var(--bg);
 }
 
+.html-viewer-highlight-item-expanded {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.html-viewer-highlight-item-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
 .html-viewer-highlight-item-main {
   display: flex;
   gap: 0.45rem;
   min-width: 0;
   flex: 1;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.html-viewer-highlight-item-main:hover .html-viewer-highlight-quote {
+  color: var(--accent);
 }
 
 .html-viewer-highlight-swatch {
@@ -2475,6 +2498,59 @@ body.html-viewer-body {
 .html-viewer-highlight-missing {
   font-size: 0.68rem;
   color: var(--orange);
+}
+
+.html-viewer-highlight-has-note {
+  display: inline-block;
+  margin-left: 0.25rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.html-viewer-highlight-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.html-viewer-highlight-note-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.html-viewer-highlight-note-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 3.5rem;
+  padding: 0.5rem;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--fg);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.html-viewer-highlight-note-status {
+  font-size: 0.68rem;
+  min-height: 1rem;
+}
+
+.html-viewer-highlight-note-status[data-state="saved"] {
+  color: var(--green);
+}
+
+.html-viewer-highlight-note-status[data-state="error"] {
+  color: var(--red);
 }
 
 .html-viewer-highlight-delete {
