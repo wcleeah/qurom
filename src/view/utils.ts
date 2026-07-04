@@ -108,6 +108,30 @@ export function formatElapsed(ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
+export function formatDurationMs(ms: number): string {
+  if (ms >= 60_000) {
+    const m = Math.floor(ms / 60_000)
+    const s = Math.round((ms % 60_000) / 1000)
+    return s > 0 ? `${m}m ${s}s` : `${m}m`
+  }
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+  return `${ms}ms`
+}
+
+export function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
+  return String(n)
+}
+
+export function formatUsagePair(
+  usage: { tokensIn: number; tokensOut: number } | undefined,
+  available?: boolean,
+): string {
+  if (!available || !usage) return "—"
+  return `${formatTokenCount(usage.tokensIn)} in / ${formatTokenCount(usage.tokensOut)} out`
+}
+
 export function statusDot(status: string): string {
   if (status === "running") return "●"
   if (status === "complete") return "✓"

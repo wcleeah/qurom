@@ -4,9 +4,10 @@ import { indexRunArtifacts, maxRebuttalTurn, roundHasRebuttals } from "./run-art
 import { renderAgentActivity } from "./components"
 import { renderAllAuditRounds } from "./audit-view"
 import { renderConsensusCard, renderDrafterReview } from "./artifact-renderers"
+import { nodeHistoryTotalsForNode, renderAgentUsageTable, renderNodeTelemetryMeta } from "./telemetry-view"
 import { tableWrap } from "./html"
 import { safeFilePath } from "./paths"
-import { escapeHtml, formatElapsed } from "./utils"
+import { escapeHtml, formatDurationMs, formatElapsed, formatUsagePair } from "./utils"
 import type { LiveStatus, NodeHistoryEntry, RunStatus } from "./types"
 
 export function renderNodeGrid(
@@ -14,6 +15,7 @@ export function renderNodeGrid(
   files: string[],
   liveStatus: LiveStatus | null,
   researchStatus: RunStatus = "running",
+  nodeHistory: NodeHistoryEntry[] = [],
 ): string {
   const index = indexRunArtifacts(files)
   const activeNode = resolveLiveNode(liveStatus)
@@ -25,12 +27,19 @@ export function renderNodeGrid(
     const active = activeNode === node.id || isNodeActive(liveStatus, node.id)
     const completed = isNodeComplete(node.id, files, researchStatus, liveStatus, index)
     const kpis = nodeKpis(node.id, files, index)
+    const totals = nodeHistoryTotalsForNode(nodeHistory, node.id)
+    if (totals.durationMs > 0) {
+      kpis.unshift({ label: "Time", value: formatDurationMs(totals.durationMs) })
+    }
+    if (totals.usageAvailable) {
+      kpis.unshift({ label: "Tokens", value: formatUsagePair(totals.usage, true) })
+    }
 
     let statusIcon = "○"
     if (active) statusIcon = "●"
     else if (completed) statusIcon = "✓"
 
-    const kpiHtml = kpis.slice(0, 2).map((k) =>
+    const kpiHtml = kpis.slice(0, 3).map((k) =>
       `<span class="node-grid-kpi">${escapeHtml(k.label)}: <strong>${escapeHtml(k.value)}</strong></span>`
     ).join("")
 
@@ -55,13 +64,16 @@ export function renderNodeExecutionHistory(
 
   let html = `<div class="section"><h2>Execution history</h2><div class="card stack-card stack-card-history">`
   for (const entry of [...filtered].reverse()) {
-    const elapsed = entry.completedAt - entry.startedAt
-    const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(1)}s` : `${elapsed}ms`
+    const elapsed = entry.durationMs ?? (entry.completedAt - entry.startedAt)
+    const elapsedStr = formatDurationMs(elapsed)
+    const usageStr = entry.usageAvailable && entry.usage
+      ? ` · ${formatUsagePair(entry.usage, true)}`
+      : ""
     const icon = entry.status === "completed" ? "✓" : "✗"
     html += `<div class="node-history-row">
   <span class="node-history-icon ${entry.status === "completed" ? "success-text" : "danger-text"}">${icon}</span>
   <span class="node-history-link">${escapeHtml(entry.node)}</span>
-  <span class="node-history-meta">${elapsedStr}</span>
+  <span class="node-history-meta">${elapsedStr}${usageStr}</span>
   ${entry.round > 0 || entry.round === 0 ? `<span class="node-history-extra">· round ${entry.round}</span>` : ""}
   ${entry.rebuttalTurn ? `<span class="node-history-extra">· turn ${entry.rebuttalTurn}</span>` : ""}
   ${entry.summary ? `<span class="node-history-extra">· ${escapeHtml(formatSummary(entry.summary))}</span>` : ""}
@@ -87,6 +99,7 @@ export async function renderNodeDashboard(
   files: string[],
   fileSizes: Map<string, number>,
   liveStatus: LiveStatus | null,
+  nodeHistory: NodeHistoryEntry[] = [],
 ): Promise<{ body: string; live: string }> {
   const def = getNodeDefinition(nodeName) ?? getNodeDefinition(nodeName.replace(/Prompt|Resume$/, ""))
   const resolvedId = def?.id ?? nodeName
@@ -152,6 +165,19 @@ ${await renderAllAuditRounds(runName, index.rounds, focusRound)}
     body += `</div></div>`
   }
 
+  const totals = nodeHistoryTotalsForNode(nodeHistory, resolvedId)
+  const telemetryHtml = renderNodeTelemetryMeta(liveStatus, nodeHistory, nodeName)
+  if (telemetryHtml) {
+    body += telemetryHtml
+  }
+
+  body += renderAgentUsageTable(
+    active && liveStatus?.nodeUsageByAgent
+      ? liveStatus.nodeUsageByAgent
+      : totals.usageByAgent,
+    active ? liveStatus?.agents : undefined,
+  )
+
   const kpis = nodeKpis(resolvedId, files, index)
   if (kpis.length > 0) {
     let kpiRows = kpis.map((k) => `<tr><td>${escapeHtml(k.label)}</td><td>${escapeHtml(k.value)}</td></tr>`).join("")
@@ -166,9 +192,12 @@ ${await renderAllAuditRounds(runName, index.rounds, focusRound)}
 
   if (active && liveStatus) {
     const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : ""
+    const usageLabel = liveStatus.nodeUsageAvailable && liveStatus.nodeUsage
+      ? ` · ${formatUsagePair(liveStatus.nodeUsage, true)}`
+      : ""
     live += `<div class="card active-run-hero">
   <span class="badge badge-running">● Running</span>
-  <span class="dim-text">${escapeHtml(resolvedId)} · ${escapeHtml(elapsed)}</span>
+  <span class="dim-text">${escapeHtml(resolvedId)} · ${escapeHtml(elapsed)}${escapeHtml(usageLabel)}</span>
 </div>`
     live += renderAgentActivity(liveStatus)
   }

@@ -4,7 +4,8 @@ import { answeredQuestionsFromTranscript } from "../reader-transcript"
 import { renderReaderProfileSummary } from "./artifact-renderers"
 import { indexRunArtifacts } from "./run-artifacts"
 import { getNodeDefinition, isNodeActive, resolveLiveNode } from "./node-registry"
-import { escapeHtml, statusDot } from "./utils"
+import { nodeTelemetrySuffix } from "./telemetry-view"
+import { escapeHtml, formatDurationMs, formatTokenCount, formatUsagePair, statusDot } from "./utils"
 import type { LiveAgentStatus, LiveStatus, NodeHistoryEntry, RunStatus } from "./types"
 
 export function renderLivePipeline(
@@ -12,6 +13,7 @@ export function renderLivePipeline(
   files: string[],
   researchStatus: RunStatus,
   runName?: string,
+  nodeHistory: NodeHistoryEntry[] = [],
 ): string {
   const activeNode = resolveLiveNode(liveStatus)
   const liveAgents = liveStatus?.agents ?? {}
@@ -38,6 +40,20 @@ export function renderLivePipeline(
     })
   }
 
+  function pipelineTelemetryMeta(linkId: string, active: boolean): string {
+    if (active && liveStatus) {
+      const parts: string[] = []
+      if (liveStatus.nodeStartedAt && resolveLiveNode(liveStatus) === linkId) {
+        parts.push(formatDurationMs(Date.now() - liveStatus.nodeStartedAt))
+      }
+      if (liveStatus.nodeUsageAvailable && liveStatus.nodeUsage) {
+        parts.push(formatUsagePair(liveStatus.nodeUsage, true))
+      }
+      return parts.length > 0 ? ` · ${parts.join(" · ")}` : ""
+    }
+    return nodeTelemetrySuffix(nodeHistory, linkId)
+  }
+
   function nodeRow(
     num: number,
     label: string,
@@ -53,8 +69,10 @@ export function renderLivePipeline(
     const labelHtml = linkable
       ? `<a href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(linkId)}">${escapeHtml(label)}</a>`
       : escapeHtml(label)
+    const telemetryMeta = pipelineTelemetryMeta(linkId, active)
+    const combinedMeta = `${meta ?? ""}${telemetryMeta}`.trim()
     return `<div class="${cls}">
-  <div class="pipeline-node-label"><span class="pipeline-icon">${icon}</span> ${num}. ${labelHtml}${meta ? ` <span class="pipeline-node-meta">${meta}</span>` : ""}</div>
+  <div class="pipeline-node-label"><span class="pipeline-icon">${icon}</span> ${num}. ${labelHtml}${combinedMeta ? ` <span class="pipeline-node-meta">${combinedMeta}</span>` : ""}</div>
   ${agentList ? `<div class="pipeline-agent-list">${agentList}</div>` : ""}
 </div>`
   }
@@ -65,9 +83,12 @@ export function renderLivePipeline(
         const order: Record<string, number> = { running: 0, complete: 1, error: 2, idle: 3 }
         return (order[a.status] ?? 3) - (order[b.status] ?? 3)
       })
-      .map(([name, agent]) =>
-        `<span class="pipeline-agent-item">${statusDot(agent.status)} ${escapeHtml(name)}${agent.tool ? ` · ${escapeHtml(agent.tool)}` : ""}</span>`
-      )
+      .map(([name, agent]) => {
+        const tokens = agent.usageAvailable
+          ? ` · ${formatTokenCount(agent.tokensIn)}/${formatTokenCount(agent.tokensOut)} tok`
+          : ""
+        return `<span class="pipeline-agent-item">${statusDot(agent.status)} ${escapeHtml(name)}${agent.tool ? ` · ${escapeHtml(agent.tool)}` : ""}${tokens}</span>`
+      })
       .join("\n")
   }
 
@@ -138,7 +159,7 @@ export function renderAgentActivity(liveStatus: LiveStatus | null): string {
   let html = '<div class="section"><h2>Agent Activity</h2>'
 
   for (const [name, agent] of agents) {
-    html += `<div class="card card-compact"><div class="agent-card-title">${statusDot(agent.status)} ${escapeHtml(name)} <span class="agent-card-status">(${agent.status})</span></div>`
+    html += `<div class="card card-compact"><div class="agent-card-title">${statusDot(agent.status)} ${escapeHtml(name)} <span class="agent-card-status">(${agent.status})</span>${agent.usageAvailable ? ` <span class="agent-card-tokens dim-text">${escapeHtml(formatUsagePair({ tokensIn: agent.tokensIn, tokensOut: agent.tokensOut }, true))}</span>` : ""}</div>`
 
     if (agent.reasoning) {
       html += `<details class="markdown-preview agent-reasoning"><summary>Reasoning</summary><pre>${escapeHtml(agent.reasoning)}</pre></details>`
@@ -177,14 +198,17 @@ export function renderNodeHistory(
   let html = '<div class="section"><h2>Node History</h2><div class="card stack-card stack-card-history">'
 
   for (const entry of nodes) {
-    const elapsed = entry.completedAt - entry.startedAt
-    const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(1)}s` : `${elapsed}ms`
+    const elapsed = entry.durationMs ?? (entry.completedAt - entry.startedAt)
+    const elapsedStr = formatDurationMs(elapsed)
+    const usageStr = entry.usageAvailable && entry.usage
+      ? ` · ${formatUsagePair(entry.usage, true)}`
+      : ""
     const icon = entry.status === "completed" ? "✓" : "✗"
     const linkNode = getNodeDefinition(entry.node)?.pipelineLabel ?? entry.node
     html += `<div class="node-history-row">
   <span class="node-history-icon ${entry.status === "completed" ? "success-text" : "danger-text"}">${icon}</span>
   <a class="node-history-link" href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(linkNode)}">${escapeHtml(entry.node)}</a>
-  <span class="node-history-meta">${elapsedStr}</span>
+  <span class="node-history-meta">${elapsedStr}${usageStr}</span>
   ${entry.round >= 0 ? `<span class="node-history-extra">· round ${entry.round}</span>` : ""}
   ${entry.rebuttalTurn ? `<span class="node-history-extra">· turn ${entry.rebuttalTurn}</span>` : ""}
   ${entry.summary ? `<span class="node-history-extra">· ${escapeHtml(JSON.stringify(entry.summary))}</span>` : ""}

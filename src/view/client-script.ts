@@ -1,4 +1,5 @@
 const DEFAULT_POLL_SECTION_IDS = [
+  "telemetry-section",
   "pipeline-section",
   "round-strip-section",
   "agent-activity-section",

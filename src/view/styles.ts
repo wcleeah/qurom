@@ -73,6 +73,13 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+button {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
 /* ── Layout (mobile-first: narrow) ── */
 body.app-body {
   padding: 0;
@@ -222,7 +229,7 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
-  font-size: 1rem;
+  font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
   transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
@@ -254,7 +261,7 @@ a:hover { text-decoration: underline; }
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
-  font-size: 0.85rem;
+  font-size: 0.75rem;
 }
 .run-filters a {
   display: inline-flex;
@@ -358,8 +365,8 @@ a:hover { text-decoration: underline; }
 .app-navbar-pill {
   display: inline-flex;
   align-items: center;
-  padding: 0.3rem 0.55rem;
-  font-size: 0.75rem;
+  padding: 0.28rem 0.5rem;
+  font-size: 0.72rem;
   font-weight: 500;
   color: var(--muted);
   text-decoration: none;
@@ -410,14 +417,13 @@ a:hover { text-decoration: underline; }
 .html-viewer-action {
   display: inline-flex;
   align-items: center;
-  padding: 0.3rem 0.55rem;
-  font-size: 0.75rem;
+  padding: 0.28rem 0.5rem;
+  font-size: 0.72rem;
   color: var(--fg);
   text-decoration: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
-  font: inherit;
   cursor: pointer;
 }
 .app-navbar-action:hover,
@@ -535,14 +541,13 @@ details[open] > .json-summary::before {
 .json-viewer-btn {
   display: inline-flex;
   align-items: center;
-  padding: 0.3rem 0.55rem;
+  padding: 0.28rem 0.5rem;
   font-size: 0.72rem;
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font: inherit;
 }
 .json-viewer-btn:hover {
   border-color: var(--accent);
@@ -1567,12 +1572,13 @@ code {
 }
 .chat-form button {
   align-self: flex-start;
-  padding: 0.5rem 1rem;
+  padding: 0.35rem 0.75rem;
   border: 1px solid var(--accent);
   border-radius: var(--radius);
   background: var(--accent);
   color: var(--bg);
   cursor: pointer;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -1623,6 +1629,34 @@ details[open] > .markdown-preview summary::before {
   transform: rotate(90deg);
 }
 
+.telemetry-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.telemetry-strip-compact {
+  margin-bottom: 0.5rem;
+}
+
+.telemetry-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--fg);
+}
+
+.agent-card-tokens {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
 .refresh-controls {
   display: flex;
   align-items: center;
@@ -1647,9 +1681,9 @@ details[open] > .markdown-preview summary::before {
   border-radius: var(--radius-sm);
   background: var(--bg-card);
   color: var(--fg);
-  padding: 0.25rem 0.5rem;
+  padding: 0.22rem 0.45rem;
   cursor: pointer;
-  font: inherit;
+  font-size: 0.72rem;
 }
 .refresh-button:hover {
   border-color: var(--accent);
@@ -1767,10 +1801,9 @@ details[open] > .markdown-preview summary::before {
   border-radius: var(--radius-sm);
   background: var(--bg-card);
   color: var(--fg);
-  padding: 0.4rem 0.85rem;
+  padding: 0.32rem 0.7rem;
   cursor: pointer;
-  font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 .btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -1953,7 +1986,7 @@ body.html-viewer-body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
+  font-size: 0.95rem;
   line-height: 1;
   color: var(--muted);
   background: transparent;
@@ -1985,8 +2018,8 @@ body.html-viewer-body {
 
 .html-viewer-tab {
   flex: 1;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.75rem;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.72rem;
   font-weight: 500;
   color: var(--muted);
   background: var(--bg);
@@ -2375,7 +2408,7 @@ body.html-viewer-body {
   color: var(--muted);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.85rem;
   line-height: 1;
 }
 

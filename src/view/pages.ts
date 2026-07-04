@@ -8,6 +8,7 @@ import { computeStats, getRunFiles, listRuns, readLiveStatus, readNodeHistory } 
 import { getNodeDefinition, isNodeActive } from "./node-registry"
 import { renderNodeDashboard, renderNodeExecutionHistory, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
 import { renderLiveStatusMeta, renderRoundDetailPage, renderRoundStrip } from "./round-view"
+import { renderRunTelemetryStrip, resolveRunUsage, runElapsedMs } from "./telemetry-view"
 import { renderFileBrowser } from "./file-browser"
 import { listHtmlReaderAskThreads } from "./html-ask-store"
 import { listHtmlReaderHighlights } from "./html-highlights-store"
@@ -17,10 +18,10 @@ import { tableWrap } from "./html"
 import { renderDebugLogHtml, type DebugLogEntry } from "./debug-log-viewer"
 import { appNavbarAction } from "./app-nav"
 import { badge, formatRelative, layout } from "./layout"
-import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
+import { getRunsDir, resolveRunName, safeFilePath, safeRunPath } from "./paths"
 import { STAR_SCRIPT } from "./star-script"
 import { isRunStarred } from "./starred-store"
-import { contentType, escapeHtml, formatBytes, formatElapsed, renderJsonCard, renderMarkdown, statusDot } from "./utils"
+import { contentType, escapeHtml, formatBytes, formatElapsed, formatUsagePair, renderJsonCard, renderMarkdown, statusDot } from "./utils"
 import type { RequestJson, RunStatus } from "./types"
 
 function renderStarButton(runName: string, starred: boolean): string {
@@ -29,7 +30,32 @@ function renderStarButton(runName: string, starred: boolean): string {
   return `<button type="button" class="star-button${activeClass}" data-star-toggle data-run-name="${escapeHtml(runName)}" data-starred="${starred ? "true" : "false"}" aria-pressed="${starred ? "true" : "false"}" aria-label="${label}">★</button>`
 }
 
+async function canonicalRunResponse(
+  runName: string,
+  suffix = "",
+): Promise<{ runName: string; early?: Response }> {
+  const resolved = await resolveRunName(runName)
+  if (!resolved) return { runName, early: new Response("Not found", { status: 404 }) }
+  if (resolved !== runName) {
+    return {
+      runName: resolved,
+      early: new Response(null, {
+        status: 302,
+        headers: { Location: `/runs/${encodeURIComponent(resolved)}${suffix}` },
+      }),
+    }
+  }
+  return { runName: resolved }
+}
+
 export async function renderNodePage(runName: string, nodeName: string): Promise<Response> {
+  const canonical = await canonicalRunResponse(
+    runName,
+    `/node/${encodeURIComponent(nodeName)}`,
+  )
+  if (canonical.early) return canonical.early
+  runName = canonical.runName
+
   try {
     safeRunPath(runName)
   } catch {
@@ -53,7 +79,7 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
   const nodeHistory = await readNodeHistory(runName)
   const displayName = def?.label ?? nodeName
   const resolvedId = def?.id ?? nodeName
-  const { body: dashboardBody, live: dashboardLive } = await renderNodeDashboard(runName, nodeName, files, fileSizes, liveStatus)
+  const { body: dashboardBody, live: dashboardLive } = await renderNodeDashboard(runName, nodeName, files, fileSizes, liveStatus, nodeHistory)
   const historyHtml = renderNodeExecutionHistory(nodeHistory, nodeName, runName)
   const miniPipeline = renderNodeMiniPipeline(runName, nodeName, files)
   const nodeIsActive = isNodeActive(liveStatus, resolvedId)
@@ -86,6 +112,10 @@ ${nodeIsActive ? NODE_MANUAL_REFRESH_SCRIPT : ""}`
 }
 
 export async function renderRoundPage(runName: string, roundNum: number): Promise<Response> {
+  const canonical = await canonicalRunResponse(runName, `/round/${roundNum}`)
+  if (canonical.early) return canonical.early
+  runName = canonical.runName
+
   try {
     safeRunPath(runName)
   } catch {
@@ -117,6 +147,10 @@ export async function renderRoundPage(runName: string, roundNum: number): Promis
 }
 
 export async function renderFilesPage(runName: string): Promise<Response> {
+  const canonical = await canonicalRunResponse(runName, "/files")
+  if (canonical.early) return canonical.early
+  runName = canonical.runName
+
   try {
     safeRunPath(runName)
   } catch {
@@ -225,7 +259,11 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     const liveStatus = await readLiveStatus(run.name)
     if (!liveStatus) continue
     hasActiveRun = true
-    const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : ""
+    const nodeHistory = await readNodeHistory(run.name)
+    const elapsedMs = runElapsedMs(liveStatus, nodeHistory)
+    const elapsed = elapsedMs !== undefined ? formatElapsed(elapsedMs) : ""
+    const { usage, usageAvailable } = resolveRunUsage(liveStatus, nodeHistory)
+    const usageLabel = usageAvailable ? ` · ${formatUsagePair(usage, true)}` : ""
     const agentList = Object.entries(liveStatus.agents)
       .slice(0, 4)
       .map(([name, a]) => `${statusDot(a.status)} ${escapeHtml(name)}${a.tool ? ` · ${escapeHtml(a.tool)}` : ""}`)
@@ -239,7 +277,7 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     <a href="/runs/${encodeURIComponent(run.name)}">${escapeHtml(run.topic)}</a>
   </div>
   <div class="active-run-pipeline">
-    ${escapeHtml(liveStatus.node ?? "running")} · Round ${liveStatus.round}/${liveStatus.maxRounds} · ${elapsed}
+    ${escapeHtml(liveStatus.node ?? "running")} · Round ${liveStatus.round}/${liveStatus.maxRounds} · ${escapeHtml(elapsed)}${escapeHtml(usageLabel)}
   </div>
   ${agentList ? `<div class="active-run-agents">${agentList}</div>` : ""}
 </div>`
@@ -359,6 +397,10 @@ export async function readDesignSummary(_runName: string, files: string[]): Prom
 // ---------------------------------------------------------------------------
 
 export async function renderRun(name: string): Promise<Response> {
+  const canonical = await canonicalRunResponse(name)
+  if (canonical.early) return canonical.early
+  name = canonical.runName
+
   let dirPath: string
   try {
     dirPath = safeRunPath(name)
@@ -645,19 +687,21 @@ export async function renderRun(name: string): Promise<Response> {
 </div>`
   }
 
-  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, name)
-  const agentActivityHtml = renderAgentActivity(liveStatus)
   const nodeHistory = await readNodeHistory(name)
+  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, name, nodeHistory)
+  const agentActivityHtml = renderAgentActivity(liveStatus)
   const nodeHistoryHtml = renderNodeHistory(nodeHistory, name)
   const roundStripHtml = await renderRoundStrip(name, files, liveStatus)
-  const nodeGridHtml = renderNodeGrid(name, files, liveStatus, researchStatus)
+  const nodeGridHtml = renderNodeGrid(name, files, liveStatus, researchStatus, nodeHistory)
   const liveMetaHtml = renderLiveStatusMeta(liveStatus)
+  const telemetryHtml = renderRunTelemetryStrip(liveStatus, nodeHistory)
   const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
   const interviewChatHtml = renderInterviewChatCard(name, liveStatus)
 
   const filesLinkSection = `<div class="section"><p><a href="/runs/${encodeURIComponent(name)}/files">Browse all ${files.length} files →</a></p></div>`
 
+  const telemetrySection = `<div id="telemetry-section">${telemetryHtml}</div>`
   const pipelineSection = `<div id="pipeline-section">${pipelineHtml}</div>`
   const agentActivitySection = `<div id="agent-activity-section">${agentActivityHtml}</div>`
   const nodeHistorySection = `<div id="node-history-section">${nodeHistoryHtml}</div>`
@@ -703,6 +747,7 @@ ${interviewChatSection}
 </div>
 
 ${failureBannerSection}
+${telemetrySection}
 ${pipelineSection}
 ${roundStripSection}
 ${agentActivitySection}

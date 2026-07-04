@@ -34,6 +34,7 @@ export interface LiveAgentStatus {
   tool?: string
   tokensIn: number
   tokensOut: number
+  usageAvailable?: boolean
   toolCalls: Array<{
     tool: string
     status: "running" | "completed" | "error"
@@ -47,6 +48,15 @@ export interface LiveAgentStatus {
   reasoning: string
 }
 
+export interface UsageTotals {
+  tokensIn: number
+  tokensOut: number
+}
+
+export interface AgentUsageSnapshot extends UsageTotals {
+  usageAvailable: boolean
+}
+
 export interface NodeHistoryEntry {
   node: string
   startedAt: number
@@ -58,18 +68,28 @@ export interface NodeHistoryEntry {
   researchPhase?: string
   summary?: Record<string, unknown>
   artifacts?: string[]
+  durationMs?: number
+  usage?: UsageTotals
+  usageAvailable?: boolean
+  usageByAgent?: Record<string, AgentUsageSnapshot>
 }
 
 export interface LiveStatus {
   phase: "running" | "complete" | "error"
   node?: string
   nodeStartedAt?: number
+  runStartedAt?: number
   round: number
   maxRounds: number
   researchPhase?: string
   rebuttalTurn?: number
   activeRebuttalCount?: number
   unresolvedFindingCount?: number
+  usage?: UsageTotals
+  usageAvailable?: boolean
+  nodeUsage?: UsageTotals
+  nodeUsageAvailable?: boolean
+  nodeUsageByAgent?: Record<string, AgentUsageSnapshot>
   agents: Record<string, LiveAgentStatus>
   nodeHistory: NodeHistoryEntry[]
   error?: string
