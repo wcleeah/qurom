@@ -50,7 +50,7 @@ function renderOpenCodeUsageImportSection(importSummary?: OpenCodeUsageImportSum
   const summary = importSummary ?? lastOpenCodeUsageImport
   const tursoConfigured = isTursoConfigured()
   const statusHtml = tursoConfigured
-    ? `<p class="tiny-text muted-text">Turso credentials detected. Backfill reads OpenCode usage from your analytics DB and fills missing OpenCode sessions in existing runs.</p>`
+    ? `<p class="tiny-text muted-text">Turso credentials detected. Creates or fills <code>session-telemetry.json</code> for OpenCode runs by reading session IDs from each run's debug log and looking up usage in Turso.</p>`
     : `<div class="outcome-banner failed">Turso not configured. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in the environment.</div>`
   const summaryHtml = summary
     ? `<div class="outcome-banner approved">Backfilled ${summary.matchedSessions}/${summary.sessionsNeedingBackfill} OpenCode session(s) across ${summary.runsUpdated} run(s). Unmatched: ${summary.unmatchedSessions}.</div>`

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import {
   applyOpenCodeUsageImport,
   fetchTursoSessionUsage,
+  parseDebugLogOpenCodeSessions,
   sessionNeedsBackfill,
   type TursoQueryClient,
 } from "../src/opencode-usage-import.ts"
@@ -91,7 +92,85 @@ describe("fetchTursoSessionUsage", () => {
   })
 })
 
+describe("parseDebugLogOpenCodeSessions", () => {
+  test("discovers sessions and stamps node from debug log", async () => {
+    const runsDir = await mkdtemp(join(tmpdir(), "opencode-debug-"))
+    const runDir = join(runsDir, "demo-run")
+    await mkdir(runDir, { recursive: true })
+    await writeFile(
+      join(runDir, "debug-log.jsonl"),
+      [
+        '{"ts":"2026-07-04T06:38:58.016Z","type":"node.start","node":"runParallelAudits","round":0}',
+        '{"ts":"2026-07-04T06:38:58.020Z","type":"session.created","sessionID":"ses-auditor","role":"auditor:source-auditor"}',
+      ].join("\n"),
+      "utf8",
+    )
+
+    const sessions = await parseDebugLogOpenCodeSessions(runDir)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]?.sessionId).toBe("ses-auditor")
+    expect(sessions[0]?.node).toBe("runParallelAudits")
+    expect(sessions[0]?.round).toBe(0)
+  })
+})
+
 describe("applyOpenCodeUsageImport", () => {
+  test("creates session-telemetry from debug log and Turso", async () => {
+    const runsDir = await mkdtemp(join(tmpdir(), "opencode-import-debug-"))
+    const runDir = join(runsDir, "demo-run")
+    await mkdir(runDir, { recursive: true })
+    await writeFile(
+      join(runDir, "debug-log.jsonl"),
+      [
+        '{"ts":"2026-07-04T06:36:01.833Z","type":"node.start","node":"draftFullDraft","round":0}',
+        '{"ts":"2026-07-04T06:36:01.839Z","type":"session.created","sessionID":"ses-missing","role":"research-drafter"}',
+      ].join("\n"),
+      "utf8",
+    )
+
+    const tursoClient: TursoQueryClient = {
+      async execute({ args }) {
+        const sessionId = String(args?.[0] ?? "")
+        if (sessionId !== "ses-missing") {
+          return { columns: [], rows: [], rowsAffected: 0, columnTypes: [] }
+        }
+        return {
+          columns: [],
+          rows: [
+            {
+              session_id: "ses-missing",
+              agent: "research-drafter",
+              model_id: "claude-sonnet-4",
+              provider_id: "anthropic",
+              tokens_in: 1000,
+              tokens_out: 250,
+              tokens_cache_read: 0,
+              tokens_cache_write: 0,
+              reported_cost: 0.15,
+              duration_ms: 4500,
+              completed_at: 1_700_000_000_000,
+            },
+          ],
+          rowsAffected: 0,
+          columnTypes: [],
+        }
+      },
+      close() {},
+    }
+
+    const summary = await applyOpenCodeUsageImport({ runsDir, tursoClient })
+    expect(summary.runsScanned).toBe(1)
+    expect(summary.matchedSessions).toBe(1)
+    expect(summary.runsUpdated).toBe(1)
+
+    const telemetry = await readSessionTelemetry(runDir)
+    const missing = telemetry.sessions.find((session) => session.sessionId === "ses-missing")
+    expect(missing?.provider).toBe("opencode")
+    expect(missing?.node).toBe("draftFullDraft")
+    expect(missing?.calls[0]?.usage?.tokensIn).toBe(1000)
+    expect(missing?.calls[0]?.usageSource).toBe("turso-import")
+  })
+
   test("gap-fills opencode sessions from Turso and skips sessions with usage", async () => {
     const runsDir = await mkdtemp(join(tmpdir(), "opencode-import-"))
     const runDir = join(runsDir, "demo-run")
@@ -124,6 +203,16 @@ describe("applyOpenCodeUsageImport", () => {
         null,
         2,
       )}\n`,
+      "utf8",
+    )
+    await writeFile(
+      join(runDir, "debug-log.jsonl"),
+      [
+        '{"ts":"2026-07-04T06:36:01.833Z","type":"node.start","node":"draftFullDraft","round":0}',
+        '{"ts":"2026-07-04T06:36:01.839Z","type":"session.created","sessionID":"ses-missing","role":"research-drafter"}',
+        '{"ts":"2026-07-04T06:38:58.016Z","type":"node.start","node":"runParallelAudits","round":1}',
+        '{"ts":"2026-07-04T06:38:58.020Z","type":"session.created","sessionID":"ses-has-usage","role":"logic-auditor"}',
+      ].join("\n"),
       "utf8",
     )
 

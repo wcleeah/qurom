@@ -5,13 +5,13 @@ import { join } from "node:path"
 import {
   applySessionTelemetryEvent,
   readSessionTelemetry,
-  SESSION_TELEMETRY_FILENAME,
   writeSessionTelemetry,
   type SessionTelemetryFile,
   type SessionTelemetryRecord,
 } from "./session-telemetry"
 import { foldOpencodeTokens, hasUsage } from "./usage"
 
+export const DEBUG_LOG_FILENAME = "debug-log.jsonl"
 export const OPENCODE_USAGE_IMPORT_FILENAME = "opencode-usage-import.json"
 
 const TURSO_BATCH_SIZE = 100
@@ -27,6 +27,14 @@ export type OpenCodeTursoSessionUsage = {
   costAvailable: boolean
   durationMs: number
   completedAt: number | null
+}
+
+export type DiscoveredOpenCodeSession = {
+  sessionId: string
+  role: string
+  node?: string
+  round?: number
+  createdAt?: string
 }
 
 export type OpenCodeUsageMatch = {
@@ -63,6 +71,12 @@ export type OpenCodeUsageImportSummary = {
 
 export type TursoQueryClient = Pick<Client, "execute" | "close">
 
+type RunBackfillCandidate = {
+  runDir: string
+  runName: string
+  record: SessionTelemetryRecord
+}
+
 export function isTursoConfigured(): boolean {
   return Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN)
 }
@@ -83,6 +97,53 @@ export function sessionNeedsBackfill(record: SessionTelemetryRecord): boolean {
   const call = latestCall(record)
   if (!call?.usage) return true
   return !hasUsage(call.usage)
+}
+
+export async function parseDebugLogOpenCodeSessions(runDir: string): Promise<DiscoveredOpenCodeSession[]> {
+  let text: string
+  try {
+    text = await readFile(join(runDir, DEBUG_LOG_FILENAME), "utf8")
+  } catch {
+    return []
+  }
+
+  const nodeStarts: Array<{ ts: number; node: string; round: number }> = []
+  const sessions = new Map<string, DiscoveredOpenCodeSession>()
+
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+
+    const ts = Date.parse(String(entry.ts ?? ""))
+    const eventTs = Number.isFinite(ts) ? ts : Date.now()
+
+    if (entry.type === "node.start" && typeof entry.node === "string") {
+      nodeStarts.push({
+        ts: eventTs,
+        node: entry.node,
+        round: typeof entry.round === "number" ? entry.round : 0,
+      })
+      continue
+    }
+
+    if (entry.type !== "session.created" || typeof entry.sessionID !== "string") continue
+
+    const activeNode = [...nodeStarts].reverse().find((item) => item.ts <= eventTs) ?? nodeStarts.at(-1)
+    sessions.set(entry.sessionID, {
+      sessionId: entry.sessionID,
+      role: typeof entry.role === "string" ? entry.role : entry.sessionID,
+      node: activeNode?.node,
+      round: activeNode?.round,
+      createdAt: new Date(eventTs).toISOString(),
+    })
+  }
+
+  return [...sessions.values()]
 }
 
 function usageFromTursoRow(row: OpenCodeTursoSessionUsage) {
@@ -145,15 +206,11 @@ export async function fetchTursoSessionUsage(
 
     for (const row of result.rows) {
       const sessionId = String(row.session_id)
-      const tokensIn = Number(row.tokens_in ?? 0)
-      const tokensOut = Number(row.tokens_out ?? 0)
-      const cacheRead = Number(row.tokens_cache_read ?? 0)
-      const cacheWrite = Number(row.tokens_cache_write ?? 0)
       const folded = foldTursoTokenFields({
-        tokens_in: tokensIn,
-        tokens_out: tokensOut,
-        tokens_cache_read: cacheRead,
-        tokens_cache_write: cacheWrite,
+        tokens_in: Number(row.tokens_in ?? 0),
+        tokens_out: Number(row.tokens_out ?? 0),
+        tokens_cache_read: Number(row.tokens_cache_read ?? 0),
+        tokens_cache_write: Number(row.tokens_cache_write ?? 0),
       })
       const reportedCost = Number(row.reported_cost ?? 0)
       const completedAtRaw = row.completed_at
@@ -178,35 +235,59 @@ export async function fetchTursoSessionUsage(
   return output
 }
 
-type RunBackfillCandidate = {
-  runDir: string
-  runName: string
-  record: SessionTelemetryRecord
+async function runHasOpenCodeSignal(runDir: string, telemetry: SessionTelemetryFile): Promise<boolean> {
+  if (telemetry.sessions.some((session) => session.provider === "opencode")) return true
+  const discovered = await parseDebugLogOpenCodeSessions(runDir)
+  return discovered.length > 0
 }
 
-async function listBackfillCandidates(runsDir: string): Promise<RunBackfillCandidate[]> {
+async function listBackfillCandidates(runsDir: string): Promise<{
+  candidates: RunBackfillCandidate[]
+  runsScanned: number
+}> {
   const entries = await readdir(runsDir, { withFileTypes: true })
   const candidates: RunBackfillCandidate[] = []
+  let runsScanned = 0
 
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue
     const runDir = join(runsDir, entry.name)
-    let telemetryPath: string
-    try {
-      telemetryPath = join(runDir, SESSION_TELEMETRY_FILENAME)
-      await readFile(telemetryPath, "utf8")
-    } catch {
-      continue
+    const telemetry = await readSessionTelemetry(runDir)
+    if (!(await runHasOpenCodeSignal(runDir, telemetry))) continue
+
+    runsScanned++
+    const discovered = await parseDebugLogOpenCodeSessions(runDir)
+    const bySession = new Map<string, RunBackfillCandidate>()
+
+    for (const session of discovered) {
+      const existing = telemetry.sessions.find((record) => record.sessionId === session.sessionId)
+      if (existing && !sessionNeedsBackfill(existing)) continue
+
+      bySession.set(session.sessionId, {
+        runDir,
+        runName: entry.name,
+        record: existing ?? {
+          sessionId: session.sessionId,
+          role: session.role,
+          provider: "opencode",
+          node: session.node,
+          round: session.round,
+          createdAt: session.createdAt,
+          calls: [],
+        },
+      })
     }
 
-    const file = await readSessionTelemetry(runDir)
-    for (const record of file.sessions) {
+    for (const record of telemetry.sessions) {
       if (!sessionNeedsBackfill(record)) continue
-      candidates.push({ runDir, runName: entry.name, record })
+      if (bySession.has(record.sessionId)) continue
+      bySession.set(record.sessionId, { runDir, runName: entry.name, record })
     }
+
+    candidates.push(...bySession.values())
   }
 
-  return candidates
+  return { candidates, runsScanned }
 }
 
 function buildMatch(record: SessionTelemetryRecord, turso: OpenCodeTursoSessionUsage): OpenCodeUsageMatch {
@@ -274,7 +355,7 @@ export async function applyOpenCodeUsageImport(input: {
 
   const ownsClient = !input.tursoClient
   try {
-    const candidates = await listBackfillCandidates(input.runsDir)
+    const { candidates, runsScanned } = await listBackfillCandidates(input.runsDir)
     const sessionIds = [...new Set(candidates.map((item) => item.record.sessionId))]
     const tursoBySession = await fetchTursoSessionUsage(client, sessionIds)
 
@@ -321,16 +402,12 @@ export async function applyOpenCodeUsageImport(input: {
       runsUpdated++
     }
 
-    const runsScanned = new Set(candidates.map((item) => item.runDir)).size
-    const opencodeSessionsFound = candidates.length
-    const unmatchedSessions = candidates.length - matchedSessions
-
     return {
       runsScanned,
-      opencodeSessionsFound,
+      opencodeSessionsFound: candidates.length,
       sessionsNeedingBackfill: candidates.length,
       matchedSessions,
-      unmatchedSessions,
+      unmatchedSessions: candidates.length - matchedSessions,
       runsUpdated,
     }
   } finally {
