@@ -1,7 +1,8 @@
-import { readdir, stat } from "node:fs/promises"
+import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { POLLING_SCRIPT } from "./client-script"
 import { renderStructuredJson } from "./artifact-renderers"
+import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard, renderLivePipeline, renderNodeHistory } from "./components"
 import { computeStats, getRunFiles, listRuns, readLiveStatus } from "./data"
 import { renderFileBrowser } from "./file-browser"
@@ -9,6 +10,8 @@ import { listHtmlReaderAskThreads } from "./html-ask-store"
 import { listHtmlReaderHighlights } from "./html-highlights-store"
 import { getHtmlReaderNotes } from "./html-notes-store"
 import { renderHtmlViewerPage } from "./html-viewer"
+import { tableWrap } from "./html"
+import { renderDebugLogHtml, type DebugLogEntry } from "./debug-log-viewer"
 import { appNavbarAction } from "./app-nav"
 import { badge, formatRelative, layout } from "./layout"
 import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
@@ -69,13 +72,13 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
     html += `<div class="section">
   <h2>Execution #${nodeEntries.length - i} <span class="${statusCls} tiny-text">${statusLabel}</span></h2>
   <div class="card">
-    <table class="summary-table">
+    ${tableWrap(`<table class="summary-table">
       <tr><td>Status</td><td>${statusLabel}</td></tr>
       <tr><td>Duration</td><td>${elapsed}</td></tr>
       <tr><td>Round</td><td>${entry.round ?? 0}</td></tr>
       ${entry.summary ? Object.entries(entry.summary as Record<string, unknown>).map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`).join("") : ""}
       ${entry.error ? `<tr><td>Error</td><td class="danger-text">${escapeHtml(String(entry.error))}</td></tr>` : ""}
-    </table>
+    </table>`)}
   </div>
 </div>`
   }
@@ -134,62 +137,17 @@ export async function renderDebugLog(runName: string, files: string[]): Promise<
 
   if (!raw.trim()) return ""
 
-  const entries: Array<{ ts: string; type: string; [k: string]: unknown }> = []
+  const entries: DebugLogEntry[] = []
   for (const line of raw.split("\n")) {
-    try { entries.push(JSON.parse(line)) } catch { /* skip malformed lines */ }
+    try { entries.push(JSON.parse(line) as DebugLogEntry) } catch { /* skip malformed lines */ }
   }
 
   if (entries.length === 0) return ""
 
-  let html = '<div class="section"><details class="markdown-preview"><summary>Debug Log (' + entries.length + ' entries)</summary>'
-  html += '<div class="debug-log-scroll"><table class="summary-table summary-table-debug">'
-  html += '<thead><tr><th>Time</th><th>Type</th><th>Data</th></tr></thead><tbody>'
-
-  for (const entry of entries.reverse()) {
-    const { ts, type, ...data } = entry
-    const time = ts ? (ts as string).slice(11, 23) : ""
-    const typeKind = type.split(".")[1]
-    const typeClass = typeKind === "error" ? "danger-text" : typeKind === "complete" ? "success-text" : typeKind === "start" ? "accent-text" : "muted-text"
-    const dataStr = JSON.stringify(data).slice(0, 200)
-    html += `<tr>
-  <td class="cell-nowrap muted-text">${escapeHtml(time)}</td>
-  <td class="cell-nowrap ${typeClass}">${escapeHtml(type)}</td>
-  <td class="cell-truncate cell-truncate-wide">${escapeHtml(dataStr)}</td>
-</tr>`
-  }
-
-  html += '</tbody></table></div></details></div>'
-  return html
-}
-
-export async function renderRunNavActions(currentName: string): Promise<string> {
-  let names: string[]
-  try {
-    const entries = await readdir(getRunsDir(), { withFileTypes: true })
-    names = entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !/\.sqlite/.test(e.name))
-      .map((e) => e.name)
-      .sort((a, b) => b.localeCompare(a))
-  } catch {
-    return ""
-  }
-
-  const index = names.indexOf(currentName)
-  if (index === -1) return ""
-
-  const prevName = index < names.length - 1 ? names[index + 1] : null
-  const nextName = index > 0 ? names[index - 1] : null
-  const actions: string[] = []
-
-  if (prevName) {
-    actions.push(appNavbarAction(`/runs/${encodeURIComponent(prevName)}`, "← Prev"))
-  }
-  actions.push(appNavbarAction("/", "All runs"))
-  if (nextName) {
-    actions.push(appNavbarAction(`/runs/${encodeURIComponent(nextName)}`, "Next →"))
-  }
-
-  return actions.join("")
+  return `<div class="section">
+  <h2>Debug log</h2>
+  ${renderDebugLogHtml([...entries].reverse())}
+</div>`
 }
 
 // ---------------------------------------------------------------------------
@@ -578,11 +536,11 @@ export async function renderRun(name: string): Promise<Response> {
   <h2>Design</h2>
   <div class="structured-card">
     <div class="outcome-banner ${escapeHtml(designOutcomeClass)}">${designOutcomeLabel}</div>
-    <table class="summary-table">
+    ${tableWrap(`<table class="summary-table">
       <tr><td>HTML drafts</td><td>${countByPattern(files, /^design-html-round-\d+\.html$/)}</td></tr>
       ${design.hasFinalHtml ? `<tr><td>Final HTML</td><td>final.html ready</td></tr>` : ""}
       ${design.hasFailure ? `<tr><td>Error</td><td class="danger-text">design-failure.json</td></tr>` : ""}
-    </table>
+    </table>`)}
   </div>
 </div>`
   }
@@ -665,7 +623,6 @@ export async function renderRun(name: string): Promise<Response> {
   const nodeHistoryHtml = renderNodeHistory(liveStatus, name)
   const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
-  const runNavActions = await renderRunNavActions(name)
   const interviewChatHtml = renderInterviewChatCard(name, liveStatus)
 
   const extraHead = ""  // Background poll handles refresh
@@ -731,7 +688,6 @@ ${liveStatus?.phase === "running" ? POLLING_SCRIPT : ""}`
       section: "runs",
       back: { href: "/", label: "← Back to runs" },
       title: topic,
-      actionsHtml: runNavActions,
     },
   })
 
@@ -819,7 +775,7 @@ export async function serveRawFile(
     const baseName = basename(filePath)
     const structuredHtml = typeof parsed === "object" && parsed !== null
       ? renderStructuredJson(baseName, parsed)
-      : renderJsonCard(parsed, { defaultOpen: true })
+      : renderJsonViewer(parsed)
 
     const runHref = `/runs/${encodeURIComponent(runName)}`
     const sourceHref = `${runHref}/raw/${encodeURIComponent(filePath)}?source=1`

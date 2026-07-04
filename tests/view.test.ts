@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
+import { renderDebugLogHtml } from "../src/view/debug-log-viewer.ts"
 import { renderStructuredJson } from "../src/view/artifact-renderers.ts"
 import { POLLING_SCRIPT } from "../src/view/client-script.ts"
 import { renderInterviewChatCard, renderLivePipeline } from "../src/view/components.ts"
@@ -41,18 +42,56 @@ describe("view artifact renderers", () => {
     expect(html).toContain("linearizability")
   })
 
-  test("falls back to the generic JSON card for unknown artifacts", () => {
-    const html = renderStructuredJson("custom.json", { ok: true })
+  test("falls back to the generic JSON viewer for unknown artifacts", () => {
+    const html = renderStructuredJson("custom.json", { ok: true, count: 2, nested: { alpha: 1 } })
 
-    expect(html).toContain("json-details")
+    expect(html).toContain("json-viewer")
+    expect(html).toContain("json-kv-table")
     expect(html).toContain("ok")
+    expect(html).toContain("nested")
+  })
+
+  test("renders uniform object arrays as data tables", () => {
+    const html = renderStructuredJson("metrics.json", [
+      { name: "latency", value: 12 },
+      { name: "errors", value: 0 },
+    ])
+
+    expect(html).toContain("json-data-table")
+    expect(html).toContain("latency")
+    expect(html).toContain("errors")
+  })
+
+  test("renders debug log entries with expandable payloads", () => {
+    const html = renderDebugLogHtml([
+      {
+        ts: "2026-07-04T10:15:30.123Z",
+        type: "node.start",
+        node: "runParallelAudits",
+        round: 0,
+      },
+      {
+        ts: "2026-07-04T10:15:31.456Z",
+        type: "pipeline.error",
+        error: "StructuredRecoveryError",
+      },
+    ])
+
+    expect(html).toContain("debug-log-viewer")
+    expect(html).toContain("node.start")
+    expect(html).toContain("pipeline.error")
+    expect(html).toContain("runParallelAudits")
+    expect(html).toContain("StructuredRecoveryError")
+    expect(html).toContain("json-kv-table")
+    expect(html).toContain("badge-running")
+    expect(html).toContain("badge-failed")
   })
 })
 
 describe("view assets and html helpers", () => {
   test("keeps styles and client script split into focused modules", () => {
-    expect(CSS).toContain(".app-navbar")
-    expect(CSS).toContain(".html-viewer-shell")
+    expect(CSS).toContain(".table-wrap")
+    expect(CSS).toContain("overflow-x: auto")
     expect(CSS).not.toContain("<script>")
     expect(POLLING_SCRIPT).toContain("<script>")
     expect(POLLING_SCRIPT).toContain("data-refresh-now")
@@ -64,6 +103,7 @@ describe("view assets and html helpers", () => {
     expect(html).toContain('class="section"')
     expect(html).toContain('class="card"')
     expect(html).toContain('class="summary-table"')
+    expect(html).toContain('class="table-wrap"')
     expect(html).toContain("<td>Status</td>")
     expect(html).toContain("<strong>ok</strong>")
   })

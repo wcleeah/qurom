@@ -1,3 +1,4 @@
+import { tableWrap } from "./html"
 import { safeFilePath } from "./paths"
 import { answeredQuestionsFromTranscript } from "../reader-transcript"
 import { renderReaderProfileSummary } from "./artifact-renderers"
@@ -131,17 +132,18 @@ export function renderAgentActivity(liveStatus: LiveStatus | null): string {
 
     // Tool calls
     if (agent.toolCalls.length > 0) {
-      html += '<table class="summary-table summary-table-compact"><thead><tr><th>Tool</th><th>Status</th><th>Input</th><th>Output</th></tr></thead><tbody>'
+      let toolTable = '<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Tool</th><th>Status</th><th>Input</th><th>Output</th></tr></thead><tbody>'
       for (const tc of agent.toolCalls.slice(-10).reverse()) {
         const statusIcon = tc.status === "running" ? "●" : tc.status === "completed" ? "✓" : "✗"
-        html += `<tr>
+        toolTable += `<tr>
   <td><code>${escapeHtml(tc.tool)}</code></td>
   <td class="${tc.status === "running" ? "running-text" : tc.status === "completed" ? "success-text" : "danger-text"}">${statusIcon} ${tc.status}</td>
   <td class="tiny-text cell-truncate">${escapeHtml(tc.inputSummary ?? "")}</td>
   <td class="tiny-text cell-truncate">${tc.error ? `<span class="danger-text">${escapeHtml(tc.error.slice(0, 60))}</span>` : escapeHtml(tc.outputSummary ?? "")}</td>
 </tr>`
       }
-      html += '</tbody></table>'
+      toolTable += "</tbody></table>"
+      html += tableWrap(toolTable)
     }
 
     html += '</div>'

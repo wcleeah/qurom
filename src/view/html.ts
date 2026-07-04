@@ -18,9 +18,14 @@ export function structuredCard(body: string, className = ""): string {
   return `<div class="${cls}">${body}</div>`
 }
 
+export function tableWrap(tableHtml: string, className = ""): string {
+  const cls = className ? `table-wrap ${className}` : "table-wrap"
+  return `<div class="${cls}">${tableHtml}</div>`
+}
+
 export function summaryTable(rows: string[], className = ""): string {
   const cls = className ? `summary-table ${className}` : "summary-table"
-  return `<table class="${cls}">${rows.join("")}</table>`
+  return tableWrap(`<table class="${cls}">${rows.join("")}</table>`)
 }
 
 export function summaryRow(label: string, value: string, options: { labelIsHtml?: boolean } = {}): string {

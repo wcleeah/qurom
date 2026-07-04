@@ -1,4 +1,6 @@
 import { escapeHtml, renderJsonCard } from "./utils"
+import { renderJsonViewer } from "./json-viewer"
+import { summaryTable, tableWrap } from "./html"
 import type { AggregatedFindings, AuditFinding, AuditRecord, RebuttalEntry, RebuttalResponseEntry } from "./types"
 
 export function outcomeLabel(outcome: string): string {
@@ -60,7 +62,7 @@ export function renderRequestCard(data: unknown): string {
   }
   return `<div class="structured-card">
   <div class="auditor-header">Request</div>
-  <table class="summary-table">${rows.join("")}</table>
+  ${summaryTable(rows)}
 </div>`
 }
 
@@ -119,7 +121,7 @@ export function renderReaderProfileSummary(data: unknown): string {
     }).join("")
     : "<tr><td colspan=\"3\" class=\"placeholder-muted\">(gaps not yet inferred)</td></tr>"
 
-  return `<table class="summary-table reader-profile-summary">
+  return tableWrap(`<table class="summary-table summary-table-wide reader-profile-summary">
     <tr><td>Goal</td><td colspan="2">${goal}</td></tr>
     <tr><td>Depth</td><td colspan="2">${depth}</td></tr>
     <tr><td>Background</td><td colspan="2">${background}</td></tr>
@@ -127,7 +129,7 @@ export function renderReaderProfileSummary(data: unknown): string {
     <tr><td>Adjacent</td><td colspan="2">${adjacent}</td></tr>
     <tr><th>Gap</th><th>Treatment</th><th>Rationale</th></tr>
     ${gapRows}
-  </table>`
+  </table>`)
 }
 
 export function renderReaderProfileCard(data: unknown): string {
@@ -177,7 +179,7 @@ export function renderSummaryCard(data: unknown): string {
 
   return `<div class="structured-card">
   <div class="outcome-banner ${outcomeClass(outcome)}">${outcomeLabel(outcome)}</div>
-  <table class="summary-table">${rows.join("")}</table>
+  ${summaryTable(rows)}
 </div>`
 }
 
@@ -242,7 +244,7 @@ export function renderConsensusCard(filename: string, data: unknown, isDesign?: 
     rows.push(`<tr><td>Failure reason</td><td><code>${escapeHtml(d.failureReason)}</code></td></tr>`)
   }
   if (rows.length > 0) {
-    html += `<div class="structured-summary-wrap"><table class="summary-table">${rows.join("")}</table></div>`
+    html += `<div class="structured-summary-wrap">${summaryTable(rows)}</div>`
   }
 
   // Unresolved findings list
@@ -363,5 +365,5 @@ export function renderStructuredJson(filename: string, data: unknown): string {
   if (/^aggregated-findings-round-\d+\.json$/.test(filename)) return renderConsensusCard(filename, data)
   if (/^drafter-finding-review-round-\d+\.json$/.test(filename)) return renderDrafterReview(filename, data)
   if (/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(filename)) return renderRebuttalResponses(filename, data)
-  return renderJsonCard(data, { defaultOpen: true })
+  return renderJsonViewer(data)
 }
