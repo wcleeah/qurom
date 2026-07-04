@@ -1253,6 +1253,19 @@ details[open] > .markdown-preview summary::before {
   border-color: var(--accent);
 }
 .config-form textarea { font-family: var(--font-mono); line-height: 1.5; }
+.config-readonly-agent {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 24rem;
+  overflow: auto;
+}
 .form-fields-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -1284,6 +1297,20 @@ details[open] > .markdown-preview summary::before {
   color: var(--bg);
 }
 .btn-primary:hover { color: var(--bg); opacity: 0.9; }
+.btn-secondary {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--fg-muted);
+}
+.btn-secondary:hover { color: var(--accent); border-color: var(--accent); }
+.inline-form {
+  display: inline-block;
+  margin: 0;
+}
+.form-actions .inline-form + .btn,
+.form-actions .btn + .inline-form {
+  margin-left: 0.5rem;
+}
 .provider-tabs {
   display: inline-flex;
   flex-wrap: wrap;

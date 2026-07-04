@@ -1,26 +1,12 @@
 import { loadRuntimeConfig } from "../config"
-import { listConfigSummary, listProviderNeutralRoleDefinitions, updatePromptAsset, updateQuorumConfig, updateRoleBinding } from "../config-store"
-import { availableProviderIds, providerConfigForm, validateProviderPrerequisites } from "../providers/registry"
+import { listConfigSummary, updatePromptAsset, updateQuorumConfig, updateRoleBinding, updateRoleInstruction } from "../config-store"
+import { availableProviderIds, configuredAgentRoles, providerConfigForm, validateProviderPrerequisites } from "../providers/registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
 import { card, section, summaryRow, summaryTable } from "./html"
 import { layout } from "./layout"
+import { configBackLink, configNav } from "./config-nav"
+import { readActiveOpencodeAgent, renderOpencodeAgentReadonly } from "./opencode-agent-display"
 import { escapeHtml } from "./utils"
-
-type ConfigTab = "overview" | "roles" | "prompts"
-
-function nav(active: ConfigTab) {
-  const link = (href: string, label: string, tab: ConfigTab) =>
-    `<a href="${href}"${tab === active ? ' class="active"' : ""}>${label}</a>`
-  return `<div class="config-nav">
-  ${link("/config", "Overview", "overview")}
-  ${link("/config/roles", "Roles", "roles")}
-  ${link("/config/prompts", "Prompts", "prompts")}
-</div>`
-}
-
-function backLink() {
-  return `<a class="back-link" href="/">← Back to runs</a>`
-}
 
 function parseOptionsJson(text: string | undefined) {
   if (!text) return {}
@@ -29,23 +15,6 @@ function parseOptionsJson(text: string | undefined) {
   } catch {
     return {}
   }
-}
-
-function frontmatterModel(content: string): string {
-  const match = content.match(/^---\n([\s\S]*?)\n---/)
-  const block = match ? match[1] : content
-  const modelLine = block.match(/^model:\s*(.+)$/m)
-  return modelLine ? modelLine[1].trim() : ""
-}
-
-function cursorModelParams(options: Record<string, unknown>) {
-  const params = options.modelParams
-  if (!Array.isArray(params)) return []
-  return params.filter((entry): entry is { id: string; value: string } =>
-    Boolean(entry) &&
-    typeof entry === "object" &&
-    typeof (entry as { id?: unknown }).id === "string" &&
-    typeof (entry as { value?: unknown }).value === "string")
 }
 
 export async function renderConfigIndex(): Promise<Response> {
@@ -61,21 +30,25 @@ export async function renderConfigIndex(): Promise<Response> {
   ${summaryTable([
     summaryRow("Profile", escapeHtml(summary.profile.name)),
     summaryRow("Validation", isValid ? "valid" : escapeHtml(validationError ?? "invalid")),
-    summaryRow("Roles", String(summary.roles.length)),
+    summaryRow("Roles", String(summary.bindings.length)),
     summaryRow("Prompt assets", String(summary.prompts.length)),
+    summaryRow("Data directory", escapeHtml(config.env.QUORUM_DATA_DIR)),
+    summaryRow("Config database", escapeHtml(config.env.QUORUM_CONFIG_DB_PATH)),
+    summaryRow("Checkpoints database", escapeHtml(config.env.QUORUM_CHECKPOINT_PATH)),
+    summaryRow("Runs directory", escapeHtml(config.env.QUORUM_RUNS_DIR)),
     summaryRow("Default provider", escapeHtml(summary.config?.agentRuntime.defaultProvider ?? "unknown")),
   ])}
 </div>`
   const quorumConfigJson = JSON.stringify(summary.config ?? config.quorumConfig, null, 2)
   const quorumConfigForm = `<form class="config-form" method="POST" action="/config/quorum">
-  <p class="tiny-text muted-text">This edits the active live config profile stored in SQLite. <code>quorum.config.json</code> is used only to seed the first profile.</p>
+  <p class="tiny-text muted-text">Edits the active config profile in <code>${escapeHtml(config.env.QUORUM_CONFIG_DB_PATH)}</code>. Shipped defaults live under <code>defaults/quorum.config.json</code>.</p>
   <textarea name="content" rows="24">${escapeHtml(quorumConfigJson)}</textarea>
   <div class="form-actions"><button type="submit" class="btn btn-primary">Save quorum config</button></div>
 </form>`
 
   const body = [
-    backLink(),
-    nav("overview"),
+    configBackLink(),
+    configNav("overview"),
     `<div class="header-bar"><div class="header-main"><h1>Configuration</h1><div class="meta-row"><span class="meta-item">Active profile: <strong>${escapeHtml(summary.profile.name)}</strong></span></div></div></div>`,
     section("Status", statusCard),
     `<form class="config-form" method="POST" action="/config/validate"><div class="form-actions"><button type="submit" class="btn btn-primary">Validate providers</button></div></form>`,
@@ -90,10 +63,10 @@ export async function renderConfigIndex(): Promise<Response> {
 export async function renderConfigRoles(): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
-  const neutralRoles = await listProviderNeutralRoleDefinitions(config.env)
-  const neutralRoleByName = new Map(neutralRoles.map((role) => [role.role, role]))
+  const roleInstructionsByName = new Map(summary.roleInstructions.map((role) => [role.role, role.content]))
   const bindingByRole = new Map(summary.bindings.map((b) => [b.role, b]))
   const providerIds = availableProviderIds()
+  const roles = configuredAgentRoles(config)
   const field = (label: string, name: string, value: string, help: string, placeholder = "unset", disabled = false) =>
     `<label class="form-field"><span>${label}</span><input class="form-input" name="${name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${disabled ? " disabled" : ""}><small>${escapeHtml(help)}</small></label>`
 
@@ -121,34 +94,39 @@ export async function renderConfigRoles(): Promise<Response> {
 
   const providerHelp = (provider: string) => {
     if (provider === "cursor") {
-      return "Cursor runs this role through the Cursor Agent SDK. Set a per-role model; role instructions below remain app-owned."
+      return "Cursor runs this role through the Cursor Agent SDK. Role instructions below are stored in SQLite."
     }
     if (provider === "opencode") {
-      return "OpenCode runs this role through the named provider agent. Edit the OpenCode agent file directly for OpenCode behavior and permissions."
+      return "OpenCode runs this role through the named provider agent. Edit .opencode/agents/<role>.md on disk for OpenCode behavior and permissions."
     }
-    return "This provider controls which runtime executes the role. Role instructions below stay separate from the provider binding."
+    return "This provider controls which runtime executes the role."
   }
 
   const providerFields = (
     role: string,
-    roleContent: string,
     binding: (typeof summary.bindings)[number] | undefined,
     descriptor: ProviderConfigFormDescriptor,
     active: boolean,
-    fallbackModel = "",
+    opencodeAgentHtml: string,
   ) => {
     if (descriptor.providerId === "opencode") {
-      const filePath = `.opencode/agents/${role}.md`
       return `<div class="provider-fields"${active ? "" : " hidden"} data-provider-fields="opencode">
-  <p class="tiny-text muted-text">OpenCode role configuration is file-backed. Edit <code>${escapeHtml(filePath)}</code> directly, then restart or revalidate the app config.</p>
-  <details open><summary>OpenCode agent file content</summary><pre>${escapeHtml(roleContent)}</pre></details>
+  ${opencodeAgentHtml}
 </div>`
     }
 
     const fields = descriptor.fields ?? { providerAgent: true, model: "text", variant: true, outputMode: true }
     const options = parseOptionsJson(binding?.options_json)
-    const savedParams = new Map(cursorModelParams(options).map((param) => [param.id, param.value]))
-    const model = binding?.model || (descriptor.providerId === "opencode" ? fallbackModel : "")
+    const savedParams = new Map(
+      (Array.isArray(options.modelParams) ? options.modelParams : [])
+        .filter((entry): entry is { id: string; value: string } =>
+          Boolean(entry) &&
+          typeof entry === "object" &&
+          typeof (entry as { id?: unknown }).id === "string" &&
+          typeof (entry as { value?: unknown }).value === "string")
+        .map((param) => [param.id, param.value]),
+    )
+    const model = binding?.model ?? ""
     const selectedModelParameters = descriptor.parametersByModel?.[model] ?? []
     const warnings = descriptor.warnings?.length
       ? `<div class="outcome-banner failed">${descriptor.warnings.map(escapeHtml).join("<br>")}</div>`
@@ -191,28 +169,37 @@ export async function renderConfigRoles(): Promise<Response> {
   }
 
   const descriptors = new Map(await Promise.all(providerIds.map(async (id) => [id, await providerConfigForm(config, id as AgentProviderId)] as const)))
-  const cards = await Promise.all(summary.roles.map(async (role) => {
-    const binding = bindingByRole.get(role.role)
+  const opencodeAgentHtmlByRole = new Map(await Promise.all(
+    roles.map(async (role) => [role, renderOpencodeAgentReadonly(await readActiveOpencodeAgent(config.env.OPENCODE_DIRECTORY, role))] as const),
+  ))
+  const cards = await Promise.all(roles.map(async (role) => {
+    const binding = bindingByRole.get(role)
     const currentProvider = binding?.provider ?? summary.config?.agentRuntime.defaultProvider ?? "opencode"
-    const neutralRole = neutralRoleByName.get(role.role)
-    const opencodeModel = frontmatterModel(role.content)
+    const opencodeAgentHtml = opencodeAgentHtmlByRole.get(role) ?? ""
     const providerFormBlocks = providerIds
-      .map((id) => providerFields(role.role, role.content, binding, descriptors.get(id)!, id === currentProvider, opencodeModel))
+      .map((id) => providerFields(role, binding, descriptors.get(id)!, id === currentProvider, opencodeAgentHtml))
       .join("\n")
     const opencodeActive = currentProvider === "opencode"
-    const roleInstructions = `<details data-role-instructions${opencodeActive ? " hidden" : ""}><summary>Role instructions</summary><p class="tiny-text muted-text">Cursor uses provider-neutral role instructions from <code>assets/roles/${escapeHtml(role.role)}.md</code>. OpenCode uses its agent file directly.</p><pre>${escapeHtml(neutralRole?.content ?? "(missing role instruction file)")}</pre></details>`
-    const form = `<form class="config-form" method="POST" action="/config/roles/${encodeURIComponent(role.role)}">
-  ${providerTabs(role.role, currentProvider)}
+    const instructionContent = roleInstructionsByName.get(role) ?? ""
+    const roleInstructions = `<details data-role-instructions${opencodeActive ? " hidden" : ""}>
+  <summary>Role instructions</summary>
+  <form class="config-form" method="POST" action="/config/role-instructions/${encodeURIComponent(role)}">
+    <textarea name="content" rows="12">${escapeHtml(instructionContent)}</textarea>
+    <div class="form-actions"><button type="submit" class="btn btn-primary">Save role instructions</button></div>
+  </form>
+</details>`
+    const form = `<form class="config-form" method="POST" action="/config/roles/${encodeURIComponent(role)}">
+  ${providerTabs(role, currentProvider)}
   ${providerFormBlocks}
-  <div class="form-actions" data-save-actions${opencodeActive ? " hidden" : ""}><button type="submit" class="btn btn-primary">Save</button></div>
+  <div class="form-actions" data-save-actions${opencodeActive ? " hidden" : ""}><button type="submit" class="btn btn-primary">Save provider binding</button></div>
 </form>
 ${roleInstructions}`
-    return card(`<div data-role-card><h3>${escapeHtml(role.role)}</h3>${form}</div>`)
+    return card(`<div data-role-card><h3>${escapeHtml(role)}</h3>${form}</div>`)
   }))
 
   const body = [
-    backLink(),
-    nav("roles"),
+    configBackLink(),
+    configNav("roles"),
     `<div class="header-bar"><div class="header-main"><h1>Roles</h1></div></div>`,
     section("Role provider bindings", cards.join("\n")),
   ].join("\n")
@@ -221,6 +208,7 @@ ${roleInstructions}`
 (function(){
   function init(){
   document.querySelectorAll("form.config-form").forEach(function(form){
+    if (!form.querySelector("input[name='provider']")) return;
     var radios = form.querySelectorAll("input[name='provider']");
     function sync(){
       var checked = form.querySelector("input[name='provider']:checked");
@@ -270,8 +258,8 @@ export async function renderConfigPrompts(): Promise<Response> {
   })
 
   const body = [
-    backLink(),
-    nav("prompts"),
+    configBackLink(),
+    configNav("prompts"),
     `<div class="header-bar"><div class="header-main"><h1>Prompts</h1></div></div>`,
     section("Prompt assets", cards.join("\n")),
   ].join("\n")
@@ -313,6 +301,13 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
       outputMode: params.get("outputMode")?.trim() || undefined,
       options,
     })
+    return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
+  }
+
+  const roleInstructionMatch = path.match(/^\/config\/role-instructions\/(.+)$/)
+  if (roleInstructionMatch) {
+    const params = new URLSearchParams(await req.text())
+    await updateRoleInstruction(config.env, decodeURIComponent(roleInstructionMatch[1]), params.get("content") ?? "")
     return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
   }
 

@@ -1,6 +1,14 @@
 import { stat } from "node:fs/promises"
 import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "./config"
 import {
+  handleConfigDefaultsPost,
+  renderConfigDefaultsBindings,
+  renderConfigDefaultsIndex,
+  renderConfigDefaultsOpencode,
+  renderConfigDefaultsPrompts,
+  renderConfigDefaultsRoles,
+} from "./config-defaults"
+import {
   createHtmlReaderHighlight,
   deleteHtmlReaderHighlight,
 } from "./html-highlights-store"
@@ -14,7 +22,12 @@ import { setHtmlReaderNotes } from "./html-notes-store"
 import { renderIndex, renderNodePage, renderRun, serveRawFile } from "./pages"
 import { safeFilePath, HOST, PORT, safeRunPath } from "./paths"
 import { setRunStarred } from "./starred-store"
+import { viewServerAdminEnabled } from "./server-options"
 import { MARKED_UMD_PATH, MARKED_UMD_URL } from "./html-viewer-markdown"
+
+function defaultsRoutesDisabled() {
+  return !viewServerAdminEnabled()
+}
 
 export function startViewServer(): void {
   Bun.serve({
@@ -69,8 +82,64 @@ export function startViewServer(): void {
         }
       }
 
+      if (path.startsWith("/config/defaults")) {
+        if (defaultsRoutesDisabled()) {
+          return new Response("Not found", { status: 404 })
+        }
+      }
+
+      if (path === "/config/defaults") {
+        try {
+          return await renderConfigDefaultsIndex()
+        } catch (e) {
+          console.error("GET /config/defaults error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      if (path === "/config/defaults/prompts") {
+        try {
+          return await renderConfigDefaultsPrompts()
+        } catch (e) {
+          console.error("GET /config/defaults/prompts error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      if (path === "/config/defaults/roles") {
+        try {
+          return await renderConfigDefaultsRoles()
+        } catch (e) {
+          console.error("GET /config/defaults/roles error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      if (path === "/config/defaults/opencode") {
+        try {
+          return await renderConfigDefaultsOpencode()
+        } catch (e) {
+          console.error("GET /config/defaults/opencode error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      if (path === "/config/defaults/bindings") {
+        try {
+          return await renderConfigDefaultsBindings()
+        } catch (e) {
+          console.error("GET /config/defaults/bindings error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
       if (path.startsWith("/config/") && req.method === "POST") {
         try {
+          if (path.startsWith("/config/defaults") && defaultsRoutesDisabled()) {
+            return new Response("Not found", { status: 404 })
+          }
+          const defaultsResponse = await handleConfigDefaultsPost(req, path)
+          if (defaultsResponse) return defaultsResponse
           const response = await handleConfigPost(req, path)
           if (response) return response
         } catch (e) {
