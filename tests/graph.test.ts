@@ -15,16 +15,11 @@ import {
 } from "../src/graph.ts"
 import type { AggregatedFinding, AuditResultRecord, RebuttalResponseRecord, ResearchState } from "../src/schema.ts"
 import { resolveRunDir } from "../src/output.ts"
+import { testQuorumConfig, testRuntimeEnv, unitTestDataDir } from "./test-env"
 
 const config = {
   env: {
-    OPENCODE_BASE_URL: "http://127.0.0.1:4096",
-    OPENCODE_DIRECTORY: process.cwd(),
-    QUORUM_WORKSPACE_DIRECTORY: process.cwd(),
-    QUORUM_CHECKPOINT_PATH: "runs/checkpoints.sqlite",
-    QUORUM_CONFIG_DB_PATH: "runs/quorum-config.sqlite",
-    QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
-    QUORUM_CAPTURE_SYNC_HISTORY: "0",
+    ...testRuntimeEnv({ dataDir: unitTestDataDir("graph"), workspaceDir: process.cwd() }),
     CURSOR_API_KEY: undefined,
     CONTEXT7_API_KEY: undefined,
     EXA_API_KEY: undefined,
@@ -32,20 +27,9 @@ const config = {
     LANGFUSE_SECRET_KEY: undefined,
     LANGFUSE_BASE_URL: undefined,
   },
-  quorumConfig: {
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor", "logic-auditor", "clarity-auditor"],
-    summarizerAgent: "markdown-summarizer",
+  quorumConfig: testQuorumConfig({
     maxRounds: 2,
     maxRebuttalTurnsPerFinding: 2,
-    recursionLimit: 80,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: {
-      source: "local",
-      label: "production",
-    },
     researchTools: {
       prefer: ["context7", "exa"],
       webSearchProvider: "exa",
@@ -54,13 +38,7 @@ const config = {
       enabled: true,
       designatedDesigner: "html-designer",
     },
-    auditRestart: { maxRestarts: 1 },
-    readerDiscovery: { maxTurns: 6, enabled: true },
-    agentRuntime: {
-      defaultProvider: "opencode",
-      roles: {},
-    },
-  },
+  }),
 } satisfies RuntimeConfig
 
 function finding(input: Partial<AggregatedFinding> & Pick<AggregatedFinding, "findingId" | "agent" | "issue">): AggregatedFinding {
@@ -310,7 +288,7 @@ describe("graph helpers", () => {
       documentText: "# Hybrid reranking in Qdrant\n\nbody",
     })
 
-    const runDir = resolveRunDir(config.quorumConfig.artifactDir, {
+    const runDir = resolveRunDir(config.env.QUORUM_RUNS_DIR, {
       requestId: state.requestId,
       inputMode: state.inputMode,
       topic: undefined,
@@ -318,7 +296,7 @@ describe("graph helpers", () => {
       documentText: state.documentText,
     })
 
-    expect(runDir).toBe("runs/hybrid-reranking-in-qdrant-req-1")
+    expect(runDir).toBe(`${config.env.QUORUM_RUNS_DIR}/hybrid-reranking-in-qdrant-req-1`)
   })
 
   test("ingestRequest preserves a runner-provided outputPath", async () => {
@@ -349,7 +327,7 @@ describe("graph helpers", () => {
       }),
     )
 
-    expect(state.outputPath).toBe("runs/hybrid-reranking-in-qdrant-req-1")
+    expect(state.outputPath).toBe(`${config.env.QUORUM_RUNS_DIR}/hybrid-reranking-in-qdrant-req-1`)
   })
 
   test("summarizeInputDocument is a no-op for topic runs", async () => {

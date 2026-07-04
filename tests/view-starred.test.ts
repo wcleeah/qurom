@@ -11,7 +11,7 @@ import {
 } from "../src/view/starred-store.ts"
 
 let dir: string
-let originalConfigDbPath: string | undefined
+let originalDataDir: string | undefined
 let originalWorkspace: string | undefined
 let originalOpencodeDir: string | undefined
 let originalRunsDir: string | undefined
@@ -23,19 +23,19 @@ beforeEach(async () => {
   await writeFile(join(dir, "runs", "alpha-run", "request.json"), JSON.stringify({ topic: "Alpha topic" }))
   await writeFile(join(dir, "runs", "beta-run", "request.json"), JSON.stringify({ topic: "Beta topic" }))
 
-  originalConfigDbPath = process.env.QUORUM_CONFIG_DB_PATH
+  originalDataDir = process.env.QUORUM_DATA_DIR
   originalWorkspace = process.env.QUORUM_WORKSPACE_DIRECTORY
   originalOpencodeDir = process.env.OPENCODE_DIRECTORY
   originalRunsDir = process.env.QUORUM_RUNS_DIR
-  process.env.QUORUM_CONFIG_DB_PATH = join(dir, "runs", "quorum-config.sqlite")
+  process.env.QUORUM_DATA_DIR = dir
   process.env.QUORUM_WORKSPACE_DIRECTORY = dir
   process.env.OPENCODE_DIRECTORY = dir
   process.env.QUORUM_RUNS_DIR = join(dir, "runs")
 })
 
 afterEach(async () => {
-  if (originalConfigDbPath === undefined) delete process.env.QUORUM_CONFIG_DB_PATH
-  else process.env.QUORUM_CONFIG_DB_PATH = originalConfigDbPath
+  if (originalDataDir === undefined) delete process.env.QUORUM_DATA_DIR
+  else process.env.QUORUM_DATA_DIR = originalDataDir
   if (originalWorkspace === undefined) delete process.env.QUORUM_WORKSPACE_DIRECTORY
   else process.env.QUORUM_WORKSPACE_DIRECTORY = originalWorkspace
   if (originalOpencodeDir === undefined) delete process.env.OPENCODE_DIRECTORY

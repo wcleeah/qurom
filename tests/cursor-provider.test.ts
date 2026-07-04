@@ -6,6 +6,7 @@ import { z } from "zod"
 
 import type { RuntimeConfig } from "../src/config"
 import { createEventBus, type RunnerEvent } from "../src/runner"
+import { testQuorumConfig, testRuntimeEnv, unitTestDataDir } from "./test-env"
 
 const createCalls: unknown[] = []
 const sendCalls: string[] = []
@@ -145,13 +146,7 @@ const { cursorProvider, clampCursorAgentName } = await import("../src/providers/
 
 const config: RuntimeConfig = {
   env: {
-    OPENCODE_BASE_URL: "http://127.0.0.1:4096",
-    OPENCODE_DIRECTORY: process.cwd(),
-    QUORUM_WORKSPACE_DIRECTORY: process.cwd(),
-    QUORUM_CHECKPOINT_PATH: "runs/checkpoints.sqlite",
-    QUORUM_CONFIG_DB_PATH: "runs/quorum-config.sqlite",
-    QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
-    QUORUM_CAPTURE_SYNC_HISTORY: "0",
+    ...testRuntimeEnv({ dataDir: unitTestDataDir("cursor-provider"), workspaceDir: process.cwd() }),
     CURSOR_API_KEY: "cursor-test-key",
     CONTEXT7_API_KEY: undefined,
     EXA_API_KEY: undefined,
@@ -159,20 +154,10 @@ const config: RuntimeConfig = {
     LANGFUSE_SECRET_KEY: undefined,
     LANGFUSE_BASE_URL: undefined,
   },
-  quorumConfig: {
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor"],
-    summarizerAgent: "markdown-summarizer",
+  quorumConfig: testQuorumConfig({
     maxRounds: 1,
-    maxRebuttalTurnsPerFinding: 1,
-    recursionLimit: 80,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: { source: "local", label: "production" },
+    auditors: ["source-auditor"],
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
-    auditRestart: { maxRestarts: 1 },
-    readerDiscovery: { maxTurns: 6, enabled: true },
     agentRuntime: {
       defaultProvider: "opencode",
       roles: {
@@ -183,7 +168,7 @@ const config: RuntimeConfig = {
         },
       },
     },
-  },
+  }),
 }
 
 beforeEach(() => {
@@ -633,7 +618,7 @@ describe("cursorProvider", () => {
     expect(JSON.parse(await readFile(outputFile, "utf8"))).toEqual({ ok: true })
   })
 
-  test("rejects Cursor prompts without an output file", async () => {
+  test("rejects structured Cursor prompts without an output file", async () => {
     const handle = await cursorProvider.createRunHandle({
       config,
       role: "research-drafter",
@@ -645,7 +630,8 @@ describe("cursorProvider", () => {
       handle,
       role: "research-drafter",
       prompt: "return inline",
-    })).rejects.toThrow("inline output is disabled")
+      schema: z.object({ ok: z.boolean() }),
+    })).rejects.toThrow("Cursor provider requires outputFile for structured prompts")
   })
 
   test("fails when a Cursor-bound role has no model", async () => {

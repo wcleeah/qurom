@@ -1,63 +1,31 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  ensureConfigInitialized,
   getConfigStore,
-  listPromptAssetsFromFiles,
+  loadPromptAssetsFromStore,
   loadQuorumConfigFromStore,
-  seedConfigStoreFromFiles,
-  syncOpencodeAgentsFromStore,
   updatePromptAsset,
   updateQuorumConfig,
   updateRoleBinding,
 } from "../src/config-store"
 import { promptAssetFiles } from "../src/prompt-asset-defs"
 import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "../src/view/config"
+import { prepareTestDataDir, testRuntimeEnv } from "./test-env"
 
 let dir: string
+let dataDir: string
 
 function env() {
-  return {
-    OPENCODE_DIRECTORY: dir,
-    QUORUM_WORKSPACE_DIRECTORY: dir,
-    QUORUM_CONFIG_DB_PATH: join(dir, "runs", "quorum-config.sqlite"),
-  }
-}
-
-async function writeFixtures() {
-  await mkdir(join(dir, "assets", "prompts"), { recursive: true })
-  await mkdir(join(dir, ".opencode", "agents"), { recursive: true })
-  await mkdir(join(dir, "runs"), { recursive: true })
-  await writeFile(join(dir, "quorum.config.json"), JSON.stringify({
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor"],
-    summarizerAgent: "markdown-summarizer",
-    maxRounds: 2,
-    maxRebuttalTurnsPerFinding: 1,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: { source: "local", label: "test" },
-    researchTools: { prefer: ["exa"], webSearchProvider: "exa" },
-    auditRestart: { maxRestarts: 1 },
-    readerDiscovery: { maxTurns: 2, enabled: true },
-  }, null, 2))
-  for (const filename of Object.values(promptAssetFiles)) {
-    await writeFile(join(dir, "assets", "prompts", filename), `prompt:${filename}`)
-  }
-  await writeFile(join(dir, ".opencode", "agents", "research-drafter.md"), "drafter definition")
-  await writeFile(join(dir, ".opencode", "agents", "source-auditor.md"), "auditor definition")
-  await writeFile(join(dir, ".opencode", "agents", "markdown-summarizer.md"), "summarizer definition")
+  return testRuntimeEnv({ dataDir, workspaceDir: dir })
 }
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "qurom-config-store-"))
-  await writeFixtures()
-  process.env.OPENCODE_DIRECTORY = dir
-  process.env.QUORUM_WORKSPACE_DIRECTORY = dir
-  process.env.QUORUM_CONFIG_DB_PATH = join(dir, "runs", "quorum-config.sqlite")
+  dataDir = await prepareTestDataDir(dir)
 })
 
 afterEach(async () => {
@@ -65,22 +33,21 @@ afterEach(async () => {
 })
 
 describe("config store", () => {
-  test("seeds current file config and role definitions into sqlite, while prompts stay file-backed", async () => {
-    const store = await getConfigStore(env())
-    const profile = await seedConfigStoreFromFiles(env(), store)
-    const roleCount = store.db.query<{ count: number }, []>("SELECT count(*) as count FROM role_definitions").get()?.count
-    const promptTable = store.db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'prompt_assets'").get()
+  test("seeds defaults into sqlite for quorum config, prompts, and role bindings", async () => {
+    await ensureConfigInitialized(env())
+    const store = getConfigStore(env())
+    const promptCount = store.db.query<{ count: number }, []>("SELECT count(*) as count FROM prompt_assets").get()?.count
+    const bindingCount = store.db.query<{ count: number }, []>("SELECT count(*) as count FROM role_provider_bindings").get()?.count
     store.close()
 
-    expect(profile.name).toBe("default")
-    expect(roleCount).toBe(3)
-    expect(promptTable).toBeNull()
+    expect(promptCount).toBe(Object.keys(promptAssetFiles).length)
+    expect(bindingCount).toBeGreaterThan(0)
     expect((await loadQuorumConfigFromStore(env())).designatedDrafter).toBe("research-drafter")
-    expect((await listPromptAssetsFromFiles(env())).find((prompt) => prompt.key === "audit")?.content).toBe("prompt:audit.md")
+    expect((await loadPromptAssetsFromStore(env())).audit).toContain("audit")
   })
 
   test("role binding updates are merged into loaded runtime config", async () => {
-    await seedConfigStoreFromFiles(env())
+    await ensureConfigInitialized(env())
     await updateRoleBinding(env(), "source-auditor", {
       provider: "opencode",
       providerAgent: "custom-source-auditor",
@@ -96,7 +63,7 @@ describe("config store", () => {
   })
 
   test("quorum config updates are validated and saved to the active profile", async () => {
-    await seedConfigStoreFromFiles(env())
+    await ensureConfigInitialized(env())
     const current = await loadQuorumConfigFromStore(env())
     await updateQuorumConfig(env(), JSON.stringify({
       ...current,
@@ -111,7 +78,7 @@ describe("config store", () => {
   })
 
   test("legacy browser QA config and bindings are pruned from sqlite profiles", async () => {
-    await seedConfigStoreFromFiles(env())
+    await ensureConfigInitialized(env())
     const current = await loadQuorumConfigFromStore(env())
     await updateQuorumConfig(env(), JSON.stringify({
       ...current,
@@ -134,7 +101,7 @@ describe("config store", () => {
     })
 
     const config = await loadQuorumConfigFromStore(env())
-    const store = await getConfigStore(env())
+    const store = getConfigStore(env())
     const binding = store.db
       .query<{ role: string }, []>("SELECT role FROM role_provider_bindings WHERE role = 'browser-qa-enhancer'")
       .get()
@@ -145,35 +112,29 @@ describe("config store", () => {
     expect(binding).toBeNull()
   })
 
-  test("prompt updates write prompt asset files directly", async () => {
-    await seedConfigStoreFromFiles(env())
+  test("prompt updates are stored in sqlite", async () => {
+    await ensureConfigInitialized(env())
     await updatePromptAsset(env(), "audit", "updated audit prompt")
 
-    const assets = await listPromptAssetsFromFiles(env())
-    expect(assets.find((prompt) => prompt.key === "audit")?.content).toBe("updated audit prompt")
-  })
-
-  test("OpenCode role definitions are rendered directly from agent files", async () => {
-    await seedConfigStoreFromFiles(env())
-    await writeFile(join(dir, ".opencode", "agents", "research-drafter.md"), "edited file definition")
-    await syncOpencodeAgentsFromStore(env())
-
-    const rolesHtml = await renderConfigRoles().then((r) => r.text())
-    expect(rolesHtml).toContain("edited file definition")
+    const assets = await loadPromptAssetsFromStore(env())
+    expect(assets.audit).toBe("updated audit prompt")
   })
 
   test("view config routes render and update sqlite-backed settings", async () => {
-    await seedConfigStoreFromFiles(env())
+    await ensureConfigInitialized(env())
+    process.env.QUORUM_DATA_DIR = dataDir
+    process.env.OPENCODE_DIRECTORY = dir
+    process.env.QUORUM_WORKSPACE_DIRECTORY = dir
 
     const indexHtml = await renderConfigIndex().then((r) => r.text())
     expect(indexHtml).toContain("Save quorum config")
-    expect(indexHtml).toContain("quorum.config.json")
+    expect(indexHtml).toContain("defaults/quorum.config.json")
     expect(indexHtml).not.toContain("browserQa")
 
     const rolesHtml = await renderConfigRoles().then((r) => r.text())
     expect(rolesHtml).toContain("source-auditor")
-    expect(rolesHtml).toContain("data-role-instructions hidden")
-    expect(rolesHtml).toContain("OpenCode role configuration is file-backed")
+    expect(rolesHtml).toContain(".opencode/agents/")
+    expect(rolesHtml).not.toContain("edited file definition")
 
     const promptHtml = await renderConfigPrompts().then((r) => r.text())
     expect(promptHtml).toContain("audit")
@@ -202,5 +163,22 @@ describe("config store", () => {
     const quorumResponse = await handleConfigPost(quorumReq, "/config/quorum")
     expect(quorumResponse?.status).toBe(303)
     expect((await loadQuorumConfigFromStore(env())).designQuorum?.designatedDesigner).toBe("html-designer")
+  })
+
+  test("migrates legacy checkpoints.sqlite into the data directory", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises")
+    const { join } = await import("node:path")
+    const workspace = await mkdtemp(join(tmpdir(), "qurom-migrate-checkpoints-"))
+    const dataDir = await prepareTestDataDir(workspace)
+    const legacyRuns = join(workspace, "runs")
+    await mkdir(legacyRuns, { recursive: true })
+    await writeFile(join(legacyRuns, "checkpoints.sqlite"), "legacy-checkpoint-db")
+
+    const migrateEnv = testRuntimeEnv({ dataDir, workspaceDir: workspace })
+    await ensureConfigInitialized(migrateEnv)
+
+    const migrated = await Bun.file(migrateEnv.QUORUM_CHECKPOINT_PATH).text()
+    expect(migrated).toBe("legacy-checkpoint-db")
+    await rm(workspace, { recursive: true, force: true })
   })
 })

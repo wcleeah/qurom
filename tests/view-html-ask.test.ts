@@ -17,9 +17,10 @@ import { formatSseEvent } from "../src/view/html-ask-sse.ts"
 import { handleListAskThreads } from "../src/view/html-ask-routes.ts"
 import { openHtmlReaderDb } from "../src/view/html-reader-db.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
+import { testQuorumConfig, testRuntimeEnv } from "./test-env"
 
 let dir: string
-let originalConfigDbPath: string | undefined
+let originalDataDir: string | undefined
 let originalWorkspace: string | undefined
 let originalOpencodeDir: string | undefined
 let originalRunsDir: string | undefined
@@ -36,11 +37,11 @@ beforeEach(async () => {
     'Quote: "{quote}"\n\n{question}\n',
   )
 
-  originalConfigDbPath = process.env.QUORUM_CONFIG_DB_PATH
+  originalDataDir = process.env.QUORUM_DATA_DIR
   originalWorkspace = process.env.QUORUM_WORKSPACE_DIRECTORY
   originalOpencodeDir = process.env.OPENCODE_DIRECTORY
   originalRunsDir = process.env.QUORUM_RUNS_DIR
-  process.env.QUORUM_CONFIG_DB_PATH = join(dir, "runs", "quorum-config.sqlite")
+  process.env.QUORUM_DATA_DIR = dir
   process.env.QUORUM_WORKSPACE_DIRECTORY = dir
   process.env.OPENCODE_DIRECTORY = dir
   process.env.QUORUM_RUNS_DIR = join(dir, "runs")
@@ -48,37 +49,23 @@ beforeEach(async () => {
 
 function askTestConfig(): RuntimeConfig {
   return {
-    env: {
-      OPENCODE_BASE_URL: "http://127.0.0.1:4096",
-      OPENCODE_DIRECTORY: dir,
-      QUORUM_WORKSPACE_DIRECTORY: dir,
-      QUORUM_CHECKPOINT_PATH: "runs/checkpoints.sqlite",
-      QUORUM_CONFIG_DB_PATH: join(dir, "runs", "quorum-config.sqlite"),
-      QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
-      QUORUM_CAPTURE_SYNC_HISTORY: "0",
-    },
-    quorumConfig: {
-      designatedDrafter: "research-drafter",
-      auditors: ["source-auditor"],
-      summarizerAgent: "markdown-summarizer",
+    env: testRuntimeEnv({ dataDir: dir, workspaceDir: dir }),
+    quorumConfig: testQuorumConfig({
       maxRounds: 1,
-      maxRebuttalTurnsPerFinding: 1,
-      recursionLimit: 80,
-      requireUnanimousApproval: true,
-      artifactDir: "runs",
-      promptAssetsDir: "assets/prompts",
-      promptManagement: { source: "local", label: "production" },
+      auditors: ["source-auditor"],
       researchTools: { prefer: ["context7", "exa"], webSearchProvider: "exa" },
-      auditRestart: { maxRestarts: 1 },
-      readerDiscovery: { maxTurns: 6, enabled: true },
-      agentRuntime: { defaultProvider: "opencode", roles: {} },
-    },
+    }),
   }
 }
 
+const askPromptAssets = {
+  htmlAskPage: "{researchToolHint}\n\n## Reader question\n\n{question}\n",
+  htmlAskHighlight: 'Quote: "{quote}"\n\n{question}\n',
+}
+
 afterEach(async () => {
-  if (originalConfigDbPath === undefined) delete process.env.QUORUM_CONFIG_DB_PATH
-  else process.env.QUORUM_CONFIG_DB_PATH = originalConfigDbPath
+  if (originalDataDir === undefined) delete process.env.QUORUM_DATA_DIR
+  else process.env.QUORUM_DATA_DIR = originalDataDir
   if (originalWorkspace === undefined) delete process.env.QUORUM_WORKSPACE_DIRECTORY
   else process.env.QUORUM_WORKSPACE_DIRECTORY = originalWorkspace
   if (originalOpencodeDir === undefined) delete process.env.OPENCODE_DIRECTORY
@@ -103,6 +90,7 @@ describe("html ask context", () => {
       bootstrap: true,
       source,
       config: askTestConfig(),
+      promptAssets: askPromptAssets,
     })
     expect(bootstrap.inputFiles?.[0]?.filename).toBe("content.md")
     expect(bootstrap.prompt).toContain("What is this about?")
@@ -115,6 +103,7 @@ describe("html ask context", () => {
       bootstrap: false,
       source,
       config: askTestConfig(),
+      promptAssets: askPromptAssets,
     })
     expect(followup.prompt).toBe("Tell me more")
     expect(followup.inputFiles).toBeUndefined()

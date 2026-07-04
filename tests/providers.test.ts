@@ -2,16 +2,11 @@ import { describe, expect, test } from "bun:test"
 
 import type { RuntimeConfig } from "../src/config"
 import { availableProviderIds, configuredAgentRoles, providerForRole } from "../src/providers/registry"
+import { testQuorumConfig, testRuntimeEnv, unitTestDataDir } from "./test-env"
 
 const baseConfig: RuntimeConfig = {
   env: {
-    OPENCODE_BASE_URL: "http://127.0.0.1:4096",
-    OPENCODE_DIRECTORY: process.cwd(),
-    QUORUM_WORKSPACE_DIRECTORY: process.cwd(),
-    QUORUM_CHECKPOINT_PATH: "runs/checkpoints.sqlite",
-    QUORUM_CONFIG_DB_PATH: "runs/quorum-config.sqlite",
-    QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
-    QUORUM_CAPTURE_SYNC_HISTORY: "0",
+    ...testRuntimeEnv({ dataDir: unitTestDataDir("providers"), workspaceDir: process.cwd() }),
     CURSOR_API_KEY: undefined,
     CONTEXT7_API_KEY: undefined,
     EXA_API_KEY: undefined,
@@ -19,32 +14,14 @@ const baseConfig: RuntimeConfig = {
     LANGFUSE_SECRET_KEY: undefined,
     LANGFUSE_BASE_URL: undefined,
   },
-  quorumConfig: {
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor", "logic-auditor", "clarity-auditor"],
-    summarizerAgent: "markdown-summarizer",
+  quorumConfig: testQuorumConfig({
     maxRounds: 1,
-    maxRebuttalTurnsPerFinding: 1,
-    recursionLimit: 80,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: {
-      source: "local",
-      label: "production",
-    },
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
     designQuorum: {
       enabled: true,
       designatedDesigner: "html-designer",
     },
-    auditRestart: { maxRestarts: 1 },
-    readerDiscovery: { maxTurns: 6, enabled: true },
-    agentRuntime: {
-      defaultProvider: "opencode",
-      roles: {},
-    },
-  },
+  }),
 }
 
 describe("provider registry", () => {

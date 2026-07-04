@@ -58,38 +58,44 @@ Design quorum (when `designQuorum.enabled` is true):
 Recovery helpers (used by the structured-output recovery router):
 - `json-fixer`
 
-These are configured in `quorum.config.json` and backed by local agent definitions under `.opencode/agents/`.
+These are configured in the active SQLite config profile and backed by local OpenCode agent definitions under `.opencode/agents/`.
 
 ## Requirements
 - **Bun** (runtime + test runner)
 - **OpenCode** (`opencode` binary on your `PATH`) — the app spawns `opencode serve` on the configured port if no server is already reachable at `OPENCODE_BASE_URL`. Alternatively, point `OPENCODE_BASE_URL` at an already-running OpenCode server and it will be reused as-is.
-- Local agent definitions available to that OpenCode instance (the repo ships them under `.opencode/agents/`; OpenCode loads them automatically when `OPENCODE_DIRECTORY` points at this repo).
+- Local OpenCode agent definitions under `.opencode/agents/` (bootstrapped from `defaults/opencode/agents/` on first run; gitignored after that)
 
-Prompt contracts are repo-owned and loaded from `assets/prompts/`.
-Live quorum runs do not require the global `deep-dive-research` skill. Drafting behavior is owned by the repo prompt bundle and the repo agent definitions under `.opencode/agents/`.
+Prompt contracts and role instructions live in SQLite. Shipped starters are under `defaults/prompts/`, `defaults/roles/`, and default role provider bindings in `defaults/quorum-config.sqlite`.
+Live quorum runs do not require the global `deep-dive-research` skill. Drafting behavior is owned by the repo defaults and the active config profile.
 
 Optional:
 - Langfuse credentials for trace export
 - Git submodules under `reference/` and `references/` (only needed for browsing upstream sources; the app does not require them to run)
 
 ## Configuration
-Runtime config is loaded from environment variables and `quorum.config.json`.
+Runtime config is stored in SQLite under the Qurom data directory. Shipped defaults live in `defaults/` and are seeded on first run.
 
-Important `quorum.config.json` fields:
-- `recursionLimit`: LangGraph superstep limit for a run.
-- `promptAssetsDir`: repo-local prompt asset directory.
-- `promptManagement`: currently `local` only; the app loads prompt files from disk at startup.
+Data directory resolution:
+1. `QUORUM_DATA_DIR` if set
+2. otherwise `$XDG_DATA_HOME/qurom`
+3. otherwise `~/.local/share/qurom`
+
+Derived paths:
+- `{dataDir}/quorum-config.sqlite` — quorum config, prompts, role instructions, bindings
+- `{dataDir}/checkpoints.sqlite` — LangGraph checkpoints
+- `{dataDir}/runs/` — run artifacts
 
 Main environment variables:
 - `OPENCODE_BASE_URL`
-- `OPENCODE_DIRECTORY`
-- `QUORUM_CHECKPOINT_PATH`
+- `OPENCODE_DIRECTORY` — repo checkout (OpenCode workspace; `.opencode/agents/` lives here)
+- `QUORUM_DATA_DIR` — optional override for the data directory above
+- `QUORUM_OPENCODE_BOOTSTRAP` — non-interactive OpenCode agent bootstrap (`seed`, `overwrite`, `keep`)
 - `QUORUM_CAPTURE_OPENCODE_EVENTS`
 - `QUORUM_CAPTURE_SYNC_HISTORY`
 - `LANGFUSE_PUBLIC_KEY`
 - `LANGFUSE_SECRET_KEY`
 - `LANGFUSE_BASE_URL`
-Default values are defined in `src/config.ts`.
+Default values are defined in `src/config.ts` and `src/data-paths.ts`.
 
 ## Setup
 
@@ -111,8 +117,11 @@ bun install
 cp .env.example .env
 ```
 Set at least:
-- `OPENCODE_DIRECTORY` — absolute path to this repo (used as the OpenCode server's working dir so it can see `.opencode/agents/` and the prompt assets)
+- `OPENCODE_DIRECTORY` — absolute path to this repo (OpenCode workspace; `.opencode/agents/` is bootstrapped here)
 - `OPENCODE_BASE_URL` — where the app should reach OpenCode. If nothing is running there, the app starts `opencode serve` itself on that port.
+
+On first run, Qurom seeds SQLite from `defaults/` and may prompt you to copy OpenCode agent definitions into `.opencode/agents/`.
+Existing repo-local `runs/` data is auto-migrated into `~/.local/share/qurom/` (or `$XDG_DATA_HOME/qurom`).
 
 Leave the `LANGFUSE_*` keys blank to skip telemetry, or fill them in to export traces to Langfuse.
 
@@ -163,8 +172,9 @@ web dashboard at `http://localhost:3000` (`bun run view`).
 
 ## Notes
 - The repo may contain large `reference/` and `langfuse/` directories used as local references; the active app code is under `src/` and `tests/`.
-- Draft documents created from the TUI are stored under `runs/.drafts/`.
-- Run artifacts now include the request, per-round drafts, audits, rebuttal reviews, aggregated findings, and final or failure outputs under each run directory in `runs/`.
+- Shipped defaults live under `defaults/`. User data (runs, SQLite DBs) lives under `~/.local/share/qurom/` by default.
+- Draft documents created from the TUI are stored under `{dataDir}/runs/.drafts/`.
+- Run artifacts include the request, per-round drafts, audits, rebuttal reviews, aggregated findings, and final or failure outputs under each run directory.
 - The runner now aborts created OpenCode sessions when a run is cancelled.
 - Failed runs attempt to recover the latest checkpointed state and write failure artifacts when possible.
 

@@ -18,43 +18,26 @@ import {
 } from "../src/runner.ts"
 import type { RuntimeConfig } from "../src/config.ts"
 import type { TelemetryRun, TraceObservation } from "../src/telemetry.ts"
+import { testQuorumConfig, testRuntimeEnv, unitTestDataDir } from "./test-env"
 
 const config: RuntimeConfig = {
   env: {
-    OPENCODE_BASE_URL: "http://127.0.0.1:4096",
-    OPENCODE_DIRECTORY: process.cwd(),
-    QUORUM_WORKSPACE_DIRECTORY: process.cwd(),
-    QUORUM_CHECKPOINT_PATH: "runs/checkpoints.sqlite",
-    QUORUM_CONFIG_DB_PATH: "runs/quorum-config.sqlite",
-    QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
-    QUORUM_CAPTURE_SYNC_HISTORY: "0",
+    ...testRuntimeEnv({ dataDir: unitTestDataDir("runner"), workspaceDir: process.cwd() }),
     CURSOR_API_KEY: undefined,
     LANGFUSE_PUBLIC_KEY: undefined,
     LANGFUSE_SECRET_KEY: undefined,
     LANGFUSE_BASE_URL: undefined,
   },
-  quorumConfig: {
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor"],
-    summarizerAgent: "markdown-summarizer",
+  quorumConfig: testQuorumConfig({
     maxRounds: 1,
-    maxRebuttalTurnsPerFinding: 1,
-    recursionLimit: 80,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: {
-      source: "local",
-      label: "production",
-    },
+    auditors: ["source-auditor"],
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
-  },
+  }),
 }
 
 const promptBundle = {
-  source: "local",
-  label: "test",
-  dir: "/tmp/prompts",
+  source: "sqlite" as const,
+  roleInstructions: {},
   assets: {
     deepDiveContract: "contract",
     draftFullDraft: "full-draft",
@@ -63,11 +46,15 @@ const promptBundle = {
     reviewFindings: "review-findings",
     rebuttal: "rebuttal",
     reviewRebuttalResponses: "review-rebuttal-responses",
+    designHtml: "design",
     readerInterview: "reader-interview",
     readerInterviewFollowUp: "reader-interview-follow-up",
     readerInterviewDuplicateCorrection: "reader-interview-duplicate-correction",
+    enhanceDesign: "enhance",
+    htmlAskPage: "html-ask-page",
+    htmlAskHighlight: "html-ask-highlight",
   },
-} as const
+}
 
 function disabledTelemetry(): TelemetryRun {
   return {
@@ -81,16 +68,16 @@ function disabledTelemetry(): TelemetryRun {
 }
 
 async function makeConfigWithTempArtifacts() {
-  const artifactDir = await mkdtemp(join(tmpdir(), "qurom-runner-"))
+  const runsDir = await mkdtemp(join(tmpdir(), "qurom-runner-"))
   return {
     config: {
       ...config,
-      quorumConfig: {
-        ...config.quorumConfig,
-        artifactDir,
+      env: {
+        ...config.env,
+        QUORUM_RUNS_DIR: runsDir,
       },
     } satisfies RuntimeConfig,
-    artifactDir,
+    runsDir,
   }
 }
 
@@ -279,7 +266,7 @@ describe("runResearchPipeline", () => {
   })
 
   test("cleans up a still-empty run directory after an early failure", async () => {
-    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
+    const { config: configWithTempArtifacts, runsDir } = await makeConfigWithTempArtifacts()
     const bus = createEventBus()
     let bridgeRunDir: string | undefined
 
@@ -308,7 +295,7 @@ describe("runResearchPipeline", () => {
     ).rejects.toThrow("boom")
 
     expect(bridgeRunDir).toBeUndefined()
-    expect(await readdir(artifactDir)).toEqual([])
+    expect(await readdir(runsDir)).toEqual([])
   })
 
   test("aborts created OpenCode sessions when the run signal is aborted", async () => {
@@ -382,7 +369,7 @@ describe("runResearchPipeline", () => {
           approvedAgents: ["source-auditor"],
           unresolvedFindings: [],
           failureReason: undefined,
-          outputPath: join(configWithTempArtifacts.quorumConfig.artifactDir, "hybrid-reranking-in-qdrant-req-1"),
+          outputPath: join(configWithTempArtifacts.env.QUORUM_RUNS_DIR, "hybrid-reranking-in-qdrant-req-1"),
         }),
       })) as GraphFactory,
     })
@@ -391,8 +378,8 @@ describe("runResearchPipeline", () => {
   })
 
   test("resumes a research run from the latest checkpoint", async () => {
-    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
-    const runDir = join(artifactDir, "resume-topic-req-resume-1")
+    const { config: configWithTempArtifacts, runsDir } = await makeConfigWithTempArtifacts()
+    const runDir = join(runsDir, "resume-topic-req-resume-1")
     await mkdir(runDir, { recursive: true })
     await Bun.write(join(runDir, "request.json"), JSON.stringify({
       requestId: "req-resume-1",
@@ -445,8 +432,8 @@ describe("runResearchPipeline", () => {
   })
 
   test("retries a named node from the checkpoint before that node", async () => {
-    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
-    const runDir = join(artifactDir, "retry-node-req-node-1")
+    const { config: configWithTempArtifacts, runsDir } = await makeConfigWithTempArtifacts()
+    const runDir = join(runsDir, "retry-node-req-node-1")
     await mkdir(runDir, { recursive: true })
     await Bun.write(join(runDir, "request.json"), JSON.stringify({
       requestId: "req-node-1",
@@ -502,8 +489,8 @@ describe("runResearchPipeline", () => {
   })
 
   test("uses the interrupt checkpoint when resuming a reader interview", async () => {
-    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
-    const runDir = join(artifactDir, "interview-resume-req-1")
+    const { config: configWithTempArtifacts, runsDir } = await makeConfigWithTempArtifacts()
+    const runDir = join(runsDir, "interview-resume-req-1")
     await mkdir(runDir, { recursive: true })
     await Bun.write(join(runDir, "reader-reply.json"), JSON.stringify({ reply: "I know checkpoints." }))
 
@@ -614,7 +601,7 @@ describe("runResearchPipeline", () => {
           approvedAgents: ["source-auditor"],
           unresolvedFindings: [],
           failureReason: undefined,
-          outputPath: join(configWithTempArtifacts.quorumConfig.artifactDir, "req-1"),
+          outputPath: join(configWithTempArtifacts.env.QUORUM_RUNS_DIR, "req-1"),
         }
       },
     })) as GraphFactory
@@ -639,8 +626,8 @@ describe("runResearchPipeline", () => {
 
 describe("runDesignPipeline", () => {
   test("archives previous design artifacts and reruns from the HTML designer checkpoint", async () => {
-    const { config: configWithTempArtifacts, artifactDir } = await makeConfigWithTempArtifacts()
-    const runDir = join(artifactDir, "design-rerun-req-design-1")
+    const { config: configWithTempArtifacts, runsDir } = await makeConfigWithTempArtifacts()
+    const runDir = join(runsDir, "design-rerun-req-design-1")
     await mkdir(runDir, { recursive: true })
     await Bun.write(join(runDir, "request.json"), JSON.stringify({
       requestId: "req-design-1",

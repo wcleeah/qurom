@@ -7,6 +7,7 @@ import { createEventBus, type BridgeFactory, type GraphFactory, type RunResearch
 import type { RuntimeConfig } from "../src/config.ts"
 import type { TelemetryRun } from "../src/telemetry.ts"
 import { resolveRunDir } from "../src/output.ts"
+import { testQuorumConfig, testRuntimeEnv, unitTestDataDir } from "./test-env"
 
 const shouldRun = process.env.RUN_INTEGRATION === "1"
 
@@ -14,34 +15,17 @@ const testIfIntegration = shouldRun ? test : test.skip
 
 const config: RuntimeConfig = {
   env: {
-    OPENCODE_BASE_URL: "http://127.0.0.1:4096",
-    OPENCODE_DIRECTORY: process.cwd(),
-    QUORUM_WORKSPACE_DIRECTORY: process.cwd(),
-    QUORUM_CHECKPOINT_PATH: "runs/checkpoints.sqlite",
-    QUORUM_CONFIG_DB_PATH: "runs/quorum-config.sqlite",
-    QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
-    QUORUM_CAPTURE_SYNC_HISTORY: "0",
+    ...testRuntimeEnv({ dataDir: unitTestDataDir("runner-integration"), workspaceDir: process.cwd() }),
     CURSOR_API_KEY: undefined,
     LANGFUSE_PUBLIC_KEY: undefined,
     LANGFUSE_SECRET_KEY: undefined,
     LANGFUSE_BASE_URL: undefined,
   },
-  quorumConfig: {
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor"],
-    summarizerAgent: "markdown-summarizer",
+  quorumConfig: testQuorumConfig({
     maxRounds: 1,
-    maxRebuttalTurnsPerFinding: 1,
-    recursionLimit: 80,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: {
-      source: "local",
-      label: "production",
-    },
+    auditors: ["source-auditor"],
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
-  },
+  }),
 }
 
 const prerequisites = {
@@ -49,9 +33,8 @@ const prerequisites = {
 } as unknown as RunResearchPipelineArgs["prerequisites"]
 
 const promptBundle = {
-  source: "local",
-  label: "test",
-  dir: "/tmp/prompts",
+  source: "sqlite" as const,
+  roleInstructions: {},
   assets: {
     deepDiveContract: "contract",
     draftFullDraft: "full-draft",
@@ -60,11 +43,15 @@ const promptBundle = {
     reviewFindings: "review-findings",
     rebuttal: "rebuttal",
     reviewRebuttalResponses: "review-rebuttal-responses",
+    designHtml: "design",
     readerInterview: "reader-interview",
     readerInterviewFollowUp: "reader-interview-follow-up",
     readerInterviewDuplicateCorrection: "reader-interview-duplicate-correction",
+    enhanceDesign: "enhance",
+    htmlAskPage: "html-ask-page",
+    htmlAskHighlight: "html-ask-highlight",
   },
-} as const
+}
 
 function disabledTelemetry(): TelemetryRun {
   return {
@@ -79,15 +66,15 @@ function disabledTelemetry(): TelemetryRun {
 
 describe("runResearchPipeline integration", () => {
   testIfIntegration("two back-to-back runs do not duplicate bridge events", async () => {
-    const artifactDir = await mkdtemp(join(tmpdir(), "qurom-runner-int-"))
+    const runsDir = await mkdtemp(join(tmpdir(), "qurom-runner-int-"))
     const graphStarts: string[] = []
     let bridgeStartCalls = 0
 
     const configWithTempArtifacts: RuntimeConfig = {
       ...config,
-      quorumConfig: {
-        ...config.quorumConfig,
-        artifactDir,
+      env: {
+        ...config.env,
+        QUORUM_RUNS_DIR: runsDir,
       },
     }
 
@@ -108,7 +95,7 @@ describe("runResearchPipeline integration", () => {
           approvedAgents: ["source-auditor"],
           unresolvedFindings: [],
           failureReason: undefined,
-          outputPath: resolveRunDir(artifactDir, {
+          outputPath: resolveRunDir(runsDir, {
             requestId: request.requestId,
             inputMode: request.inputMode,
             topic: request.inputMode === "topic" ? request.topic : undefined,

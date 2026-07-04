@@ -11,6 +11,8 @@ import {
   type ReaderCalibrationProfile,
   type ResearchState,
 } from "../src/schema"
+import { ensureConfigInitialized } from "../src/config-store"
+import { prepareTestDataDir, testRuntimeConfig } from "./test-env"
 
 const {
   createGraph,
@@ -56,41 +58,25 @@ export function sampleReaderProfile(overrides: Partial<ReaderCalibrationProfile>
   })
 }
 
-const testConfig: RuntimeConfig = {
-  env: {
-    OPENCODE_BASE_URL: "http://127.0.0.1:4096",
-    OPENCODE_DIRECTORY: process.cwd(),
-    QUORUM_WORKSPACE_DIRECTORY: process.cwd(),
-    QUORUM_CHECKPOINT_PATH: "runs/checkpoints-test.sqlite",
-    QUORUM_CONFIG_DB_PATH: "runs/quorum-config.sqlite",
-    QUORUM_CAPTURE_OPENCODE_EVENTS: "0",
-    QUORUM_CAPTURE_SYNC_HISTORY: "0",
-    CURSOR_API_KEY: undefined,
-    LANGFUSE_PUBLIC_KEY: undefined,
-    LANGFUSE_SECRET_KEY: undefined,
-    LANGFUSE_BASE_URL: undefined,
-  },
-  quorumConfig: {
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor", "logic-auditor", "clarity-auditor"],
-    summarizerAgent: "markdown-summarizer",
-    maxRounds: 3,
-    maxRebuttalTurnsPerFinding: 2,
-    recursionLimit: 80,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: { source: "local", label: "production" },
-    researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
-    auditRestart: { maxRestarts: 1 },
-    readerDiscovery: { maxTurns: 6, enabled: true },
-  },
-}
-
+let testConfig: RuntimeConfig
 let tempDir: string
+let workspaceDir: string
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "reader-discovery-"))
+  workspaceDir = tempDir
+  const dataDir = await prepareTestDataDir(workspaceDir)
+  testConfig = testRuntimeConfig({
+    dataDir,
+    workspaceDir,
+    quorumOverrides: {
+      maxRounds: 3,
+      maxRebuttalTurnsPerFinding: 2,
+      researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
+      readerDiscovery: { maxTurns: 6, enabled: true },
+    },
+  })
+  await ensureConfigInitialized(testConfig.env)
 })
 afterEach(async () => {
   await rm(tempDir, { recursive: true, force: true })
@@ -267,9 +253,8 @@ describe("reader interview prompt assets", () => {
 describe("createGraph wires the discoverReader node", () => {
   test("the graph compiles with discoverReader between prepareOutputPath and draftFullDraft", () => {
     const promptBundle = {
-      source: "local" as const,
-      label: "test",
-      dir: "assets/prompts",
+      source: "sqlite" as const,
+      roleInstructions: {},
       assets: {
         deepDiveContract: "contract",
         draftFullDraft: "draft {outputFile}",
@@ -283,17 +268,9 @@ describe("createGraph wires the discoverReader node", () => {
         readerInterviewFollowUp: "interview follow-up {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
         readerInterviewDuplicateCorrection: "interview correction {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
         enhanceDesign: "enhance",
-        rebuttalReview: "rr",
-        drafterReview: "dr",
-        summarizeInput: "si",
-        drafterRebuttalReview: "drr",
-        summarizeOutput: "so",
-        aggregateFindings: "af",
-        confidencePrompt: "cp",
-        synthesizeDrafts: "sd",
-        classifyComplexity: "cc",
-        deepDiveSkill: "dds",
-      } as Record<string, string>,
+        htmlAskPage: "html-ask-page",
+        htmlAskHighlight: "html-ask-highlight",
+      },
     }
     const graph = createGraph(testConfig, promptBundle)
     expect(graph).toBeDefined()

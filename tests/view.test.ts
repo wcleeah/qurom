@@ -6,13 +6,13 @@ import { renderInterviewChatCard, renderLivePipeline } from "../src/view/compone
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 import { classifyFile } from "../src/view/file-browser.ts"
 import { card, section, summaryRow, summaryTable } from "../src/view/html.ts"
-import { RUNS_DIR, safeFilePath, safeRunPath } from "../src/view/paths.ts"
+import { getRunsDir, safeFilePath, safeRunPath } from "../src/view/paths.ts"
 import { CSS } from "../src/view/styles.ts"
 import type { LiveStatus } from "../src/view/types.ts"
 
 describe("view path helpers", () => {
   test("safeRunPath resolves run names inside the runs directory", () => {
-    expect(safeRunPath("example-run")).toBe(`${RUNS_DIR}/example-run`)
+    expect(safeRunPath("example-run")).toBe(`${getRunsDir()}/example-run`)
   })
 
   test("safeFilePath blocks traversal and sqlite artifacts", () => {

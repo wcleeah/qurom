@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-
-import { promptAssetFiles } from "../src/prompt-asset-defs"
 
 mock.module("@cursor/sdk", () => {
   class CursorSdkError extends Error {
@@ -38,74 +36,64 @@ mock.module("@cursor/sdk", () => {
 })
 
 const { renderConfigRoles, handleConfigPost } = await import("../src/view/config")
-const { loadQuorumConfigFromStore, seedConfigStoreFromFiles, updateRoleBinding } = await import("../src/config-store")
+const { ensureConfigInitialized, loadQuorumConfigFromStore, updateRoleBinding } = await import("../src/config-store")
+const { prepareTestDataDir, testRuntimeEnv } = await import("./test-env")
 
 let dir: string
+let dataDir: string
+const savedEnv: Record<string, string | undefined> = {}
 
 function env() {
-  return {
-    OPENCODE_DIRECTORY: dir,
-    QUORUM_WORKSPACE_DIRECTORY: dir,
-    QUORUM_CONFIG_DB_PATH: join(dir, "runs", "quorum-config.sqlite"),
-  }
-}
-
-async function writeFixtures() {
-  await mkdir(join(dir, "assets", "prompts"), { recursive: true })
-  await mkdir(join(dir, ".opencode", "agents"), { recursive: true })
-  await mkdir(join(dir, "runs"), { recursive: true })
-  await writeFile(join(dir, "quorum.config.json"), JSON.stringify({
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor"],
-    summarizerAgent: "markdown-summarizer",
-    maxRounds: 2,
-    maxRebuttalTurnsPerFinding: 1,
-    requireUnanimousApproval: true,
-    artifactDir: "runs",
-    promptAssetsDir: "assets/prompts",
-    promptManagement: { source: "local", label: "test" },
-    researchTools: { prefer: ["exa"], webSearchProvider: "exa" },
-    auditRestart: { maxRestarts: 1 },
-    readerDiscovery: { maxTurns: 2, enabled: true },
-  }, null, 2))
-  for (const filename of Object.values(promptAssetFiles)) {
-    await writeFile(join(dir, "assets", "prompts", filename), `prompt:${filename}`)
-  }
-  await writeFile(join(dir, ".opencode", "agents", "research-drafter.md"), "drafter definition")
-  await writeFile(join(dir, ".opencode", "agents", "source-auditor.md"), "auditor definition")
-  await writeFile(join(dir, ".opencode", "agents", "markdown-summarizer.md"), "summarizer definition")
+  return testRuntimeEnv({ dataDir, workspaceDir: dir })
 }
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "qurom-provider-forms-"))
-  await writeFixtures()
+  dataDir = await prepareTestDataDir(dir)
+  const runtimeEnv = env()
+  for (const key of [
+    "OPENCODE_DIRECTORY",
+    "QUORUM_WORKSPACE_DIRECTORY",
+    "QUORUM_DATA_DIR",
+    "QUORUM_CONFIG_DB_PATH",
+    "QUORUM_CHECKPOINT_PATH",
+    "QUORUM_RUNS_DIR",
+  ] as const) {
+    savedEnv[key] = process.env[key]
+  }
   process.env.OPENCODE_DIRECTORY = dir
   process.env.QUORUM_WORKSPACE_DIRECTORY = dir
-  process.env.QUORUM_CONFIG_DB_PATH = join(dir, "runs", "quorum-config.sqlite")
+  process.env.QUORUM_DATA_DIR = dataDir
+  process.env.QUORUM_CONFIG_DB_PATH = runtimeEnv.QUORUM_CONFIG_DB_PATH
+  process.env.QUORUM_CHECKPOINT_PATH = runtimeEnv.QUORUM_CHECKPOINT_PATH
+  process.env.QUORUM_RUNS_DIR = runtimeEnv.QUORUM_RUNS_DIR
   process.env.CURSOR_API_KEY = "cursor-test-key"
+  await ensureConfigInitialized(env())
 })
 
 afterEach(async () => {
   delete process.env.CURSOR_API_KEY
+  for (const [key, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
   await rm(dir, { recursive: true, force: true })
 })
 
 describe("provider-specific role forms", () => {
-  test("renders OpenCode role configuration as file-backed read-only content", async () => {
-    await seedConfigStoreFromFiles(env())
-
+  test("renders OpenCode role configuration as read-only agent file content", async () => {
     const html = await renderConfigRoles().then((response) => response.text())
 
-    expect(html).toContain("OpenCode role configuration is file-backed")
     expect(html).toContain(".opencode/agents/research-drafter.md")
-    expect(html).toContain("drafter definition")
+    expect(html).toContain("config-readonly-agent")
+    expect(html).not.toContain("Edit .opencode/agents/")
+    expect(html).not.toContain("drafter definition")
     expect(html).toContain("data-save-actions hidden")
     expect(html).toContain("data-role-instructions hidden")
     expect(html).not.toContain('placeholder="composer-2.5"')
   })
 
   test("renders Cursor model dropdown and parameter controls from catalog", async () => {
-    await seedConfigStoreFromFiles(env())
     await updateRoleBinding(env(), "source-auditor", {
       provider: "cursor",
       model: "composer-2.5",
@@ -122,8 +110,6 @@ describe("provider-specific role forms", () => {
   })
 
   test("persists Cursor model params into role binding options", async () => {
-    await seedConfigStoreFromFiles(env())
-
     const req = new Request("http://localhost/config/roles/source-auditor", {
       method: "POST",
       body: new URLSearchParams({
