@@ -52,7 +52,35 @@ describe("session telemetry", () => {
     expect(sumSessionTelemetryUsage(file).tokensOut).toBe(400)
   })
 
-  test("resolveRunTelemetry omits est for csv-import session usage", () => {
+  test("resolveRunTelemetry omits est for csv-import with actual cost", () => {
+    const resolved = resolveRunTelemetry({
+      version: 1,
+      sessions: [{
+        sessionId: "bc-123",
+        role: "reader-interviewer",
+        provider: "cursor",
+        calls: [{
+          resolvedModel: "auto",
+          usage: {
+            tokensIn: 1000,
+            tokensOut: 200,
+            costUsd: 0.02,
+            costAvailable: true,
+            costEstimated: false,
+          },
+          usageSource: "csv-import",
+        }],
+      }],
+    })
+
+    expect(resolved.usageAvailable).toBe(true)
+    expect(resolved.usage.tokensIn).toBe(1000)
+    expect(resolved.usage.tokensOut).toBe(200)
+    expect(resolved.costAvailable).toBe(true)
+    expect(resolved.costEstimated).toBe(false)
+  })
+
+  test("resolveRunTelemetry keeps est for csv-import with estimated cost", () => {
     const resolved = resolveRunTelemetry({
       version: 1,
       sessions: [{
@@ -73,11 +101,8 @@ describe("session telemetry", () => {
       }],
     })
 
-    expect(resolved.usageAvailable).toBe(true)
-    expect(resolved.usage.tokensIn).toBe(1000)
-    expect(resolved.usage.tokensOut).toBe(200)
     expect(resolved.costAvailable).toBe(true)
-    expect(resolved.costEstimated).toBe(false)
+    expect(resolved.costEstimated).toBe(true)
   })
 
   test("applyOpencodeAgentUsageEvent accumulates message deltas per session", () => {

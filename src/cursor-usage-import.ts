@@ -1,6 +1,7 @@
 import { readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
+import { estimateCursorCostUsd } from "./cursor-pricing"
 import {
   applySessionTelemetryEvent,
   readSessionTelemetry,
@@ -242,6 +243,17 @@ function usageFromCsvRow(row: CursorUsageCsvRow) {
       costUsd: parsedCost.costUsd,
       costAvailable: true,
       costEstimated: false,
+    }
+  }
+
+  const estimated = estimateCursorCostUsd(row.model, raw)
+  if (estimated.costAvailable) {
+    return {
+      tokensIn: folded.tokensIn,
+      tokensOut: folded.tokensOut,
+      costUsd: estimated.costUsd,
+      costAvailable: true,
+      costEstimated: true,
     }
   }
 
