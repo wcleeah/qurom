@@ -110,7 +110,7 @@ describe("defaults config UI", () => {
       new Request("http://localhost/config/defaults/apply/prompts/audit", { method: "POST" }),
       "/config/defaults/apply/prompts/audit",
     )
-    expect(response?.status).toBe(303)
+    expect(response?.status).toBe(200)
     expect((await loadPromptAssetsFromStore(testRuntimeEnv({ dataDir, workspaceDir: dir }))).audit)
       .toBe("applied-from-defaults audit prompt")
   })
@@ -124,7 +124,7 @@ describe("defaults config UI", () => {
       }),
       "/config/defaults/apply/prompts/designHtml",
     )
-    expect(response?.status).toBe(303)
+    expect(response?.status).toBe(200)
     expect((await loadPromptAssetsFromStore(testRuntimeEnv({ dataDir, workspaceDir: dir }))).designHtml)
       .toBe("applied-from-form design prompt")
   })

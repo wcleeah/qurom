@@ -358,7 +358,7 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
   if (path === "/config/defaults/apply/quorum") {
     const content = await readDefaultsQuorumConfig(workspaceDir)
     await updateQuorumConfig(config.env, content)
-    return new Response(null, { status: 303, headers: { Location: "/config" } })
+    return renderConfigDefaultsIndex()
   }
 
   const applyPromptMatch = path.match(/^\/config\/defaults\/apply\/prompts\/(.+)$/)
@@ -373,7 +373,7 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
       content = prompt.content
     }
     await updatePromptAsset(config.env, key, content)
-    return new Response(null, { status: 303, headers: { Location: "/config/prompts" } })
+    return renderConfigDefaultsPrompts()
   }
 
   const applyRoleMatch = path.match(/^\/config\/defaults\/apply\/roles\/(.+)$/)
@@ -388,7 +388,7 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
       content = entry.content
     }
     await updateRoleInstruction(config.env, role, content)
-    return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
+    return renderConfigDefaultsRoles()
   }
 
   const applyBindingMatch = path.match(/^\/config\/defaults\/apply\/bindings\/(.+)$/)
@@ -431,7 +431,7 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
         await applyDefaultsOpencodeAgent(workspaceDir, role)
       }
     }
-    return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
+    return renderConfigDefaultsBindings()
   }
 
   const promptMatch = path.match(/^\/config\/defaults\/prompts\/(.+)$/)
