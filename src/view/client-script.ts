@@ -5,11 +5,9 @@ export { LIVE_REFRESH_STORAGE_KEY, renderRefreshControls }
 const RUN_DETAIL_SECTION_IDS = [
   "run-controls-section",
   "telemetry-section",
-  "pipeline-section",
   "round-strip-section",
   "agent-activity-section",
   "node-grid-section",
-  "node-history-section",
   "debug-log-section",
   "failure-banner-section",
   "interview-chat-section",
@@ -17,7 +15,6 @@ const RUN_DETAIL_SECTION_IDS = [
   "stats-section",
   "hero-section",
   "key-outputs-section",
-  "phase-section",
   "design-summary-section",
   "files-section",
 ]

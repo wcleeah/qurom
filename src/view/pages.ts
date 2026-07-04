@@ -8,7 +8,7 @@ import { renderRunControlsSection, renderNodeControlsSection, renderRunCompletio
 import { tryGetRunManager } from "../run-manager"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
-import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard, renderLivePipeline, renderNodeHistory } from "./components"
+import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard } from "./components"
 import { computeStats, getRunFiles, listRuns, readLiveStatus, readNodeHistory } from "./data"
 import { getNodeDefinition } from "./node-registry"
 import { renderNodeDashboard, renderNodeExecutionHistory, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
@@ -26,7 +26,7 @@ import { badge, formatRelative, layout } from "./layout"
 import { getRunsDir, resolveRunName, safeFilePath, safeRunPath } from "./paths"
 import { STAR_SCRIPT } from "./star-script"
 import { isRunStarred } from "./starred-store"
-import { contentType, escapeHtml, formatBytes, formatElapsed, formatUsagePair, renderJsonCard, renderMarkdown, statusDot } from "./utils"
+import { contentType, escapeHtml, formatBytes, formatElapsed, formatUsagePair, renderMarkdown, statusDot } from "./utils"
 import type { RequestJson, RunStatus } from "./types"
 
 function renderStarButton(runName: string, starred: boolean): string {
@@ -514,127 +514,61 @@ export async function renderRun(name: string): Promise<Response> {
 
   const totalBytes = [...fileSizes.values()].reduce((a, b) => a + b, 0)
 
-  // ── Quick stats dashboard ──
-  let statsHtml = `<div class="run-stats-grid">
-  <div class="run-stat">
-    <div class="run-stat-value">${files.length}</div>
-    <div class="run-stat-label">Files</div>
-  </div>
-  <div class="run-stat">
-    <div class="run-stat-value">${formatBytes(totalBytes)}</div>
-    <div class="run-stat-label">Total size</div>
-  </div>`
+  // ── Quick stats dashboard (artifact counts only; files/size live in telemetry strip) ──
+  const statCards: string[] = []
 
   if (draftCount > 0) {
-    statsHtml += `
+    statCards.push(`
   <div class="run-stat">
     <div class="run-stat-value">${draftCount}</div>
     <div class="run-stat-label">Drafts</div>
-  </div>`
+  </div>`)
   }
 
   if (auditCount > 0) {
-    statsHtml += `
+    statCards.push(`
   <div class="run-stat">
     <div class="run-stat-value">${auditCount}</div>
     <div class="run-stat-label">Audits</div>
-  </div>`
+  </div>`)
   }
 
   if (rebuttalCount > 0) {
-    statsHtml += `
+    statCards.push(`
   <div class="run-stat">
     <div class="run-stat-value">${rebuttalCount}</div>
     <div class="run-stat-label">Rebuttals</div>
-  </div>`
+  </div>`)
   }
 
   if (reviewCount > 0) {
-    statsHtml += `
+    statCards.push(`
   <div class="run-stat">
     <div class="run-stat-value">${reviewCount}</div>
     <div class="run-stat-label">Reviews</div>
-  </div>`
+  </div>`)
   }
 
   if (aggregatedCount > 0) {
-    statsHtml += `
+    statCards.push(`
   <div class="run-stat">
     <div class="run-stat-value">${aggregatedCount}</div>
     <div class="run-stat-label">Aggregations</div>
-  </div>`
+  </div>`)
   }
 
   if (design && design.hasDesignFiles) {
     const designHtmlCount = countByPattern(files, /^design-html-round-\d+\.html$/)
-    statsHtml += `
+    statCards.push(`
   <div class="run-stat">
     <div class="run-stat-value">${designHtmlCount}</div>
     <div class="run-stat-label">Design HTML</div>
-  </div>`
+  </div>`)
   }
 
-  statsHtml += `</div>`
-
-  // ── Phase timeline ──
-  let phaseHtml = ""
-
-  // Research phase
-  let researchLabel = "running"
-  let researchClass = "badge-running"
-  if (researchStatus === "approved") {
-    researchLabel = "approved"
-    researchClass = "badge-approved"
-  } else if (researchStatus === "failed") {
-    researchLabel = "failed"
-    researchClass = "badge-failed"
-  }
-
-  const maxRound = draftCount > 0 ? draftCount - 1 : 0
-  const researchLine = `<div class="phase-row">
-  <span class="badge ${researchClass}">Research: ${researchLabel}</span>
-  <span class="phase-detail">${maxRound} round${maxRound !== 1 ? "s" : ""}, ${aggregatedCount} consensus</span>
-</div>`
-
-  // Design phase
-  let designLine = ""
-  if (design && design.hasDesignFiles) {
-    let designLabel = design.status
-    let designClass = "badge-running"
-    if (design.status === "approved") {
-      designLabel = "approved"
-      designClass = "badge-approved"
-    } else if (design.status === "failed" || design.hasFailure) {
-      designLabel = "failed"
-      designClass = "badge-failed"
-    }
-
-    designLine = `<div class="phase-row">
-  <span class="badge ${designClass}">Design: ${designLabel}</span>
-  <span class="phase-detail">HTML generation${design.hasFinalHtml ? ", final.html ready" : ""}</span>
-</div>`
-  } else if (researchStatus === "approved" && !design) {
-    // Research finished, design phase expected but no design files yet
-    designLine = `<div class="phase-row">
-  <span class="badge badge-running">Design: running…</span>
-  <span class="phase-detail">waiting for design artifacts</span>
-</div>`
-  } else if (researchStatus === "approved" && design && !design.hasDesignFiles) {
-    designLine = `<div class="phase-row">
-  <span class="badge badge-running">Design: running…</span>
-  <span class="phase-detail">generating HTML</span>
-</div>`
-  }
-
-  if (researchLine || designLine) {
-    phaseHtml = `<div class="section">
-  <h2>Pipeline</h2>
-  <div class="card stack-card stack-card-roomy">
-    ${researchLine}
-    ${designLine}
-  </div>
-</div>`
-  }
+  const statsHtml = statCards.length > 0
+    ? `<div class="run-stats-grid">${statCards.join("")}</div>`
+    : ""
 
   // ── Design summary card ──
   let designSummaryHtml = ""
@@ -714,25 +648,15 @@ export async function renderRun(name: string): Promise<Response> {
 </div>`
   }
 
-  // ── Request info (collapsed by default) ──
-  let requestInfoHtml = ""
-  if (requestJson) {
-    requestInfoHtml = `<div class="section">
-  <h2>Request metadata</h2>
-  <div class="card">
-    ${renderJsonCard(requestJson, { defaultOpen: false })}
-  </div>
-</div>`
-  }
-
   const nodeHistory = await readNodeHistory(name)
-  const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, name, nodeHistory)
   const agentActivityHtml = renderAgentActivity(liveStatus)
-  const nodeHistoryHtml = renderNodeHistory(nodeHistory, name)
   const roundStripHtml = await renderRoundStrip(name, files, liveStatus)
   const nodeGridHtml = renderNodeGrid(name, files, liveStatus, researchStatus, nodeHistory)
   const liveMetaHtml = renderLiveStatusMeta(liveStatus)
-  const telemetryHtml = renderRunTelemetryStrip(liveStatus, nodeHistory)
+  const telemetryHtml = renderRunTelemetryStrip(liveStatus, nodeHistory, {
+    fileCount: files.length,
+    totalBytes,
+  })
   const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
   const interviewChatHtml = renderInterviewChatCard(name, liveStatus)
@@ -770,9 +694,7 @@ export async function renderRun(name: string): Promise<Response> {
   const filesLinkSection = `<div class="section"><p><a href="/runs/${encodeURIComponent(name)}/files">Browse all ${files.length} files →</a></p></div>`
 
   const telemetrySection = `<div id="telemetry-section">${telemetryHtml}</div>`
-  const pipelineSection = `<div id="pipeline-section">${pipelineHtml}</div>`
   const agentActivitySection = `<div id="agent-activity-section">${agentActivityHtml}</div>`
-  const nodeHistorySection = `<div id="node-history-section">${nodeHistoryHtml}</div>`
   const roundStripSection = `<div id="round-strip-section">${roundStripHtml}</div>`
   const nodeGridSection = `<div id="node-grid-section">${nodeGridHtml}</div>`
   const debugLogSection = `<div id="debug-log-section">${debugLogHtml}</div>`
@@ -782,7 +704,6 @@ export async function renderRun(name: string): Promise<Response> {
   const statsSection = `<div id="stats-section">${statsHtml}</div>`
   const heroSection = `<div id="hero-section">${heroHtml}</div>`
   const keyOutputsSection = `<div id="key-outputs-section">${keyOutputsHtml}</div>`
-  const phaseSection = `<div id="phase-section">${phaseHtml}</div>`
   const designSummarySection = `<div id="design-summary-section">${designSummaryHtml}</div>`
   const filesSection = `<div id="files-section">${filesLinkSection}</div>`
 
@@ -813,19 +734,15 @@ ${interviewChatSection}
 
 ${failureBannerSection}
 ${telemetrySection}
-${pipelineSection}
 ${roundStripSection}
 ${agentActivitySection}
 ${nodeGridSection}
-${nodeHistorySection}
 ${debugLogSection}
 ${markdownSection}
 ${statsSection}
-${phaseSection}
 ${designSummarySection}
 ${heroSection}
 ${keyOutputsSection}
-${requestInfoHtml}
 ${filesSection}
 ${STAR_SCRIPT}
 ${isRunning ? POLLING_SCRIPT : ""}`

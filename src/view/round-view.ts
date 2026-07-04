@@ -1,4 +1,4 @@
-import { renderAllAuditRounds } from "./audit-view"
+import { buildRoundAuditVoteRows, renderAllAuditRounds, renderRoundAuditVoteTable } from "./audit-view"
 import { renderConsensusCard } from "./artifact-renderers"
 import { classifyFile } from "./data"
 import { safeFilePath } from "./paths"
@@ -28,14 +28,18 @@ export async function renderRoundStrip(
   const currentRound = liveStatus?.phase === "running" ? liveStatus.round : index.maxRound
 
   let chips = ""
+  let auditPanels = ""
   for (const round of index.rounds) {
     const isCurrent = round.round === currentRound && liveStatus?.phase === "running"
     const cls = isCurrent ? "round-chip active" : "round-chip"
     let outcomeText = isCurrent ? "in progress" : "…"
+    let outcomeClass = "badge-running"
     if (round.consensus) {
       try {
         const raw = await Bun.file(safeFilePath(runName, round.consensus)).text()
-        outcomeText = outcomeLabelForRound(summarizeConsensusData(JSON.parse(raw)).outcome)
+        const consensus = summarizeConsensusData(JSON.parse(raw))
+        outcomeText = outcomeLabelForRound(consensus.outcome)
+        outcomeClass = outcomeClassForRound(consensus.outcome)
       } catch {
         outcomeText = "view"
       }
@@ -45,9 +49,25 @@ export async function renderRoundStrip(
   ${isCurrent ? `<span class="round-chip-live">●</span>` : ""}
   <span class="round-chip-outcome dim-text">${escapeHtml(outcomeText)}</span>
 </a>`
+
+    const auditRows = await buildRoundAuditVoteRows(runName, round, liveStatus, { isCurrentRound: isCurrent })
+    if (auditRows.length === 0) continue
+
+    auditPanels += `<div class="round-audit-card">
+  <div class="round-audit-card-head">
+    <span class="round-audit-card-title">Round ${round.round}</span>
+    <span class="badge ${outcomeClass}">${escapeHtml(outcomeText)}</span>
+    <a class="round-audit-card-link tiny-text" href="/runs/${encodeURIComponent(runName)}/round/${round.round}">Details →</a>
+  </div>
+  ${renderRoundAuditVoteTable(auditRows)}
+</div>`
   }
 
-  return `<div class="section"><h2>Research rounds</h2><div class="round-strip">${chips}</div></div>`
+  const auditSection = auditPanels
+    ? `<div class="round-audit-summaries">${auditPanels}</div>`
+    : ""
+
+  return `<div class="section"><h2>Research rounds</h2><div class="round-strip">${chips}</div>${auditSection}</div>`
 }
 
 export async function renderRoundDetailPage(

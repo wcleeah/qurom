@@ -164,6 +164,17 @@ describe("telemetry view", () => {
     expect(html).toContain("~$0.042 est.")
   })
 
+  test("renders file count and total size in telemetry strip", () => {
+    const html = renderRunTelemetryStrip(null, [], {
+      fileCount: 12,
+      totalBytes: 1_500_000,
+    })
+
+    expect(html).toContain("telemetry-strip")
+    expect(html).toContain("12 files")
+    expect(html).toContain("1.4 MB")
+  })
+
   test("resolveRunTelemetry falls back to node history", () => {
     const resolved = resolveRunTelemetry(null, [
       {

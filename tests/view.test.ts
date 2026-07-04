@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test"
 import { renderDebugLogHtml } from "../src/view/debug-log-viewer.ts"
 import { renderStructuredJson } from "../src/view/artifact-renderers.ts"
 import { POLLING_SCRIPT } from "../src/view/client-script.ts"
-import { renderInterviewChatCard, renderLivePipeline } from "../src/view/components.ts"
+import { renderInterviewChatCard } from "../src/view/components.ts"
+import { renderNodeGrid } from "../src/view/node-view.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 import { classifyFile } from "../src/view/file-browser.ts"
 import { card, section, summaryRow, summaryTable } from "../src/view/html.ts"
@@ -131,33 +132,36 @@ describe("view file browser classification", () => {
 })
 
 describe("view components", () => {
-  test("renders discoverReader in the live pipeline", () => {
-    const html = renderLivePipeline(
-      { node: "discoverReaderPrompt", phase: "running", round: 0, maxRounds: 2, agents: {}, nodeHistory: [] },
-      ["request.json"],
-      "running",
+  test("renders discoverReader in the node grid", () => {
+    const html = renderNodeGrid(
       "example-run",
+      ["request.json"],
+      { node: "discoverReaderPrompt", phase: "running", round: 0, maxRounds: 2, agents: {}, nodeHistory: [] },
+      "running",
     )
 
-    expect(html).toContain("discoverReader")
-    expect(html).toContain("interviewing")
-    expect(html).toContain("stack-card-tight")
+    expect(html).toContain("Discover reader")
+    expect(html).toContain("node-grid-card active")
+    expect(html).toContain("/runs/example-run/node/discoverReader")
     expect(html).not.toContain('style="')
   })
 
   test("marks discoverReader complete when numbered reader profile exists", () => {
-    const html = renderLivePipeline(
-      null,
-      ["request.json", "reader-profile-1.json"],
-      "running",
+    const html = renderNodeGrid(
       "example-run",
+      ["request.json", "reader-profile-1.json"],
+      null,
+      "running",
     )
 
-    expect(html).toContain("profile ready")
+    expect(html).toContain("Discover reader")
+    expect(html).toContain("✓")
   })
 
-  test("renders finalizeDesign as the terminal design pipeline node", () => {
-    const html = renderLivePipeline(
+  test("renders finalizeDesign in the node grid", () => {
+    const html = renderNodeGrid(
+      "example-run",
+      ["final.md", "design-html-round-0.html", "final.html"],
       {
         phase: "complete",
         node: "finalizeDesign",
@@ -168,19 +172,18 @@ describe("view components", () => {
           { node: "finalizeDesign", startedAt: 1, completedAt: 2, status: "completed", round: 2 },
         ],
       },
-      ["final.md", "design-html-round-0.html", "final.html"],
       "approved",
-      "example-run",
     )
 
-    expect(html).toContain("finalizeDesign")
-    expect(html).toContain("final.html written")
+    expect(html).toContain("Finalize design")
     expect(html).toContain("/runs/example-run/node/finalizeDesign")
     expect(html).not.toContain("browserQaEnhance")
   })
 
-  test("ignores stale browser QA node history in the design pipeline", () => {
-    const html = renderLivePipeline(
+  test("does not surface stale browser QA nodes in the node grid", () => {
+    const html = renderNodeGrid(
+      "example-run",
+      ["final.md", "design-html-round-0.html", "final.html"],
       {
         phase: "complete",
         node: "finalizeDesign",
@@ -191,12 +194,10 @@ describe("view components", () => {
           { node: "browserQaEnhance", startedAt: 1, completedAt: 2, status: "completed", round: 2 },
         ],
       },
-      ["final.md", "design-html-round-0.html", "final.html"],
       "approved",
-      "example-run",
     )
 
-    expect(html).toContain("finalizeDesign")
+    expect(html).toContain("Finalize design")
     expect(html).not.toContain("browserQaEnhance")
     expect(html).not.toContain("browser-qa-enhancer")
   })

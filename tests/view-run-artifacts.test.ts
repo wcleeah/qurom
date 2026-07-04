@@ -1,9 +1,13 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
-import { renderLivePipeline } from "../src/view/components.ts"
+import { renderNodeGrid } from "../src/view/node-view.ts"
 import { classifyFile } from "../src/view/file-browser.ts"
-import { renderAuditVoteTable, renderAuditorFindingsBlocks } from "../src/view/audit-view.ts"
+import { renderAuditVoteTable, renderAuditorFindingsBlocks, renderCompactAuditVoteTable, renderRoundAuditVoteTable, buildRoundAuditVoteRows } from "../src/view/audit-view.ts"
 import { filesForNode, isNodeComplete } from "../src/view/node-registry.ts"
+import { renderRoundStrip } from "../src/view/round-view.ts"
 import type { LiveStatus } from "../src/view/types.ts"
 import {
   indexRunArtifacts,
@@ -92,6 +96,49 @@ describe("audit-view rendering", () => {
     expect(findings).toContain("sample bias")
     expect(findings).toContain("No findings")
   })
+
+  test("renders compact vote table with findings count only", () => {
+    const audits = [
+      {
+        agent: "methodologist",
+        vote: "revise",
+        summary: "methodology gaps",
+        findings: [
+          { severity: "major", category: "method", issue: "sample bias", evidence: ["p.2"], required_fix: "fix", findingId: "f1" },
+        ],
+      },
+      {
+        agent: "fact-checker",
+        vote: "approve",
+        summary: "looks good",
+        findings: [],
+      },
+    ]
+
+    const table = renderCompactAuditVoteTable(audits)
+    expect(table).toContain("methodologist")
+    expect(table).toContain("revise")
+    expect(table).toContain("fact-checker")
+    expect(table).toContain("approve")
+    expect(table).toContain("Findings")
+    expect(table).not.toContain("Blocker")
+    expect(table).not.toContain("sample bias")
+  })
+
+  test("renders live audit rows with per-agent loading states", () => {
+    const table = renderRoundAuditVoteTable([
+      { agent: "source-auditor", vote: "approve", findings: 0, status: "complete" },
+      { agent: "logic-auditor", status: "running" },
+      { agent: "clarity-auditor", status: "pending" },
+    ])
+
+    expect(table).toContain("source-auditor")
+    expect(table).toContain("approve")
+    expect(table).toContain("auditing…")
+    expect(table).toContain("audit-row-spinner")
+    expect(table).toContain("waiting…")
+    expect(table).toContain("audit-row-running")
+  })
 })
 
 describe("node-registry completion", () => {
@@ -146,26 +193,27 @@ describe("classifyFile rebuttal artifacts", () => {
   })
 })
 
-describe("live pipeline rebuttal detection", () => {
-  test("marks rebuttal nodes complete with turn-based artifacts", () => {
-    const html = renderLivePipeline(
-      null,
+describe("node grid rebuttal detection", () => {
+  test("includes rebuttal nodes with turn-based artifacts", () => {
+    const html = renderNodeGrid(
+      "example-run",
       [
         "auditor-rebuttal-responses-round-0-turn-1.json",
         "drafter-rebuttal-review-round-0-turn-1.json",
       ],
+      null,
       "running",
-      "example-run",
     )
 
-    expect(html).toContain("runTargetedRebuttals")
-    expect(html).toContain("reviewRebuttalResponses")
+    expect(html).toContain("Targeted rebuttals")
+    expect(html).toContain("Rebuttal review")
     expect(html).toContain("/runs/example-run/node/runTargetedRebuttals")
-    expect(html).toContain("1 turn")
   })
 
-  test("links active pipeline nodes", () => {
-    const html = renderLivePipeline(
+  test("highlights active node in the grid", () => {
+    const html = renderNodeGrid(
+      "example-run",
+      ["audits-round-0.json", "audits-round-1.json"],
       {
         phase: "running",
         node: "runParallelAudits",
@@ -174,12 +222,154 @@ describe("live pipeline rebuttal detection", () => {
         agents: {},
         nodeHistory: [],
       },
-      ["audits-round-0.json", "audits-round-1.json"],
       "running",
-      "example-run",
     )
 
-    expect(html).toContain('pipeline-node active')
+    expect(html).toContain("node-grid-card active")
     expect(html).toContain("/runs/example-run/node/runParallelAudits")
+  })
+})
+
+describe("renderRoundStrip audit summaries", () => {
+  let dir: string
+  let originalRunsDir: string | undefined
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "qurom-round-strip-"))
+    const runDir = join(dir, "demo-run")
+    await mkdir(runDir, { recursive: true })
+    await writeFile(
+      join(runDir, "audits-round-0.json"),
+      JSON.stringify([
+        {
+          agent: "methodologist",
+          vote: "revise",
+          summary: "gaps",
+          findings: [{ severity: "major", category: "method", issue: "bias", evidence: [], required_fix: "fix", findingId: "f1" }],
+        },
+        { agent: "fact-checker", vote: "approve", summary: "ok", findings: [] },
+      ]),
+    )
+    originalRunsDir = process.env.QUORUM_RUNS_DIR
+    process.env.QUORUM_RUNS_DIR = dir
+  })
+
+  afterEach(async () => {
+    if (originalRunsDir === undefined) delete process.env.QUORUM_RUNS_DIR
+    else process.env.QUORUM_RUNS_DIR = originalRunsDir
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  test("includes compact voting table per round with audits", async () => {
+    const html = await renderRoundStrip("demo-run", ["draft-round-0.md", "audits-round-0.json"], null)
+
+    expect(html).toContain("Research rounds")
+    expect(html).toContain("round-audit-summaries")
+    expect(html).toContain("methodologist")
+    expect(html).toContain("revise")
+    expect(html).toContain("fact-checker")
+    expect(html).toContain("approve")
+    expect(html).toContain("audit-vote-table-compact")
+    expect(html).toContain("/runs/demo-run/round/0")
+  })
+
+  test("shows live loading rows while parallel audits are running", async () => {
+    await writeFile(
+      join(dir, "demo-run", "audit-source-auditor-round-0.json"),
+      JSON.stringify({
+        agent: "source-auditor",
+        vote: "approve",
+        summary: "ok",
+        findings: [],
+      }),
+    )
+
+    const liveStatus: LiveStatus = {
+      phase: "running",
+      node: "runParallelAudits",
+      round: 0,
+      maxRounds: 3,
+      agents: {
+        "auditor:logic-auditor": {
+          status: "running",
+          tokensIn: 100,
+          tokensOut: 20,
+          usageAvailable: true,
+          toolCalls: [],
+          reasoning: "",
+        },
+        "auditor:clarity-auditor": {
+          status: "idle",
+          tokensIn: 0,
+          tokensOut: 0,
+          usageAvailable: false,
+          toolCalls: [],
+          reasoning: "",
+        },
+      },
+      nodeHistory: [],
+    }
+
+    const html = await renderRoundStrip(
+      "demo-run",
+      ["draft-round-0.md", "audit-source-auditor-round-0.json"],
+      liveStatus,
+    )
+
+    expect(html).toContain("source-auditor")
+    expect(html).toContain("approve")
+    expect(html).toContain("logic-auditor")
+    expect(html).toContain("auditing…")
+    expect(html).toContain("clarity-auditor")
+    expect(html).toContain("waiting…")
+  })
+
+  test("buildRoundAuditVoteRows merges per-agent files with live status", async () => {
+    await writeFile(
+      join(dir, "demo-run", "draft-round-0.md"),
+      "# draft",
+    )
+    await writeFile(
+      join(dir, "demo-run", "audit-source-auditor-round-0.json"),
+      JSON.stringify({
+        agent: "source-auditor",
+        vote: "revise",
+        summary: "issues",
+        findings: [{ severity: "major", category: "x", issue: "y", evidence: [], required_fix: "z", findingId: "f1" }],
+      }),
+    )
+
+    const rows = await buildRoundAuditVoteRows(
+      "demo-run",
+      {
+        round: 0,
+        perAgentAudits: ["audit-source-auditor-round-0.json"],
+        perAgentRebuttalInputs: [],
+        rebuttalTurns: [],
+      },
+      {
+        phase: "running",
+        node: "runParallelAudits",
+        round: 0,
+        maxRounds: 3,
+        agents: {
+          "auditor:logic-auditor": {
+            status: "running",
+            tokensIn: 0,
+            tokensOut: 0,
+            usageAvailable: false,
+            toolCalls: [],
+            reasoning: "",
+          },
+        },
+        nodeHistory: [],
+      },
+      { isCurrentRound: true },
+    )
+
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toMatchObject({ agent: "source-auditor", vote: "revise", findings: 1, status: "complete" })
+    expect(rows[1]).toMatchObject({ agent: "logic-auditor", status: "running" })
+    expect(rows[2]).toMatchObject({ agent: "clarity-auditor", status: "pending" })
   })
 })

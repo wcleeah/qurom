@@ -1,7 +1,7 @@
 import { addUsage, emptyUsage } from "../usage"
 import { tableWrap } from "./html"
 import { getNodeDefinition } from "./node-registry"
-import { escapeHtml, formatCostUsd, formatDurationMs, formatElapsed, formatTokenCount, formatUsagePair } from "./utils"
+import { escapeHtml, formatBytes, formatCostUsd, formatDurationMs, formatElapsed, formatTokenCount, formatUsagePair } from "./utils"
 import type { AgentUsageSnapshot, LiveStatus, NodeHistoryEntry, UsageTotals } from "./types"
 
 export function runElapsedMs(liveStatus: LiveStatus | null, nodeHistory: NodeHistoryEntry[]): number | undefined {
@@ -111,18 +111,31 @@ function formatTelemetryUsageLabel(usage: UsageTotals, usageAvailable: boolean):
   return formatUsagePair(usage, true)
 }
 
+export type RunTelemetryExtras = {
+  fileCount?: number
+  totalBytes?: number
+}
+
 export function renderRunTelemetryStrip(
   liveStatus: LiveStatus | null,
   nodeHistory: NodeHistoryEntry[],
+  extras?: RunTelemetryExtras,
 ): string {
   const elapsedMs = runElapsedMs(liveStatus, nodeHistory)
   const { usage, usageAvailable, costAvailable } = resolveRunTelemetry(liveStatus, nodeHistory)
-  if (!elapsedMs && !usageAvailable && !costAvailable) return ""
+  const hasFileStats = extras?.fileCount !== undefined || extras?.totalBytes !== undefined
+  if (!elapsedMs && !usageAvailable && !costAvailable && !hasFileStats) return ""
 
   const parts: string[] = []
   if (elapsedMs !== undefined) parts.push(`${formatElapsed(elapsedMs)} elapsed`)
   const usageLabel = formatTelemetryUsageLabel(usage, usageAvailable || costAvailable)
   if (usageLabel) parts.push(usageLabel)
+  if (extras?.fileCount !== undefined) {
+    parts.push(`${extras.fileCount} file${extras.fileCount !== 1 ? "s" : ""}`)
+  }
+  if (extras?.totalBytes !== undefined) {
+    parts.push(formatBytes(extras.totalBytes))
+  }
 
   return `<div class="telemetry-strip">
   ${parts.map((part) => `<span class="telemetry-chip">${escapeHtml(part)}</span>`).join("")}

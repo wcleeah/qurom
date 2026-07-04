@@ -1,7 +1,10 @@
 import { renderFindingRow } from "./artifact-renderers"
 import { tableWrap } from "./html"
+import { resolveLiveNode } from "./node-registry"
 import { safeFilePath } from "./paths"
-import type { AuditFinding, AuditRecord } from "./types"
+import { AUDITOR_ROLES } from "../role-registry"
+import type { RoundArtifacts } from "./run-artifacts"
+import type { AuditFinding, AuditRecord, LiveAgentStatus, LiveStatus } from "./types"
 import { escapeHtml } from "./utils"
 
 function countBySeverity(findings: AuditFinding[]): Record<string, number> {
@@ -20,6 +23,140 @@ export async function readAuditBundle(runName: string, filename: string): Promis
   } catch {
     return null
   }
+}
+
+export async function readPerAgentAudit(runName: string, filename: string): Promise<AuditRecord | null> {
+  try {
+    const raw = await Bun.file(safeFilePath(runName, filename)).text()
+    const data = JSON.parse(raw)
+    if (!data || typeof data !== "object") return null
+    const record = data as AuditRecord
+    if (typeof record.agent !== "string") return null
+    return record
+  } catch {
+    return null
+  }
+}
+
+export type AuditVoteRow = {
+  agent: string
+  vote?: string
+  findings?: number
+  status: "complete" | "running" | "pending" | "error"
+}
+
+function liveAgentForAuditor(agents: Record<string, LiveAgentStatus>, agent: string): LiveAgentStatus | undefined {
+  return agents[`auditor:${agent}`] ?? agents[agent]
+}
+
+function liveRowStatus(agent: LiveAgentStatus | undefined): AuditVoteRow["status"] {
+  if (!agent) return "pending"
+  if (agent.status === "running") return "running"
+  if (agent.status === "error") return "error"
+  if (agent.status === "complete") return "running"
+  return "pending"
+}
+
+export async function buildRoundAuditVoteRows(
+  runName: string,
+  round: RoundArtifacts,
+  liveStatus: LiveStatus | null,
+  options?: { isCurrentRound?: boolean },
+): Promise<AuditVoteRow[]> {
+  if (round.audits) {
+    const bundle = await readAuditBundle(runName, round.audits)
+    if (bundle) {
+      return bundle.map((audit) => ({
+        agent: audit.agent,
+        vote: audit.vote,
+        findings: audit.findings?.length ?? 0,
+        status: "complete" as const,
+      }))
+    }
+  }
+
+  const isCurrentRound = options?.isCurrentRound ?? false
+  const auditingLive = isCurrentRound
+    && liveStatus?.phase === "running"
+    && liveStatus.round === round.round
+    && resolveLiveNode(liveStatus) === "runParallelAudits"
+
+  if (!auditingLive && round.perAgentAudits.length === 0) {
+    return []
+  }
+
+  const rows = new Map<string, AuditVoteRow>()
+
+  for (const file of round.perAgentAudits) {
+    const match = file.match(/^audit-([\w-]+)-round-\d+\.json$/)
+    if (!match) continue
+    const agent = match[1]!
+    const record = await readPerAgentAudit(runName, file)
+    if (!record) continue
+    rows.set(agent, {
+      agent: record.agent,
+      vote: record.vote,
+      findings: record.findings?.length ?? 0,
+      status: "complete",
+    })
+  }
+
+  if (auditingLive) {
+    for (const agent of AUDITOR_ROLES) {
+      if (rows.has(agent)) continue
+      const liveAgent = liveAgentForAuditor(liveStatus!.agents, agent)
+      rows.set(agent, {
+        agent,
+        status: liveRowStatus(liveAgent),
+      })
+    }
+  }
+
+  return AUDITOR_ROLES
+    .filter((agent) => rows.has(agent))
+    .map((agent) => rows.get(agent)!)
+}
+
+export function renderRoundAuditVoteTable(rows: AuditVoteRow[]): string {
+  if (rows.length === 0) {
+    return `<p class="empty-inline dim-text">No auditor results yet.</p>`
+  }
+
+  const body = rows.map((row) => {
+    if (row.status === "complete") {
+      return `<tr>
+  <td>${escapeHtml(row.agent)}</td>
+  <td><span class="auditor-vote ${escapeHtml(row.vote ?? "")}">${escapeHtml(row.vote ?? "")}</span></td>
+  <td>${row.findings ?? 0}</td>
+</tr>`
+    }
+
+    const voteCell = row.status === "running"
+      ? `<span class="audit-row-status running"><span class="audit-row-spinner" aria-hidden="true"></span> auditing…</span>`
+      : row.status === "error"
+        ? `<span class="audit-row-status error">error</span>`
+        : `<span class="audit-row-status pending dim-text">waiting…</span>`
+
+    return `<tr class="audit-row-${row.status}">
+  <td>${escapeHtml(row.agent)}</td>
+  <td>${voteCell}</td>
+  <td><span class="dim-text">—</span></td>
+</tr>`
+  }).join("")
+
+  return tableWrap(`<table class="summary-table summary-table-compact audit-vote-table audit-vote-table-compact">
+  <thead><tr><th>Auditor</th><th>Vote</th><th>Findings</th></tr></thead>
+  <tbody>${body}</tbody>
+</table>`)
+}
+
+export function renderCompactAuditVoteTable(audits: AuditRecord[]): string {
+  return renderRoundAuditVoteTable(audits.map((audit) => ({
+    agent: audit.agent,
+    vote: audit.vote,
+    findings: audit.findings?.length ?? 0,
+    status: "complete" as const,
+  })))
 }
 
 export function renderAuditVoteTable(audits: AuditRecord[]): string {
