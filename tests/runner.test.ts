@@ -386,6 +386,9 @@ describe("runResearchPipeline", () => {
       inputMode: "topic",
       topic: "resume topic",
     }))
+    await Bun.write(join(runDir, "node-history.json"), JSON.stringify([
+      { node: "draftFullDraft", startedAt: 1, completedAt: 2, status: "completed", round: 0 },
+    ]))
 
     const bus = createEventBus()
     const invokeInputs: unknown[] = []
@@ -429,6 +432,10 @@ describe("runResearchPipeline", () => {
     expect(invokeConfigs[0]).toMatchObject({
       configurable: { thread_id: "req-resume-1", checkpoint_id: "checkpoint-7" },
     })
+
+    const runStatus = await Bun.file(join(runDir, "run-status.json")).json() as { phase: string; nodeHistory: unknown[] }
+    expect(runStatus.phase).toBe("complete")
+    expect(runStatus.nodeHistory.length).toBeGreaterThan(0)
   })
 
   test("retries a named node from the checkpoint before that node", async () => {

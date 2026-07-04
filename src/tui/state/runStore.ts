@@ -178,6 +178,7 @@ export function reduce(state: RunStoreState, event: RunnerEvent): RunStoreState 
     case "agent.message.start":
     case "agent.reasoning":
     case "agent.message.text":
+    case "agent.usage":
     case "agent.permission":
     case "agent.permission.replied": {
       // Update lastEventAt for the agent — no scrollback needed

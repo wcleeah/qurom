@@ -3,6 +3,7 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import type { RuntimeConfig } from "./config"
 import { ensureRunDirPath } from "./output"
 import type { Bridge, EventBus } from "./runner"
+import { foldOpencodeTokens } from "./usage"
 
 type OpencodeClient = ReturnType<typeof createOpencodeClient>
 
@@ -186,13 +187,29 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
 
       if (event.type === "message.updated") {
         if (event.properties.info.role !== "assistant") continue
-        if (seenAssistantMessages.has(event.properties.info.id)) continue
+        const info = event.properties.info as {
+          id: string
+          tokens?: { input?: number; output?: number; cache?: { read?: number; write?: number } }
+        }
+        const sessionID = event.properties.sessionID
+        if (info.tokens) {
+          const folded = foldOpencodeTokens(info.tokens)
+          bus.emit({
+            kind: "agent.usage",
+            sessionID,
+            messageID: info.id,
+            tokensIn: folded.tokensIn,
+            tokensOut: folded.tokensOut,
+            source: "opencode",
+          })
+        }
+        if (seenAssistantMessages.has(info.id)) continue
 
-        seenAssistantMessages.add(event.properties.info.id)
+        seenAssistantMessages.add(info.id)
         bus.emit({
           kind: "agent.message.start",
-          sessionID: event.properties.sessionID,
-          messageID: event.properties.info.id,
+          sessionID,
+          messageID: info.id,
         })
         continue
       }

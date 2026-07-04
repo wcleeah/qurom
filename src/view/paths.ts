@@ -1,3 +1,4 @@
+import { readdir, stat } from "node:fs/promises"
 import { basename, resolve } from "node:path"
 
 import { quorumDataPaths } from "../data-paths"
@@ -15,6 +16,31 @@ export const RUNS_DIR = getRunsDir()
 
 export const PORT = parseInt(process.env.VIEW_PORT ?? "3000", 10)
 export const HOST = process.env.VIEW_HOST ?? "0.0.0.0"
+
+/** Resolve a run URL segment to the on-disk directory name (exact or requestId suffix). */
+export async function resolveRunName(runName: string): Promise<string | null> {
+  try {
+    const direct = safeRunPath(runName)
+    if ((await stat(direct)).isDirectory()) return runName
+  } catch {
+    // not an exact match — try fuzzy lookup below
+  }
+
+  const runsDir = getRunsDir()
+  let dirs: string[]
+  try {
+    const entries = await readdir(runsDir, { withFileTypes: true })
+    dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name)
+  } catch {
+    return null
+  }
+
+  if (dirs.includes(runName)) return runName
+  const suffixMatch = dirs.find((dir) => dir.endsWith(`-${runName}`))
+  if (suffixMatch) return suffixMatch
+  const includeMatch = dirs.find((dir) => dir.includes(runName))
+  return includeMatch ?? null
+}
 
 export function safeRunPath(runName: string): string {
   const runsDir = getRunsDir()

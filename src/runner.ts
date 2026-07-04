@@ -1,7 +1,7 @@
 import { createGraph } from "./graph"
 import { createOpencodeEventBridge } from "./opencode-event-bridge"
 import { createAgentRuntime } from "./agent-runtime/runtime"
-import { createLiveStatusWriter } from "./live-status"
+import { createLiveStatusWriter, type NodeHistoryEntry } from "./live-status"
 import { createDebugLog, type DebugLog } from "./debug-log"
 import { abortSession } from "./opencode"
 import { removeEmptyRunDir, writeFailedArtifacts } from "./output"
@@ -15,6 +15,7 @@ import type { validateProviderPrerequisites } from "./providers/registry"
 import type { PromptBundle } from "./prompt-assets"
 import { answeredQuestionsFromTranscript } from "./reader-transcript"
 import { resolveRunForResume } from "./run-resume"
+import { join } from "node:path"
 
 export type GraphFactory = typeof createGraph
 
@@ -63,6 +64,16 @@ export type RunnerEvent =
       requestID: string
       reply: "once" | "always" | "reject"
       sessionID: string
+    }
+  | {
+      kind: "agent.usage"
+      sessionID: string
+      tokensIn: number
+      tokensOut: number
+      source: "opencode" | "cursor"
+      messageID?: string
+      runID?: string
+      cumulative?: boolean
     }
   | { kind: "result"; runResult: unknown }
   | {
@@ -545,6 +556,44 @@ async function archiveDesignArtifacts(runDir: string) {
   return { archiveDir, files: files.map((file) => file.name) }
 }
 
+async function readNodeHistoryFromDisk(runDir: string): Promise<NodeHistoryEntry[]> {
+  try {
+    const raw = await Bun.file(join(runDir, "node-history.json")).json()
+    return Array.isArray(raw) ? raw as NodeHistoryEntry[] : []
+  } catch {
+    return []
+  }
+}
+
+function attachResearchRunObservers(
+  runDir: string,
+  request: InputRequest,
+  requestId: string,
+  config: RuntimeConfig,
+  bus: EventBus,
+  opts?: { initialNodeHistory?: NodeHistoryEntry[]; logStart?: boolean },
+): { liveStatusWriter: ReturnType<typeof createLiveStatusWriter>; debugLog: DebugLog } {
+  const debugLog = createDebugLog(runDir)
+  const liveStatusWriter = createLiveStatusWriter(bus, runDir, {
+    maxRounds: config.quorumConfig.maxRounds,
+    initialNodeHistory: opts?.initialNodeHistory,
+  }, debugLog)
+  if (opts?.logStart !== false) {
+    debugLog.write("pipeline.start", {
+      requestId,
+      inputMode: request.inputMode,
+      topic: request.inputMode === "topic" ? request.topic : undefined,
+      documentPath: request.inputMode === "document" ? request.documentPath : undefined,
+      recursionLimit: config.quorumConfig.recursionLimit,
+      maxRounds: config.quorumConfig.maxRounds,
+      designatedDrafter: DRAFTER_ROLE,
+      auditors: [...AUDITOR_ROLES],
+      designQuorum: config.quorumConfig.designQuorum?.enabled ?? false,
+    })
+  }
+  return { liveStatusWriter, debugLog }
+}
+
 export async function runResearchPipeline(args: RunResearchPipelineArgs): Promise<RunResult> {
   const { config, prerequisites, promptBundle, bus, signal } = args
   void prerequisites
@@ -608,13 +657,35 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
     phase: "starting",
     requestId,
     traceId: telemetry.traceId,
+    ...(runDir ? { outputDir: runDir } : {}),
   })
 
   try {
     await bridge.start()
 
+    if (resolvedResume?.runDir) {
+      const initialNodeHistory = await readNodeHistoryFromDisk(resolvedResume.runDir)
+      const attached = attachResearchRunObservers(
+        resolvedResume.runDir,
+        request,
+        requestId,
+        config,
+        bus,
+        { initialNodeHistory, logStart: false },
+      )
+      liveStatusWriter = attached.liveStatusWriter
+      debugLog = attached.debugLog
+      debugLogRef.current = debugLog
+    }
+
     const runResult = await telemetry.runWithRootObservation(async () => {
-      bus.emit({ kind: "lifecycle", phase: "running", requestId, traceId: telemetry.traceId })
+      bus.emit({
+        kind: "lifecycle",
+        phase: "running",
+        requestId,
+        traceId: telemetry.traceId,
+        ...(runDir ? { outputDir: runDir } : {}),
+      })
 
       const graph = graphFactory(config, promptBundle, {
         runtime: createAgentRuntime(config, bus, { roleInstructions: promptBundle.roleInstructions }),
@@ -630,21 +701,17 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
               const op = (state as { outputPath?: string }).outputPath
               if (op) {
                 interviewRunDir = op
-                liveStatusWriter = createLiveStatusWriter(bus, op, {
-                  maxRounds: config.quorumConfig.maxRounds,
-                }, debugLog)
-                debugLog = createDebugLog(op)
+                runDir = op
+                const attached = attachResearchRunObservers(op, request, requestId, config, bus)
+                liveStatusWriter = attached.liveStatusWriter
+                debugLog = attached.debugLog
                 debugLogRef.current = debugLog
-                debugLog.write("pipeline.start", {
+                bus.emit({
+                  kind: "lifecycle",
+                  phase: "running",
                   requestId,
-                  inputMode: request.inputMode,
-                  topic: request.inputMode === "topic" ? request.topic : undefined,
-                  documentPath: request.inputMode === "document" ? request.documentPath : undefined,
-                  recursionLimit: config.quorumConfig.recursionLimit,
-                  maxRounds: config.quorumConfig.maxRounds,
-                  designatedDrafter: DRAFTER_ROLE,
-                  auditors: [...AUDITOR_ROLES],
-                  designQuorum: config.quorumConfig.designQuorum?.enabled ?? false,
+                  traceId: telemetry.traceId,
+                  outputDir: op,
                 })
               }
             }
@@ -912,6 +979,8 @@ export function describeRunnerEvent(event: RunnerEvent): string {
       return `agent.permission:${event.sessionID}:${event.requestID}:${event.permission}`
     case "agent.permission.replied":
       return `agent.permission.replied:${event.sessionID}:${event.requestID}:${event.reply}`
+    case "agent.usage":
+      return `agent.usage:${event.sessionID}:${event.source}`
     case "result":
       return "result"
     case "design.phase":
@@ -966,11 +1035,11 @@ export async function runDesignPipeline(args: {
     else signal.addEventListener("abort", () => bridgeAbort.abort(signal.reason), { once: true })
   }
 
-  bus.emit({ kind: "lifecycle", phase: "starting", requestId, traceId: telemetry.traceId })
+  bus.emit({ kind: "lifecycle", phase: "starting", requestId, traceId: telemetry.traceId, outputDir: runDir })
 
   try {
     await bridge.start()
-    bus.emit({ kind: "lifecycle", phase: "running", requestId, traceId: telemetry.traceId })
+    bus.emit({ kind: "lifecycle", phase: "running", requestId, traceId: telemetry.traceId, outputDir: runDir })
 
     const graph = graphFactory(config, promptBundle, {
       observer: {

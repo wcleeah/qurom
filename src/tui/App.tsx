@@ -1,3 +1,4 @@
+import { basename } from "node:path"
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useRef, useState } from "react"
 import type { RuntimeConfig } from "../config"
@@ -27,6 +28,24 @@ interface RunCtx {
   promise: Promise<unknown>
 }
 
+function bindViewUrl(
+  bus: ReturnType<typeof createEventBus>,
+  setViewUrl: (url: string) => void,
+): () => void {
+  const port = process.env.VIEW_PORT ?? "3000"
+  const host = process.env.VIEW_HOST ?? "localhost"
+  return bus.on((event) => {
+    if (event.kind !== "lifecycle") return
+    if (event.outputDir) {
+      setViewUrl(`http://${host}:${port}/runs/${encodeURIComponent(basename(event.outputDir))}`)
+      return
+    }
+    if (event.requestId && (event.phase === "running" || event.phase === "starting")) {
+      setViewUrl(`http://${host}:${port}/runs/${encodeURIComponent(event.requestId)}`)
+    }
+  })
+}
+
 export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit }: AppProps) => {
   const [screen, setScreen] = useState<Screen>("prompt")
   const [runCtx, setRunCtx] = useState<RunCtx | undefined>(undefined)
@@ -48,14 +67,7 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
       setRunCtx(ctx)
       setScreen("running")
 
-      const port = process.env.VIEW_PORT ?? "3000"
-      const host = process.env.VIEW_HOST ?? "localhost"
-      const offLifecycle = bus.on((event) => {
-        if (event.kind === "lifecycle" && event.requestId) {
-          setViewUrl(`http://${host}:${port}/runs/${event.requestId}`)
-          offLifecycle()
-        }
-      })
+      bindViewUrl(bus, setViewUrl)
       const offTerminal = bus.on((event) => {
         if (event.kind === "lifecycle" && (event.phase === "complete" || event.phase === "error")) {
           setScreen("complete")
@@ -84,14 +96,7 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
       setRunCtx(ctx)
       setScreen("running")
 
-      const port = process.env.VIEW_PORT ?? "3000"
-      const host = process.env.VIEW_HOST ?? "localhost"
-      const offLifecycle = bus.on((event) => {
-        if (event.kind === "lifecycle" && event.requestId) {
-          setViewUrl(`http://${host}:${port}/runs/${event.requestId}`)
-          offLifecycle()
-        }
-      })
+      bindViewUrl(bus, setViewUrl)
       const offTerminal = bus.on((event) => {
         if (event.kind === "lifecycle" && (event.phase === "complete" || event.phase === "error")) {
           setScreen("complete")
@@ -120,14 +125,7 @@ export const App = ({ config, prerequisites, promptBundle, systemStatus, onExit 
       setRunCtx(ctx)
       setScreen("running")
 
-      const port = process.env.VIEW_PORT ?? "3000"
-      const host = process.env.VIEW_HOST ?? "localhost"
-      const offLifecycle = bus.on((event) => {
-        if (event.kind === "lifecycle" && event.requestId) {
-          setViewUrl(`http://${host}:${port}/runs/${event.requestId}`)
-          offLifecycle()
-        }
-      })
+      bindViewUrl(bus, setViewUrl)
       const offTerminal = bus.on((event) => {
         if (event.kind === "lifecycle" && (event.phase === "complete" || event.phase === "error")) {
           setScreen("complete")

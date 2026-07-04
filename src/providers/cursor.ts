@@ -16,6 +16,8 @@ import { basename, dirname, join } from "node:path"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
 import type { RuntimeConfig } from "../config"
+import type { EventBus } from "../runner"
+import { foldCursorUsage, hasUsage } from "../usage"
 import type {
   AgentProvider,
   AgentRunHandle,
@@ -455,6 +457,33 @@ async function downloadCursorArtifact(input: {
   await writeFile(input.outputFile, buffer)
 }
 
+function cursorUsageFromRun(run: CursorRunHandle, result: unknown) {
+  const raw = (run as { usage?: Record<string, number> }).usage
+    ?? (result as { usage?: Record<string, number> })?.usage
+  if (!raw) return undefined
+  return foldCursorUsage(raw)
+}
+
+function emitCursorRunUsage(
+  bus: EventBus | undefined,
+  sessionID: string,
+  run: CursorRunHandle,
+  result: unknown,
+) {
+  if (!bus) return
+  const folded = cursorUsageFromRun(run, result)
+  if (!folded || !hasUsage(folded)) return
+  bus.emit({
+    kind: "agent.usage",
+    sessionID,
+    runID: run.id,
+    tokensIn: folded.tokensIn,
+    tokensOut: folded.tokensOut,
+    source: "cursor",
+    cumulative: true,
+  })
+}
+
 function emitCursorDelta(input: {
   event: unknown
   providerInput: Parameters<AgentProvider["prompt"]>[0]
@@ -616,6 +645,7 @@ export const cursorProvider: AgentProvider = {
           if (status && status !== "finished" && status !== "completed") {
             throw new CursorRunStatusError(run.id, status, result)
           }
+          emitCursorRunUsage(input.bus, input.handle.id, run, result)
           input.bus?.emit({
             kind: "agent.message.text",
             sessionID: input.handle.id,
@@ -722,6 +752,7 @@ export const cursorProvider: AgentProvider = {
             if (status && status !== "finished" && status !== "completed") {
               throw new CursorRunStatusError(run.id, status, result)
             }
+            emitCursorRunUsage(input.bus, input.handle.id, run, result)
             await downloadCursorArtifact({
               agent: active.agent,
               handle: input.handle,

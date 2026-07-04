@@ -20,10 +20,16 @@ import {
 } from "./html-ask-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
 import { renderIndex, renderNodePage, renderRoundPage, renderFilesPage, renderRun, serveRawFile } from "./pages"
-import { safeFilePath, HOST, PORT, safeRunPath } from "./paths"
+import { resolveRunName, safeFilePath, HOST, PORT, safeRunPath } from "./paths"
 import { setRunStarred } from "./starred-store"
 import { viewServerAdminEnabled } from "./server-options"
 import { MARKED_UMD_PATH, MARKED_UMD_URL } from "./html-viewer-markdown"
+
+async function resolveRunDir(runName: string): Promise<{ runName: string; runDir: string }> {
+  const resolved = await resolveRunName(runName)
+  if (!resolved) throw new Error("Run not found")
+  return { runName: resolved, runDir: safeRunPath(resolved) }
+}
 
 function defaultsRoutesDisabled() {
   return !viewServerAdminEnabled()
@@ -152,7 +158,7 @@ export function startViewServer(): void {
       if (starMatch && req.method === "POST") {
         const runName = decodeURIComponent(starMatch[1])
         try {
-          const runDir = safeRunPath(runName)
+          const { runName: resolvedName, runDir } = await resolveRunDir(runName)
           const runStat = await stat(runDir)
           if (!runStat.isDirectory()) {
             return new Response("Not found", { status: 404 })
@@ -166,7 +172,7 @@ export function startViewServer(): void {
             const params = new URLSearchParams(raw)
             starred = params.get("starred") === "true"
           }
-          await setRunStarred(runName, starred)
+          await setRunStarred(resolvedName, starred)
           const wantsJson =
             url.searchParams.get("json") === "1"
             || (req.headers.get("accept") ?? "").includes("application/json")
@@ -176,7 +182,7 @@ export function startViewServer(): void {
           const referer = req.headers.get("referer")
           return new Response(null, {
             status: 303,
-            headers: { Location: referer ?? `/runs/${encodeURIComponent(runName)}` },
+            headers: { Location: referer ?? `/runs/${encodeURIComponent(resolvedName)}` },
           })
         } catch (e) {
           if (e instanceof Error && e.message === "Path traversal blocked") {
@@ -191,7 +197,7 @@ export function startViewServer(): void {
       if (replyMatch && req.method === "POST") {
         const runName = decodeURIComponent(replyMatch[1])
         try {
-          const runDir = safeRunPath(runName)
+          const { runName: resolvedName, runDir } = await resolveRunDir(runName)
           const raw = await req.text()
           const params = new URLSearchParams(raw)
           const answers: string[] = []
@@ -209,7 +215,7 @@ export function startViewServer(): void {
           await Bun.write(`${runDir}/reader-reply.json`, JSON.stringify({ reply: replyText }))
           return new Response(null, {
             status: 303,
-            headers: { Location: `/runs/${encodeURIComponent(runName)}` },
+            headers: { Location: `/runs/${encodeURIComponent(resolvedName)}` },
           })
         } catch (e) {
           console.error("POST /reply error:", e)
@@ -221,7 +227,7 @@ export function startViewServer(): void {
       if (htmlNotesMatch && req.method === "POST") {
         const runName = decodeURIComponent(htmlNotesMatch[1])
         try {
-          const runDir = safeRunPath(runName)
+          const { runName: resolvedName, runDir } = await resolveRunDir(runName)
           const runStat = await stat(runDir)
           if (!runStat.isDirectory()) {
             return new Response("Not found", { status: 404 })
@@ -241,12 +247,12 @@ export function startViewServer(): void {
           if (!file) {
             return new Response("Missing file", { status: 400 })
           }
-          const resolved = safeFilePath(runName, file)
+          const resolved = safeFilePath(resolvedName, file)
           const fileStat = await stat(resolved)
           if (!fileStat.isFile()) {
             return new Response("Not found", { status: 404 })
           }
-          const result = await setHtmlReaderNotes(runName, file, notes)
+          const result = await setHtmlReaderNotes(resolvedName, file, notes)
           return Response.json({ ok: true, updatedAt: result.updatedAt })
         } catch (e) {
           if (e instanceof Error && (e.message === "Path traversal blocked" || e.message === "Only HTML files support reader annotations")) {
@@ -262,7 +268,7 @@ export function startViewServer(): void {
         const runName = decodeURIComponent(htmlHighlightsMatch[1])
         const highlightId = htmlHighlightsMatch[2] ? decodeURIComponent(htmlHighlightsMatch[2]) : undefined
         try {
-          const runDir = safeRunPath(runName)
+          const { runName: resolvedName, runDir } = await resolveRunDir(runName)
           const runStat = await stat(runDir)
           if (!runStat.isDirectory()) {
             return new Response("Not found", { status: 404 })
@@ -299,13 +305,13 @@ export function startViewServer(): void {
             if (!file) {
               return new Response("Missing file", { status: 400 })
             }
-            const resolved = safeFilePath(runName, file)
+            const resolved = safeFilePath(resolvedName, file)
             const fileStat = await stat(resolved)
             if (!fileStat.isFile()) {
               return new Response("Not found", { status: 404 })
             }
             const highlight = await createHtmlReaderHighlight({
-              runName,
+              runName: resolvedName,
               filePath: file,
               color,
               quote,
@@ -320,12 +326,12 @@ export function startViewServer(): void {
             if (!file) {
               return new Response("Missing file", { status: 400 })
             }
-            const resolved = safeFilePath(runName, file)
+            const resolved = safeFilePath(resolvedName, file)
             const fileStat = await stat(resolved)
             if (!fileStat.isFile()) {
               return new Response("Not found", { status: 404 })
             }
-            const deleted = await deleteHtmlReaderHighlight(runName, file, highlightId)
+            const deleted = await deleteHtmlReaderHighlight(resolvedName, file, highlightId)
             if (!deleted) {
               return new Response("Not found", { status: 404 })
             }
