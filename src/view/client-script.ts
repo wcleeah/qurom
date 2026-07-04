@@ -1,4 +1,8 @@
-const DEFAULT_POLL_SECTION_IDS = [
+import { LIVE_REFRESH_STORAGE_KEY, renderRefreshControls } from "./refresh-controls"
+
+export { LIVE_REFRESH_STORAGE_KEY, renderRefreshControls }
+
+const RUN_DETAIL_SECTION_IDS = [
   "telemetry-section",
   "pipeline-section",
   "round-strip-section",
@@ -19,28 +23,53 @@ const DEFAULT_POLL_SECTION_IDS = [
 
 function buildRefreshScript(options: {
   sectionIds: string[]
-  autoStart: boolean
-  initialStatus: string
+  defaultAutoRefresh: boolean
 }): string {
   const idsJson = JSON.stringify(options.sectionIds)
-  const autoStart = options.autoStart
-  const initialStatus = options.initialStatus
+  const defaultAutoRefresh = options.defaultAutoRefresh
+  const storageKey = LIVE_REFRESH_STORAGE_KEY
 
   return /* html */ `
 <script>
 (function () {
   const IDs = ${idsJson}
+  const STORAGE_KEY = ${JSON.stringify(storageKey)}
+  const DEFAULT_AUTO = ${defaultAutoRefresh}
   let timer
   let nextDelay = 8000
   let inFlight = false
+  let autoRefresh = readAutoRefresh()
   const refreshDot = () => document.getElementById("refresh-dot")
   const refreshStatus = () => document.getElementById("refresh-status")
+  const refreshToggle = () => document.getElementById("refresh-auto-toggle")
+
+  function readAutoRefresh() {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored === "on") return true
+    if (stored === "off") return false
+    return DEFAULT_AUTO
+  }
+
+  function writeAutoRefresh(enabled) {
+    localStorage.setItem(STORAGE_KEY, enabled ? "on" : "off")
+  }
+
+  function syncToggle() {
+    const toggle = refreshToggle()
+    if (toggle instanceof HTMLInputElement) toggle.checked = autoRefresh
+  }
+
+  function offStatusText() {
+    return "Live refresh off · click Refresh now to update"
+  }
+
   function setStatus(text, polling) {
     const status = refreshStatus()
     if (status) status.textContent = text
     const dot = refreshDot()
     if (dot) dot.classList.toggle("polling", !!polling)
   }
+
   function sectionShouldSkipSwap(id, oldEl) {
     if (!oldEl) return false
     if (id === "interview-chat-section") {
@@ -55,6 +84,23 @@ function buildRefreshScript(options: {
     }
     return false
   }
+
+  function scheduleNextPoll() {
+    clearTimeout(timer)
+    if (!autoRefresh) {
+      setStatus(offStatusText(), false)
+      return
+    }
+    timer = setTimeout(() => poll(false), nextDelay)
+    const status = refreshStatus()
+    if (status) {
+      const nextText = "next refresh in " + Math.round(nextDelay / 1000) + "s"
+      status.textContent = status.textContent.startsWith("Updated")
+        ? status.textContent + " · " + nextText
+        : "Next refresh in " + Math.round(nextDelay / 1000) + "s"
+    }
+  }
+
   async function poll(manual) {
     if (inFlight) return
     inFlight = true
@@ -93,22 +139,28 @@ function buildRefreshScript(options: {
     const interviewEl = document.getElementById("interview-chat-section")
     const interviewPending = !!(interviewEl && interviewEl.querySelector("form"))
     nextDelay = interviewPending ? 1500 : 8000
-    if (${autoStart}) {
-      timer = setTimeout(() => poll(false), nextDelay)
-      const status = refreshStatus()
-      if (status) {
-        const nextText = "next refresh in " + Math.round(nextDelay / 1000) + "s"
-        status.textContent = status.textContent.startsWith("Updated")
-          ? status.textContent + " · " + nextText
-          : "Next refresh in " + Math.round(nextDelay / 1000) + "s"
-      }
+    if (autoRefresh) {
+      scheduleNextPoll()
     } else if (manual) {
       const status = refreshStatus()
       if (status && status.textContent.startsWith("Updated")) {
-        status.textContent = status.textContent.split(" · ")[0]
+        status.textContent = status.textContent.split(" · ")[0] + " · " + offStatusText()
       }
     }
   }
+
+  function setAutoRefresh(enabled) {
+    autoRefresh = enabled
+    writeAutoRefresh(enabled)
+    syncToggle()
+    clearTimeout(timer)
+    if (enabled) {
+      void poll(false)
+    } else {
+      setStatus(offStatusText(), false)
+    }
+  }
+
   document.addEventListener("click", (event) => {
     const target = event.target
     if (target && target instanceof Element && target.closest("[data-refresh-now]")) {
@@ -116,6 +168,14 @@ function buildRefreshScript(options: {
       void poll(true)
     }
   })
+
+  document.addEventListener("change", (event) => {
+    const target = event.target
+    if (target instanceof HTMLInputElement && target.matches("[data-refresh-toggle]")) {
+      setAutoRefresh(target.checked)
+    }
+  })
+
   document.addEventListener("submit", async (event) => {
     const form = event.target
     if (!(form instanceof HTMLFormElement) || !form.matches("[data-interview-reply-form]")) return
@@ -139,23 +199,40 @@ function buildRefreshScript(options: {
       if (submit) submit.removeAttribute("disabled")
     }
   })
-  const status = refreshStatus()
-  if (status) status.textContent = ${JSON.stringify(initialStatus)}
-  ${autoStart ? "void poll(false)" : ""}
+
+  syncToggle()
+  if (autoRefresh) {
+    void poll(false)
+  } else {
+    setStatus(offStatusText(), false)
+  }
 })()
 </script>`
 }
 
 /** Auto-polling for the run overview page. */
 export const POLLING_SCRIPT = buildRefreshScript({
-  sectionIds: DEFAULT_POLL_SECTION_IDS,
-  autoStart: true,
-  initialStatus: "Polling every 8s",
+  sectionIds: RUN_DETAIL_SECTION_IDS,
+  defaultAutoRefresh: true,
 })
 
-/** Manual refresh only — updates live agent activity, not the readable dashboard body. */
-export const NODE_MANUAL_REFRESH_SCRIPT = buildRefreshScript({
+/** Live refresh for node detail pages. */
+export const NODE_REFRESH_SCRIPT = buildRefreshScript({
   sectionIds: ["node-live-section", "node-history-section"],
-  autoStart: false,
-  initialStatus: "Auto-refresh off · click Refresh to update live activity",
+  defaultAutoRefresh: true,
 })
+
+/** Live refresh for round detail pages. */
+export const ROUND_REFRESH_SCRIPT = buildRefreshScript({
+  sectionIds: ["round-detail-section"],
+  defaultAutoRefresh: true,
+})
+
+/** Live refresh for the run files browser. */
+export const FILES_REFRESH_SCRIPT = buildRefreshScript({
+  sectionIds: ["files-section"],
+  defaultAutoRefresh: true,
+})
+
+/** @deprecated Use NODE_REFRESH_SCRIPT */
+export const NODE_MANUAL_REFRESH_SCRIPT = NODE_REFRESH_SCRIPT

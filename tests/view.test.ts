@@ -95,6 +95,8 @@ describe("view assets and html helpers", () => {
     expect(CSS).not.toContain("<script>")
     expect(POLLING_SCRIPT).toContain("<script>")
     expect(POLLING_SCRIPT).toContain("data-refresh-now")
+    expect(POLLING_SCRIPT).toContain("data-refresh-toggle")
+    expect(POLLING_SCRIPT).toContain("qurom-view-live-refresh")
   })
 
   test("renders small reusable card, section, and summary table fragments", () => {

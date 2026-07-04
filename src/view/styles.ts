@@ -1689,6 +1689,17 @@ details[open] > .markdown-preview summary::before {
   border-color: var(--accent);
   color: var(--accent);
 }
+.refresh-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+}
+.refresh-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+}
 
 .config-form {
   display: flex;

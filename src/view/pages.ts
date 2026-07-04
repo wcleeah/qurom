@@ -1,11 +1,12 @@
 import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { POLLING_SCRIPT, NODE_MANUAL_REFRESH_SCRIPT } from "./client-script"
+import { POLLING_SCRIPT, NODE_REFRESH_SCRIPT, ROUND_REFRESH_SCRIPT, FILES_REFRESH_SCRIPT } from "./client-script"
+import { renderRefreshControls } from "./refresh-controls"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard, renderLivePipeline, renderNodeHistory } from "./components"
 import { computeStats, getRunFiles, listRuns, readLiveStatus, readNodeHistory } from "./data"
-import { getNodeDefinition, isNodeActive } from "./node-registry"
+import { getNodeDefinition } from "./node-registry"
 import { renderNodeDashboard, renderNodeExecutionHistory, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
 import { renderLiveStatusMeta, renderRoundDetailPage, renderRoundStrip } from "./round-view"
 import { renderRunTelemetryStrip, resolveRunUsage, runElapsedMs } from "./telemetry-view"
@@ -78,17 +79,12 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
   const liveStatus = await readLiveStatus(runName)
   const nodeHistory = await readNodeHistory(runName)
   const displayName = def?.label ?? nodeName
-  const resolvedId = def?.id ?? nodeName
   const { body: dashboardBody, live: dashboardLive } = await renderNodeDashboard(runName, nodeName, files, fileSizes, liveStatus, nodeHistory)
   const historyHtml = renderNodeExecutionHistory(nodeHistory, nodeName, runName)
   const miniPipeline = renderNodeMiniPipeline(runName, nodeName, files)
-  const nodeIsActive = isNodeActive(liveStatus, resolvedId)
+  const showLiveRefresh = liveStatus?.phase === "running"
 
-  const html = `${nodeIsActive ? `<div class="refresh-controls">
-  <span id="refresh-dot" class="refresh-dot" aria-hidden="true"></span>
-  <span id="refresh-status">Auto-refresh off · click Refresh to update live activity</span>
-  <button type="button" class="refresh-button" data-refresh-now>Refresh now</button>
-</div>` : ""}
+  const html = `${showLiveRefresh ? renderRefreshControls() : ""}
 <div class="header-bar">
   <h1>${escapeHtml(displayName)}</h1>
   <p class="muted-note dim-text">Run: ${escapeHtml(runName)} · ${escapeHtml(nodeName)}</p>
@@ -97,7 +93,7 @@ ${miniPipeline}
 <div id="node-live-section">${dashboardLive}</div>
 <div id="node-dashboard-section">${dashboardBody}</div>
 <div id="node-history-section">${historyHtml}</div>
-${nodeIsActive ? NODE_MANUAL_REFRESH_SCRIPT : ""}`
+${showLiveRefresh ? NODE_REFRESH_SCRIPT : ""}`
 
   const fullHtml = layout(`Node: ${displayName} — ${escapeHtml(runName)}`, html, {
     navbar: {
@@ -132,8 +128,11 @@ export async function renderRoundPage(runName: string, roundNum: number): Promis
   const fileSizes = await getFileSizes(runName, files)
   const liveStatus = await readLiveStatus(runName)
   const body = await renderRoundDetailPage(runName, roundNum, files, fileSizes, liveStatus)
+  const showLiveRefresh = liveStatus?.phase === "running"
 
-  const html = layout(`Round ${roundNum} — ${escapeHtml(runName)}`, `${body}`, {
+  const html = layout(`Round ${roundNum} — ${escapeHtml(runName)}`, `${showLiveRefresh ? renderRefreshControls() : ""}
+<div id="round-detail-section">${body}</div>
+${showLiveRefresh ? ROUND_REFRESH_SCRIPT : ""}`, {
     navbar: {
       section: "runs",
       back: { href: `/runs/${encodeURIComponent(runName)}`, label: "← Back to run" },
@@ -165,12 +164,16 @@ export async function renderFilesPage(runName: string): Promise<Response> {
   }
 
   const fileSizes = await getFileSizes(runName, files)
+  const liveStatus = await readLiveStatus(runName)
   const fileListHtml = renderFileBrowser({ runName, files, fileSizes })
+  const showLiveRefresh = liveStatus?.phase === "running"
 
-  const html = layout(`Files — ${escapeHtml(runName)}`, `<div class="section">
+  const html = layout(`Files — ${escapeHtml(runName)}`, `${showLiveRefresh ? renderRefreshControls() : ""}
+<div id="files-section" class="section">
   <h1 class="page-title">All files</h1>
   ${fileListHtml}
-</div>`, {
+</div>
+${showLiveRefresh ? FILES_REFRESH_SCRIPT : ""}`, {
     navbar: {
       section: "runs",
       back: { href: `/runs/${encodeURIComponent(runName)}`, label: "← Back to run" },
@@ -725,11 +728,7 @@ export async function renderRun(name: string): Promise<Response> {
   const extraHead = ""
 
   const body = `
-${liveStatus?.phase === "running" ? `<div class="refresh-controls">
-  <span id="refresh-dot" class="refresh-dot" aria-hidden="true"></span>
-  <span id="refresh-status">Polling every 8s</span>
-  <button type="button" class="refresh-button" data-refresh-now>Refresh now</button>
-</div>` : ""}
+${liveStatus?.phase === "running" ? renderRefreshControls() : ""}
 ${interviewChatSection}
 <div class="header-bar">
   <div class="header-main">
