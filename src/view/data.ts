@@ -148,6 +148,26 @@ export async function listRuns(): Promise<RunMeta[]> {
   return metas
 }
 
+export function filterRunsForIndex(
+  runs: RunMeta[],
+  searchParams: URLSearchParams,
+): { runs: RunMeta[]; showStarredOnly: boolean; showAll: boolean } {
+  const showStarredOnly = searchParams.get("starred") === "1"
+  const showAll = searchParams.get("all") === "1"
+
+  if (showStarredOnly) {
+    return { runs: runs.filter((run) => run.starred), showStarredOnly, showAll }
+  }
+  if (showAll) {
+    return { runs, showStarredOnly, showAll }
+  }
+  return {
+    runs: runs.filter((run) => run.status !== "failed" || run.starred),
+    showStarredOnly,
+    showAll,
+  }
+}
+
 export function computeStats(runs: RunMeta[]): RunStats {
   return {
     total: runs.length,

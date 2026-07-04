@@ -9,7 +9,7 @@ import { tryGetRunManager } from "../run-manager"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard } from "./components"
-import { computeStats, getRunFiles, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry } from "./data"
+import { computeStats, filterRunsForIndex, getRunFiles, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry } from "./data"
 import { getNodeDefinition, isRebuttalsViewerNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
 import { renderNodeDashboard, renderGlobalResearchRoundStrip, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
 import { renderLiveStatusMeta, renderRoundStrip } from "./round-view"
@@ -227,13 +227,10 @@ export async function renderDebugLog(runName: string, files: string[]): Promise<
 // ---------------------------------------------------------------------------
 
 export async function renderIndex(searchParams = new URLSearchParams()): Promise<Response> {
-  const showStarredOnly = searchParams.get("starred") === "1"
   const runError = searchParams.get("error") ?? undefined
-  let runs = await listRuns()
-  if (showStarredOnly) {
-    runs = runs.filter((run) => run.starred)
-  }
-  const stats = computeStats(runs)
+  const allRuns = await listRuns()
+  const { runs, showStarredOnly, showAll } = filterRunsForIndex(allRuns, searchParams)
+  const stats = computeStats(allRuns)
 
   const manager = tryGetRunManager()
   const managerStatus = manager?.status()
@@ -310,8 +307,10 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   let runCards = ""
   if (runs.length === 0) {
     runCards = showStarredOnly
-      ? `<div class="empty-state">No starred runs yet. <a href="/">Show all runs</a></div>`
-      : `<div class="empty-state">No runs found in <code>${escapeHtml(getRunsDir())}</code></div>`
+      ? `<div class="empty-state">No starred runs yet. <a href="/">Show active runs</a></div>`
+      : !showAll
+        ? `<div class="empty-state">No active runs. <a href="/?all=1">Show all runs including failed</a></div>`
+        : `<div class="empty-state">No runs found in <code>${escapeHtml(getRunsDir())}</code></div>`
   } else {
     for (const run of runs) {
       const roundLabel =
@@ -344,7 +343,8 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   }
 
   const filterHtml = `<div class="run-filters">
-  <a href="/"${showStarredOnly ? "" : ' class="active"'}>All</a>
+  <a href="/"${!showStarredOnly && !showAll ? ' class="active"' : ""}>Active</a>
+  <a href="/?all=1"${showAll ? ' class="active"' : ""}>All</a>
   <a href="/?starred=1"${showStarredOnly ? ' class="active"' : ""}>Starred</a>
 </div>`
 

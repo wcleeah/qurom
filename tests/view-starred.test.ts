@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { filterRunsForIndex } from "../src/view/data.ts"
 import { renderIndex } from "../src/view/pages.ts"
 import {
   isRunStarred,
@@ -72,6 +73,7 @@ describe("view starred index", () => {
     const allHtml = await allResponse.text()
     expect(allHtml).toContain("Alpha topic")
     expect(allHtml).toContain("Beta topic")
+    expect(allHtml).toContain('href="/" class="active"')
     expect(allHtml).toContain('data-run-name="alpha-run"')
     expect(allHtml).toContain('data-starred="true"')
     expect(allHtml).toContain('data-starred="false"')
@@ -89,5 +91,36 @@ describe("view starred index", () => {
     const html = await response.text()
     expect(html).toContain("No starred runs yet")
     expect(html).toContain('href="/"')
+  })
+
+  test("renderIndex hides failed runs by default unless starred", async () => {
+    await mkdir(join(dir, "runs", "failed-run"), { recursive: true })
+    await writeFile(join(dir, "runs", "failed-run", "request.json"), JSON.stringify({ topic: "Failed topic" }))
+    await writeFile(join(dir, "runs", "failed-run", "latest-draft.md"), "# draft")
+
+    const activeResponse = await renderIndex(new URLSearchParams())
+    const activeHtml = await activeResponse.text()
+    expect(activeHtml).not.toContain("Failed topic")
+
+    const allResponse = await renderIndex(new URLSearchParams("all=1"))
+    const allHtml = await allResponse.text()
+    expect(allHtml).toContain("Failed topic")
+
+    await setRunStarred("failed-run", true)
+    const starredFailedResponse = await renderIndex(new URLSearchParams())
+    const starredFailedHtml = await starredFailedResponse.text()
+    expect(starredFailedHtml).toContain("Failed topic")
+  })
+
+  test("filterRunsForIndex keeps starred failed runs in the default view", () => {
+    const runs = [
+      { name: "ok", topic: "Ok", status: "approved" as const, starred: false, mtime: 1, roundCount: 0, hasFinalHtml: false, hasFinalMd: true, hasLatestDraft: false, fileCount: 1, designStatus: null, designRoundCount: 0 },
+      { name: "bad", topic: "Bad", status: "failed" as const, starred: false, mtime: 2, roundCount: 0, hasFinalHtml: false, hasFinalMd: false, hasLatestDraft: true, fileCount: 1, designStatus: null, designRoundCount: 0 },
+      { name: "starred-bad", topic: "Starred bad", status: "failed" as const, starred: true, mtime: 3, roundCount: 0, hasFinalHtml: false, hasFinalMd: false, hasLatestDraft: true, fileCount: 1, designStatus: null, designRoundCount: 0 },
+    ]
+    const active = filterRunsForIndex(runs, new URLSearchParams())
+    expect(active.runs.map((run) => run.name)).toEqual(["ok", "starred-bad"])
+    const all = filterRunsForIndex(runs, new URLSearchParams("all=1"))
+    expect(all.runs).toHaveLength(3)
   })
 })

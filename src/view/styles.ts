@@ -21,6 +21,7 @@ export const CSS = /* css */ `
   --radius-sm: 4px;
   --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+  --text-base: 0.875rem;
 }
 /* Dark mode: grep near-black, deliberately tuned (not an inversion).
    Applied when the OS prefers dark AND the user hasn't forced light,
@@ -66,11 +67,20 @@ export const CSS = /* css */ `
 
 body {
   font-family: var(--font-sans);
+  font-size: var(--text-base);
   background: var(--bg);
   color: var(--fg);
   line-height: 1.5;
   letter-spacing: -0.011em;
   -webkit-text-size-adjust: 100%;
+}
+
+input, select, textarea, button, table, th, td, p, li, label, summary, details, code, pre {
+  font-size: inherit;
+}
+
+code, pre {
+  font-family: var(--font-mono);
 }
 
 button {
@@ -2154,16 +2164,20 @@ details[open] > .markdown-preview summary::before {
 .theme-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.3rem 0.55rem;
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.02em;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
   color: var(--muted);
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
+}
+.theme-toggle svg {
+  display: block;
+  width: 1rem;
+  height: 1rem;
 }
 .theme-toggle:hover {
   color: var(--fg);
@@ -2179,6 +2193,7 @@ body.html-viewer-body {
   max-width: none;
   width: 100%;
   margin: 0;
+  font-size: var(--text-base);
 }
 
 .html-viewer-shell {
