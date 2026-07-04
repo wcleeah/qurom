@@ -95,6 +95,8 @@ describe("defaults config UI", () => {
     const promptsHtml = await renderConfigDefaultsPrompts().then((r) => r.text())
     expect(promptsHtml).toContain("audit")
     expect(promptsHtml).toContain("Apply to active")
+    expect(promptsHtml).toContain('formaction="/config/defaults/apply/prompts/audit"')
+    expect(promptsHtml).not.toContain('class="config-form inline-form"')
 
     const bindingsHtml = await renderConfigDefaultsBindings().then((r) => r.text())
     expect(bindingsHtml).toContain("defaults/opencode/agents/")
@@ -111,5 +113,19 @@ describe("defaults config UI", () => {
     expect(response?.status).toBe(303)
     expect((await loadPromptAssetsFromStore(testRuntimeEnv({ dataDir, workspaceDir: dir }))).audit)
       .toBe("applied-from-defaults audit prompt")
+  })
+
+  test("apply prompt uses posted textarea content when provided", async () => {
+    const response = await handleConfigDefaultsPost(
+      new Request("http://localhost/config/defaults/apply/prompts/designHtml", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ content: "applied-from-form design prompt" }).toString(),
+      }),
+      "/config/defaults/apply/prompts/designHtml",
+    )
+    expect(response?.status).toBe(303)
+    expect((await loadPromptAssetsFromStore(testRuntimeEnv({ dataDir, workspaceDir: dir }))).designHtml)
+      .toBe("applied-from-form design prompt")
   })
 })

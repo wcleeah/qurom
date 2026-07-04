@@ -41,7 +41,7 @@ function parseOptionsJson(text: string | undefined) {
 }
 
 function applyButton(path: string, label: string) {
-  return `<form class="config-form inline-form" method="POST" action="${path}"><button type="submit" class="btn btn-secondary">${escapeHtml(label)}</button></form>`
+  return `<button type="submit" class="btn btn-secondary" formaction="${escapeHtml(path)}" formmethod="post">${escapeHtml(label)}</button>`
 }
 
 export async function renderConfigDefaultsIndex(options?: { error?: string; draftConfig?: QuorumConfig }): Promise<Response> {
@@ -364,38 +364,72 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
   const applyPromptMatch = path.match(/^\/config\/defaults\/apply\/prompts\/(.+)$/)
   if (applyPromptMatch) {
     const key = decodeURIComponent(applyPromptMatch[1])
-    const prompts = await listDefaultsPrompts(workspaceDir)
-    const prompt = prompts.find((entry) => entry.key === key)
-    if (!prompt) throw new Error(`Unknown defaults prompt ${JSON.stringify(key)}`)
-    await updatePromptAsset(config.env, key, prompt.content)
+    const params = new URLSearchParams(await req.text())
+    let content = params.get("content") ?? ""
+    if (!content.trim()) {
+      const prompts = await listDefaultsPrompts(workspaceDir)
+      const prompt = prompts.find((entry) => entry.key === key)
+      if (!prompt) throw new Error(`Unknown defaults prompt ${JSON.stringify(key)}`)
+      content = prompt.content
+    }
+    await updatePromptAsset(config.env, key, content)
     return new Response(null, { status: 303, headers: { Location: "/config/prompts" } })
   }
 
   const applyRoleMatch = path.match(/^\/config\/defaults\/apply\/roles\/(.+)$/)
   if (applyRoleMatch) {
     const role = decodeURIComponent(applyRoleMatch[1])
-    const roles = await listDefaultsRoleInstructions(workspaceDir)
-    const entry = roles.find((item) => item.role === role)
-    if (!entry) throw new Error(`Unknown defaults role ${JSON.stringify(role)}`)
-    await updateRoleInstruction(config.env, role, entry.content)
+    const params = new URLSearchParams(await req.text())
+    let content = params.get("content") ?? ""
+    if (!content.trim()) {
+      const roles = await listDefaultsRoleInstructions(workspaceDir)
+      const entry = roles.find((item) => item.role === role)
+      if (!entry) throw new Error(`Unknown defaults role ${JSON.stringify(role)}`)
+      content = entry.content
+    }
+    await updateRoleInstruction(config.env, role, content)
     return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
   }
 
   const applyBindingMatch = path.match(/^\/config\/defaults\/apply\/bindings\/(.+)$/)
   if (applyBindingMatch) {
     const role = decodeURIComponent(applyBindingMatch[1])
-    const binding = (await listDefaultsRoleBindings(workspaceDir)).find((entry) => entry.role === role)
-    if (!binding) throw new Error(`Unknown defaults binding ${JSON.stringify(role)}`)
-    await updateRoleBinding(config.env, role, {
-      provider: binding.provider ?? undefined,
-      providerAgent: binding.provider_agent ?? undefined,
-      model: binding.model ?? undefined,
-      variant: binding.variant ?? undefined,
-      outputMode: binding.output_mode ?? undefined,
-      options: parseOptionsJson(binding.options_json),
-    })
-    if ((binding.provider ?? "opencode") === "opencode") {
-      await applyDefaultsOpencodeAgent(workspaceDir, role)
+    const raw = await req.text()
+    if (raw.trim()) {
+      const params = new URLSearchParams(raw)
+      const provider = params.get("provider")?.trim() || undefined
+      const options: Record<string, unknown> = {}
+      if (provider === "cursor") {
+        const modelParams = [...params.entries()]
+          .filter(([key, value]) => key.startsWith("modelParam:") && value.trim())
+          .map(([key, value]) => ({ id: key.slice("modelParam:".length), value: value.trim() }))
+        if (modelParams.length > 0) options.modelParams = modelParams
+      }
+      await updateRoleBinding(config.env, role, {
+        provider,
+        providerAgent: params.get("providerAgent")?.trim() || undefined,
+        model: params.get("model")?.trim() || undefined,
+        variant: params.get("variant")?.trim() || undefined,
+        outputMode: params.get("outputMode")?.trim() || undefined,
+        options,
+      })
+      if ((provider ?? "opencode") === "opencode") {
+        await applyDefaultsOpencodeAgent(workspaceDir, role)
+      }
+    } else {
+      const binding = (await listDefaultsRoleBindings(workspaceDir)).find((entry) => entry.role === role)
+      if (!binding) throw new Error(`Unknown defaults binding ${JSON.stringify(role)}`)
+      await updateRoleBinding(config.env, role, {
+        provider: binding.provider ?? undefined,
+        providerAgent: binding.provider_agent ?? undefined,
+        model: binding.model ?? undefined,
+        variant: binding.variant ?? undefined,
+        outputMode: binding.output_mode ?? undefined,
+        options: parseOptionsJson(binding.options_json),
+      })
+      if ((binding.provider ?? "opencode") === "opencode") {
+        await applyDefaultsOpencodeAgent(workspaceDir, role)
+      }
     }
     return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
   }
