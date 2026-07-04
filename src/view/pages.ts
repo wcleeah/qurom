@@ -1,7 +1,11 @@
 import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { POLLING_SCRIPT, NODE_REFRESH_SCRIPT, ROUND_REFRESH_SCRIPT, FILES_REFRESH_SCRIPT } from "./client-script"
+import { POLLING_SCRIPT, NODE_REFRESH_SCRIPT, ROUND_REFRESH_SCRIPT, FILES_REFRESH_SCRIPT, INDEX_REFRESH_SCRIPT } from "./client-script"
 import { renderRefreshControls } from "./refresh-controls"
+import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
+import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
+import { renderRunControlsSection, renderNodeControlsSection, renderRunCompletionBanner, resolveRunResumeActions, resolveRunVerdict } from "./run-controls"
+import { tryGetRunManager } from "../run-manager"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard, renderLivePipeline, renderNodeHistory } from "./components"
@@ -83,8 +87,18 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
   const historyHtml = renderNodeExecutionHistory(nodeHistory, nodeName, runName)
   const miniPipeline = renderNodeMiniPipeline(runName, nodeName, files)
   const showLiveRefresh = liveStatus?.phase === "running"
+  const hasFinalMd = files.includes("final.md")
+  const isRunning = liveStatus?.phase === "running"
+  const runActiveGlobally = Boolean(tryGetRunManager()?.status().active)
+  const nodeControlsHtml = renderNodeControlsSection({
+    runName,
+    nodeName,
+    showRetry: !isRunning && !hasFinalMd,
+    runActiveGlobally,
+  })
 
   const html = `${showLiveRefresh ? renderRefreshControls() : ""}
+${nodeControlsHtml}
 <div class="header-bar">
   <h1>${escapeHtml(displayName)}</h1>
   <p class="muted-note dim-text">Run: ${escapeHtml(runName)} · ${escapeHtml(nodeName)}</p>
@@ -227,11 +241,29 @@ export async function renderDebugLog(runName: string, files: string[]): Promise<
 
 export async function renderIndex(searchParams = new URLSearchParams()): Promise<Response> {
   const showStarredOnly = searchParams.get("starred") === "1"
+  const runError = searchParams.get("error") ?? undefined
   let runs = await listRuns()
   if (showStarredOnly) {
     runs = runs.filter((run) => run.starred)
   }
   const stats = computeStats(runs)
+
+  const manager = tryGetRunManager()
+  const managerStatus = manager?.status()
+  const runActive = Boolean(managerStatus?.active)
+
+  let bootstrapHtml = ""
+  try {
+    bootstrapHtml = await renderOpencodeBootstrapBanner()
+  } catch {
+    // Index renders in test fixtures without a full config tree.
+  }
+
+  const newRunHtml = renderNewRunForm({
+    runActive,
+    activeRunId: managerStatus?.active?.runId,
+    error: runError,
+  })
 
   // Stats dashboard
   const statsHtml = `
@@ -274,7 +306,6 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     activeRunHtml = `<div class="card active-run-hero">
   <div class="active-run-header">
     <span class="badge badge-running">● Active</span>
-    <span class="active-run-refresh">auto-refreshes</span>
   </div>
   <div class="active-run-topic">
     <a href="/runs/${encodeURIComponent(run.name)}">${escapeHtml(run.topic)}</a>
@@ -332,13 +363,17 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   const body = `
 <h1 class="page-title">Runs</h1>
 ${filterHtml}
+${bootstrapHtml}
+${newRunHtml}
 ${statsHtml}
-${activeRunHtml}
+${hasActiveRun ? renderRefreshControls() : ""}
+<div id="index-active-section">${activeRunHtml}</div>
 <div id="run-card-list">${runCards}</div>
-${STAR_SCRIPT}`
+${STAR_SCRIPT}
+${NEW_RUN_FORM_SCRIPT}
+${hasActiveRun ? INDEX_REFRESH_SCRIPT : ""}`
 
-  const extraHead = hasActiveRun ? `<meta http-equiv="refresh" content="8">` : ""
-  const html = layout("Runs — quorum", body, { extraHead, navbar: { section: "runs" } })
+  const html = layout("Runs — quorum", body, { navbar: { section: "runs" } })
   return new Response(html, {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
@@ -702,6 +737,36 @@ export async function renderRun(name: string): Promise<Response> {
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
   const interviewChatHtml = renderInterviewChatCard(name, liveStatus)
 
+  const isRunning = liveStatus?.phase === "running"
+  const runActiveGlobally = Boolean(tryGetRunManager()?.status().active)
+  const showCompletion = liveStatus && (liveStatus.phase === "complete" || liveStatus.phase === "error")
+  const verdict = resolveRunVerdict({
+    researchStatus: researchStatus,
+    designStatus: design?.status ?? null,
+    liveError: liveStatus?.phase === "error" ? liveStatus.error : undefined,
+    hasFailureJson,
+  })
+  const resumeActions = resolveRunResumeActions({
+    isRunning,
+    hasFinalMd,
+    hasFinalHtml,
+    designStatus: design?.status ?? null,
+  })
+  const runControlsHtml = renderRunControlsSection({
+    runName: name,
+    isRunning,
+    showCompletion: Boolean(showCompletion),
+    completionHtml: showCompletion
+      ? renderRunCompletionBanner({
+        errored: verdict.errored,
+        verdictText: verdict.verdictText,
+        outputDir: dirPath,
+      })
+      : "",
+    resumeActions,
+    runActiveGlobally,
+  })
+
   const filesLinkSection = `<div class="section"><p><a href="/runs/${encodeURIComponent(name)}/files">Browse all ${files.length} files →</a></p></div>`
 
   const telemetrySection = `<div id="telemetry-section">${telemetryHtml}</div>`
@@ -728,7 +793,8 @@ export async function renderRun(name: string): Promise<Response> {
   const extraHead = ""
 
   const body = `
-${liveStatus?.phase === "running" ? renderRefreshControls() : ""}
+${isRunning ? renderRefreshControls() : ""}
+${runControlsHtml}
 ${interviewChatSection}
 <div class="header-bar">
   <div class="header-main">
@@ -762,7 +828,7 @@ ${keyOutputsSection}
 ${requestInfoHtml}
 ${filesSection}
 ${STAR_SCRIPT}
-${liveStatus?.phase === "running" ? POLLING_SCRIPT : ""}`
+${isRunning ? POLLING_SCRIPT : ""}`
 
   const html = layout(`${escapeHtml(topic)} — quorum run`, body, {
     extraHead,

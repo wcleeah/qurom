@@ -1,6 +1,7 @@
 import { createAgentRuntime } from "../agent-runtime/runtime"
 import { loadRuntimeConfig } from "../config"
 import { loadPromptBundle } from "../prompt-assets"
+import { getProviderLifecycle } from "../providers/lifecycle"
 import { providerForRole } from "../providers/registry"
 import { createEventBus, type Bridge, type RunnerEvent } from "../runner"
 import { HTML_READING_COMPANION_ROLE, markAskThreadIdle, markAskThreadStale } from "./html-ask-agent"
@@ -36,6 +37,7 @@ export async function streamAskMessage(input: StreamAskMessageInput): Promise<Re
   const encoder = new TextEncoder()
   let bridge: Bridge | undefined
   let unsubscribe: (() => void) | undefined
+  let releaseProvider: (() => Promise<void>) | undefined
   let assistantText = ""
 
   const stream = new ReadableStream<Uint8Array>({
@@ -72,6 +74,7 @@ export async function streamAskMessage(input: StreamAskMessageInput): Promise<Re
         const promptBundle = await loadPromptBundle(config)
         const bus = createEventBus()
         const provider = providerForRole(config, HTML_READING_COMPANION_ROLE)
+        releaseProvider = await getProviderLifecycle().acquireForRoles(config, [HTML_READING_COMPANION_ROLE])
         if (provider.createEventBridge) {
           bridge = provider.createEventBridge({
             config,
@@ -141,6 +144,7 @@ export async function streamAskMessage(input: StreamAskMessageInput): Promise<Re
       } finally {
         unsubscribe?.()
         await bridge?.stop().catch(() => {})
+        if (releaseProvider) await releaseProvider().catch(() => {})
         controller.close()
       }
     },

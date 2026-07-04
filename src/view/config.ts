@@ -1,6 +1,8 @@
 import { loadRuntimeConfig, type QuorumConfig } from "../config"
 import { listConfigSummary, normalizeQuorumConfig, updatePromptAsset, updateQuorumConfig, updateRoleBinding, updateRoleInstruction } from "../config-store"
-import { availableProviderIds, configuredAgentRoles, providerConfigForm, validateProviderPrerequisites } from "../providers/registry"
+import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
+import { getProviderLifecycle } from "../providers/lifecycle"
+import { rolesUsingProvider, validateProviderPrerequisites } from "../providers/registry"
 import { DEFAULT_PROVIDER } from "../role-registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
 import { card, section, summaryRow, summaryTable } from "./html"
@@ -19,20 +21,23 @@ function parseOptionsJson(text: string | undefined) {
   }
 }
 
+let lastProviderValidation: { ok: boolean; message: string } | undefined
+
 export async function renderConfigIndex(options?: { error?: string; draftConfig?: QuorumConfig }): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
-  const validationError = await validateProviderPrerequisites(config)
-    .then(() => null)
-    .catch((error) => (error instanceof Error ? error.message : String(error)))
-  const isValid = validationError === null
+  const validation = lastProviderValidation
+  const validationLabel = validation
+    ? (validation.ok ? "valid" : escapeHtml(validation.message))
+    : "not checked — click Validate providers"
+  const isValid = validation?.ok === true
   const quorumConfig = options?.draftConfig ?? summary.config ?? config.quorumConfig
 
   const statusCard = `<div class="structured-card">
-  <div class="outcome-banner ${isValid ? "approved" : "failed"}">${isValid ? "Providers valid" : "Validation failed"}</div>
+  <div class="outcome-banner ${validation ? (isValid ? "approved" : "failed") : "needs-revision"}">${validation ? (isValid ? "Providers valid" : "Validation failed") : "Providers not validated"}</div>
   ${summaryTable([
     summaryRow("Profile", escapeHtml(summary.profile.name)),
-    summaryRow("Validation", isValid ? "valid" : escapeHtml(validationError ?? "invalid")),
+    summaryRow("Validation", validationLabel),
     summaryRow("Roles", String(summary.bindings.length)),
     summaryRow("Prompt assets", String(summary.prompts.length)),
     summaryRow("Data directory", escapeHtml(config.env.QUORUM_DATA_DIR)),
@@ -277,7 +282,22 @@ export async function renderConfigPrompts(): Promise<Response> {
 export async function handleConfigPost(req: Request, path: string): Promise<Response | undefined> {
   const config = await loadRuntimeConfig()
   if (path === "/config/validate") {
-    await validateProviderPrerequisites(config)
+    const lifecycle = getProviderLifecycle()
+    let release: (() => Promise<void>) | undefined
+    try {
+      if (rolesUsingProvider(config, "opencode").length > 0) {
+        release = await lifecycle.acquire(config, "opencode")
+      }
+      await validateProviderPrerequisites(config)
+      lastProviderValidation = { ok: true, message: "valid" }
+    } catch (error) {
+      lastProviderValidation = {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      }
+    } finally {
+      if (release) await release()
+    }
     return new Response(null, { status: 303, headers: { Location: "/config" } })
   }
 

@@ -3,6 +3,7 @@ import { LIVE_REFRESH_STORAGE_KEY, renderRefreshControls } from "./refresh-contr
 export { LIVE_REFRESH_STORAGE_KEY, renderRefreshControls }
 
 const RUN_DETAIL_SECTION_IDS = [
+  "run-controls-section",
   "telemetry-section",
   "pipeline-section",
   "round-strip-section",
@@ -218,7 +219,7 @@ export const POLLING_SCRIPT = buildRefreshScript({
 
 /** Live refresh for node detail pages. */
 export const NODE_REFRESH_SCRIPT = buildRefreshScript({
-  sectionIds: ["node-live-section", "node-history-section"],
+  sectionIds: ["node-controls-section", "node-live-section", "node-history-section"],
   defaultAutoRefresh: true,
 })
 
@@ -231,6 +232,12 @@ export const ROUND_REFRESH_SCRIPT = buildRefreshScript({
 /** Live refresh for the run files browser. */
 export const FILES_REFRESH_SCRIPT = buildRefreshScript({
   sectionIds: ["files-section"],
+  defaultAutoRefresh: true,
+})
+
+/** Live refresh for the runs index active-run hero. */
+export const INDEX_REFRESH_SCRIPT = buildRefreshScript({
+  sectionIds: ["index-active-section"],
   defaultAutoRefresh: true,
 })
 

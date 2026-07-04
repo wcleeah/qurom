@@ -281,6 +281,160 @@ a:hover { text-decoration: underline; }
   border-color: var(--fg);
   font-weight: 600;
 }
+.new-run-section {
+  margin-bottom: 1.25rem;
+}
+.new-run-section .new-run-card {
+  padding: 1rem 1.1rem 1.1rem;
+  margin-bottom: 0;
+}
+.new-run-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.85rem 1.25rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+.new-run-header-text h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.05rem;
+}
+.new-run-subtitle {
+  margin: 0;
+  font-size: 0.78rem;
+}
+.new-run-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.new-run-tab {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.75rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.new-run-tab:hover {
+  color: var(--fg);
+  border-color: var(--muted);
+}
+.new-run-tab.active {
+  color: var(--fg);
+  border-color: var(--accent);
+  background: var(--accent-bg, rgba(59, 130, 246, 0.08));
+  font-weight: 600;
+}
+.new-run-panels {
+  position: relative;
+}
+.new-run-panels .config-form.new-run-panel:not(.active) {
+  display: none;
+}
+.new-run-panels .config-form.new-run-panel.active {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0;
+}
+.new-run-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.new-run-textarea {
+  min-height: 6.5rem;
+  line-height: 1.55;
+  font-family: inherit;
+  resize: vertical;
+}
+.new-run-optional {
+  font-size: 0.62rem;
+  text-transform: lowercase;
+  letter-spacing: normal;
+  color: var(--muted);
+  font-weight: normal;
+}
+.new-run-actions {
+  margin-top: 0.15rem;
+  padding-top: 0.15rem;
+}
+.new-run-active-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--orange-bg);
+  border: 1px solid color-mix(in srgb, var(--orange) 25%, var(--border));
+}
+.new-run-error {
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--red-bg);
+  border: 1px solid color-mix(in srgb, var(--red) 25%, var(--border));
+  color: var(--red);
+  font-size: 0.82rem;
+}
+.run-cancel-form {
+  margin-bottom: 0.75rem;
+}
+.run-cancel-button {
+  font-size: 0.8125rem;
+}
+.run-controls-section {
+  margin-bottom: 0.85rem;
+}
+.run-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  margin-bottom: 0.75rem;
+}
+.run-actions-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.run-actions-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.run-action-form {
+  margin: 0;
+}
+.run-actions-note {
+  margin: 0;
+  font-size: 0.78rem;
+}
+.run-completion-banner {
+  margin-bottom: 1rem;
+}
+.opencode-bootstrap-banner {
+  margin-bottom: 1rem;
+}
+.opencode-bootstrap-banner .form-actions {
+  gap: 0.5rem;
+}
 .run-card-title {
   font-weight: 600;
   font-size: 0.95rem;
@@ -1763,12 +1917,13 @@ details[open] > .markdown-preview summary::before {
   gap: 0.35rem;
 }
 .form-input,
+.form-field textarea,
 .config-form textarea {
   width: 100%;
   box-sizing: border-box;
   font-family: inherit;
   font-size: 0.85rem;
-  padding: 0.45rem 0.55rem;
+  padding: 0.55rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -1776,11 +1931,16 @@ details[open] > .markdown-preview summary::before {
   resize: vertical;
 }
 .form-input:focus,
+.form-field textarea:focus,
 .config-form textarea:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
 }
-.config-form textarea { font-family: var(--font-mono); line-height: 1.5; }
+.config-form textarea,
+.form-field textarea.new-run-textarea {
+  line-height: 1.55;
+}
 .config-readonly-agent {
   margin: 0;
   padding: 0.75rem 1rem;
