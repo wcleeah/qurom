@@ -4,6 +4,8 @@ mode: subagent
 model: opencode/big-pickle
 variant: max
 permission:
+  external_directory:
+    "~/.local/share/qurom/runs/**": allow
   read:
     "runs/**": allow
   glob: deny
