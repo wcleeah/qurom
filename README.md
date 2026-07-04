@@ -1,5 +1,5 @@
 # research-qurom 
-A agent loop that generate a research document on a specific topic powered by Opencode. It runs one designated drafter and three auditors agent through a quorum review loop, with a local TUI built on `@opentui/react`.
+A agent loop that generate a research document on a specific topic powered by Opencode. It runs one designated drafter and three auditors agent through a quorum review loop, with a web dashboard for starting runs, live monitoring, and artifact review.
 
 https://github.com/user-attachments/assets/488d9741-d4ad-454f-bb34-422627048370
 
@@ -11,37 +11,17 @@ The generated document can be found in `./example/go-routine-parking.md`
 - Runs three auditors in parallel to review the draft from different perspective. 
 - Aggregates findings, rebuttals, and approvals until the run is approved or fails.
 - Once a research run is approved, an optional **design quorum** turns the document into a single self-contained HTML page (`final.html`), reviewed by its own panel of design auditors.
-- Streams live activity into a TUI with per-agent panels, dashboard and a summary screen after run.
+- Streams live activity into the web dashboard with pipeline view, telemetry, reader interview, and artifact browser.
 - Captures Langfuse telemetry when configured.
 
 ## The Big Picture
-1. `bun run dev` -> entry point index.tsx 
-2. index.tsx setup the tui, load the config json, and at last render `App`.
-3. `App` is the controller of the whole tui:
-  - Obviously it does the rendering, by different stages render the startup `prompt screen`, the in progress `running screen`, and the `summary screen` once the whole thing is done.
-  - It controls most of the ui state, such as keyboard interactions, on run, on summary action.
-  - It also provide the function to start the agent loop
-4. Starting the agent loop requires a few things:
-  - Create an event bus, which will carry events from opencode, or the graph node, or simply lifecycle event from the pipeline
-  - Bind that event bus with the central UI store (powered by zustand), so the UI can react and render those state.
-  - then start the pipeline
-5. The pipeline starts up, it will do a few initialization:
-  - It sets up telemetry with langfuse
-  - It opens the opencode event bridge
-  - It binds the telemetry handler and opencode event bridge with the bus
-6. And then the graph is invoked
-- 6.1. Opencode session creation, summary agent generate summary if it is document mode, a bunch of initialization 
-- 6.2. Draft agent starts to work, based on the topic:
-- 6.2a. It writes one full draft directly from the request, evidence, and prompt contract
-- 6.3. Audit agents receive the draft, review it from different angles, vote for / against the draft, and give findings-=
-- 6.4. Draft agents then review the findings, post a rebuttal or accept the defeat
-- 6.5. Audit agents review the rebuttles, and post a re-rebuttal or accept the rebuttal
-- 6.6. 4-5 loops until either they agreed or the limit is reached
-- 6.7. Draft agents rewrite the draft and goes back to step 6.3
-- 6.8. If everyone is happy, voted yes for the draft, everything is done!
-- 6.9. Do some finalization, like write the document plus run artifacts into `runs/`, send telemetry and event via bus, summarize agent summarize the whole document
-7. Then the summary screen comes, showing the final verdict, summary, allow the user to review the document
-8. The user can choose to rerun, it will all go back to step 3
+1. `bun run dev` starts the web dashboard at `http://localhost:3000`
+2. Start a research run from the index page (topic, document path, resume, or design)
+3. The run manager creates an event bus and starts `runResearchPipeline` / `runDesignPipeline`
+4. OpenCode is started lazily only when a configured role uses the OpenCode provider
+5. Live status is written to `live-status.json` and polled by the dashboard
+6. Reader interview replies are submitted from the run page (`POST /runs/:name/reply`)
+7. When the run completes, artifacts land under `{dataDir}/runs/` and the dashboard shows the verdict
 
 ## Current Agent Roles
 Research quorum:
@@ -62,7 +42,7 @@ These are configured in the active SQLite config profile and backed by local Ope
 
 ## Requirements
 - **Bun** (runtime + test runner)
-- **OpenCode** (`opencode` binary on your `PATH`) — the app spawns `opencode serve` on the configured port if no server is already reachable at `OPENCODE_BASE_URL`. Alternatively, point `OPENCODE_BASE_URL` at an already-running OpenCode server and it will be reused as-is.
+- **OpenCode** (`opencode` binary on your `PATH`) — when a role uses the OpenCode provider, the app spawns `opencode serve` on the configured port if no server is already reachable at `OPENCODE_BASE_URL`. Alternatively, point `OPENCODE_BASE_URL` at an already-running OpenCode server and it will be reused as-is.
 - Local OpenCode agent definitions under `.opencode/agents/` (bootstrapped from `defaults/opencode/agents/` on first run; gitignored after that)
 
 Prompt contracts and role instructions live in SQLite. Shipped starters are under `defaults/prompts/`, `defaults/roles/`, and default role provider bindings in `defaults/quorum-config.sqlite`.
@@ -118,7 +98,7 @@ cp .env.example .env
 ```
 Set at least:
 - `OPENCODE_DIRECTORY` — absolute path to this repo (OpenCode workspace; `.opencode/agents/` is bootstrapped here)
-- `OPENCODE_BASE_URL` — where the app should reach OpenCode. If nothing is running there, the app starts `opencode serve` itself on that port.
+- `OPENCODE_BASE_URL` — where the app should reach OpenCode. OpenCode is not started at dashboard boot; it starts when a run (or HTML ask) needs an OpenCode-bound role.
 
 On first run, Qurom seeds SQLite from `defaults/` and may prompt you to copy OpenCode agent definitions into `.opencode/agents/`.
 Existing repo-local `runs/` data is auto-migrated into `~/.local/share/qurom/` (or `$XDG_DATA_HOME/qurom`).
@@ -133,19 +113,20 @@ bun run typecheck
 bun run test
 ```
 
-You're ready — `bun run dev` launches the TUI.
+You're ready — `bun run dev` launches the dashboard at `http://localhost:3000`.
 
 ## Run
 ```bash
-bun run dev      # launch the TUI
+bun run dev      # web dashboard + run orchestration (http://localhost:3000)
+bun run view:admin   # same, with defaults editor routes enabled
 ```
 
-Other entry points:
-```bash
-bun run view     # web dashboard for live + past runs at http://localhost:3000
-bun run design <run-directory-or-request-id>   # resume the design phase from the run checkpoint
-bun run design   # in the TUI, paste a run ID to resume the design phase from checkpoint
-```
+Start runs from the index page, or via HTTP API:
+- `POST /api/runs` — new research run (`inputMode`, `topic` or `documentPath`)
+- `POST /api/runs/:id/resume` — resume research (`node` optional)
+- `POST /api/runs/:id/design` — resume design quorum
+- `POST /api/runs/:id/cancel` — cancel active run
+- `GET /api/status` — active run + provider lifecycle status
 
 ## Test And Typecheck
 ```bash
@@ -153,27 +134,22 @@ bun run typecheck
 bun run test
 ```
 
-## TUI Flow
+## Dashboard Flow
 
-The TUI has two screens:
+### Index (`/`)
+- Start a topic or document run, resume research, or resume design
+- One active pipeline run at a time
+- Live refresh for the active-run hero when a run is in progress
 
-### Prompt screen
-- Type a topic and press `Enter` to start a run
-- `Tab` toggles between topic and document mode (paste a file path)
-- `Ctrl-C` quits
-
-### Running screen
-- Shows current graph node, round, elapsed time, and active agents with tool names
-- Prints the view-server URL — open this in a browser for full detail
-- `Ctrl-C` cancels the run and exits
-
-All post-run detail (pipeline, findings, rebuttals, round history, artifacts) is available in the
-web dashboard at `http://localhost:3000` (`bun run view`).
+### Run detail (`/runs/:name`)
+- Pipeline, telemetry, agent activity, reader interview, artifacts
+- Cancel while running; completion banner when done
+- Configure quorum/roles/prompts under `/config`
 
 ## Notes
 - The repo may contain large `reference/` and `langfuse/` directories used as local references; the active app code is under `src/` and `tests/`.
 - Shipped defaults live under `defaults/`. User data (runs, SQLite DBs) lives under `~/.local/share/qurom/` by default.
-- Draft documents created from the TUI are stored under `{dataDir}/runs/.drafts/`.
+- Draft documents from document-mode runs are read from the path you provide on the server.
 - Run artifacts include the request, per-round drafts, audits, rebuttal reviews, aggregated findings, and final or failure outputs under each run directory.
 - The runner now aborts created OpenCode sessions when a run is cancelled.
 - Failed runs attempt to recover the latest checkpointed state and write failure artifacts when possible.
@@ -201,9 +177,9 @@ Every recovery tier emits a standardized debug-log event so post-hoc triage can 
 
 When `designQuorum.enabled` is true in `quorum.config.json`, an approved research run can be turned into a single self-contained HTML document by the main graph's design phase. The design phase is linear: `html-designer` drafts `design-html-round-0.html`, `interactive-enhancer` adds representation-layer improvements, and `finalizeDesign` writes `final.html`.
 
-Resume it for an existing approved run directory or request id:
+Resume design for an existing approved run from the dashboard **Design** tab or:
 ```bash
-bun run design runs/my-topic-abc123
+curl -X POST http://localhost:3000/api/runs/my-topic-abc123/design
 ```
 The CLI and TUI both resume the original graph checkpoint, so reruns use the same design pipeline as normal approved research runs. Output is written to `<run-directory>/final.html`.
 
