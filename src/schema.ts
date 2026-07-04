@@ -228,9 +228,9 @@ export const confidenceSchema = z.object({
 export type SectionConfidence = z.infer<typeof sectionConfidenceSchema>
 export type Confidence = z.infer<typeof confidenceSchema>
 
-export const readerCompetenceLevelSchema = z.enum(["novice", "intermediate", "advanced", "expert"])
+export const readerCompetenceLevelSchema = z.enum(["unknown", "novice", "intermediate", "advanced", "expert"])
 
-export const readerIntentDepthSchema = z.enum(["overview", "conceptual", "implementation", "evaluation"])
+export const readerIntentDepthSchema = z.enum(["unknown", "overview", "conceptual", "implementation", "evaluation"])
 
 export const readerGapTreatmentSchema = z.enum(["must-explain", "brief-recap", "can-assume"])
 

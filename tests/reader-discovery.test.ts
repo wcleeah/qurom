@@ -97,6 +97,42 @@ describe("readerInterviewTurnSchema", () => {
     expect(parsed.profile.intent.goal).toBe("not yet clear")
   })
 
+  test("accepts unknown enum placeholders on an early interview turn", () => {
+    const parsed = readerInterviewTurnSchema.parse({
+      newQuestions: ["What's your goal with this document?"],
+      done: false,
+      profile: {
+        intent: {
+          goal: "not yet clear",
+          depth: "unknown",
+        },
+        background: {
+          summary: "Not yet known — first turn.",
+        },
+        competence: {
+          inTopic: {
+            level: "unknown",
+            summary: "Not yet known — first turn.",
+            evidence: [],
+          },
+          adjacent: {
+            summary: "Not yet known — first turn.",
+            evidence: [],
+          },
+        },
+        inferredGaps: [
+          {
+            concept: "unified memory model on Apple silicon",
+            treatment: "must-explain",
+            rationale: "MLX's unified memory is central to the framework's value.",
+          },
+        ],
+      },
+    })
+    expect(parsed.profile.intent.depth).toBe("unknown")
+    expect(parsed.profile.competence.inTopic.level).toBe("unknown")
+  })
+
   test("accepts a non-done turn with multiple independent questions", () => {
     const parsed = readerInterviewTurnSchema.parse({
       newQuestions: ["What are you trying to accomplish?", "What is your ML background?"],
