@@ -14,7 +14,9 @@ function normalizeUsageForDisplay(
   usage: UsageTotals,
   usageSource?: SessionTelemetryFile["sessions"][number]["calls"][number]["usageSource"],
 ): UsageTotals {
-  if (usageSource === "csv-import") return { ...usage, costEstimated: false }
+  if (usageSource === "csv-import" || usageSource === "turso-import") {
+    return { ...usage, costEstimated: false }
+  }
   return usage
 }
 
@@ -334,7 +336,7 @@ export function runElapsedMs(liveStatus: LiveStatus | null, nodeHistory: NodeHis
 
 function hasCsvImportUsage(sessionTelemetry?: SessionTelemetryFile | null): boolean {
   return sessionTelemetry?.sessions.some((session) =>
-    session.calls.some((call) => call.usageSource === "csv-import" && call.usage),
+    session.calls.some((call) => (call.usageSource === "csv-import" || call.usageSource === "turso-import") && call.usage),
   ) ?? false
 }
 

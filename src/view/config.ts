@@ -1,5 +1,10 @@
 import { loadRuntimeConfig, type QuorumConfig } from "../config"
 import { applyCursorUsageImport, parseCursorUsageCsv, type CursorUsageImportSummary } from "../cursor-usage-import"
+import {
+  applyOpenCodeUsageImport,
+  isTursoConfigured,
+  type OpenCodeUsageImportSummary,
+} from "../opencode-usage-import"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { listConfigSummary, normalizeQuorumConfig, updatePromptAsset, updateQuorumConfig, updateRoleBinding, updateRoleInstruction } from "../config-store"
@@ -26,6 +31,7 @@ function parseOptionsJson(text: string | undefined) {
 
 let lastProviderValidation: { ok: boolean; message: string } | undefined
 let lastCursorUsageImport: CursorUsageImportSummary | undefined
+let lastOpenCodeUsageImport: OpenCodeUsageImportSummary | undefined
 
 function renderCursorUsageImportSection(importSummary?: CursorUsageImportSummary) {
   const summary = importSummary ?? lastCursorUsageImport
@@ -40,10 +46,28 @@ function renderCursorUsageImportSection(importSummary?: CursorUsageImportSummary
 </form>`)
 }
 
+function renderOpenCodeUsageImportSection(importSummary?: OpenCodeUsageImportSummary) {
+  const summary = importSummary ?? lastOpenCodeUsageImport
+  const tursoConfigured = isTursoConfigured()
+  const statusHtml = tursoConfigured
+    ? `<p class="tiny-text muted-text">Turso credentials detected. Backfill reads OpenCode usage from your analytics DB and fills missing OpenCode sessions in existing runs.</p>`
+    : `<div class="outcome-banner failed">Turso not configured. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in the environment.</div>`
+  const summaryHtml = summary
+    ? `<div class="outcome-banner approved">Backfilled ${summary.matchedSessions}/${summary.sessionsNeedingBackfill} OpenCode session(s) across ${summary.runsUpdated} run(s). Unmatched: ${summary.unmatchedSessions}.</div>`
+    : ""
+
+  return section("OpenCode usage backfill", `${statusHtml}
+${summaryHtml}
+<form class="config-form" method="POST" action="/config/opencode-usage-import">
+  <div class="form-actions"><button type="submit" class="btn btn-primary"${tursoConfigured ? "" : " disabled"}>Backfill OpenCode usage from Turso</button></div>
+</form>`)
+}
+
 export async function renderConfigIndex(options?: {
   error?: string
   draftConfig?: QuorumConfig
   importSummary?: CursorUsageImportSummary
+  opencodeImportSummary?: OpenCodeUsageImportSummary
 }): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
@@ -80,6 +104,7 @@ export async function renderConfigIndex(options?: {
     section("Status", statusCard),
     `<form class="config-form" method="POST" action="/config/validate"><div class="form-actions"><button type="submit" class="btn btn-primary">Validate providers</button></div></form>`,
     renderCursorUsageImportSection(options?.importSummary),
+    renderOpenCodeUsageImportSection(options?.opencodeImportSummary),
     section("Quorum policy", quorumConfigForm),
   ].join("\n")
 
@@ -331,6 +356,19 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
       })
       lastCursorUsageImport = summary
       return renderConfigIndex({ importSummary: summary })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return renderConfigIndex({ error: message })
+    }
+  }
+
+  if (path === "/config/opencode-usage-import") {
+    try {
+      const summary = await applyOpenCodeUsageImport({
+        runsDir: config.env.QUORUM_RUNS_DIR,
+      })
+      lastOpenCodeUsageImport = summary
+      return renderConfigIndex({ opencodeImportSummary: summary })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return renderConfigIndex({ error: message })

@@ -15,7 +15,7 @@ export type SessionTelemetryCall = {
   durationMs?: number
   completedAt?: string
   usage?: UsageTotals
-  usageSource?: "sdk" | "csv-import"
+  usageSource?: "sdk" | "csv-import" | "turso-import"
 }
 
 export type SessionTelemetryRecord = {
@@ -55,7 +55,7 @@ export type SessionTelemetryEvent = {
   durationMs?: number
   completedAt?: number
   usage?: UsageTotals
-  usageSource?: "sdk" | "csv-import"
+  usageSource?: "sdk" | "csv-import" | "turso-import"
 }
 
 export function emptySessionTelemetryFile(): SessionTelemetryFile {

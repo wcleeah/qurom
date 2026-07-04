@@ -12,12 +12,13 @@
     "view:admin": "bun run src/view-server.ts --admin"
   },
   "dependencies": {
+    "@cursor/sdk": "^1.0.22",
     "@langchain/core": "^1.1.40",
     "@langchain/langgraph": "^1.2.9",
     "@langchain/langgraph-checkpoint-sqlite": "^1.0.1",
     "@langfuse/otel": "^5.1.0",
     "@langfuse/tracing": "^5.1.0",
-    "@cursor/sdk": "^1.0.22",
+    "@libsql/client": "^0.17.4",
     "@opencode-ai/sdk": "^1.4.6",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/sdk-trace-node": "^2.7.0",
