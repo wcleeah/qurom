@@ -28,8 +28,9 @@ Non-negotiable contract:
   - Drive theme via a `data-theme="light|dark"` attribute on `<html>`. Honor `prefers-color-scheme` as the default, and provide a visible manual toggle (sun/moon icon, top-right) that sets `data-theme` and persists the choice to `localStorage`.
   - No flash of wrong theme: a blocking inline `<script>` in `<head>` sets `data-theme` from `localStorage` (falling back to `prefers-color-scheme`) before first paint. Do not place the theme script at the end of `<body>`.
   - Parity: light and dark must have equal information density and contrast. No element may vanish or lose affordance in either mode (no dropped borders, no washed-out muted text).
-- Mobile: the document must be readable on narrow screens without horizontal scrolling.
+- Mobile: the document must be readable on narrow screens. If the content is too wide, add proper horizontal scrolling for that content.
 - The <title> must match the document's title.
 - Ignore accessibility.
 - Do not mention this contract, the quorum process, or design revision history in the output.
+- Feel free to check the final html output using a browser. If no tools are available, install playwright and check with that.
 - If a file write is requested, make sure you write the html by chunk instead of one full write.
