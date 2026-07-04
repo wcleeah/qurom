@@ -24,9 +24,15 @@ describe("view path helpers", () => {
 describe("view artifact renderers", () => {
   test("dispatches reader-profile-N.json to the reader profile card", () => {
     const html = renderStructuredJson("reader-profile-2.json", {
+      done: true,
       profile: {
-        learningGoal: "Understand quorum reads",
-        concepts: [{ concept: "linearizability", level: "heard-of", evidence: "named it" }],
+        intent: { goal: "Understand quorum reads", depth: "conceptual" },
+        background: { summary: "Backend engineer" },
+        competence: {
+          inTopic: { level: "intermediate", summary: "Knows replication basics", evidence: [] },
+          adjacent: { summary: "Strong distributed systems background", evidence: [] },
+        },
+        inferredGaps: [{ concept: "linearizability", treatment: "must-explain", rationale: "named it but could not define it" }],
       },
     })
 
@@ -179,6 +185,37 @@ describe("view components", () => {
     expect(html).toContain("Answered history")
     expect(html).toContain("What do you already know?")
     expect(html).toContain('method="POST"')
+  })
+
+  test("renders partial profile during the interview", () => {
+    const liveStatus: LiveStatus = {
+      phase: "running",
+      node: "discoverReaderPrompt",
+      round: 0,
+      maxRounds: 2,
+      agents: {},
+      nodeHistory: [],
+      awaitingReaderReply: {
+        turn: 1,
+        answeredQuestions: [],
+        newQuestions: ["What are you trying to get out of this topic?"],
+        transcript: [{ role: "interviewer", text: "What are you trying to get out of this topic?" }],
+        partialProfile: {
+          intent: { goal: "not yet clear", depth: "overview" },
+          background: { summary: "Unknown so far" },
+          competence: {
+            inTopic: { level: "novice", summary: "Unknown so far", evidence: [] },
+            adjacent: { summary: "Unknown so far", evidence: [] },
+          },
+          inferredGaps: [],
+        },
+      },
+    }
+
+    const html = renderInterviewChatCard("example-run", liveStatus)
+
+    expect(html).toContain("Profile so far")
+    expect(html).toContain("not yet clear")
   })
 
   test("renders batched interview history as numbered question and answer pairs", () => {

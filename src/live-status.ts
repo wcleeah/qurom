@@ -47,6 +47,7 @@ export interface LiveStatus {
     answeredQuestions: Array<{ question: string; answer: string }>
     newQuestions: string[]
     transcript: { role: string; text: string }[]
+    partialProfile?: Record<string, unknown>
   }
 }
 
@@ -293,10 +294,15 @@ function summarizeNodeState(node: string, state: unknown): Record<string, unknow
   if (!state || typeof state !== "object") return undefined
   const s = state as Record<string, unknown>
   if (node === "discoverReaderPrompt" || node === "discoverReaderResume") {
-    const profile = Array.isArray(s.readerProfile) ? s.readerProfile : undefined
+    const profile = s.readerProfile && typeof s.readerProfile === "object" ? s.readerProfile as Record<string, unknown> : undefined
+    const intent = profile?.intent as { goal?: string; depth?: string } | undefined
     return {
-      concepts: profile?.length ?? 0,
-      goal: typeof s.learningGoal === "string" ? s.learningGoal : undefined,
+      interviewComplete: s.readerInterviewComplete === true,
+      goal: typeof intent?.goal === "string" ? intent.goal : undefined,
+      depth: typeof intent?.depth === "string" ? intent.depth : undefined,
+      gapCount: Array.isArray((profile as { inferredGaps?: unknown[] } | undefined)?.inferredGaps)
+        ? ((profile as { inferredGaps: unknown[] }).inferredGaps.length)
+        : 0,
       transcriptTurns: Array.isArray(s.interviewTranscript) ? Math.ceil(s.interviewTranscript.length / 2) : 0,
     }
   }

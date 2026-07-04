@@ -18,6 +18,7 @@ import type { PromptBundle } from "./prompt-assets"
 import { buildResearchToolHint } from "./research-tools"
 import { summarizeMarkdown } from "./summarizer"
 import { designHtml } from "./design-quorum"
+import { formatReaderProfileForPrompt, readerContextBlock as buildReaderContextBlock } from "./reader-profile"
 import { formatReaderTranscriptForPrompt } from "./reader-transcript"
 import {
   aggregatedFindingSchema,
@@ -134,19 +135,7 @@ function requestContextBlock(state: ResearchState) {
 }
 
 export function readerContextBlock(state: ResearchState): string {
-  if (!state.readerProfile || state.readerProfile.length === 0) {
-    return state.learningGoal ? `Reader goal: ${state.learningGoal}` : ""
-  }
-  const familiar = state.readerProfile.filter((c) => c.level === "familiar").map((c) => c.concept)
-  const lacks = state.readerProfile.filter((c) => c.level !== "familiar")
-  const lines: string[] = []
-  if (state.learningGoal) lines.push(`Reader goal: ${state.learningGoal}`)
-  if (familiar.length > 0) lines.push(`Reader already knows: ${familiar.join(", ")}`)
-  if (lacks.length > 0) {
-    lines.push(`Reader does NOT know: ${lacks.map((c) => c.concept).join(", ")}`)
-    lines.push(`Include a Prerequisites section covering: ${lacks.map((c) => c.concept).join(", ")}. Explain these before the main topic.`)
-  }
-  return lines.join("\n")
+  return buildReaderContextBlock(state.readerProfile)
 }
 
 async function fileExists(path: string) {
@@ -663,6 +652,7 @@ function renderReaderInterviewPrompt(input: {
     .replace("{requestContext}", requestContextBlock(input.state))
     .replace("{researchToolHint}", buildResearchToolHint(input.config))
     .replace("{transcript}", input.transcriptText)
+    .replace("{profileSoFar}", formatReaderProfileForPrompt(input.state.readerProfile))
     .replace("{maxTurns}", String(input.maxTurns))
     .replace("{turn}", String(input.turn))
 }
@@ -695,13 +685,12 @@ async function discoverReaderPrompt(
   const maxTurns = config.quorumConfig.readerDiscovery.maxTurns
   const turn = Math.floor(transcript.length / 2) + 1
 
-  // Turn budget exhausted: no profile, drafter falls back to default.
+  // Turn budget exhausted: proceed with any partial profile collected so far.
   if (turn > maxTurns) {
     await disposeReaderInterviewerSession(state.requestId)
     return researchStateSchema.parse({
       ...state,
-      readerProfile: undefined,
-      learningGoal: undefined,
+      readerInterviewComplete: true,
       pendingNewReaderQuestions: undefined,
     })
   }
@@ -766,24 +755,25 @@ async function discoverReaderPrompt(
 
   await ensureJsonArtifact(outputFile, turnResult, "reader profile")
   if (!turnResult || turnResult.done) {
-    // Interview complete (or the agent returned nothing recoverable after the router).
     const profile = turnResult?.profile
     await disposeReaderInterviewerSession(state.requestId)
     return researchStateSchema.parse({
       ...state,
-      readerProfile: profile?.concepts,
-      learningGoal: profile?.learningGoal,
+      readerProfile: profile,
+      readerInterviewComplete: true,
       pendingNewReaderQuestions: undefined,
     })
   }
 
-  // Not done: append the question to the transcript and route to the resume node.
+  // Not done: merge partial profile, append the question, route to resume.
   const pendingQuestions = [...turnResult.newQuestions]
   transcript.push({ role: "interviewer", text: pendingQuestions.join("\n") })
   return researchStateSchema.parse({
     ...state,
+    readerProfile: turnResult.profile,
     interviewTranscript: transcript,
     pendingNewReaderQuestions: pendingQuestions,
+    readerInterviewComplete: false,
   })
 }
 
@@ -819,12 +809,12 @@ async function discoverReaderResume(
 
 /**
  * Conditional router after discoverReaderPrompt:
- * - readerProfile set → interview complete → draftFullDraft
- * - last transcript entry is an interviewer question → need a reply → discoverReaderResume
- * - otherwise (kill-switch, budget exhausted, no pending question) → draftFullDraft
+ * - readerInterviewComplete → draftFullDraft
+ * - last transcript entry is an interviewer question → discoverReaderResume
+ * - otherwise (kill-switch, no pending question) → draftFullDraft
  */
 function routeAfterReaderPrompt(state: ResearchState): string {
-  if (state.readerProfile !== undefined) return "draftFullDraft"
+  if (state.readerInterviewComplete) return "draftFullDraft"
   const transcript = state.interviewTranscript ?? []
   const lastEntry = transcript[transcript.length - 1]
   if (lastEntry && lastEntry.role === "interviewer") return "discoverReaderResume"

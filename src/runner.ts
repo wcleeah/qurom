@@ -235,7 +235,16 @@ async function runGraphWithInterviewResume<GraphT extends {
     )
 
     opts.debugLog?.write("reader.interview_suspend", { turn, answeredQuestions, newQuestions, attempt })
-    opts.setAwaitingReaderReply({ turn, answeredQuestions, newQuestions, transcript })
+    const partialProfile = snapshot?.values?.readerProfile
+    opts.setAwaitingReaderReply({
+      turn,
+      answeredQuestions,
+      newQuestions,
+      transcript,
+      ...(partialProfile && typeof partialProfile === "object"
+        ? { partialProfile: partialProfile as Record<string, unknown> }
+        : {}),
+    })
 
     // Wait for the view-server to write reader-reply.json (the user submitted
     // the chat form). Poll the run dir; honor the abort signal.

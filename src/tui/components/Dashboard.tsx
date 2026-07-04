@@ -55,13 +55,12 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
   const maxRounds = (graphState && "maxRounds" in graphState && typeof graphState.maxRounds === "number")
     ? (graphState as { maxRounds?: number }).maxRounds : 10
   const researchStatus = (graphState && "status" in graphState) ? (graphState as { status?: string }).status : undefined
-  const interviewActive = !!(graphState && "interviewTranscript" in graphState && (graphState as { interviewTranscript?: unknown[] }).interviewTranscript && !(graphState as { readerProfile?: unknown[] }).readerProfile)
-  const readerProfile = (graphState && "readerProfile" in graphState && Array.isArray((graphState as { readerProfile?: unknown[] }).readerProfile))
-    ? ((graphState as { readerProfile?: Array<{ concept: string; level: string }> }).readerProfile!)
+  const interviewActive = !!(graphState && "interviewTranscript" in graphState && (graphState as { interviewTranscript?: unknown[] }).interviewTranscript && !(graphState as { readerInterviewComplete?: boolean }).readerInterviewComplete)
+  const readerProfile = (graphState && "readerProfile" in graphState && (graphState as { readerProfile?: { intent?: { goal?: string }; competence?: { inTopic?: { level?: string } } } }).readerProfile)
+    ? (graphState as { readerProfile: { intent?: { goal?: string }; competence?: { inTopic?: { level?: string } } } }).readerProfile
     : undefined
-  const learningGoal = (graphState && "learningGoal" in graphState && typeof (graphState as { learningGoal?: string }).learningGoal === "string")
-    ? (graphState as { learningGoal?: string }).learningGoal
-    : undefined
+  const readerGoal = readerProfile?.intent?.goal
+  const readerLevel = readerProfile?.competence?.inTopic?.level
 
   // Active agents: those with status not idle
   const activeAgents = Object.entries(agents)
@@ -132,9 +131,9 @@ export const Dashboard = ({ store, viewUrl }: DashboardProps) => {
       )}
 
       {/* Reader profile badge — shown once the interview completes */}
-      {readerProfile && readerProfile.length > 0 && (
+      {readerProfile && (
         <text fg={theme.textMuted} marginTop={1} flexShrink={0}>
-          reader: {readerProfile.length} concepts{learningGoal ? ` · ${learningGoal.slice(0, 40)}` : ""}
+          reader: {readerLevel ?? "unknown level"}{readerGoal ? ` · ${readerGoal.slice(0, 40)}` : ""}
         </text>
       )}
 

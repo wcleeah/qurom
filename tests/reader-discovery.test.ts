@@ -2,12 +2,16 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { z } from "zod"
 
 import type { RuntimeConfig } from "../src/config"
-import { researchStateSchema, readerInterviewTurnSchema, readerProfileSchema, type ResearchState } from "../src/schema"
+import {
+  researchStateSchema,
+  readerInterviewTurnSchema,
+  readerCalibrationProfileSchema,
+  type ReaderCalibrationProfile,
+  type ResearchState,
+} from "../src/schema"
 
-// Pure-function imports — these don't touch the OpenCode client.
 const {
   createGraph,
   fullDraftPrompt,
@@ -21,6 +25,36 @@ const {
 const { loadPromptBundle } = await import("../src/prompt-assets")
 const { promptAssetFiles } = await import("../src/prompt-asset-defs")
 const { formatReaderTranscriptForPrompt } = await import("../src/reader-transcript")
+const { formatReaderProfileForPrompt, readerContextBlock: readerContextFromProfile } = await import("../src/reader-profile")
+
+export function sampleReaderProfile(overrides: Partial<ReaderCalibrationProfile> = {}): ReaderCalibrationProfile {
+  return readerCalibrationProfileSchema.parse({
+    intent: {
+      goal: "decide if MLX is worth learning",
+      depth: "evaluation",
+    },
+    background: {
+      summary: "Daily PyTorch user; no Swift or Apple stack experience",
+    },
+    competence: {
+      inTopic: {
+        level: "intermediate",
+        summary: "Understands training loops; weak on low-level runtime",
+        evidence: ["could not explain kernel compilation"],
+      },
+      adjacent: {
+        summary: "Strong PyTorch background",
+        evidence: ["uses PyTorch daily for model training"],
+      },
+    },
+    inferredGaps: [
+      { concept: "autograd", treatment: "must-explain", rationale: "could not explain how gradients flow" },
+      { concept: "Swift", treatment: "brief-recap", rationale: "no Apple stack experience mentioned" },
+      { concept: "tensor ops", treatment: "can-assume", rationale: "daily PyTorch use" },
+    ],
+    ...overrides,
+  })
+}
 
 const testConfig: RuntimeConfig = {
   env: {
@@ -63,65 +97,65 @@ afterEach(async () => {
 })
 
 describe("readerInterviewTurnSchema", () => {
-  test("accepts a non-done turn with one question", () => {
+  test("accepts a non-done turn with profile and one question", () => {
     const parsed = readerInterviewTurnSchema.parse({
-      newQuestions: ["What are you trying to do with MLX?"],
+      newQuestions: ["What are you trying to get out of this topic?"],
       done: false,
+      profile: sampleReaderProfile({
+        intent: { goal: "not yet clear", depth: "overview" },
+        inferredGaps: [],
+      }),
     })
     expect(parsed.done).toBe(false)
     expect(parsed.newQuestions).toHaveLength(1)
-    expect(parsed.profile).toBeUndefined()
+    expect(parsed.profile.intent.goal).toBe("not yet clear")
   })
 
   test("accepts a non-done turn with multiple independent questions", () => {
     const parsed = readerInterviewTurnSchema.parse({
-      newQuestions: ["Do you know PyTorch?", "Do you know Swift?"],
+      newQuestions: ["What are you trying to accomplish?", "What is your ML background?"],
       done: false,
+      profile: sampleReaderProfile({ inferredGaps: [] }),
     })
     expect(parsed.newQuestions).toHaveLength(2)
   })
 
-  test("accepts a done turn with a full profile", () => {
+  test("accepts a done turn with a full profile and no questions", () => {
+    const profile = sampleReaderProfile()
     const parsed = readerInterviewTurnSchema.parse({
       newQuestions: [],
       done: true,
-      profile: {
-        learningGoal: "decide if MLX is worth learning",
-        concepts: [
-          { concept: "autograd", level: "unknown", evidence: "couldn't explain chain rule" },
-          { concept: "tensor ops", level: "familiar" },
-        ],
-      },
+      profile,
     })
     expect(parsed.done).toBe(true)
-    expect(parsed.profile?.learningGoal).toBe("decide if MLX is worth learning")
-    expect(parsed.profile?.concepts).toHaveLength(2)
+    expect(parsed.profile.inferredGaps).toHaveLength(3)
   })
 
   test("rejects a non-done turn with no questions", () => {
-    expect(() => readerInterviewTurnSchema.parse({ newQuestions: [], done: false })).toThrow()
+    expect(() => readerInterviewTurnSchema.parse({
+      newQuestions: [],
+      done: false,
+      profile: sampleReaderProfile(),
+    })).toThrow()
   })
 
-  test("has no confidence field in the profile (per plan)", () => {
-    const parsed = readerInterviewTurnSchema.parse({
+  test("rejects a turn with no profile", () => {
+    expect(() => readerInterviewTurnSchema.parse({
       newQuestions: ["q"],
-      done: true,
-      profile: { learningGoal: "g", concepts: [{ concept: "c", level: "familiar" }] },
-    })
-    // confidence is not in the schema; an extra unknown key is stripped by zod default
-    expect(parsed).not.toHaveProperty("confidence")
-    expect(parsed.profile?.concepts[0]).not.toHaveProperty("confidence")
+      done: false,
+    })).toThrow()
   })
 
-  test("rejects an invalid level", () => {
-    expect(() =>
-      readerProfileSchema.parse([{ concept: "c", level: "expert" }]),
-    ).toThrow()
+  test("rejects an invalid gap treatment", () => {
+    expect(() => readerCalibrationProfileSchema.parse({
+      ...sampleReaderProfile(),
+      inferredGaps: [{ concept: "x", treatment: "quiz", rationale: "bad" }],
+    })).toThrow()
   })
 })
 
 describe("ResearchState reader fields", () => {
-  test("researchStateSchema accepts readerProfile/learningGoal/interviewTranscript", () => {
+  test("researchStateSchema accepts readerProfile, interview completion, and transcript", () => {
     const base = {
       requestId: "r-1",
       inputMode: "topic" as const,
@@ -140,15 +174,14 @@ describe("ResearchState reader fields", () => {
     }
     const withReader = researchStateSchema.parse({
       ...base,
-      readerProfile: [{ concept: "autograd", level: "unknown" }],
-      learningGoal: "decide if MLX is worth learning",
-      pendingNewReaderQuestions: ["What are you trying to do?", "What have you read so far?\nMention file paths if relevant."],
+      readerProfile: sampleReaderProfile(),
+      readerInterviewComplete: false,
+      pendingNewReaderQuestions: ["What are you trying to do?"],
       interviewTranscript: [{ role: "interviewer", text: "q?" }, { role: "reader", text: "a" }],
     })
-    expect(withReader.readerProfile).toHaveLength(1)
-    expect(withReader.learningGoal).toBe("decide if MLX is worth learning")
-    expect(withReader.pendingNewReaderQuestions).toHaveLength(2)
-    expect(withReader.pendingNewReaderQuestions?.[1]).toContain("file paths")
+    expect(withReader.readerProfile?.intent.goal).toContain("MLX")
+    expect(withReader.readerInterviewComplete).toBe(false)
+    expect(withReader.pendingNewReaderQuestions).toHaveLength(1)
     expect(withReader.interviewTranscript).toHaveLength(2)
   })
 
@@ -171,7 +204,7 @@ describe("ResearchState reader fields", () => {
     }
     const parsed = researchStateSchema.parse(base)
     expect(parsed.readerProfile).toBeUndefined()
-    expect(parsed.learningGoal).toBeUndefined()
+    expect(parsed.readerInterviewComplete).toBeUndefined()
     expect(parsed.pendingNewReaderQuestions).toBeUndefined()
     expect(parsed.interviewTranscript).toBeUndefined()
   })
@@ -190,13 +223,14 @@ describe("reader interview prompt assets", () => {
     expect(promptAssetFiles.readerInterviewDuplicateCorrection).toBe("reader-interview-duplicate-correction.md")
 
     const bundle = await loadPromptBundle(testConfig)
-    expect(bundle.assets.readerInterview).toContain("first interview turn")
+    expect(bundle.assets.readerInterview).toContain("turn {turn}")
+    expect(bundle.assets.readerInterview).toContain("Do not quiz the reader on prerequisite terminology")
     expect(bundle.assets.readerInterviewFollowUp).toContain("continuing an existing reader interview")
+    expect(bundle.assets.readerInterviewFollowUp).toContain("{profileSoFar}")
     expect(bundle.assets.readerInterviewDuplicateCorrection).toContain("previous response repeated")
     expect(bundle.assets.readerInterview).toContain("`newQuestions` array")
     expect(bundle.assets.readerInterviewFollowUp).toContain("`newQuestions` array")
     expect(bundle.assets.readerInterviewDuplicateCorrection).toContain("`newQuestions` array")
-    expect(bundle.assets.readerInterviewFollowUp).not.toContain("Follow-up guidance")
   })
 
   test("formats batched reader questions and answers as numbered pairs", () => {
@@ -212,6 +246,13 @@ describe("reader interview prompt assets", () => {
     expect(formatted).toContain("Answer 2: Quite new.")
   })
 
+  test("formats partial profile for follow-up prompts", () => {
+    const formatted = formatReaderProfileForPrompt(sampleReaderProfile())
+    expect(formatted).toContain("Goal: decide if MLX is worth learning")
+    expect(formatted).toContain("In-topic (intermediate)")
+    expect(formatted).toContain("autograd (must-explain)")
+  })
+
   test("detects repeated interviewer questions", () => {
     const transcript = [
       { role: "interviewer" as const, text: "What are you trying to learn or build with MLX?" },
@@ -225,7 +266,6 @@ describe("reader interview prompt assets", () => {
 
 describe("createGraph wires the discoverReader node", () => {
   test("the graph compiles with discoverReader between prepareOutputPath and draftFullDraft", () => {
-    // If the node or edges are mis-wired, createGraph throws on compile.
     const promptBundle = {
       source: "local" as const,
       label: "test",
@@ -239,9 +279,9 @@ describe("createGraph wires the discoverReader node", () => {
         rebuttal: "rebuttal",
         reviewRebuttalResponses: "review-rebuttals",
         designHtml: "design",
-        readerInterview: "interview {requestContext} {transcript} {maxTurns} {turn} {outputFile}",
-        readerInterviewFollowUp: "interview follow-up {requestContext} {transcript} {maxTurns} {turn} {outputFile}",
-        readerInterviewDuplicateCorrection: "interview correction {requestContext} {transcript} {maxTurns} {turn} {outputFile}",
+        readerInterview: "interview {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
+        readerInterviewFollowUp: "interview follow-up {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
+        readerInterviewDuplicateCorrection: "interview correction {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
         enhanceDesign: "enhance",
         rebuttalReview: "rr",
         drafterReview: "dr",
@@ -257,33 +297,26 @@ describe("createGraph wires the discoverReader node", () => {
     }
     const graph = createGraph(testConfig, promptBundle)
     expect(graph).toBeDefined()
-    // The graph has getState (compiled with a checkpointer) — needed for interrupt resume.
     expect(typeof graph.getState).toBe("function")
   })
 })
 
 describe("reader-profile-N.json artifact shape", () => {
-  test("a profile written by the interviewer parses as readerProfileSchema", async () => {
+  test("a profile written by the interviewer parses as readerCalibrationProfileSchema", async () => {
     const profileFile = join(tempDir, "reader-profile-1.json")
     await mkdir(tempDir, { recursive: true })
-    const profile = {
-      learningGoal: "decide if MLX is worth learning",
-      concepts: [
-        { concept: "autograd", level: "unknown", evidence: "couldn't explain it" },
-        { concept: "tensor ops", level: "familiar" },
-        { concept: "Swift", level: "heard-of" },
-      ],
+    const turn = {
+      newQuestions: ["What are you trying to get out of MLX?"],
+      done: false,
+      profile: sampleReaderProfile({ inferredGaps: [] }),
     }
-    await writeFile(profileFile, JSON.stringify(profile, null, 2))
+    await writeFile(profileFile, JSON.stringify(turn, null, 2))
     const loaded = JSON.parse(await Bun.file(profileFile).text())
-    expect(readerProfileSchema.safeParse(loaded.concepts).success).toBe(true)
-    // No confidence field anywhere in the persisted artifact.
-    expect(loaded).not.toHaveProperty("confidence")
-    expect(loaded.concepts.every((c: Record<string, unknown>) => !("confidence" in c))).toBe(true)
+    expect(readerCalibrationProfileSchema.safeParse(loaded.profile).success).toBe(true)
   })
 })
 
-describe("Phase 2 — reader profile threaded to prompt-contract functions", () => {
+describe("reader profile threaded to prompt-contract functions", () => {
   const profileState = (overrides: Partial<ResearchState> = {}) =>
     researchStateSchema.parse({
       requestId: "r-1",
@@ -300,11 +333,8 @@ describe("Phase 2 — reader profile threaded to prompt-contract functions", () 
       unresolvedFindings: [],
       approvedAgents: [],
       status: "auditing" as const,
-      readerProfile: [
-        { concept: "autograd", level: "unknown", evidence: "couldn't explain it" },
-        { concept: "tensor ops", level: "familiar" },
-      ],
-      learningGoal: "decide if MLX is worth learning",
+      readerProfile: sampleReaderProfile(),
+      readerInterviewComplete: true,
       ...overrides,
     }) as ResearchState
 
@@ -313,34 +343,38 @@ describe("Phase 2 — reader profile threaded to prompt-contract functions", () 
     promptBundle = await loadPromptBundle(testConfig)
   })
 
-  test("readerContextBlock lists familiar concepts, lacks, and the Prerequisites instruction", () => {
+  test("readerContextBlock lists intent, competence, and prerequisites from inferred gaps", () => {
     const block = readerContextBlock(profileState())
     expect(block).toContain("Reader goal: decide if MLX is worth learning")
-    expect(block).toContain("Reader already knows: tensor ops")
-    expect(block).toContain("Reader does NOT know: autograd")
-    expect(block).toContain("Include a Prerequisites section covering: autograd")
+    expect(block).toContain("Desired depth: evaluation")
+    expect(block).toContain("In-topic level (intermediate)")
+    expect(block).toContain("Reader already knows (do not re-teach): tensor ops")
+    expect(block).toContain("Include a Prerequisites section covering: autograd, Swift")
+    expect(block).toContain("Explain fully before the main topic: autograd")
+    expect(block).toContain("Brief recap only in Prerequisites: Swift")
   })
 
-  test("readerContextBlock returns empty when no profile and no goal (default-reader fallback)", () => {
-    const block = readerContextBlock(profileState({ readerProfile: undefined, learningGoal: undefined }))
+  test("readerContextBlock returns empty when no profile (default-reader fallback)", () => {
+    const block = readerContextBlock(profileState({ readerProfile: undefined }))
     expect(block).toBe("")
+    expect(readerContextFromProfile(undefined)).toBe("")
   })
 
   test("fullDraftPrompt includes the reader context block when a profile is set", () => {
-    const prompt = fullDraftPrompt(testConfig, promptBundle, profileState(), "out.md")
-    expect(prompt).toContain("Reader does NOT know: autograd")
-    expect(prompt).toContain("Include a Prerequisites section covering: autograd")
+    const prompt = fullDraftPrompt(testConfig, promptBundle, profileState())
+    expect(prompt).toContain("Include a Prerequisites section covering: autograd, Swift")
+    expect(prompt).toContain("Desired depth: evaluation")
   })
 
   test("fullDraftPrompt omits reader context when no profile is set", () => {
-    const prompt = fullDraftPrompt(testConfig, promptBundle, profileState({ readerProfile: undefined, learningGoal: undefined }), "out.md")
+    const prompt = fullDraftPrompt(testConfig, promptBundle, profileState({ readerProfile: undefined }))
     expect(prompt).not.toContain("Prerequisites section")
-    expect(prompt).not.toContain("Reader does NOT know")
+    expect(prompt).not.toContain("Reader goal")
   })
 
   test("auditPrompt includes the reader context block when a profile is set", () => {
     const prompt = auditPrompt(testConfig, promptBundle, "source-auditor", profileState(), "audit.json")
-    expect(prompt).toContain("Reader does NOT know: autograd")
+    expect(prompt).toContain("Include a Prerequisites section covering: autograd, Swift")
   })
 
   test("auditPrompt includes the explanation-depth-vs-factual-rigor instruction", () => {
@@ -350,23 +384,23 @@ describe("Phase 2 — reader profile threaded to prompt-contract functions", () 
   })
 
   test("auditPrompt omits reader context when no profile is set (and notes the default)", () => {
-    const prompt = auditPrompt(testConfig, promptBundle, "source-auditor", profileState({ readerProfile: undefined, learningGoal: undefined }), "audit.json")
-    expect(prompt).not.toContain("Reader does NOT know")
+    const prompt = auditPrompt(testConfig, promptBundle, "source-auditor", profileState({ readerProfile: undefined }), "audit.json")
+    expect(prompt).not.toContain("Reader goal")
     expect(prompt).toContain("no reader profile provided")
   })
 
   test("rebuttalPrompt includes the reader context block when a profile is set", () => {
     const prompt = rebuttalPrompt(testConfig, promptBundle, profileState(), "rebuttal.json")
-    expect(prompt).toContain("Reader does NOT know: autograd")
+    expect(prompt).toContain("Desired depth: evaluation")
   })
 
   test("rebuttalReviewPrompt includes the reader context block when a profile is set", () => {
     const prompt = rebuttalReviewPrompt(testConfig, promptBundle, profileState(), "review.json", 2)
-    expect(prompt).toContain("Reader does NOT know: autograd")
+    expect(prompt).toContain("Desired depth: evaluation")
   })
 
   test("drafterReviewPrompt includes the reader context block when a profile is set", () => {
     const prompt = drafterReviewPrompt(testConfig, promptBundle, profileState(), "review.json")
-    expect(prompt).toContain("Reader does NOT know: autograd")
+    expect(prompt).toContain("Desired depth: evaluation")
   })
 })

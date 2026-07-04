@@ -1,5 +1,6 @@
 import { safeFilePath } from "./paths"
 import { answeredQuestionsFromTranscript } from "../reader-transcript"
+import { renderReaderProfileSummary } from "./artifact-renderers"
 import { escapeHtml, statusDot } from "./utils"
 import type { LiveAgentStatus, LiveStatus, RunStatus } from "./types"
 
@@ -49,6 +50,8 @@ export function renderLivePipeline(
   }
 
   const isActive = (node: string) => activeNode === node
+  const interviewActive = isActive("discoverReaderPrompt") || isActive("discoverReaderResume")
+  const profileReady = hasReaderProfile && !interviewActive
   const researchDone = researchStatus === "approved" || researchStatus === "failed"
   const terminalLabel = researchStatus === "approved" ? "finalizeApprovedDraft" : researchStatus === "failed" ? "finalizeFailedRun" : "finalize"
 
@@ -58,9 +61,9 @@ export function renderLivePipeline(
   html += nodeRow(1, "ingestRequest", true, isActive("ingestRequest"))
   html += nodeRow(2, "summarizeInputDocument", researchStatus !== "running" || hasFile(/./), isActive("summarizeInputDocument"))
   html += nodeRow(3, "prepareOutputPath", hasFile(/./), isActive("prepareOutputPath"))
-  html += nodeRow(4, "discoverReader", hasReaderProfile, isActive("discoverReaderPrompt") || isActive("discoverReaderResume"),
-    hasReaderProfile ? "· profile ready" : (isActive("discoverReaderPrompt") || isActive("discoverReaderResume") ? "· interviewing" : ""),
-    (isActive("discoverReaderPrompt") || isActive("discoverReaderResume")) ? agentListHtml(liveAgents) : "")
+  html += nodeRow(4, "discoverReader", profileReady, interviewActive,
+    profileReady ? "· profile ready" : (interviewActive ? "· interviewing" : ""),
+    interviewActive ? agentListHtml(liveAgents) : "")
   html += nodeRow(5, "draftFullDraft", hasDraft, isActive("draftFullDraft"),
     hasDraft ? `· ${files.filter((f) => /^draft-round-\d+\.md$/.test(f)).length} rounds` : "",
     isActive("draftFullDraft") ? agentListHtml(liveAgents) : "")
@@ -219,8 +222,15 @@ export function renderInterviewChatCard(runName: string, liveStatus: LiveStatus 
         <textarea name="a_0" rows="4" placeholder="type your answer..." required></textarea>
       </div>`
   const currentTurn = awaiting.turn
+  const profileSoFarHtml = awaiting.partialProfile
+    ? `<div class="interview-profile-so-far">
+        <div class="chat-current-label">Profile so far</div>
+        ${renderReaderProfileSummary(awaiting.partialProfile)}
+      </div>`
+    : ""
   return `<div class="section interview-card">
   <h2>Reader interview · turn ${currentTurn}</h2>
+  ${profileSoFarHtml}
   ${historySection}
   <div class="interview-current">
     <div class="chat-current-label">Answer this turn:</div>

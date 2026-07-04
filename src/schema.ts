@@ -228,19 +228,43 @@ export const confidenceSchema = z.object({
 export type SectionConfidence = z.infer<typeof sectionConfidenceSchema>
 export type Confidence = z.infer<typeof confidenceSchema>
 
-export const readerProfileSchema = z.array(z.object({
-  concept: z.string(),
-  level: z.enum(["familiar", "heard-of", "unknown"]),
-  evidence: z.string().optional(),
-}))
+export const readerCompetenceLevelSchema = z.enum(["novice", "intermediate", "advanced", "expert"])
+
+export const readerIntentDepthSchema = z.enum(["overview", "conceptual", "implementation", "evaluation"])
+
+export const readerGapTreatmentSchema = z.enum(["must-explain", "brief-recap", "can-assume"])
+
+export const readerCalibrationProfileSchema = z.object({
+  intent: z.object({
+    goal: z.string(),
+    depth: readerIntentDepthSchema,
+    format: z.string().optional(),
+  }),
+  background: z.object({
+    summary: z.string(),
+  }),
+  competence: z.object({
+    inTopic: z.object({
+      level: readerCompetenceLevelSchema,
+      summary: z.string(),
+      evidence: z.array(z.string()),
+    }),
+    adjacent: z.object({
+      summary: z.string(),
+      evidence: z.array(z.string()),
+    }),
+  }),
+  inferredGaps: z.array(z.object({
+    concept: z.string(),
+    treatment: readerGapTreatmentSchema,
+    rationale: z.string(),
+  })),
+})
 
 export const readerInterviewTurnSchema = z.object({
   newQuestions: z.array(z.string()),
   done: z.boolean(),
-  profile: z.object({
-    learningGoal: z.string().optional(),
-    concepts: readerProfileSchema,
-  }).optional(),
+  profile: readerCalibrationProfileSchema,
 }).superRefine((val, ctx) => {
   // A non-done turn must carry at least one question; a done turn may have
   // an empty newQuestions array (no further question to ask).
@@ -249,7 +273,7 @@ export const readerInterviewTurnSchema = z.object({
   }
 })
 
-export type ReaderProfile = z.infer<typeof readerProfileSchema>
+export type ReaderCalibrationProfile = z.infer<typeof readerCalibrationProfileSchema>
 export type ReaderInterviewTurn = z.infer<typeof readerInterviewTurnSchema>
 
 export const runSummarySchema = z.object({
@@ -317,12 +341,8 @@ export const researchStateObjectSchema = z.object({
   status: researchStatusSchema,
   failureReason: failureReasonSchema.optional(),
   outputPath: nonEmptyStringSchema.optional(),
-  readerProfile: z.array(z.object({
-    concept: z.string(),
-    level: z.enum(["familiar", "heard-of", "unknown"]),
-    evidence: z.string().optional(),
-  })).optional(),
-  learningGoal: z.string().optional(),
+  readerProfile: readerCalibrationProfileSchema.optional(),
+  readerInterviewComplete: z.boolean().optional(),
   pendingNewReaderQuestions: z.array(z.string()).optional(),
   interviewTranscript: z.array(z.object({
     role: z.enum(["interviewer", "reader"]),

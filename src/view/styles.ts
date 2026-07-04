@@ -967,6 +967,16 @@ code {
 }
 
 /* ── Interview chat card ── */
+.interview-profile-so-far {
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.interview-profile-so-far .reader-profile-summary {
+  margin-top: 0.35rem;
+}
 .interview-card {
   background: var(--panel);
   border: 1px solid var(--accent);

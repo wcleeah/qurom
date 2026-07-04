@@ -66,25 +66,86 @@ export function renderRequestCard(data: unknown): string {
 
 // ── reader-profile-N.json ──
 
-export function renderReaderProfileCard(data: unknown): string {
-  // The interviewer writes one JSON artifact per turn. On the final turn the
-  // file holds the full turn object with `profile: { learningGoal, concepts }`.
+type ReaderProfileData = {
+  intent?: { goal?: string; depth?: string; format?: string }
+  background?: { summary?: string }
+  competence?: {
+    inTopic?: { level?: string; summary?: string; evidence?: string[] }
+    adjacent?: { summary?: string; evidence?: string[] }
+  }
+  inferredGaps?: Array<{ concept: string; treatment: string; rationale?: string }>
+}
+
+function extractReaderProfileData(data: unknown): ReaderProfileData | undefined {
   const d = data as Record<string, unknown>
-  const profile = (d.profile ?? d) as { learningGoal?: string; concepts?: Array<{ concept: string; level: string; evidence?: string }> }
-  const concepts = Array.isArray(profile.concepts) ? profile.concepts : []
-  const goal = profile.learningGoal ? escapeHtml(String(profile.learningGoal)) : "<span class=\"placeholder-muted\">(not specified)</span>"
-  const levelClass: Record<string, string> = { familiar: "concept-level-familiar", "heard-of": "concept-level-heard-of", unknown: "concept-level-unknown" }
-  const conceptRows = concepts.map((c) => {
-    const lvl = escapeHtml(String(c.level))
-    const ev = c.evidence ? escapeHtml(String(c.evidence)) : ""
-    return `<tr><td>${escapeHtml(c.concept)}</td><td class="${levelClass[c.level] ?? "concept-level-default"}">${lvl}</td><td class="evidence-muted">${ev}</td></tr>`
-  }).join("")
-  return `<div class="structured-card">
+  const profile = (d.profile ?? d) as ReaderProfileData
+  if (!profile || typeof profile !== "object") return undefined
+  if (!profile.intent && !profile.background && !profile.competence) return undefined
+  return profile
+}
+
+const gapTreatmentClass: Record<string, string> = {
+  "must-explain": "concept-level-unknown",
+  "brief-recap": "concept-level-heard-of",
+  "can-assume": "concept-level-familiar",
+}
+
+export function renderReaderProfileSummary(data: unknown): string {
+  const profile = extractReaderProfileData(data)
+  if (!profile) return ""
+
+  const goal = profile.intent?.goal
+    ? escapeHtml(String(profile.intent.goal))
+    : "<span class=\"placeholder-muted\">(intent not yet clear)</span>"
+  const depth = profile.intent?.depth ? escapeHtml(String(profile.intent.depth)) : "—"
+  const background = profile.background?.summary
+    ? escapeHtml(String(profile.background.summary))
+    : "<span class=\"placeholder-muted\">(background not yet clear)</span>"
+  const inTopicLevel = profile.competence?.inTopic?.level
+    ? escapeHtml(String(profile.competence.inTopic.level))
+    : "—"
+  const inTopicSummary = profile.competence?.inTopic?.summary
+    ? escapeHtml(String(profile.competence.inTopic.summary))
+    : "—"
+  const adjacent = profile.competence?.adjacent?.summary
+    ? escapeHtml(String(profile.competence.adjacent.summary))
+    : "—"
+  const gaps = Array.isArray(profile.inferredGaps) ? profile.inferredGaps : []
+  const gapRows = gaps.length > 0
+    ? gaps.map((g) => {
+      const treatment = escapeHtml(String(g.treatment))
+      const rationale = g.rationale ? escapeHtml(String(g.rationale)) : ""
+      return `<tr><td>${escapeHtml(String(g.concept))}</td><td class="${gapTreatmentClass[g.treatment] ?? "concept-level-default"}">${treatment}</td><td class="evidence-muted">${rationale}</td></tr>`
+    }).join("")
+    : "<tr><td colspan=\"3\" class=\"placeholder-muted\">(gaps not yet inferred)</td></tr>"
+
+  return `<table class="summary-table reader-profile-summary">
+    <tr><td>Goal</td><td colspan="2">${goal}</td></tr>
+    <tr><td>Depth</td><td colspan="2">${depth}</td></tr>
+    <tr><td>Background</td><td colspan="2">${background}</td></tr>
+    <tr><td>In-topic</td><td>${inTopicLevel}</td><td>${inTopicSummary}</td></tr>
+    <tr><td>Adjacent</td><td colspan="2">${adjacent}</td></tr>
+    <tr><th>Gap</th><th>Treatment</th><th>Rationale</th></tr>
+    ${gapRows}
+  </table>`
+}
+
+export function renderReaderProfileCard(data: unknown): string {
+  const d = data as Record<string, unknown>
+  const done = d.done === true
+  const summary = renderReaderProfileSummary(d)
+  if (!summary) {
+    return `<div class="structured-card">
   <div class="auditor-header">Reader profile</div>
-  <table class="summary-table">
-    <tr><td>Learning goal</td><td colspan="2">${goal}</td></tr>
-    ${concepts.length > 0 ? `<tr><th>Concept</th><th>Level</th><th>Evidence</th></tr>${conceptRows}` : "<tr><td colspan=\"3\" class=\"placeholder-muted\">(interview did not complete)</td></tr>"}
-  </table>
+  <p class="placeholder-muted">(interview in progress — no profile synthesized yet)</p>
+</div>`
+  }
+  const status = done
+    ? "Reader profile"
+    : "Reader profile (in progress)"
+  return `<div class="structured-card">
+  <div class="auditor-header">${status}</div>
+  ${summary}
 </div>`
 }
 

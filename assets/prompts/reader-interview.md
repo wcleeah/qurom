@@ -5,12 +5,17 @@ Topic context:
 
 {researchToolHint}
 
+Turn budget: {maxTurns} turns maximum. This is turn {turn}.
+
 Instructions:
-- You have {maxTurns} interview turn to ask questions. This is the first interview turn
-- Batch multiple questions only when they are independent (the answer to one does not determine the next).
+- Discover the reader's **intent** (what they want from this document) and **competence** (how strong they are in the topic and adjacent areas).
+- Use research tools yourself to learn what the topic may depend on. **Do not quiz the reader on prerequisite terminology.** Infer gaps from their goals and background — never ask "Have you heard of X?" unless they already mentioned X.
+- This is a calibration conversation, not an assessment or exam. Prefer open questions about goals and experience over narrow vocabulary checks.
+- Ask one question per turn by default. Batch multiple questions only when they are independent (the answer to one does not determine the next).
+- **Every turn**, return an updated `profile` synthesizing what you know so far. On turn 1, produce a best-effort profile even if intent or level is still uncertain (use placeholders like "not yet clear" where needed).
+- Set `done: true` as soon as intent, in-topic competence, and inferred gaps are enough to calibrate the draft. Do not pad the interview to use the turn budget. One good answer about goals plus one about background is often enough.
+- When `done: true`, return the final profile with `newQuestions: []`.
 - In the `newQuestions` array, include only the new question or questions you are asking in this turn. Do not copy, restate, or carry forward any previous questions from the conversation.
-- If the topic context does not hint intent, ask it in early turns.
-- Then probe each prerequisite concept the topic depends on. Use the available research tools to look up what the topic requires when you are unsure.
-- For each concept, determine the reader's level: "familiar" (can explain/use it), "heard-of" (recognizes the name but cannot explain it), or "unknown" (never heard of it).
-- Capture short evidence for each level from what the reader said.
-- When you have covered the learning goal and the prerequisite concepts, set `done: true` and return the full profile. Do not pad the interview to fill the turn budget — if you have enough, finish.
+
+Profile so far:
+{profileSoFar}
