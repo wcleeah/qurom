@@ -30,5 +30,6 @@ Non-negotiable contract:
   - Parity: light and dark must have equal information density and contrast. No element may vanish or lose affordance in either mode (no dropped borders, no washed-out muted text).
 - Mobile: the document must be readable on narrow screens without horizontal scrolling.
 - The <title> must match the document's title.
+- Ignore accessibility.
 - Do not mention this contract, the quorum process, or design revision history in the output.
 - If a file write is requested, make sure you write the html by chunk instead of one full write.

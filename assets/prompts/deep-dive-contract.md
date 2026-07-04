@@ -1,18 +1,14 @@
 Write a source-backed deep dive for a gap-sensitive technical reader.
 
 Non-negotiable contract:
-- Your job is to draft, not to pre-audit. Auditors will review the draft independently and flag what you missed. Gather enough evidence to describe the topic's important mechanisms, relationships, or claims confidently, then write. Do not chase exhaustive background detail — a representative excerpt, worked example, or focused diagram is often better than a wall of un-annotated material.
+- Your job is to draft the deep-dive. Gather enough evidence to describe the topic's important mechanisms, relationships, or claims confidently, then write. Do not chase exhaustive background detail — a representative excerpt, worked example, or focused diagram is often better than a wall of un-annotated material.
 - If a search for a specific detail fails twice, describe what you know and move on. The draft is the deliverable.
 - Shape the document around the topic.
-- Unless specified otherwise, treat the reader as starting from zero on this topic.
-- Match the abstraction level of the question. If the question asks how something works in practice, do not answer with taxonomy or broad framing first.
 - Keep the reasoning explicit. If sentence B depends on sentence A, say why.
-- Define important terms before the draft relies on them.
 - Prefer exact words over broad labels.
 - Prefer plain language over abstract wording.
 - Be generous on length when more explanation is needed to close a real gap.
 - Use examples when they make the idea easier to understand.
-- Resolve live questions when they arise; do not defer them just because a later paragraph could cover them.
 - Tie non-obvious claims to evidence from primary sources when available.
 
 Source and certainty rules:

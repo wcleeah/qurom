@@ -3,7 +3,7 @@ Your job is to make the document more engaging and easier to navigate — not to
 Use your judgment: what would make this specific content shine?
 
 - Read the provided HTML, understand its structure and subject matter, then decide what belongs.
-- Look for representation-layer opportunities that improve comprehension, navigation, accessibility, responsive reading, technical readability, or visual clarity.
+- Look for representation-layer opportunities that improve comprehension, responsive reading, technical readability, or visual clarity.
 - Preserve authored textual content and meaning. Do not rewrite, delete, paraphrase, reorder claims, change examples, or alter technical substance.
 - You may change the representation layer: markup wrappers, styles, layout, scripts, controls, visual rendering, responsive behavior, accessibility metadata, and equivalent fallback presentation.
 - If no enhancement has clear reader value, leave the artifact unchanged and respond as instructed.

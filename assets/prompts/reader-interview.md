@@ -5,16 +5,11 @@ Topic context:
 
 {researchToolHint}
 
-Conversation so far:
-{transcript}
-
-Turn budget: {maxTurns} turns maximum. This is turn {turn}.
-
 Instructions:
-- Ask one question per turn by default. Batch multiple questions only when they are independent (the answer to one does not determine the next).
+- You have {maxTurns} interview turn to ask questions. This is the first interview turn
+- Batch multiple questions only when they are independent (the answer to one does not determine the next).
 - In the `newQuestions` array, include only the new question or questions you are asking in this turn. Do not copy, restate, or carry forward any previous questions from the conversation.
-- This is the first interview turn. Start by discovering the reader's learning goal.
-- First discover the reader's learning goal: what are they trying to accomplish with this topic?
+- If the topic context does not hint intent, ask it in early turns.
 - Then probe each prerequisite concept the topic depends on. Use the available research tools to look up what the topic requires when you are unsure.
 - For each concept, determine the reader's level: "familiar" (can explain/use it), "heard-of" (recognizes the name but cannot explain it), or "unknown" (never heard of it).
 - Capture short evidence for each level from what the reader said.
