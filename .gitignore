@@ -2,7 +2,12 @@ node_modules/
 .env
 .env.local
 dist/
-runs/*
-!runs/quorum-config.sqlite
-runs/.drafts/
+.opencode/
+runs/
+/checkpoints.sqlite
+/checkpoints.sqlite-shm
+/checkpoints.sqlite-wal
+/quorum-config.sqlite
+/quorum-config.sqlite-shm
+/quorum-config.sqlite-wal
 .DS_Store

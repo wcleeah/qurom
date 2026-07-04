@@ -1,10 +1,13 @@
 import { basename, resolve } from "node:path"
+
+import { quorumDataPaths } from "../data-paths"
 import { isSqliteFile } from "./utils"
 
 export function getRunsDir(): string {
-  return process.env.QUORUM_RUNS_DIR
-    ? resolve(process.env.QUORUM_RUNS_DIR)
-    : resolve(import.meta.dirname, "..", "..", "runs")
+  if (process.env.QUORUM_RUNS_DIR) {
+    return resolve(process.env.QUORUM_RUNS_DIR)
+  }
+  return quorumDataPaths().runsDir
 }
 
 /** @deprecated Prefer getRunsDir() — evaluated once at import for display-only use. */

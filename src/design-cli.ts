@@ -1,4 +1,5 @@
 import { loadRuntimeConfig } from "./config"
+import { resolveOpencodeBootstrap } from "./opencode-bootstrap"
 import { loadPromptBundle } from "./prompt-assets"
 import { prepareConfiguredProviders } from "./providers/registry"
 import { createEventBus, runDesignPipeline } from "./runner"
@@ -15,9 +16,10 @@ async function main() {
   const runId = args[0]
 
   const config = await loadRuntimeConfig()
+  await resolveOpencodeBootstrap({ interactive: false, workspaceDir: config.env.OPENCODE_DIRECTORY })
 
   if (!config.quorumConfig.designQuorum?.enabled) {
-    console.error("Design quorum is not enabled in quorum.config.json (set designQuorum.enabled: true)")
+    console.error("Design quorum is not enabled (set designQuorum.enabled: true in the active config profile)")
     process.exit(1)
   }
 

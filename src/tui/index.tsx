@@ -1,6 +1,7 @@
 import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { loadRuntimeConfig } from "../config"
+import { resolveOpencodeBootstrap } from "../opencode-bootstrap"
 import { ensureArtifactDir } from "../output"
 import { prepareConfiguredProviders, validateProviderPrerequisites } from "../providers/registry"
 import { loadPromptBundle } from "../prompt-assets"
@@ -8,10 +9,11 @@ import { App } from "./App"
 import { createSystemStatusStore, pushSystemStatus } from "./state/systemStatus"
 
 const config = await loadRuntimeConfig()
+await resolveOpencodeBootstrap({ interactive: true, workspaceDir: config.env.OPENCODE_DIRECTORY })
 
 const stopProviders = await prepareConfiguredProviders(config)
 
-await ensureArtifactDir(config.quorumConfig.artifactDir)
+await ensureArtifactDir(config.env.QUORUM_RUNS_DIR)
 const prerequisites = await validateProviderPrerequisites(config)
 const promptBundle = await loadPromptBundle(config)
 

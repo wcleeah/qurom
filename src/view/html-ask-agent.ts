@@ -201,7 +201,7 @@ export async function prepareAskMessage(input: {
     throw new Error("highlightId is required for highlight bootstrap")
   }
 
-  const { config } = await ensureAskRuntime()
+  const { config, promptBundle } = await ensureAskRuntime()
   const { thread, created, source } = await resolveOrCreateAskThread(input)
   if (runningThreads.has(thread.id)) {
     throw new AskThreadBusyError(thread.id)
@@ -231,6 +231,10 @@ export async function prepareAskMessage(input: {
     bootstrap,
     source,
     config,
+    promptAssets: {
+      htmlAskPage: promptBundle.assets.htmlAskPage,
+      htmlAskHighlight: promptBundle.assets.htmlAskHighlight,
+    },
   })
 
   const userMessage = await appendHtmlReaderAskMessage({

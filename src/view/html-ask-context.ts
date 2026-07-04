@@ -36,15 +36,6 @@ export async function resolveSourceMarkdown(runName: string): Promise<ResolvedSo
   throw new NoSourceMarkdownError(runName)
 }
 
-async function readPromptTemplate(name: string): Promise<string> {
-  const path = join(process.env.QUORUM_WORKSPACE_DIRECTORY ?? process.cwd(), "assets", "prompts", name)
-  const file = Bun.file(path)
-  if (!(await file.exists())) {
-    throw new Error(`Missing prompt template ${name} at ${path}`)
-  }
-  return (await file.text()).trim()
-}
-
 function renderTemplate(template: string, values: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_match, key: string) => values[key] ?? "")
 }
@@ -56,6 +47,10 @@ export interface AskPromptBuildInput {
   bootstrap: boolean
   source: ResolvedSourceMarkdown
   config: RuntimeConfig
+  promptAssets: {
+    htmlAskPage: string
+    htmlAskHighlight: string
+  }
 }
 
 export interface AskPromptBuildResult {
@@ -73,8 +68,9 @@ export async function buildAskPrompt(input: AskPromptBuildInput): Promise<AskPro
     return { prompt: message }
   }
 
-  const templateName = input.scope === "highlight" ? "html-ask-highlight.md" : "html-ask-page.md"
-  const template = await readPromptTemplate(templateName)
+  const template = input.scope === "highlight"
+    ? input.promptAssets.htmlAskHighlight
+    : input.promptAssets.htmlAskPage
   const values: Record<string, string> = {
     question: message,
     researchToolHint: buildResearchToolHint(input.config),

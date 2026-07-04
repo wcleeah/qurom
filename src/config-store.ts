@@ -1,20 +1,13 @@
 import { Database } from "bun:sqlite"
-import { mkdir, readdir, writeFile } from "node:fs/promises"
+import { access, mkdir, readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { createHash } from "node:crypto"
 
+import type { RuntimeEnv } from "./config"
 import { quorumConfigSchema } from "./config"
+import { ensureQuorumDataDirs, quorumDataPaths, repoDefaultsDir } from "./data-paths"
+import { copyPreserveTimes } from "./migrate-copy"
 import { promptAssetFiles, type PromptAssetKey } from "./prompt-asset-defs"
-
-type EnvBootstrap = {
-  OPENCODE_DIRECTORY: string
-  QUORUM_WORKSPACE_DIRECTORY?: string
-  QUORUM_CONFIG_DB_PATH?: string
-}
-
-function workspaceDirectory(env: EnvBootstrap) {
-  return env.QUORUM_WORKSPACE_DIRECTORY ?? env.OPENCODE_DIRECTORY
-}
 
 type ConfigProfileRow = {
   id: number
@@ -31,20 +24,15 @@ type ConfigValueRow = {
   value_json: string
 }
 
-export type PromptAssetFileSummary = {
+export type PromptAssetSummary = {
   key: PromptAssetKey
   content: string
   version: number
-  active: 1
 }
 
-type RoleDefinitionRow = {
-  profile_id: number
+export type RoleInstructionSummary = {
   role: string
   content: string
-  description: string | null
-  capabilities_json: string
-  enabled: number
 }
 
 type RoleProviderBindingRow = {
@@ -78,8 +66,20 @@ function parseJson<T>(text: string, fallback: T): T {
 
 const LEGACY_BROWSER_QA_ROLE = "browser-qa-enhancer"
 
+const LEGACY_QUORUM_FIELDS = ["artifactDir", "promptAssetsDir", "promptManagement"] as const
+
 async function ensureParentDir(path: string) {
   await mkdir(dirname(path), { recursive: true })
+}
+
+async function readTextIfExists(path: string) {
+  const file = Bun.file(path)
+  if (!(await file.exists())) return undefined
+  return (await file.text()).trim()
+}
+
+async function readJsonFile(path: string) {
+  return JSON.parse(await Bun.file(path).text())
 }
 
 export function openConfigStore(dbPath: string) {
@@ -108,19 +108,6 @@ CREATE TABLE IF NOT EXISTS config_values (
   FOREIGN KEY (profile_id) REFERENCES config_profiles(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS role_definitions (
-  profile_id INTEGER NOT NULL,
-  role TEXT NOT NULL,
-  description TEXT,
-  content TEXT NOT NULL,
-  capabilities_json TEXT NOT NULL DEFAULT '[]',
-  enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  PRIMARY KEY (profile_id, role),
-  FOREIGN KEY (profile_id) REFERENCES config_profiles(id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS role_provider_bindings (
   profile_id INTEGER NOT NULL,
   role TEXT NOT NULL,
@@ -130,6 +117,27 @@ CREATE TABLE IF NOT EXISTS role_provider_bindings (
   variant TEXT,
   output_mode TEXT,
   options_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (profile_id, role),
+  FOREIGN KEY (profile_id) REFERENCES config_profiles(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS prompt_assets (
+  profile_id INTEGER NOT NULL,
+  key TEXT NOT NULL,
+  content TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (profile_id, key),
+  FOREIGN KEY (profile_id) REFERENCES config_profiles(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS role_instructions (
+  profile_id INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (profile_id, role),
@@ -148,7 +156,8 @@ CREATE TABLE IF NOT EXISTS config_audit_log (
   created_at TEXT NOT NULL
 );
   `)
-  db.run("DROP TABLE IF EXISTS prompt_assets")
+  db.run("DROP TABLE IF EXISTS role_definitions")
+  db.run("DROP TABLE IF EXISTS prompt_assets_legacy")
 
   return {
     db,
@@ -158,10 +167,8 @@ CREATE TABLE IF NOT EXISTS config_audit_log (
   }
 }
 
-export async function getConfigStore(env: EnvBootstrap): Promise<ConfigStore> {
-  const dbPath = env.QUORUM_CONFIG_DB_PATH ?? join(workspaceDirectory(env), "runs", "quorum-config.sqlite")
-  await ensureParentDir(dbPath)
-  return openConfigStore(dbPath)
+export function getConfigStore(env: RuntimeEnv): ConfigStore {
+  return openConfigStore(env.QUORUM_CONFIG_DB_PATH)
 }
 
 function activeProfile(store: ConfigStore): ConfigProfileRow | undefined {
@@ -179,10 +186,6 @@ function createProfile(store: ConfigStore, name = "default"): ConfigProfileRow {
   const profile = activeProfile(store)
   if (!profile) throw new Error("Failed to create active config profile")
   return profile
-}
-
-export function getActiveConfigProfile(store: ConfigStore): ConfigProfileRow | undefined {
-  return activeProfile(store)
 }
 
 function writeAudit(store: ConfigStore, input: {
@@ -211,18 +214,19 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     )
 }
 
-async function readJsonFile(path: string) {
-  return JSON.parse(await Bun.file(path).text())
+function stripLegacyQuorumFields(config: Record<string, unknown>) {
+  const next = { ...config }
+  for (const field of LEGACY_QUORUM_FIELDS) {
+    delete next[field]
+  }
+  return next
 }
 
-async function readTextIfExists(path: string) {
-  const file = Bun.file(path)
-  if (!(await file.exists())) return undefined
-  return (await file.text()).trim()
-}
-
-function normalizeQuorumConfig(config: unknown) {
-  const parsed = quorumConfigSchema.parse(config)
+export function normalizeQuorumConfig(config: unknown) {
+  const stripped = stripLegacyQuorumFields(
+    typeof config === "object" && config !== null ? (config as Record<string, unknown>) : {},
+  )
+  const parsed = quorumConfigSchema.parse(stripped)
   const roles = { ...parsed.agentRuntime.roles }
   delete roles[LEGACY_BROWSER_QA_ROLE]
   return quorumConfigSchema.parse({
@@ -248,7 +252,7 @@ function pruneLegacyBrowserQaRows(store: ConfigStore, profileId: number) {
         profileId,
         source: "migration",
         action: "prune",
-        subject: "config:browser-qa",
+        subject: "config:legacy-fields",
         before: before.value_json,
         after: normalized,
       })
@@ -256,7 +260,6 @@ function pruneLegacyBrowserQaRows(store: ConfigStore, profileId: number) {
   }
 
   store.db.query("DELETE FROM role_provider_bindings WHERE profile_id = ? AND role = ?").run(profileId, LEGACY_BROWSER_QA_ROLE)
-  store.db.query("DELETE FROM role_definitions WHERE profile_id = ? AND role = ?").run(profileId, LEGACY_BROWSER_QA_ROLE)
 }
 
 function mergeRoleBindingsIntoConfig(config: unknown, bindings: RoleProviderBindingRow[]) {
@@ -281,34 +284,20 @@ function mergeRoleBindingsIntoConfig(config: unknown, bindings: RoleProviderBind
   })
 }
 
-async function readOpencodeRoleDefinitions(env: EnvBootstrap, profileId: number): Promise<RoleDefinitionRow[]> {
-  const agentsDir = join(workspaceDirectory(env), ".opencode", "agents")
-  const roles: RoleDefinitionRow[] = []
-  try {
-    const entries = await readdir(agentsDir, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".md")) continue
-      const role = entry.name.replace(/\.md$/, "")
-      const content = await readTextIfExists(join(agentsDir, entry.name))
-      if (!content) continue
-      roles.push({
-        profile_id: profileId,
-        role,
-        content,
-        description: role,
-        capabilities_json: "[]",
-        enabled: 1,
-      })
-    }
-  } catch {
-    // OpenCode files are only relevant when the OpenCode provider is used.
+async function readDefaultsPrompts(workspaceDir: string): Promise<Array<{ key: PromptAssetKey; content: string }>> {
+  const promptDir = join(repoDefaultsDir(workspaceDir), "prompts")
+  const prompts: Array<{ key: PromptAssetKey; content: string }> = []
+  for (const [key, filename] of Object.entries(promptAssetFiles) as Array<[PromptAssetKey, string]>) {
+    const content = await readTextIfExists(join(promptDir, filename))
+    if (!content) throw new Error(`Missing defaults prompt ${filename}`)
+    prompts.push({ key, content })
   }
-  return roles.sort((a, b) => a.role.localeCompare(b.role))
+  return prompts
 }
 
-async function readProviderNeutralRoleDefinitions(env: EnvBootstrap, profileId: number): Promise<RoleDefinitionRow[]> {
-  const rolesDir = join(workspaceDirectory(env), "assets", "roles")
-  const roles: RoleDefinitionRow[] = []
+async function readDefaultsRoleInstructions(workspaceDir: string): Promise<RoleInstructionSummary[]> {
+  const rolesDir = join(repoDefaultsDir(workspaceDir), "roles")
+  const roles: RoleInstructionSummary[] = []
   try {
     const entries = await readdir(rolesDir, { withFileTypes: true })
     for (const entry of entries) {
@@ -316,44 +305,94 @@ async function readProviderNeutralRoleDefinitions(env: EnvBootstrap, profileId: 
       const role = entry.name.replace(/\.md$/, "")
       const content = await readTextIfExists(join(rolesDir, entry.name))
       if (!content) continue
-      roles.push({
-        profile_id: profileId,
-        role,
-        content,
-        description: role,
-        capabilities_json: "[]",
-        enabled: 1,
-      })
+      roles.push({ role, content })
     }
   } catch {
-    // Provider-neutral role files are optional for older workspaces.
+    // Optional defaults.
   }
   return roles.sort((a, b) => a.role.localeCompare(b.role))
 }
 
-export async function listProviderNeutralRoleDefinitions(env: EnvBootstrap) {
-  const store = await getConfigStore(env)
-  try {
-    const profile = await seedConfigStoreFromFiles(env, store)
-    return await readProviderNeutralRoleDefinitions(env, profile.id)
-  } finally {
-    store.close()
+function insertPromptAsset(store: ConfigStore, profileId: number, key: PromptAssetKey, content: string, source: string) {
+  const ts = nowIso()
+  store.db
+    .query(`
+INSERT INTO prompt_assets (profile_id, key, content, version, created_at, updated_at)
+VALUES (?, ?, ?, 1, ?, ?)
+ON CONFLICT(profile_id, key) DO NOTHING
+    `)
+    .run(profileId, key, content, ts, ts)
+  writeAudit(store, {
+    profileId,
+    source,
+    action: "seed",
+    subject: `prompt:${key}`,
+    after: content,
+  })
+}
+
+function insertRoleInstruction(store: ConfigStore, profileId: number, role: string, content: string, source: string) {
+  const ts = nowIso()
+  store.db
+    .query(`
+INSERT INTO role_instructions (profile_id, role, content, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(profile_id, role) DO NOTHING
+    `)
+    .run(profileId, role, content, ts, ts)
+  writeAudit(store, {
+    profileId,
+    source,
+    action: "seed",
+    subject: `role-instruction:${role}`,
+    after: content,
+  })
+}
+
+function insertRoleBindingFromRow(
+  store: ConfigStore,
+  profileId: number,
+  binding: Pick<RoleProviderBindingRow, "role" | "provider" | "provider_agent" | "model" | "variant" | "output_mode" | "options_json">,
+  source: string,
+) {
+  const ts = nowIso()
+  store.db
+    .query(`
+INSERT INTO role_provider_bindings (profile_id, role, provider, provider_agent, model, variant, output_mode, options_json, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(profile_id, role) DO NOTHING
+    `)
+    .run(
+      profileId,
+      binding.role,
+      binding.provider,
+      binding.provider_agent,
+      binding.model,
+      binding.variant,
+      binding.output_mode,
+      binding.options_json,
+      ts,
+      ts,
+    )
+  writeAudit(store, {
+    profileId,
+    source,
+    action: "seed",
+    subject: `binding:${binding.role}`,
+  })
+}
+
+async function seedBindingsFromDefaultsSqlite(store: ConfigStore, profileId: number, workspaceDir: string, source: string) {
+  const { ensureDefaultsConfigDb, listDefaultsRoleBindings } = await import("./defaults-store")
+  await ensureDefaultsConfigDb(workspaceDir)
+  for (const binding of await listDefaultsRoleBindings(workspaceDir)) {
+    insertRoleBindingFromRow(store, profileId, binding, source)
   }
 }
 
-export async function seedConfigStoreFromFiles(env: EnvBootstrap, store?: ConfigStore) {
-  const ownedStore = store ?? await getConfigStore(env)
-  const shouldClose = !store
-  store = ownedStore
-  try {
-  const existing = activeProfile(store)
-  if (existing) {
-    pruneLegacyBrowserQaRows(store, existing.id)
-    return existing
-  }
-
+async function seedProfileFromDefaults(store: ConfigStore, workspaceDir: string): Promise<ConfigProfileRow> {
   const profile = createProfile(store, "default")
-  const configPath = join(workspaceDirectory(env), "quorum.config.json")
+  const configPath = join(repoDefaultsDir(workspaceDir), "quorum.config.json")
   const rawConfig = await readJsonFile(configPath)
   const quorumConfig = normalizeQuorumConfig(rawConfig)
   const configJson = JSON.stringify(quorumConfig, null, 2)
@@ -364,56 +403,150 @@ export async function seedConfigStoreFromFiles(env: EnvBootstrap, store?: Config
     .run(profile.id, configJson, ts, ts)
   writeAudit(store, {
     profileId: profile.id,
-    source: "seed-files",
+    source: "seed-defaults",
     action: "seed",
     subject: "config:quorum",
     after: configJson,
   })
 
-  const agentsDir = join(workspaceDirectory(env), ".opencode", "agents")
-  try {
-    const entries = await readdir(agentsDir, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".md")) continue
-      const role = entry.name.replace(/\.md$/, "")
-      const content = await readTextIfExists(join(agentsDir, entry.name))
-      if (!content) continue
-      store.db
-        .query(`
-INSERT INTO role_definitions (profile_id, role, description, content, capabilities_json, enabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, '[]', 1, ?, ?)
-        `)
-        .run(profile.id, role, role, content, ts, ts)
-      store.db
-        .query(`
-INSERT INTO role_provider_bindings (profile_id, role, provider, provider_agent, options_json, created_at, updated_at)
-VALUES (?, ?, 'opencode', ?, '{}', ?, ?)
-        `)
-        .run(profile.id, role, role, ts, ts)
-      writeAudit(store, {
-        profileId: profile.id,
-        source: "seed-files",
-        action: "seed",
-        subject: `role:${role}`,
-        after: content,
-      })
-    }
-  } catch {
-    // OpenCode agent files are compatibility input only; missing files should not
-    // block config DB creation for other providers.
+  for (const prompt of await readDefaultsPrompts(workspaceDir)) {
+    insertPromptAsset(store, profile.id, prompt.key, prompt.content, "seed-defaults")
   }
+  for (const role of await readDefaultsRoleInstructions(workspaceDir)) {
+    insertRoleInstruction(store, profile.id, role.role, role.content, "seed-defaults")
+  }
+  await seedBindingsFromDefaultsSqlite(store, profile.id, workspaceDir, "seed-defaults")
 
   pruneLegacyBrowserQaRows(store, profile.id)
   return profile
-  } finally {
-    if (shouldClose) store.close()
+}
+
+async function lazyMigrateMissingDefaults(store: ConfigStore, profileId: number, workspaceDir: string) {
+  for (const prompt of await readDefaultsPrompts(workspaceDir)) {
+    const existing = store.db
+      .query<{ key: string }, [number, string]>("SELECT key FROM prompt_assets WHERE profile_id = ? AND key = ?")
+      .get(profileId, prompt.key)
+    if (!existing) insertPromptAsset(store, profileId, prompt.key, prompt.content, "lazy-migrate")
+  }
+  for (const role of await readDefaultsRoleInstructions(workspaceDir)) {
+    const existing = store.db
+      .query<{ role: string }, [number, string]>("SELECT role FROM role_instructions WHERE profile_id = ? AND role = ?")
+      .get(profileId, role.role)
+    if (!existing) insertRoleInstruction(store, profileId, role.role, role.content, "lazy-migrate")
   }
 }
 
-export async function loadQuorumConfigFromStore(env: EnvBootstrap) {
-  const store = await getConfigStore(env)
+async function importLegacyPromptFiles(store: ConfigStore, profileId: number, workspaceDir: string) {
+  const legacyDirs = [
+    join(workspaceDir, "assets", "prompts"),
+    join(repoDefaultsDir(workspaceDir), "prompts"),
+  ]
+  for (const dir of legacyDirs) {
+    for (const [key, filename] of Object.entries(promptAssetFiles) as Array<[PromptAssetKey, string]>) {
+      const content = await readTextIfExists(join(dir, filename))
+      if (!content) continue
+      const existing = store.db
+        .query<{ key: string }, [number, string]>("SELECT key FROM prompt_assets WHERE profile_id = ? AND key = ?")
+        .get(profileId, key)
+      if (!existing) insertPromptAsset(store, profileId, key, content, "legacy-import")
+    }
+  }
+}
+
+async function importLegacyRoleFiles(store: ConfigStore, profileId: number, workspaceDir: string) {
+  const legacyDirs = [join(workspaceDir, "assets", "roles")]
+  for (const dir of legacyDirs) {
+    try {
+      const entries = await readdir(dir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith(".md")) continue
+        const role = entry.name.replace(/\.md$/, "")
+        const content = await readTextIfExists(join(dir, entry.name))
+        if (!content) continue
+        const existing = store.db
+          .query<{ role: string }, [number, string]>("SELECT role FROM role_instructions WHERE profile_id = ? AND role = ?")
+          .get(profileId, role)
+        if (!existing) insertRoleInstruction(store, profileId, role, content, "legacy-import")
+      }
+    } catch {
+      // Missing legacy dir.
+    }
+  }
+}
+
+async function migrateLegacyDataIfNeeded(env: RuntimeEnv) {
+  const paths = quorumDataPaths(env.QUORUM_DATA_DIR)
+  const workspaceDir = env.QUORUM_WORKSPACE_DIRECTORY
+  const legacyRunsDir = join(workspaceDir, "runs")
+  const legacyConfigDb = join(legacyRunsDir, "quorum-config.sqlite")
+  const legacyCheckpointDb = join(legacyRunsDir, "checkpoints.sqlite")
+
+  await ensureQuorumDataDirs(paths)
+
+  const targetConfigExists = await Bun.file(paths.configDb).exists()
+  const legacyConfigExists = await Bun.file(legacyConfigDb).exists()
+
+  if (!targetConfigExists && legacyConfigExists) {
+    await copyPreserveTimes(legacyConfigDb, paths.configDb)
+    console.warn(`[qurom] Migrated config database to ${paths.configDb}`)
+  }
+
+  if (!(await Bun.file(paths.checkpointDb).exists()) && await Bun.file(legacyCheckpointDb).exists()) {
+    await copyPreserveTimes(legacyCheckpointDb, paths.checkpointDb)
+    console.warn(`[qurom] Migrated checkpoint database to ${paths.checkpointDb}`)
+  }
+
+  let migratedRunDirs = 0
   try {
-    const profile = await seedConfigStoreFromFiles(env, store)
+    const legacyEntries = await readdir(legacyRunsDir, { withFileTypes: true })
+    for (const entry of legacyEntries) {
+      if (!entry.isDirectory()) continue
+      if (entry.name === ".drafts") continue
+      const source = join(legacyRunsDir, entry.name)
+      const dest = join(paths.runsDir, entry.name)
+      try {
+        await access(dest)
+        continue
+      } catch {
+        await copyPreserveTimes(source, dest, { recursive: true })
+        migratedRunDirs += 1
+      }
+    }
+    if (migratedRunDirs > 0) {
+      console.warn(`[qurom] Migrated ${migratedRunDirs} run director${migratedRunDirs === 1 ? "y" : "ies"} to ${paths.runsDir}`)
+    }
+  } catch {
+    // No legacy runs directory.
+  }
+}
+
+async function ensureActiveProfile(store: ConfigStore, env: RuntimeEnv): Promise<ConfigProfileRow> {
+  const workspaceDir = env.QUORUM_WORKSPACE_DIRECTORY
+  let profile = activeProfile(store)
+  if (!profile) {
+    profile = await seedProfileFromDefaults(store, workspaceDir)
+  }
+  pruneLegacyBrowserQaRows(store, profile.id)
+  await lazyMigrateMissingDefaults(store, profile.id, workspaceDir)
+  await importLegacyPromptFiles(store, profile.id, env.QUORUM_WORKSPACE_DIRECTORY)
+  await importLegacyRoleFiles(store, profile.id, env.QUORUM_WORKSPACE_DIRECTORY)
+  return profile
+}
+
+export async function ensureConfigInitialized(env: RuntimeEnv) {
+  await migrateLegacyDataIfNeeded(env)
+  const store = getConfigStore(env)
+  try {
+    await ensureActiveProfile(store, env)
+  } finally {
+    store.close()
+  }
+}
+
+export async function loadQuorumConfigFromStore(env: RuntimeEnv) {
+  const store = getConfigStore(env)
+  try {
+    const profile = await ensureActiveProfile(store, env)
     const row = store.db
       .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
       .get(profile.id, "quorum")
@@ -432,48 +565,63 @@ WHERE profile_id = ?
   }
 }
 
-async function promptAssetsDirFromStore(env: EnvBootstrap, store: ConfigStore, profileId: number) {
-  const configRow = store.db
-    .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
-    .get(profileId, "quorum")
-  const config = configRow ? normalizeQuorumConfig(JSON.parse(configRow.value_json)) : undefined
-  return join(workspaceDirectory(env), config?.promptAssetsDir ?? "assets/prompts")
-}
-
-export async function listPromptAssetsFromFiles(env: EnvBootstrap): Promise<PromptAssetFileSummary[]> {
-  const store = await getConfigStore(env)
+export async function loadPromptAssetsFromStore(env: RuntimeEnv): Promise<Record<PromptAssetKey, string>> {
+  const store = getConfigStore(env)
   try {
-    const profile = await seedConfigStoreFromFiles(env, store)
-    const promptDir = await promptAssetsDirFromStore(env, store, profile.id)
-    const prompts: PromptAssetFileSummary[] = []
-    for (const [key, filename] of Object.entries(promptAssetFiles) as Array<[PromptAssetKey, string]>) {
-      const content = await readTextIfExists(join(promptDir, filename))
-      if (!content) {
-        throw new Error(`Missing required prompt asset ${JSON.stringify(key)} at ${join(promptDir, filename)}`)
+    const profile = await ensureActiveProfile(store, env)
+    const assets = {} as Record<PromptAssetKey, string>
+    for (const key of Object.keys(promptAssetFiles) as PromptAssetKey[]) {
+      const row = store.db
+        .query<{ content: string }, [number, string]>("SELECT content FROM prompt_assets WHERE profile_id = ? AND key = ?")
+        .get(profile.id, key)
+      if (!row?.content?.trim()) {
+        throw new Error(`Missing required prompt asset ${JSON.stringify(key)} in config database`)
       }
-      prompts.push({ key, content, version: 1, active: 1 })
+      assets[key] = row.content.trim()
     }
-    return prompts
+    return assets
   } finally {
     store.close()
   }
 }
 
-export async function listConfigSummary(env: EnvBootstrap) {
-  const store = await getConfigStore(env)
+export async function loadRoleInstructionsFromStore(env: RuntimeEnv): Promise<Record<string, string>> {
+  const store = getConfigStore(env)
   try {
-    const profile = await seedConfigStoreFromFiles(env, store)
+    const profile = await ensureActiveProfile(store, env)
+    const rows = store.db
+      .query<{ role: string; content: string }, [number]>("SELECT role, content FROM role_instructions WHERE profile_id = ? ORDER BY role")
+      .all(profile.id)
+    const roles: Record<string, string> = {}
+    for (const row of rows) {
+      if (row.content.trim()) roles[row.role] = row.content.trim()
+    }
+    return roles
+  } finally {
+    store.close()
+  }
+}
+
+export async function listConfigSummary(env: RuntimeEnv) {
+  const store = getConfigStore(env)
+  try {
+    const profile = await ensureActiveProfile(store, env)
     const configRow = store.db
       .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
       .get(profile.id, "quorum")
-    const promptDir = await promptAssetsDirFromStore(env, store, profile.id)
-    const prompts: PromptAssetFileSummary[] = []
-    for (const [key, filename] of Object.entries(promptAssetFiles) as Array<[PromptAssetKey, string]>) {
-      const content = await readTextIfExists(join(promptDir, filename))
-      if (!content) continue
-      prompts.push({ key, content, version: 1, active: 1 })
-    }
-    const roles = await readOpencodeRoleDefinitions(env, profile.id)
+    const prompts = store.db
+      .query<{ key: string; content: string; version: number }, [number]>(`
+SELECT key, content, version FROM prompt_assets WHERE profile_id = ? ORDER BY key
+      `)
+      .all(profile.id)
+      .map((row) => ({
+        key: row.key as PromptAssetKey,
+        content: row.content,
+        version: row.version,
+      }))
+    const roleInstructions = store.db
+      .query<{ role: string; content: string }, [number]>("SELECT role, content FROM role_instructions WHERE profile_id = ? ORDER BY role")
+      .all(profile.id)
     const bindings = store.db
       .query<RoleProviderBindingRow, [number]>(`
 SELECT profile_id, role, provider, provider_agent, model, variant, output_mode, options_json
@@ -486,7 +634,7 @@ ORDER BY role
       profile,
       config: configRow ? normalizeQuorumConfig(JSON.parse(configRow.value_json)) : undefined,
       prompts,
-      roles,
+      roleInstructions,
       bindings,
     }
   } finally {
@@ -494,7 +642,7 @@ ORDER BY role
   }
 }
 
-export async function updateRoleBinding(env: EnvBootstrap, role: string, input: {
+export async function updateRoleBinding(env: RuntimeEnv, role: string, input: {
   provider?: string
   providerAgent?: string
   model?: string
@@ -502,9 +650,9 @@ export async function updateRoleBinding(env: EnvBootstrap, role: string, input: 
   outputMode?: string
   options?: Record<string, unknown>
 }) {
-  const store = await getConfigStore(env)
+  const store = getConfigStore(env)
   try {
-    const profile = await seedConfigStoreFromFiles(env, store)
+    const profile = await ensureActiveProfile(store, env)
     if (role === LEGACY_BROWSER_QA_ROLE) {
       pruneLegacyBrowserQaRows(store, profile.id)
       return
@@ -556,11 +704,11 @@ ON CONFLICT(profile_id, role) DO UPDATE SET
   }
 }
 
-export async function updateQuorumConfig(env: EnvBootstrap, content: string) {
+export async function updateQuorumConfig(env: RuntimeEnv, content: string) {
   const parsed = normalizeQuorumConfig(JSON.parse(content))
-  const store = await getConfigStore(env)
+  const store = getConfigStore(env)
   try {
-    const profile = await seedConfigStoreFromFiles(env, store)
+    const profile = await ensureActiveProfile(store, env)
     const before = store.db
       .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
       .get(profile.id, "quorum")
@@ -588,41 +736,70 @@ ON CONFLICT(profile_id, domain) DO UPDATE SET
   }
 }
 
-export async function updatePromptAsset(env: EnvBootstrap, key: string, content: string) {
+export async function updatePromptAsset(env: RuntimeEnv, key: string, content: string) {
   if (!(key in promptAssetFiles)) throw new Error(`Unknown prompt asset ${JSON.stringify(key)}`)
   if (!content.trim()) throw new Error("Prompt content cannot be empty")
-  const store = await getConfigStore(env)
+  const store = getConfigStore(env)
   try {
-    const profile = await seedConfigStoreFromFiles(env, store)
-    const promptDir = await promptAssetsDirFromStore(env, store, profile.id)
-    const filename = promptAssetFiles[key as PromptAssetKey]
-    await writeFile(join(promptDir, filename), content.trim() + "\n", "utf8")
-  } finally {
-    store.close()
-  }
-}
-
-export async function listRoleDefinitions(env: EnvBootstrap) {
-  const store = await getConfigStore(env)
-  try {
-    const profile = await seedConfigStoreFromFiles(env, store)
-    return await readOpencodeRoleDefinitions(env, profile.id)
-  } finally {
-    store.close()
-  }
-}
-
-export async function syncOpencodeAgentsFromStore(env: EnvBootstrap) {
-  const store = await getConfigStore(env)
-  try {
-    const profile = await seedConfigStoreFromFiles(env, store)
+    const profile = await ensureActiveProfile(store, env)
+    const before = store.db
+      .query<{ content: string }, [number, string]>("SELECT content FROM prompt_assets WHERE profile_id = ? AND key = ?")
+      .get(profile.id, key)
+    const ts = nowIso()
+    store.db
+      .query(`
+INSERT INTO prompt_assets (profile_id, key, content, version, created_at, updated_at)
+VALUES (?, ?, ?, 1, ?, ?)
+ON CONFLICT(profile_id, key) DO UPDATE SET
+  content = excluded.content,
+  version = prompt_assets.version + 1,
+  updated_at = excluded.updated_at
+      `)
+      .run(profile.id, key, content.trim(), ts, ts)
     writeAudit(store, {
       profileId: profile.id,
-      source: "provider:opencode",
-      action: "use-files",
-      subject: "opencode-agents",
+      source: "view",
+      action: "update",
+      subject: `prompt:${key}`,
+      before: before?.content,
+      after: content.trim(),
     })
   } finally {
     store.close()
   }
+}
+
+export async function updateRoleInstruction(env: RuntimeEnv, role: string, content: string) {
+  if (!content.trim()) throw new Error("Role instruction content cannot be empty")
+  const store = getConfigStore(env)
+  try {
+    const profile = await ensureActiveProfile(store, env)
+    const before = store.db
+      .query<{ content: string }, [number, string]>("SELECT content FROM role_instructions WHERE profile_id = ? AND role = ?")
+      .get(profile.id, role)
+    const ts = nowIso()
+    store.db
+      .query(`
+INSERT INTO role_instructions (profile_id, role, content, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(profile_id, role) DO UPDATE SET
+  content = excluded.content,
+  updated_at = excluded.updated_at
+      `)
+      .run(profile.id, role, content.trim(), ts, ts)
+    writeAudit(store, {
+      profileId: profile.id,
+      source: "view",
+      action: "update",
+      subject: `role-instruction:${role}`,
+      before: before?.content,
+      after: content.trim(),
+    })
+  } finally {
+    store.close()
+  }
+}
+
+export async function syncOpencodeAgentsFromStore(_env: RuntimeEnv) {
+  // OpenCode agent definitions are filesystem-only under .opencode/agents/.
 }

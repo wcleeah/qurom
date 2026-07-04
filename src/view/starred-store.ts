@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite"
 import { mkdir } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
+import { dirname } from "node:path"
 
+import { quorumDataPaths } from "../data-paths"
 import { safeRunPath } from "./paths"
 
 function nowIso() {
@@ -9,9 +10,7 @@ function nowIso() {
 }
 
 function resolveDbPath(): string {
-  const workspace = process.env.QUORUM_WORKSPACE_DIRECTORY ?? process.env.OPENCODE_DIRECTORY ?? process.cwd()
-  const raw = process.env.QUORUM_CONFIG_DB_PATH ?? join(workspace, "runs", "quorum-config.sqlite")
-  return raw.startsWith("/") ? raw : resolve(process.cwd(), raw)
+  return quorumDataPaths().configDb
 }
 
 function openDb(dbPath: string): Database {
@@ -60,10 +59,11 @@ export async function setRunStarred(runName: string, starred: boolean): Promise<
   const db = openDb(dbPath)
   try {
     if (starred) {
-      db.query("INSERT OR REPLACE INTO starred_runs (run_name, starred_at) VALUES (?, ?)").run(runName, nowIso())
-    } else {
-      db.query("DELETE FROM starred_runs WHERE run_name = ?").run(runName)
+      db.query("INSERT INTO starred_runs (run_name, starred_at) VALUES (?, ?) ON CONFLICT(run_name) DO UPDATE SET starred_at = excluded.starred_at")
+        .run(runName, nowIso())
+      return
     }
+    db.query("DELETE FROM starred_runs WHERE run_name = ?").run(runName)
   } finally {
     db.close()
   }

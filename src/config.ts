@@ -1,14 +1,15 @@
 import { config as loadEnv } from "dotenv"
 import { z } from "zod"
 
+import { quorumDataPaths } from "./data-paths"
+
 loadEnv()
 
 const envSchema = z.object({
   OPENCODE_BASE_URL: z.string().url().default("http://127.0.0.1:4096"),
   OPENCODE_DIRECTORY: z.string().min(1).default(process.cwd()),
   QUORUM_WORKSPACE_DIRECTORY: z.string().min(1).default(process.cwd()),
-  QUORUM_CHECKPOINT_PATH: z.string().min(1).default("runs/checkpoints.sqlite"),
-  QUORUM_CONFIG_DB_PATH: z.string().min(1).default("runs/quorum-config.sqlite"),
+  QUORUM_DATA_DIR: z.string().min(1).optional(),
   QUORUM_CAPTURE_OPENCODE_EVENTS: z.enum(["0", "1"]).default("0"),
   QUORUM_CAPTURE_SYNC_HISTORY: z.enum(["0", "1"]).default("0"),
   CURSOR_API_KEY: z.string().min(1).optional(),
@@ -42,14 +43,6 @@ export const quorumConfigSchema = z.object({
   maxRebuttalTurnsPerFinding: z.number().int().positive(),
   recursionLimit: z.number().int().positive().default(80),
   requireUnanimousApproval: z.boolean(),
-  artifactDir: z.string().min(1),
-  promptAssetsDir: z.string().min(1).default("assets/prompts"),
-  promptManagement: z
-    .object({
-      source: z.enum(["local", "langfuse"]).default("local"),
-      label: z.string().min(1).default("production"),
-    })
-    .default({ source: "local", label: "production" }),
   researchTools: z.object({
     prefer: z.array(z.string().min(1)).min(1),
     webSearchProvider: z.string().min(1),
@@ -60,13 +53,6 @@ export const quorumConfigSchema = z.object({
       designatedDesigner: z.string().min(1),
     })
     .optional(),
-  /**
-   * Phase 3.5 — outer fresh-session restart for auditors.
-   * When promptAgent's in-session RecoveryRouter exhausts its budget and throws
-   * a StructuredRecoveryError, the audit caller tears down the session and re-runs
-   * the identical audit prompt on a brand-new session, up to `maxRestarts` times.
-   * Default 1 restart; set to 0 as the runtime kill-switch (Phase 6). Audit-only.
-   */
   auditRestart: z
     .object({
       maxRestarts: z.number().int().nonnegative().default(1),
@@ -81,9 +67,25 @@ export const quorumConfigSchema = z.object({
   agentRuntime: agentRuntimeSchema,
 })
 
+export type RuntimeEnv = z.infer<typeof envSchema> & {
+  QUORUM_DATA_DIR: string
+  QUORUM_CONFIG_DB_PATH: string
+  QUORUM_CHECKPOINT_PATH: string
+  QUORUM_RUNS_DIR: string
+}
+
 export async function loadRuntimeConfig() {
-  const env = envSchema.parse(process.env)
-  const { loadQuorumConfigFromStore } = await import("./config-store")
+  const parsed = envSchema.parse(process.env)
+  const paths = quorumDataPaths(parsed.QUORUM_DATA_DIR)
+  const env: RuntimeEnv = {
+    ...parsed,
+    QUORUM_DATA_DIR: paths.root,
+    QUORUM_CONFIG_DB_PATH: paths.configDb,
+    QUORUM_CHECKPOINT_PATH: paths.checkpointDb,
+    QUORUM_RUNS_DIR: paths.runsDir,
+  }
+  const { ensureConfigInitialized, loadQuorumConfigFromStore } = await import("./config-store")
+  await ensureConfigInitialized(env)
   const quorumConfig = await loadQuorumConfigFromStore(env)
 
   return {

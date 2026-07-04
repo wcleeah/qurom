@@ -366,7 +366,7 @@ export async function prepareOutputPath(config: RuntimeConfig, state: ResearchSt
 
   const nextState = researchStateSchema.parse({
     ...state,
-    outputPath: resolveRunDir(config.quorumConfig.artifactDir, {
+    outputPath: resolveRunDir(config.env.QUORUM_RUNS_DIR, {
       requestId: state.requestId,
       inputMode: state.inputMode,
       topic: state.inputMode === "topic" ? state.topic : undefined,

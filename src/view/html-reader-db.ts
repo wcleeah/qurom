@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite"
 import { mkdir } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
+import { dirname } from "node:path"
 
+import { quorumDataPaths } from "../data-paths"
 import { safeFilePath, safeRunPath } from "./paths"
 
 export function nowIso(): string {
@@ -9,9 +10,7 @@ export function nowIso(): string {
 }
 
 export function resolveDbPath(): string {
-  const workspace = process.env.QUORUM_WORKSPACE_DIRECTORY ?? process.env.OPENCODE_DIRECTORY ?? process.cwd()
-  const raw = process.env.QUORUM_CONFIG_DB_PATH ?? join(workspace, "runs", "quorum-config.sqlite")
-  return raw.startsWith("/") ? raw : resolve(process.cwd(), raw)
+  return quorumDataPaths().configDb
 }
 
 export function isHtmlFilePath(filePath: string): boolean {
@@ -37,7 +36,6 @@ export async function withHtmlReaderDb<T>(fn: (db: Database) => T): Promise<T> {
     db.close()
   }
 }
-
 export function openHtmlReaderDb(dbPath: string): Database {
   const db = new Database(dbPath, { create: true, strict: true })
   db.run("PRAGMA journal_mode = WAL")

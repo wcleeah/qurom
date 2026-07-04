@@ -553,7 +553,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   const telemetryFactory = args.telemetryFactory ?? createTelemetry
 
   const parsedResume = args.resume ? parseResumeTarget(args.resume) : undefined
-  const resolvedResume = parsedResume ? await resolveRunForResume(parsedResume.runId, config.quorumConfig.artifactDir) : undefined
+  const resolvedResume = parsedResume ? await resolveRunForResume(parsedResume.runId, config.env.QUORUM_RUNS_DIR) : undefined
   const request = resolvedResume?.request ?? args.request
   if (!request) {
     throw new Error("runResearchPipeline requires either request or resume")
@@ -939,7 +939,7 @@ export async function runDesignPipeline(args: {
 }) {
   const { config, promptBundle, runId, bus, signal } = args
 
-  const resolvedRun = await resolveRunForResume(runId, config.quorumConfig.artifactDir)
+  const resolvedRun = await resolveRunForResume(runId, config.env.QUORUM_RUNS_DIR)
   const runDir = resolvedRun.runDir
   const requestId = resolvedRun.requestId
 
