@@ -1,4 +1,4 @@
-import { loadRuntimeConfig } from "../config"
+import { loadRuntimeConfig, type QuorumConfig } from "../config"
 import {
   applyDefaultsOpencodeAgent,
   listDefaultsOpencodeAgents,
@@ -15,17 +15,20 @@ import {
   updateDefaultsRoleInstruction,
 } from "../defaults-store"
 import {
+  normalizeQuorumConfig,
   updatePromptAsset,
   updateQuorumConfig,
   updateRoleBinding,
   updateRoleInstruction,
 } from "../config-store"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
+import { DEFAULT_PROVIDER } from "../role-registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
 import { card, section } from "./html"
 import { layout } from "./layout"
 import { configBackLink, configNav } from "./config-nav"
 import { readDefaultsOpencodeAgent, renderOpencodeAgentReadonly } from "./opencode-agent-display"
+import { parseQuorumConfigForm, quorumConfigFormScript, renderQuorumConfigForm } from "./quorum-config-form"
 import { escapeHtml } from "./utils"
 
 function parseOptionsJson(text: string | undefined) {
@@ -41,17 +44,17 @@ function applyButton(path: string, label: string) {
   return `<form class="config-form inline-form" method="POST" action="${path}"><button type="submit" class="btn btn-secondary">${escapeHtml(label)}</button></form>`
 }
 
-export async function renderConfigDefaultsIndex(): Promise<Response> {
+export async function renderConfigDefaultsIndex(options?: { error?: string; draftConfig?: QuorumConfig }): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listDefaultsSummary(config.env.QUORUM_WORKSPACE_DIRECTORY)
-  const quorumConfigForm = `<form class="config-form" method="POST" action="/config/defaults/quorum">
-  <p class="tiny-text muted-text">Shipped starter config at <code>${escapeHtml(summary.root)}/quorum.config.json</code>. Used when seeding a new SQLite profile and for lazy migration of missing keys.</p>
-  <textarea name="content" rows="24">${escapeHtml(summary.quorumConfig)}</textarea>
-  <div class="form-actions">
-    <button type="submit" class="btn btn-primary">Save defaults quorum config</button>
-    ${applyButton("/config/defaults/apply/quorum", "Apply to active profile")}
-  </div>
-</form>`
+  const defaultsConfig = options?.draftConfig ?? await loadDefaultsQuorumConfig(config.env.QUORUM_WORKSPACE_DIRECTORY)
+  const quorumConfigForm = renderQuorumConfigForm({
+    action: "/config/defaults/quorum",
+    config: defaultsConfig,
+    submitLabel: "Save defaults quorum config",
+    error: options?.error,
+    extraActionsHtml: applyButton("/config/defaults/apply/quorum", "Apply to active profile"),
+  })
 
   const overviewCards = [
     card(`<h3>Prompts</h3><p class="tiny-text muted-text">${summary.prompts.length} shipped prompt templates.</p><a href="/config/defaults/prompts">Edit defaults prompts →</a>`),
@@ -65,10 +68,10 @@ export async function renderConfigDefaultsIndex(): Promise<Response> {
     configNav("defaults"),
     `<div class="header-bar"><div class="header-main"><h1>Default resources</h1><div class="meta-row"><span class="meta-item">Directory: <code>${escapeHtml(summary.root)}</code></span></div></div></div>`,
     section("Overview", overviewCards),
-    section("Quorum config", quorumConfigForm),
+    section("Quorum policy", quorumConfigForm),
   ].join("\n")
 
-  return new Response(layout("Default resources", body), {
+  return new Response(layout("Default resources", body, quorumConfigFormScript), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -269,7 +272,7 @@ export async function renderConfigDefaultsBindings(): Promise<Response> {
           options: parseOptionsJson(row.options_json),
         }
       : undefined
-    const currentProvider = binding?.provider ?? defaultsConfig.agentRuntime.defaultProvider ?? "opencode"
+    const currentProvider = binding?.provider ?? DEFAULT_PROVIDER
     const opencodeActive = currentProvider === "opencode"
     const opencodeAgentHtml = opencodeAgentHtmlByRole.get(role) ?? ""
     const providerFormBlocks = providerIds
@@ -334,8 +337,20 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
 
   if (path === "/config/defaults/quorum") {
     const params = new URLSearchParams(await req.text())
-    await updateDefaultsQuorumConfig(workspaceDir, params.get("content") ?? "")
-    return new Response(null, { status: 303, headers: { Location: "/config/defaults" } })
+    try {
+      const parsed = normalizeQuorumConfig(parseQuorumConfigForm(params))
+      await updateDefaultsQuorumConfig(workspaceDir, JSON.stringify(parsed, null, 2))
+      return new Response(null, { status: 303, headers: { Location: "/config/defaults" } })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      let draftConfig
+      try {
+        draftConfig = parseQuorumConfigForm(params)
+      } catch {
+        draftConfig = await loadDefaultsQuorumConfig(workspaceDir)
+      }
+      return renderConfigDefaultsIndex({ error: message, draftConfig })
+    }
   }
 
   if (path === "/config/defaults/apply/quorum") {

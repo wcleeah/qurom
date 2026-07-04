@@ -8,6 +8,7 @@ import {
   getConfigStore,
   loadPromptAssetsFromStore,
   loadQuorumConfigFromStore,
+  loadRoleBindingsFromStore,
   updatePromptAsset,
   updateQuorumConfig,
   updateRoleBinding,
@@ -42,11 +43,12 @@ describe("config store", () => {
 
     expect(promptCount).toBe(Object.keys(promptAssetFiles).length)
     expect(bindingCount).toBeGreaterThan(0)
-    expect((await loadQuorumConfigFromStore(env())).designatedDrafter).toBe("research-drafter")
+    expect((await loadQuorumConfigFromStore(env())).maxRounds).toBeGreaterThan(0)
+    expect((await loadRoleBindingsFromStore(env()))["source-auditor"]).toBeDefined()
     expect((await loadPromptAssetsFromStore(env())).audit).toContain("audit")
   })
 
-  test("role binding updates are merged into loaded runtime config", async () => {
+  test("role binding updates are stored separately from quorum policy", async () => {
     await ensureConfigInitialized(env())
     await updateRoleBinding(env(), "source-auditor", {
       provider: "opencode",
@@ -54,8 +56,8 @@ describe("config store", () => {
       variant: "fast",
     })
 
-    const config = await loadQuorumConfigFromStore(env())
-    expect(config.agentRuntime.roles["source-auditor"]).toMatchObject({
+    const bindings = await loadRoleBindingsFromStore(env())
+    expect(bindings["source-auditor"]).toMatchObject({
       provider: "opencode",
       providerAgent: "custom-source-auditor",
       variant: "fast",
@@ -67,14 +69,11 @@ describe("config store", () => {
     const current = await loadQuorumConfigFromStore(env())
     await updateQuorumConfig(env(), JSON.stringify({
       ...current,
-      designQuorum: {
-        enabled: true,
-        designatedDesigner: "html-designer",
-      },
+      designQuorum: { enabled: false },
     }))
 
     const config = await loadQuorumConfigFromStore(env())
-    expect(config.designQuorum?.designatedDesigner).toBe("html-designer")
+    expect(config.designQuorum).toEqual({ enabled: false })
   })
 
   test("legacy browser QA config and bindings are pruned from sqlite profiles", async () => {
@@ -84,16 +83,8 @@ describe("config store", () => {
       ...current,
       designQuorum: {
         enabled: true,
-        designatedDesigner: "html-designer",
         browserQa: { enabled: true },
-      },
-      agentRuntime: {
-        ...current.agentRuntime,
-        roles: {
-          ...current.agentRuntime.roles,
-          "browser-qa-enhancer": { provider: "cursor", options: {} },
-        },
-      },
+      } as Record<string, unknown>,
     }))
     await updateRoleBinding(env(), "browser-qa-enhancer", {
       provider: "cursor",
@@ -108,7 +99,7 @@ describe("config store", () => {
     store.close()
 
     expect((config.designQuorum as Record<string, unknown> | undefined)?.browserQa).toBeUndefined()
-    expect(config.agentRuntime.roles["browser-qa-enhancer"]).toBeUndefined()
+    expect((await loadRoleBindingsFromStore(env()))["browser-qa-enhancer"]).toBeUndefined()
     expect(binding).toBeNull()
   })
 
@@ -128,7 +119,7 @@ describe("config store", () => {
 
     const indexHtml = await renderConfigIndex().then((r) => r.text())
     expect(indexHtml).toContain("Save quorum config")
-    expect(indexHtml).toContain("defaults/quorum.config.json")
+    expect(indexHtml).toContain('name="maxRounds"')
     expect(indexHtml).not.toContain("browserQa")
 
     const rolesHtml = await renderConfigRoles().then((r) => r.text())
@@ -145,24 +136,26 @@ describe("config store", () => {
     })
     const response = await handleConfigPost(req, "/config/roles/source-auditor")
     expect(response?.status).toBe(303)
-    expect((await loadQuorumConfigFromStore(env())).agentRuntime.roles["source-auditor"]?.providerAgent).toBe("custom-agent")
+    expect((await loadRoleBindingsFromStore(env()))["source-auditor"]?.providerAgent).toBe("custom-agent")
 
-    const current = await loadQuorumConfigFromStore(env())
     const quorumReq = new Request("http://localhost/config/quorum", {
       method: "POST",
       body: new URLSearchParams({
-        content: JSON.stringify({
-          ...current,
-          designQuorum: {
-            enabled: true,
-            designatedDesigner: "html-designer",
-          },
-        }),
+        maxRounds: "8",
+        maxRebuttalTurnsPerFinding: "2",
+        recursionLimit: "80",
+        "auditRestart.maxRestarts": "1",
+        requireUnanimousApproval: "1",
+        "designQuorum.enabled": "1",
+        "readerDiscovery.enabled": "1",
+        "readerDiscovery.maxTurns": "6",
+        "researchTools.prefer": "exa",
+        "researchTools.webSearchProvider": "exa",
       }),
     })
     const quorumResponse = await handleConfigPost(quorumReq, "/config/quorum")
     expect(quorumResponse?.status).toBe(303)
-    expect((await loadQuorumConfigFromStore(env())).designQuorum?.designatedDesigner).toBe("html-designer")
+    expect((await loadQuorumConfigFromStore(env())).maxRounds).toBe(8)
   })
 
   test("migrates legacy checkpoints.sqlite into the data directory", async () => {

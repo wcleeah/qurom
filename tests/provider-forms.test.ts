@@ -36,7 +36,7 @@ mock.module("@cursor/sdk", () => {
 })
 
 const { renderConfigRoles, handleConfigPost } = await import("../src/view/config")
-const { ensureConfigInitialized, loadQuorumConfigFromStore, updateRoleBinding } = await import("../src/config-store")
+const { ensureConfigInitialized, loadRoleBindingsFromStore, updateRoleBinding } = await import("../src/config-store")
 const { prepareTestDataDir, testRuntimeEnv } = await import("./test-env")
 
 let dir: string
@@ -119,10 +119,10 @@ describe("provider-specific role forms", () => {
       }),
     })
     const response = await handleConfigPost(req, "/config/roles/source-auditor")
-    const config = await loadQuorumConfigFromStore(env())
+    const bindings = await loadRoleBindingsFromStore(env())
 
     expect(response?.status).toBe(303)
-    expect(config.agentRuntime.roles["source-auditor"]).toMatchObject({
+    expect(bindings["source-auditor"]).toMatchObject({
       provider: "cursor",
       model: "composer-2.5",
       options: { modelParams: [{ id: "fast", value: "true" }] },

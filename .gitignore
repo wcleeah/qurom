@@ -10,4 +10,7 @@ runs/
 /quorum-config.sqlite
 /quorum-config.sqlite-shm
 /quorum-config.sqlite-wal
+defaults/quorum-config.sqlite
+defaults/quorum-config.sqlite-shm
+defaults/quorum-config.sqlite-wal
 .DS_Store

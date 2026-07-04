@@ -89,7 +89,7 @@ describe("defaults config UI", () => {
   test("renders defaults editor pages", async () => {
     const indexHtml = await renderConfigDefaultsIndex().then((r) => r.text())
     expect(indexHtml).toContain("Default resources")
-    expect(indexHtml).toContain("defaults/quorum.config.json")
+    expect(indexHtml).toContain('name="maxRounds"')
     expect(indexHtml).toContain("defaults/quorum-config.sqlite")
 
     const promptsHtml = await renderConfigDefaultsPrompts().then((r) => r.text())

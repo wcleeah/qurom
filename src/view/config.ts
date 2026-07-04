@@ -1,11 +1,13 @@
-import { loadRuntimeConfig } from "../config"
-import { listConfigSummary, updatePromptAsset, updateQuorumConfig, updateRoleBinding, updateRoleInstruction } from "../config-store"
+import { loadRuntimeConfig, type QuorumConfig } from "../config"
+import { listConfigSummary, normalizeQuorumConfig, updatePromptAsset, updateQuorumConfig, updateRoleBinding, updateRoleInstruction } from "../config-store"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm, validateProviderPrerequisites } from "../providers/registry"
+import { DEFAULT_PROVIDER } from "../role-registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
 import { card, section, summaryRow, summaryTable } from "./html"
 import { layout } from "./layout"
 import { configBackLink, configNav } from "./config-nav"
 import { readActiveOpencodeAgent, renderOpencodeAgentReadonly } from "./opencode-agent-display"
+import { parseQuorumConfigForm, quorumConfigFormScript, renderQuorumConfigForm } from "./quorum-config-form"
 import { escapeHtml } from "./utils"
 
 function parseOptionsJson(text: string | undefined) {
@@ -17,13 +19,14 @@ function parseOptionsJson(text: string | undefined) {
   }
 }
 
-export async function renderConfigIndex(): Promise<Response> {
+export async function renderConfigIndex(options?: { error?: string; draftConfig?: QuorumConfig }): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
   const validationError = await validateProviderPrerequisites(config)
     .then(() => null)
     .catch((error) => (error instanceof Error ? error.message : String(error)))
   const isValid = validationError === null
+  const quorumConfig = options?.draftConfig ?? summary.config ?? config.quorumConfig
 
   const statusCard = `<div class="structured-card">
   <div class="outcome-banner ${isValid ? "approved" : "failed"}">${isValid ? "Providers valid" : "Validation failed"}</div>
@@ -36,15 +39,15 @@ export async function renderConfigIndex(): Promise<Response> {
     summaryRow("Config database", escapeHtml(config.env.QUORUM_CONFIG_DB_PATH)),
     summaryRow("Checkpoints database", escapeHtml(config.env.QUORUM_CHECKPOINT_PATH)),
     summaryRow("Runs directory", escapeHtml(config.env.QUORUM_RUNS_DIR)),
-    summaryRow("Default provider", escapeHtml(summary.config?.agentRuntime.defaultProvider ?? "unknown")),
+    summaryRow("Default provider", escapeHtml(DEFAULT_PROVIDER)),
   ])}
 </div>`
-  const quorumConfigJson = JSON.stringify(summary.config ?? config.quorumConfig, null, 2)
-  const quorumConfigForm = `<form class="config-form" method="POST" action="/config/quorum">
-  <p class="tiny-text muted-text">Edits the active config profile in <code>${escapeHtml(config.env.QUORUM_CONFIG_DB_PATH)}</code>. Shipped defaults live under <code>defaults/quorum.config.json</code>.</p>
-  <textarea name="content" rows="24">${escapeHtml(quorumConfigJson)}</textarea>
-  <div class="form-actions"><button type="submit" class="btn btn-primary">Save quorum config</button></div>
-</form>`
+  const quorumConfigForm = renderQuorumConfigForm({
+    action: "/config/quorum",
+    config: quorumConfig,
+    submitLabel: "Save quorum config",
+    error: options?.error,
+  })
 
   const body = [
     configBackLink(),
@@ -52,10 +55,10 @@ export async function renderConfigIndex(): Promise<Response> {
     `<div class="header-bar"><div class="header-main"><h1>Configuration</h1><div class="meta-row"><span class="meta-item">Active profile: <strong>${escapeHtml(summary.profile.name)}</strong></span></div></div></div>`,
     section("Status", statusCard),
     `<form class="config-form" method="POST" action="/config/validate"><div class="form-actions"><button type="submit" class="btn btn-primary">Validate providers</button></div></form>`,
-    section("Quorum config", quorumConfigForm),
+    section("Quorum policy", quorumConfigForm),
   ].join("\n")
 
-  return new Response(layout("Configuration", body), {
+  return new Response(layout("Configuration", body, quorumConfigFormScript), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -174,7 +177,7 @@ export async function renderConfigRoles(): Promise<Response> {
   ))
   const cards = await Promise.all(roles.map(async (role) => {
     const binding = bindingByRole.get(role)
-    const currentProvider = binding?.provider ?? summary.config?.agentRuntime.defaultProvider ?? "opencode"
+    const currentProvider = binding?.provider ?? DEFAULT_PROVIDER
     const opencodeAgentHtml = opencodeAgentHtmlByRole.get(role) ?? ""
     const providerFormBlocks = providerIds
       .map((id) => providerFields(role, binding, descriptors.get(id)!, id === currentProvider, opencodeAgentHtml))
@@ -278,8 +281,20 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
 
   if (path === "/config/quorum") {
     const params = new URLSearchParams(await req.text())
-    await updateQuorumConfig(config.env, params.get("content") ?? "")
-    return new Response(null, { status: 303, headers: { Location: "/config" } })
+    try {
+      const parsed = normalizeQuorumConfig(parseQuorumConfigForm(params))
+      await updateQuorumConfig(config.env, JSON.stringify(parsed, null, 2))
+      return new Response(null, { status: 303, headers: { Location: "/config" } })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      let draftConfig
+      try {
+        draftConfig = parseQuorumConfigForm(params)
+      } catch {
+        draftConfig = config.quorumConfig
+      }
+      return renderConfigIndex({ error: message, draftConfig })
+    }
   }
 
   const roleMatch = path.match(/^\/config\/roles\/(.+)$/)
