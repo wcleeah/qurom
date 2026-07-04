@@ -19,10 +19,9 @@ const config: RuntimeConfig = {
   },
   quorumConfig: testQuorumConfig({
     maxRounds: 1,
-    auditors: ["source-auditor"],
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
-    agentRuntime: { defaultProvider: "fake", roles: {} },
   }),
+  roleBindings: {},
 }
 
 function collect(bus: ReturnType<typeof createEventBus>) {

@@ -20,25 +20,7 @@ const envSchema = z.object({
   LANGFUSE_BASE_URL: z.string().url().optional(),
 })
 
-export const agentRuntimeRoleSchema = z.object({
-  provider: z.string().min(1).optional(),
-  providerAgent: z.string().min(1).optional(),
-  model: z.string().min(1).optional(),
-  variant: z.string().min(1).optional(),
-  options: z.record(z.unknown()).default({}),
-})
-
-export const agentRuntimeSchema = z
-  .object({
-    defaultProvider: z.string().min(1).default("opencode"),
-    roles: z.record(agentRuntimeRoleSchema).default({}),
-  })
-  .default({ defaultProvider: "opencode", roles: {} })
-
 export const quorumConfigSchema = z.object({
-  designatedDrafter: z.string().min(1),
-  auditors: z.array(z.string().min(1)).min(1),
-  summarizerAgent: z.string().min(1),
   maxRounds: z.number().int().positive(),
   maxRebuttalTurnsPerFinding: z.number().int().positive(),
   recursionLimit: z.number().int().positive().default(80),
@@ -50,7 +32,6 @@ export const quorumConfigSchema = z.object({
   designQuorum: z
     .object({
       enabled: z.boolean(),
-      designatedDesigner: z.string().min(1),
     })
     .optional(),
   auditRestart: z
@@ -64,8 +45,18 @@ export const quorumConfigSchema = z.object({
       enabled: z.boolean().default(true),
     })
     .default({ maxTurns: 6, enabled: true }),
-  agentRuntime: agentRuntimeSchema,
 })
+
+export type QuorumConfig = z.infer<typeof quorumConfigSchema>
+
+export type RoleBinding = {
+  provider?: string
+  providerAgent?: string
+  model?: string
+  variant?: string
+  outputMode?: string
+  options: Record<string, unknown>
+}
 
 export type RuntimeEnv = z.infer<typeof envSchema> & {
   QUORUM_DATA_DIR: string
@@ -84,13 +75,21 @@ export async function loadRuntimeConfig() {
     QUORUM_CHECKPOINT_PATH: paths.checkpointDb,
     QUORUM_RUNS_DIR: paths.runsDir,
   }
-  const { ensureConfigInitialized, loadQuorumConfigFromStore } = await import("./config-store")
+  const {
+    ensureConfigInitialized,
+    loadQuorumConfigFromStore,
+    loadRoleBindingsFromStore,
+  } = await import("./config-store")
   await ensureConfigInitialized(env)
-  const quorumConfig = await loadQuorumConfigFromStore(env)
+  const [quorumConfig, roleBindings] = await Promise.all([
+    loadQuorumConfigFromStore(env),
+    loadRoleBindingsFromStore(env),
+  ])
 
   return {
     env,
     quorumConfig,
+    roleBindings,
   }
 }
 

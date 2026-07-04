@@ -1,6 +1,7 @@
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import type { AgentRunHandle } from "./providers/types"
 import type { RuntimeConfig } from "./config"
+import { DESIGNER_ROLE } from "./role-registry"
 import type { PromptBundle } from "./prompt-assets"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
@@ -89,7 +90,7 @@ export async function designHtml(
   observer?: RunObserver,
   runtime = createAgentRuntime(config),
 ) {
-  const role = config.quorumConfig.designQuorum!.designatedDesigner
+  const role = DESIGNER_ROLE
   const handle = await createObservedDesignHandle({
     runtime,
     role,

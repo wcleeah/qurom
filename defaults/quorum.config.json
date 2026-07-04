@@ -1,11 +1,4 @@
 {
-  "designatedDrafter": "research-drafter",
-  "auditors": [
-    "source-auditor",
-    "logic-auditor",
-    "clarity-auditor"
-  ],
-  "summarizerAgent": "markdown-summarizer",
   "maxRounds": 10,
   "maxRebuttalTurnsPerFinding": 2,
   "recursionLimit": 80,
@@ -15,8 +8,7 @@
     "webSearchProvider": "exa"
   },
   "designQuorum": {
-    "enabled": true,
-    "designatedDesigner": "html-designer"
+    "enabled": true
   },
   "readerDiscovery": {
     "maxTurns": 6,

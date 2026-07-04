@@ -1,4 +1,5 @@
 import type { RuntimeConfig } from "../config"
+import { configuredAgentRoles as listConfiguredAgentRoles, DEFAULT_PROVIDER } from "../role-registry"
 import { cursorProvider } from "./cursor"
 import { opencodeProvider } from "./opencode"
 import type { AgentProvider, AgentProviderId, AgentRole, ProviderConfigFormDescriptor } from "./types"
@@ -37,28 +38,12 @@ export async function providerConfigForm(
 }
 
 export function providerForRole(config: RuntimeConfig, role: AgentRole): AgentProvider {
-  const roleProvider = config.quorumConfig.agentRuntime.roles[role]?.provider
-  return getProvider(roleProvider ?? config.quorumConfig.agentRuntime.defaultProvider)
+  const roleProvider = config.roleBindings[role]?.provider
+  return getProvider(roleProvider ?? DEFAULT_PROVIDER)
 }
 
 export function configuredAgentRoles(config: RuntimeConfig): AgentRole[] {
-  const roles = [
-    "reader-interviewer",
-    "html-reading-companion",
-    config.quorumConfig.designatedDrafter,
-    ...config.quorumConfig.auditors,
-    config.quorumConfig.summarizerAgent,
-    "json-fixer",
-  ]
-
-  if (config.quorumConfig.designQuorum?.enabled) {
-    roles.push(
-      config.quorumConfig.designQuorum.designatedDesigner,
-      "interactive-enhancer",
-    )
-  }
-
-  return [...new Set(roles)]
+  return listConfiguredAgentRoles(config)
 }
 
 export async function validateProviderPrerequisites(config: RuntimeConfig) {

@@ -156,19 +156,15 @@ const config: RuntimeConfig = {
   },
   quorumConfig: testQuorumConfig({
     maxRounds: 1,
-    auditors: ["source-auditor"],
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
-    agentRuntime: {
-      defaultProvider: "opencode",
-      roles: {
-        "research-drafter": {
-          provider: "cursor",
-          model: "composer-2.5",
-          options: { modelParams: [{ id: "fast", value: "true" }] },
-        },
-      },
-    },
   }),
+  roleBindings: {
+    "research-drafter": {
+      provider: "cursor",
+      model: "composer-2.5",
+      options: { modelParams: [{ id: "fast", value: "true" }] },
+    },
+  },
 }
 
 beforeEach(() => {
@@ -233,20 +229,15 @@ describe("cursorProvider", () => {
   test("can create a local Cursor agent when role options request it", async () => {
     const localConfig: RuntimeConfig = {
       ...config,
-      quorumConfig: {
-        ...config.quorumConfig,
-        agentRuntime: {
-          ...config.quorumConfig.agentRuntime,
-          roles: {
-            "research-drafter": {
-              provider: "cursor",
-              model: "composer-2.5",
-              options: {
-                runtime: "local",
-                settingSources: ["project"],
-                modelParams: [{ id: "fast", value: "true" }],
-              },
-            },
+      roleBindings: {
+        ...config.roleBindings,
+        "research-drafter": {
+          provider: "cursor",
+          model: "composer-2.5",
+          options: {
+            runtime: "local",
+            settingSources: ["project"],
+            modelParams: [{ id: "fast", value: "true" }],
           },
         },
       },
@@ -266,23 +257,18 @@ describe("cursorProvider", () => {
   test("merges saved model params over the catalog default variant", async () => {
     const mcpConfig: RuntimeConfig = {
       ...config,
-      quorumConfig: {
-        ...config.quorumConfig,
-        agentRuntime: {
-          ...config.quorumConfig.agentRuntime,
-          roles: {
-            "research-drafter": {
-              provider: "cursor",
-              model: "claude-opus-4-8",
-              options: {
-                modelParams: [
-                  { id: "thinking", value: "true" },
-                  { id: "context", value: "300k" },
-                  { id: "effort", value: "low" },
-                  { id: "fast", value: "false" },
-                ],
-              },
-            },
+      roleBindings: {
+        ...config.roleBindings,
+        "research-drafter": {
+          provider: "cursor",
+          model: "claude-opus-4-8",
+          options: {
+            modelParams: [
+              { id: "thinking", value: "true" },
+              { id: "context", value: "300k" },
+              { id: "effort", value: "low" },
+              { id: "fast", value: "false" },
+            ],
           },
         },
       },
@@ -323,17 +309,15 @@ describe("cursorProvider", () => {
       quorumConfig: {
         ...config.quorumConfig,
         researchTools: { prefer: ["webfetch", "exa"], webSearchProvider: "exa" },
-        agentRuntime: {
-          ...config.quorumConfig.agentRuntime,
-          roles: {
-            "research-drafter": {
-              provider: "cursor",
-              model: "composer-2.5",
-              options: {
-                mcpServers: {
-                  exa: { url: "https://override.example/exa" },
-                },
-              },
+      },
+      roleBindings: {
+        ...config.roleBindings,
+        "research-drafter": {
+          provider: "cursor",
+          model: "composer-2.5",
+          options: {
+            mcpServers: {
+              exa: { url: "https://override.example/exa" },
             },
           },
         },
@@ -408,22 +392,17 @@ describe("cursorProvider", () => {
     process.env.SEARCH_API_KEY = "role-search-secret"
     const mcpConfig: RuntimeConfig = {
       ...config,
-      quorumConfig: {
-        ...config.quorumConfig,
-        agentRuntime: {
-          ...config.quorumConfig.agentRuntime,
-          roles: {
-            "research-drafter": {
-              provider: "cursor",
-              model: "composer-2.5",
-              options: {
-                mcpServers: {
-                  search: {
-                    url: "https://mcp.example/search?key=${env:SEARCH_API_KEY}",
-                    headers: { Authorization: "Bearer ${env:SEARCH_API_KEY}" },
-                    env: { SEARCH_API_KEY: "${SEARCH_API_KEY}" },
-                  },
-                },
+      roleBindings: {
+        ...config.roleBindings,
+        "research-drafter": {
+          provider: "cursor",
+          model: "composer-2.5",
+          options: {
+            mcpServers: {
+              search: {
+                url: "https://mcp.example/search?key=${env:SEARCH_API_KEY}",
+                headers: { Authorization: "Bearer ${env:SEARCH_API_KEY}" },
+                env: { SEARCH_API_KEY: "${SEARCH_API_KEY}" },
               },
             },
           },
@@ -637,14 +616,8 @@ describe("cursorProvider", () => {
   test("fails when a Cursor-bound role has no model", async () => {
     const missingModel: RuntimeConfig = {
       ...config,
-      quorumConfig: {
-        ...config.quorumConfig,
-        agentRuntime: {
-          defaultProvider: "opencode",
-          roles: {
-            "research-drafter": { provider: "cursor", options: {} },
-          },
-        },
+      roleBindings: {
+        "research-drafter": { provider: "cursor", options: {} },
       },
     }
 
@@ -652,7 +625,7 @@ describe("cursorProvider", () => {
       config: missingModel,
       role: "research-drafter",
       title: "draft",
-    })).rejects.toThrow("requires agentRuntime.roles")
+    })).rejects.toThrow("requires roleBindings")
   })
 
   test("cancels and disposes active runs", async () => {

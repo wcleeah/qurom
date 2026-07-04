@@ -2,27 +2,16 @@ import { describe, expect, test } from "bun:test"
 
 import type { RuntimeConfig } from "../src/config"
 import { availableProviderIds, configuredAgentRoles, providerForRole } from "../src/providers/registry"
-import { testQuorumConfig, testRuntimeEnv, unitTestDataDir } from "./test-env"
+import { testQuorumConfig, testRuntimeConfig } from "./test-env"
 
-const baseConfig: RuntimeConfig = {
-  env: {
-    ...testRuntimeEnv({ dataDir: unitTestDataDir("providers"), workspaceDir: process.cwd() }),
-    CURSOR_API_KEY: undefined,
-    CONTEXT7_API_KEY: undefined,
-    EXA_API_KEY: undefined,
-    LANGFUSE_PUBLIC_KEY: undefined,
-    LANGFUSE_SECRET_KEY: undefined,
-    LANGFUSE_BASE_URL: undefined,
-  },
-  quorumConfig: testQuorumConfig({
+const baseConfig = testRuntimeConfig({
+  dataDir: "/tmp/qurom-providers",
+  quorumOverrides: {
     maxRounds: 1,
     researchTools: { prefer: ["webfetch"], webSearchProvider: "exa" },
-    designQuorum: {
-      enabled: true,
-      designatedDesigner: "html-designer",
-    },
-  }),
-}
+    designQuorum: { enabled: true },
+  },
+})
 
 describe("provider registry", () => {
   test("collects all configured logical agent roles", () => {
@@ -49,14 +38,8 @@ describe("provider registry", () => {
   test("uses cursor for a role override", () => {
     const config: RuntimeConfig = {
       ...baseConfig,
-      quorumConfig: {
-        ...baseConfig.quorumConfig,
-        agentRuntime: {
-          defaultProvider: "opencode",
-          roles: {
-            "clarity-auditor": { provider: "cursor", model: "composer-2.5", options: {} },
-          },
-        },
+      roleBindings: {
+        "clarity-auditor": { provider: "cursor", model: "composer-2.5", options: {} },
       },
     }
 
@@ -66,14 +49,8 @@ describe("provider registry", () => {
   test("rejects unknown per-role providers early", () => {
     const config: RuntimeConfig = {
       ...baseConfig,
-      quorumConfig: {
-        ...baseConfig.quorumConfig,
-        agentRuntime: {
-          defaultProvider: "opencode",
-          roles: {
-            "clarity-auditor": { provider: "missing-provider", options: {} },
-          },
-        },
+      roleBindings: {
+        "clarity-auditor": { provider: "missing-provider", options: {} },
       },
     }
 

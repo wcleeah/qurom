@@ -1,4 +1,5 @@
 import type { RuntimeConfig } from "./config"
+import { SUMMARIZER_ROLE } from "./role-registry"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import { markdownSummarySchema, type MarkdownSummary } from "./schema"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
@@ -39,7 +40,7 @@ export async function summarizeMarkdown(input: {
   }
 }): Promise<MarkdownSummary> {
   const runtime = input.runtime ?? createAgentRuntime(input.config)
-  const role = input.config.quorumConfig.summarizerAgent
+  const role = SUMMARIZER_ROLE
   const handle = await runtime.createHandle(role, input.title)
   const response = await runtime.prompt({
     role,
@@ -54,7 +55,7 @@ export async function summarizeMarkdown(input: {
           trackAgentMetadata: input.telemetry.trackAgentMetadata,
           name: input.telemetry.name,
           metadata: {
-            agentName: input.config.quorumConfig.summarizerAgent,
+            agentName: SUMMARIZER_ROLE,
             sessionId: handle.id,
             mode: input.mode,
             ...input.telemetry.metadata,

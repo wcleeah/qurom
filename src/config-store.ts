@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite"
-import { access, mkdir, readdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { access, readdir } from "node:fs/promises"
+import { join } from "node:path"
 import { createHash } from "node:crypto"
 
 import type { RuntimeEnv } from "./config"
@@ -68,9 +68,12 @@ const LEGACY_BROWSER_QA_ROLE = "browser-qa-enhancer"
 
 const LEGACY_QUORUM_FIELDS = ["artifactDir", "promptAssetsDir", "promptManagement"] as const
 
-async function ensureParentDir(path: string) {
-  await mkdir(dirname(path), { recursive: true })
-}
+const LEGACY_AGENT_FIELDS = [
+  "designatedDrafter",
+  "auditors",
+  "summarizerAgent",
+  "agentRuntime",
+] as const
 
 async function readTextIfExists(path: string) {
   const file = Bun.file(path)
@@ -219,23 +222,33 @@ function stripLegacyQuorumFields(config: Record<string, unknown>) {
   for (const field of LEGACY_QUORUM_FIELDS) {
     delete next[field]
   }
+  for (const field of LEGACY_AGENT_FIELDS) {
+    delete next[field]
+  }
+  if (next.designQuorum && typeof next.designQuorum === "object") {
+    const designQuorum = { ...(next.designQuorum as Record<string, unknown>) }
+    delete designQuorum.designatedDesigner
+    next.designQuorum = designQuorum
+  }
   return next
+}
+
+export function bindingRowToRoleBinding(row: Pick<RoleProviderBindingRow, "provider" | "provider_agent" | "model" | "variant" | "output_mode" | "options_json">) {
+  return {
+    provider: row.provider ?? undefined,
+    providerAgent: row.provider_agent ?? undefined,
+    model: row.model ?? undefined,
+    variant: row.variant ?? undefined,
+    outputMode: row.output_mode ?? undefined,
+    options: parseJson<Record<string, unknown>>(row.options_json, {}),
+  }
 }
 
 export function normalizeQuorumConfig(config: unknown) {
   const stripped = stripLegacyQuorumFields(
     typeof config === "object" && config !== null ? (config as Record<string, unknown>) : {},
   )
-  const parsed = quorumConfigSchema.parse(stripped)
-  const roles = { ...parsed.agentRuntime.roles }
-  delete roles[LEGACY_BROWSER_QA_ROLE]
-  return quorumConfigSchema.parse({
-    ...parsed,
-    agentRuntime: {
-      ...parsed.agentRuntime,
-      roles,
-    },
-  })
+  return quorumConfigSchema.parse(stripped)
 }
 
 function pruneLegacyBrowserQaRows(store: ConfigStore, profileId: number) {
@@ -260,28 +273,6 @@ function pruneLegacyBrowserQaRows(store: ConfigStore, profileId: number) {
   }
 
   store.db.query("DELETE FROM role_provider_bindings WHERE profile_id = ? AND role = ?").run(profileId, LEGACY_BROWSER_QA_ROLE)
-}
-
-function mergeRoleBindingsIntoConfig(config: unknown, bindings: RoleProviderBindingRow[]) {
-  const parsed = normalizeQuorumConfig(config)
-  const roles = { ...parsed.agentRuntime.roles }
-  for (const binding of bindings) {
-    if (binding.role === LEGACY_BROWSER_QA_ROLE) continue
-    roles[binding.role] = {
-      provider: binding.provider ?? undefined,
-      providerAgent: binding.provider_agent ?? undefined,
-      model: binding.model ?? undefined,
-      variant: binding.variant ?? undefined,
-      options: parseJson<Record<string, unknown>>(binding.options_json, {}),
-    }
-  }
-  return quorumConfigSchema.parse({
-    ...parsed,
-    agentRuntime: {
-      ...parsed.agentRuntime,
-      roles,
-    },
-  })
 }
 
 async function readDefaultsPrompts(workspaceDir: string): Promise<Array<{ key: PromptAssetKey; content: string }>> {
@@ -551,15 +542,29 @@ export async function loadQuorumConfigFromStore(env: RuntimeEnv) {
       .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
       .get(profile.id, "quorum")
     if (!row) throw new Error("Missing quorum config in active config profile")
+    return normalizeQuorumConfig(JSON.parse(row.value_json))
+  } finally {
+    store.close()
+  }
+}
 
-    const bindings = store.db
+export async function loadRoleBindingsFromStore(env: RuntimeEnv) {
+  const store = getConfigStore(env)
+  try {
+    const profile = await ensureActiveProfile(store, env)
+    const rows = store.db
       .query<RoleProviderBindingRow, [number]>(`
 SELECT profile_id, role, provider, provider_agent, model, variant, output_mode, options_json
 FROM role_provider_bindings
 WHERE profile_id = ?
       `)
       .all(profile.id)
-    return mergeRoleBindingsIntoConfig(JSON.parse(row.value_json), bindings)
+    const bindings: Record<string, ReturnType<typeof bindingRowToRoleBinding>> = {}
+    for (const row of rows) {
+      if (row.role === LEGACY_BROWSER_QA_ROLE) continue
+      bindings[row.role] = bindingRowToRoleBinding(row)
+    }
+    return bindings
   } finally {
     store.close()
   }

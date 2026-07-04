@@ -15,6 +15,7 @@ import {
 } from "../src/graph.ts"
 import type { AggregatedFinding, AuditResultRecord, RebuttalResponseRecord, ResearchState } from "../src/schema.ts"
 import { resolveRunDir } from "../src/output.ts"
+import { AUDITOR_ROLES } from "../src/role-registry.ts"
 import { testQuorumConfig, testRuntimeEnv, unitTestDataDir } from "./test-env"
 
 const config = {
@@ -34,11 +35,9 @@ const config = {
       prefer: ["context7", "exa"],
       webSearchProvider: "exa",
     },
-    designQuorum: {
-      enabled: true,
-      designatedDesigner: "html-designer",
-    },
+    designQuorum: { enabled: true },
   }),
+  roleBindings: {},
 } satisfies RuntimeConfig
 
 function finding(input: Partial<AggregatedFinding> & Pick<AggregatedFinding, "findingId" | "agent" | "issue">): AggregatedFinding {
@@ -156,7 +155,7 @@ describe("graph helpers", () => {
 
     expect(result.status).toBe("approved")
     expect(result.unresolvedFindings).toHaveLength(0)
-    expect(result.approvedAgents).toEqual(config.quorumConfig.auditors)
+    expect(result.approvedAgents).toEqual([...AUDITOR_ROLES])
   })
 
   test("aggregateConsensus fails on stagnation when unresolved signature repeats", async () => {

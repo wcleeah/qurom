@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "./config"
+import { requiredOpenCodeAgentRoles } from "./role-registry"
 import type { DebugLog } from "./debug-log"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 import {
@@ -720,15 +721,7 @@ export async function listAgents(config: RuntimeConfig) {
 
 export async function validateRuntimePrerequisites(config: RuntimeConfig) {
   const agents = await listAgents(config)
-  const required = [
-    config.quorumConfig.designatedDrafter,
-    ...config.quorumConfig.auditors,
-    config.quorumConfig.summarizerAgent,
-  ]
-
-  if (config.quorumConfig.designQuorum?.enabled) {
-    required.push(config.quorumConfig.designQuorum.designatedDesigner)
-  }
+  const required = requiredOpenCodeAgentRoles(config)
 
   const names = new Set(agents.map((entry) => entry.name))
   const missing = required.filter((name) => !names.has(name))

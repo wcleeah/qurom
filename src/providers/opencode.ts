@@ -16,7 +16,7 @@ const capabilities = new Set<ProviderCapability>([
 ])
 
 function roleConfig(config: Parameters<AgentProvider["createRunHandle"]>[0]["config"], role: AgentRole) {
-  return config.quorumConfig.agentRuntime.roles[role]
+  return config.roleBindings[role]
 }
 
 function providerAgentForRole(config: Parameters<AgentProvider["createRunHandle"]>[0]["config"], role: AgentRole) {

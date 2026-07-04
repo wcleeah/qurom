@@ -19,6 +19,7 @@ import { buildResearchToolHint } from "./research-tools"
 import { summarizeMarkdown } from "./summarizer"
 import { designHtml } from "./design-quorum"
 import { formatReaderProfileForPrompt, readerContextBlock as buildReaderContextBlock } from "./reader-profile"
+import { AUDITOR_ROLES, DRAFTER_ROLE } from "./role-registry"
 import { formatReaderTranscriptForPrompt } from "./reader-transcript"
 import {
   aggregatedFindingSchema,
@@ -834,7 +835,7 @@ async function draftFullDraft(
   const outputFile = `${state.outputPath}/draft-round-${state.round}.md`
   const handle = await createObservedHandle({
     runtime,
-    role: config.quorumConfig.designatedDrafter,
+    role: DRAFTER_ROLE,
     title: `research-drafter:${state.requestId}:draft:${state.round}`,
     requestId: state.requestId,
     observer,
@@ -843,7 +844,7 @@ async function draftFullDraft(
 
   const prompt = fullDraftPrompt(config, promptBundle, state)
   const response = await runtime.prompt({
-    role: config.quorumConfig.designatedDrafter,
+    role: DRAFTER_ROLE,
     handle,
     prompt,
     outputFile,
@@ -851,7 +852,7 @@ async function draftFullDraft(
       telemetry,
       state,
       name: "agent.draftFullDraft",
-      agentName: config.quorumConfig.designatedDrafter,
+      agentName: DRAFTER_ROLE,
       sessionId: handle.id,
       input: {
         requestId: state.requestId,
@@ -934,7 +935,7 @@ async function runParallelAudits(
   const auditPromises: Promise<AuditResultRecord>[] = []
 
   // Always run all configured auditors — tier only controls round/rebuttal limits
-  const auditors = config.quorumConfig.auditors
+  const auditors = [...AUDITOR_ROLES]
   const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
   for (const agent of auditors) {
     auditPromises.push(
@@ -1071,7 +1072,7 @@ async function reviewFindingsByDrafter(
 
   const handle = await createObservedHandle({
     runtime,
-    role: config.quorumConfig.designatedDrafter,
+    role: DRAFTER_ROLE,
     title: `research-drafter:${state.requestId}:review-findings:${state.round}`,
     requestId: state.requestId,
     observer,
@@ -1084,7 +1085,7 @@ async function reviewFindingsByDrafter(
   const outputFile = `${state.outputPath}/drafter-finding-review-round-${state.round}.json`
 
   const response = await runtime.prompt({
-    role: config.quorumConfig.designatedDrafter,
+    role: DRAFTER_ROLE,
     handle,
     prompt: drafterReviewPrompt(
       config,
@@ -1101,7 +1102,7 @@ async function reviewFindingsByDrafter(
       telemetry,
       state,
       name: "agent.reviewFindingsByDrafter",
-      agentName: config.quorumConfig.designatedDrafter,
+      agentName: DRAFTER_ROLE,
       sessionId: handle.id,
       input: {
         requestId: state.requestId,
@@ -1382,7 +1383,7 @@ async function reviewRebuttalResponses(
 
   const handle = await createObservedHandle({
     runtime,
-    role: config.quorumConfig.designatedDrafter,
+    role: DRAFTER_ROLE,
     title: `research-drafter:${state.requestId}:review-rebuttal:${state.round}`,
     requestId: state.requestId,
     observer,
@@ -1401,7 +1402,7 @@ async function reviewRebuttalResponses(
   const outputFile = `${state.outputPath}/drafter-rebuttal-review-round-${state.round}.json`
 
   const response = await runtime.prompt({
-    role: config.quorumConfig.designatedDrafter,
+    role: DRAFTER_ROLE,
     handle,
     prompt: rebuttalReviewPrompt(
       config,
@@ -1419,7 +1420,7 @@ async function reviewRebuttalResponses(
       telemetry,
       state,
       name: "agent.reviewRebuttalResponses",
-      agentName: config.quorumConfig.designatedDrafter,
+      agentName: DRAFTER_ROLE,
       sessionId: handle.id,
       input: {
         requestId: state.requestId,
@@ -1517,7 +1518,7 @@ export async function aggregateConsensus(config: RuntimeConfig, state: ResearchS
   const hasBlockersOrMajors = unresolved.some((f) => f.severity === "blocker" || f.severity === "major")
 
   // Auditors and unanimity are global config; maxRounds is the global cap.
-  const effectiveAuditors = config.quorumConfig.auditors
+  const effectiveAuditors = [...AUDITOR_ROLES]
   const effectiveRequireUnanimous = config.quorumConfig.requireUnanimousApproval
   const effectiveMaxRounds = config.quorumConfig.maxRounds
 
@@ -1754,7 +1755,7 @@ async function reviseDraft(
 
   const handle = await createObservedHandle({
     runtime,
-    role: config.quorumConfig.designatedDrafter,
+    role: DRAFTER_ROLE,
     title: `research-drafter:${state.requestId}:revise:${state.round}`,
     requestId: state.requestId,
     observer,
@@ -1769,7 +1770,7 @@ async function reviseDraft(
   const outputFile = `${state.outputPath}/draft-round-${nextRound}.md`
 
   const response = await runtime.prompt({
-    role: config.quorumConfig.designatedDrafter,
+    role: DRAFTER_ROLE,
     handle,
     prompt: revisionPrompt(config, promptBundle, state),
     outputFile,
@@ -1781,7 +1782,7 @@ async function reviseDraft(
       telemetry,
       state,
       name: "agent.reviseDraft",
-      agentName: config.quorumConfig.designatedDrafter,
+      agentName: DRAFTER_ROLE,
       sessionId: handle.id,
       input: {
         requestId: state.requestId,

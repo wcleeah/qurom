@@ -54,7 +54,7 @@ class CursorRunStatusError extends Error {
 }
 
 function roleConfig(config: RuntimeConfig, role: AgentRole) {
-  return config.quorumConfig.agentRuntime.roles[role]
+  return config.roleBindings[role]
 }
 
 function cursorApiKey(config: RuntimeConfig) {
@@ -64,7 +64,7 @@ function cursorApiKey(config: RuntimeConfig) {
 function cursorModelForRole(config: RuntimeConfig, role: AgentRole) {
   const model = roleConfig(config, role)?.model
   if (!model) {
-    throw new Error(`Cursor provider requires agentRuntime.roles[${JSON.stringify(role)}].model`)
+    throw new Error(`Cursor provider requires roleBindings[${JSON.stringify(role)}].model`)
   }
   return model
 }
@@ -555,7 +555,7 @@ export const cursorProvider: AgentProvider = {
       providerId: "cursor",
       role: input.role,
       title: input.title,
-      providerAgent: input.config.quorumConfig.agentRuntime.roles[input.role]?.providerAgent,
+      providerAgent: input.config.roleBindings[input.role]?.providerAgent,
       dispose: () => disposeAgent(agentId),
     }
   },

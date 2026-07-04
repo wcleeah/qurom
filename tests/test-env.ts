@@ -3,8 +3,7 @@ import { cp, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
-import type { RuntimeEnv } from "../src/config"
-import type { RuntimeConfig } from "../src/config"
+import type { RuntimeEnv, RuntimeConfig } from "../src/config"
 import { quorumConfigSchema } from "../src/config"
 import { quorumDataPaths } from "../src/data-paths"
 
@@ -41,16 +40,12 @@ export function testRuntimeEnv(input: {
 
 export function testQuorumConfig(overrides: Record<string, unknown> = {}) {
   return quorumConfigSchema.parse({
-    designatedDrafter: "research-drafter",
-    auditors: ["source-auditor", "logic-auditor", "clarity-auditor"],
-    summarizerAgent: "markdown-summarizer",
     maxRounds: 2,
     maxRebuttalTurnsPerFinding: 1,
     requireUnanimousApproval: true,
     researchTools: { prefer: ["exa"], webSearchProvider: "exa" },
     auditRestart: { maxRestarts: 1 },
     readerDiscovery: { maxTurns: 2, enabled: true },
-    agentRuntime: { defaultProvider: "opencode", roles: {} },
     ...overrides,
   })
 }
@@ -59,11 +54,13 @@ export function testRuntimeConfig(input: {
   dataDir: string
   workspaceDir?: string
   quorumOverrides?: Record<string, unknown>
+  roleBindings?: RuntimeConfig["roleBindings"]
 }): RuntimeConfig {
   const env = testRuntimeEnv(input)
   return {
     env,
     quorumConfig: testQuorumConfig(input.quorumOverrides),
+    roleBindings: input.roleBindings ?? {},
   }
 }
 

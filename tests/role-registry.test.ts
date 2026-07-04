@@ -1,0 +1,50 @@
+import { describe, expect, test } from "bun:test"
+
+import {
+  AUDITOR_ROLES,
+  configuredAgentRoles,
+  DRAFTER_ROLE,
+  requiredOpenCodeAgentRoles,
+  SUMMARIZER_ROLE,
+} from "../src/role-registry"
+import { testRuntimeConfig } from "./test-env"
+
+describe("role registry", () => {
+  test("exposes hardcoded auditor role ids", () => {
+    expect(AUDITOR_ROLES).toEqual([
+      "source-auditor",
+      "logic-auditor",
+      "clarity-auditor",
+    ])
+  })
+
+  test("configuredAgentRoles includes design quorum roles when enabled", () => {
+    const withDesign = testRuntimeConfig({
+      dataDir: "/tmp/qurom-role-registry-design",
+      quorumOverrides: { designQuorum: { enabled: true } },
+    })
+    const withoutDesign = testRuntimeConfig({
+      dataDir: "/tmp/qurom-role-registry-no-design",
+      quorumOverrides: { designQuorum: undefined },
+    })
+
+    expect(configuredAgentRoles(withDesign)).toContain("html-designer")
+    expect(configuredAgentRoles(withDesign)).toContain("interactive-enhancer")
+    expect(configuredAgentRoles(withoutDesign)).not.toContain("html-designer")
+    expect(configuredAgentRoles(withDesign)).toContain(DRAFTER_ROLE)
+    expect(configuredAgentRoles(withDesign)).toContain(SUMMARIZER_ROLE)
+  })
+
+  test("requiredOpenCodeAgentRoles includes designer when design quorum enabled", () => {
+    const config = testRuntimeConfig({
+      dataDir: "/tmp/qurom-role-registry-opencode",
+      quorumOverrides: { designQuorum: { enabled: true } },
+    })
+    expect(requiredOpenCodeAgentRoles(config)).toEqual([
+      DRAFTER_ROLE,
+      ...AUDITOR_ROLES,
+      SUMMARIZER_ROLE,
+      "html-designer",
+    ])
+  })
+})

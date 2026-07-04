@@ -9,6 +9,7 @@ import { createTelemetry, type TelemetryRun, type TraceObservation } from "./tel
 import { Command, GraphRecursionError } from "@langchain/langgraph"
 
 import type { RuntimeConfig } from "./config"
+import { AUDITOR_ROLES, DRAFTER_ROLE } from "./role-registry"
 import { researchStateSchema, type GraphInput, type InputRequest, type ResearchState } from "./schema"
 import type { validateProviderPrerequisites } from "./providers/registry"
 import type { PromptBundle } from "./prompt-assets"
@@ -641,8 +642,8 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
                   documentPath: request.inputMode === "document" ? request.documentPath : undefined,
                   recursionLimit: config.quorumConfig.recursionLimit,
                   maxRounds: config.quorumConfig.maxRounds,
-                  designatedDrafter: config.quorumConfig.designatedDrafter,
-                  auditors: config.quorumConfig.auditors,
+                  designatedDrafter: DRAFTER_ROLE,
+                  auditors: [...AUDITOR_ROLES],
                   designQuorum: config.quorumConfig.designQuorum?.enabled ?? false,
                 })
               }
