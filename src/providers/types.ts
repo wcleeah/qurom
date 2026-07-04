@@ -33,6 +33,11 @@ export type AgentRunHandle = {
   providerAgent?: string
   keepAlive?: boolean
   dispose?: () => Promise<void>
+  sessionBootstrap?: {
+    requestedModel?: string
+    modelParams?: Array<{ id: string; value: string }>
+    variant?: string
+  }
 }
 
 export type ProviderRuntimeInfo = {

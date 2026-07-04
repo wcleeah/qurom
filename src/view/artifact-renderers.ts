@@ -221,18 +221,9 @@ export function renderAuditRound(filename: string, data: unknown, isDesign?: boo
 
 // ── aggregated-findings-round-N.json ──
 
-export function renderConsensusCard(filename: string, data: unknown, isDesign?: boolean): string {
-  const d = data as AggregatedFindings
-  if (!d || typeof d !== "object") return renderJsonCard(data, { defaultOpen: true })
+function renderConsensusBody(d: AggregatedFindings, isDesign?: boolean): string {
+  let html = `<div class="outcome-banner ${outcomeClass(d.outcome)}">${outcomeLabel(d.outcome)}</div>`
 
-  const roundMatch = filename.match(/round-(\d+)/)
-  const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
-  const phaseLabel = isDesign ? "Design Consensus" : "Consensus"
-  let html = `<div class="section"><h2>${phaseLabel} — ${roundLabel}</h2>
-<div class="structured-card">
-  <div class="outcome-banner ${outcomeClass(d.outcome)}">${outcomeLabel(d.outcome)}</div>`
-
-  // Summary rows
   const rows: string[] = []
   if (d.approvedAgents?.length > 0) {
     rows.push(`<tr><td>Approved</td><td>${escapeHtml(d.approvedAgents.join(", "))} (${d.approvedAgents.length})</td></tr>`)
@@ -247,33 +238,158 @@ export function renderConsensusCard(filename: string, data: unknown, isDesign?: 
     html += `<div class="structured-summary-wrap">${summaryTable(rows)}</div>`
   }
 
-  // Unresolved findings list
   if (d.unresolvedFindings?.length > 0) {
+    html += `<div class="review-section">
+  <h4>Unresolved findings (${d.unresolvedFindings.length})</h4>`
     for (const f of d.unresolvedFindings) {
       html += renderFindingRow(f, true)
     }
+    html += `</div>`
   }
 
+  return html
+}
+
+export function renderConsensusRound(
+  roundNum: number,
+  data: AggregatedFindings,
+  options?: { roundHeading?: "h2" | "h3" | false; title?: string; isDesign?: boolean },
+): string {
+  const roundHeading = options?.roundHeading ?? "h3"
+  const nested = roundHeading === "h3"
+  let html = `<div class="section${nested ? " section-nested" : ""}">`
+  if (roundHeading !== false) {
+    html += `<${roundHeading}>${escapeHtml(options?.title ?? `Round ${roundNum}`)}</${roundHeading}>`
+  }
+  html += `<div class="structured-card">`
+  html += renderConsensusBody(data, options?.isDesign)
+  html += `</div></div>`
+  return html
+}
+
+export function renderConsensusCard(filename: string, data: unknown, isDesign?: boolean): string {
+  const d = data as AggregatedFindings
+  if (!d || typeof d !== "object") return renderJsonCard(data, { defaultOpen: true })
+
+  const roundMatch = filename.match(/round-(\d+)/)
+  const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
+  const phaseLabel = isDesign ? "Design Consensus" : "Consensus"
+
+  if (roundMatch) {
+    return renderConsensusRound(parseInt(roundMatch[1], 10), d, {
+      roundHeading: "h2",
+      title: `${phaseLabel} — ${roundLabel}`,
+      isDesign,
+    })
+  }
+
+  let html = `<div class="section"><h2>${phaseLabel}${roundLabel ? ` — ${escapeHtml(roundLabel)}` : ""}</h2>
+<div class="structured-card">`
+  html += renderConsensusBody(d, isDesign)
   html += `</div></div>`
   return html
 }
 
 // ── drafter-finding-review-round-N.json ──
 
-export function renderDrafterReview(filename: string, data: unknown): string {
-  const d = data as { acceptedFindingIds?: string[]; rebuttals?: RebuttalEntry[] }
-  if (!d || typeof d !== "object") return renderJsonCard(data, { defaultOpen: true })
+function renderRebuttalEntryBlock(r: RebuttalEntry, speaker: string): string {
+  return `<div class="rebuttal-entry">
+  <div class="rebuttal-entry-header">
+    <code class="short-id">${escapeHtml(r.findingId.slice(-40))}</code>
+    <span class="rebuttal-decision ${escapeHtml(r.requestedResolution)}">${escapeHtml(r.requestedResolution)}</span>
+  </div>
+  <div class="rebuttal-speaker">${escapeHtml(speaker)}</div>
+  <div class="rebuttal-text">${escapeHtml(r.argument)}</div>
+  ${r.evidence && r.evidence.length > 0 ? `<details class="finding-evidence"><summary>Evidence (${r.evidence.length})</summary><ul>${r.evidence.map((e) => `<li>${escapeHtml(e)}</li>`).join("")}</ul></details>` : ""}
+</div>`
+}
 
+function agentFromRebuttalsFile(filename: string): string {
+  const match = filename.match(/^rebuttals-([\w-]+)-round-\d+\.json$/)
+  return match?.[1] ?? filename
+}
+
+export function renderTargetedRebuttalsRound(
+  roundNum: number,
+  agentRebuttals: Array<{ agent: string; rebuttals: RebuttalEntry[] }>,
+  options?: { roundHeading?: "h3" | false },
+): string {
+  if (agentRebuttals.length === 0) return ""
+
+  const roundHeading = options?.roundHeading ?? "h3"
+  let html = `<div class="section${roundHeading === "h3" ? " section-nested" : ""}">`
+  if (roundHeading !== false) {
+    html += `<h3>Round ${roundNum}</h3>`
+  }
+  html += `<div class="structured-card">`
+
+  for (const { agent, rebuttals } of agentRebuttals) {
+    html += `<div class="review-section">
+  <h4>${escapeHtml(agent)} (${rebuttals.length} finding${rebuttals.length !== 1 ? "s" : ""})</h4>`
+    if (rebuttals.length > 0) {
+      for (const r of rebuttals) {
+        html += renderRebuttalEntryBlock(r, "Drafter rebuttal")
+      }
+    } else {
+      html += `<div class="empty-inline">None</div>`
+    }
+    html += `</div>`
+  }
+
+  html += `</div></div>`
+  return html
+}
+
+export function renderRebuttalsInputFile(filename: string, data: unknown): string {
+  if (!Array.isArray(data)) return renderJsonCard(data, { defaultOpen: true })
   const roundMatch = filename.match(/round-(\d+)/)
+  const agent = agentFromRebuttalsFile(filename)
   const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
-  const accepted = d.acceptedFindingIds ?? []
-  const rebuttals = d.rebuttals ?? []
+  const rebuttals = data as RebuttalEntry[]
 
-  let html = `<div class="section"><h2>Drafter Review — ${roundLabel}</h2>
-<div class="structured-card">`
+  let html = `<div class="section"><h2>Rebuttals — ${escapeHtml(agent)}${roundLabel ? `, ${roundLabel}` : ""}</h2>
+<div class="structured-card">
+<div class="review-section">
+  <h4>${escapeHtml(agent)} (${rebuttals.length} finding${rebuttals.length !== 1 ? "s" : ""})</h4>`
+  if (rebuttals.length > 0) {
+    for (const r of rebuttals) {
+      html += renderRebuttalEntryBlock(r, "Drafter rebuttal")
+    }
+  } else {
+    html += `<div class="empty-inline">None</div>`
+  }
+  html += `</div></div></div>`
+  return html
+}
 
-  // Accepted
-  html += `<div class="review-section">
+export function renderRebuttalsInputFile(filename: string, data: unknown): string {
+  if (!Array.isArray(data)) return renderJsonCard(data, { defaultOpen: true })
+  const roundMatch = filename.match(/round-(\d+)/)
+  const agent = agentFromRebuttalsFile(filename)
+  const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
+  const rebuttals = data as RebuttalEntry[]
+
+  let html = `<div class="section"><h2>Rebuttals — ${escapeHtml(agent)}${roundLabel ? `, ${roundLabel}` : ""}</h2>
+<div class="structured-card">
+<div class="review-section">
+  <h4>${escapeHtml(agent)} (${rebuttals.length} finding${rebuttals.length !== 1 ? "s" : ""})</h4>`
+  if (rebuttals.length > 0) {
+    for (const r of rebuttals) {
+      html += renderRebuttalEntryBlock(r, "Drafter rebuttal")
+    }
+  } else {
+    html += `<div class="empty-inline">None</div>`
+  }
+  html += `</div></div></div>`
+  return html
+}
+
+function renderDrafterReviewBody(
+  accepted: string[],
+  rebuttals: RebuttalEntry[],
+  rebuttalSpeaker = "Drafter",
+): string {
+  let html = `<div class="review-section">
   <h4>Accepted (${accepted.length} finding${accepted.length !== 1 ? "s" : ""})</h4>`
   if (accepted.length > 0) {
     html += `<div class="chip-list">`
@@ -287,45 +403,25 @@ export function renderDrafterReview(filename: string, data: unknown): string {
   }
   html += `</div>`
 
-  // Rebutted
   html += `<div class="review-section">
   <h4>Rebutted (${rebuttals.length} finding${rebuttals.length !== 1 ? "s" : ""})</h4>`
   if (rebuttals.length > 0) {
     for (const r of rebuttals) {
-      html += `<div class="rebuttal-entry">
-  <div class="rebuttal-entry-header">
-    <code class="short-id">${escapeHtml(r.findingId.slice(-40))}</code>
-    <span class="rebuttal-decision ${escapeHtml(r.requestedResolution)}">${escapeHtml(r.requestedResolution)}</span>
-  </div>
-  <div class="rebuttal-speaker">Drafter</div>
-  <div class="rebuttal-text">${escapeHtml(r.argument)}</div>
-  ${r.evidence && r.evidence.length > 0 ? `<details class="finding-evidence"><summary>Evidence (${r.evidence.length})</summary><ul>${r.evidence.map((e) => `<li>${escapeHtml(e)}</li>`).join("")}</ul></details>` : ""}
-</div>`
+      html += renderRebuttalEntryBlock(r, rebuttalSpeaker)
     }
   } else {
     html += `<div class="empty-inline">None</div>`
   }
   html += `</div>`
-
-  html += `</div></div>`
   return html
 }
 
-// ── auditor-rebuttal-responses-round-N-turn-M.json ──
+function renderAuditorResponsesSection(responses: Record<string, RebuttalResponseEntry>): string {
+  const entries = Object.entries(responses)
+  if (entries.length === 0) return ""
 
-export function renderRebuttalResponses(filename: string, data: unknown): string {
-  const d = data as Record<string, RebuttalResponseEntry>
-  if (!d || typeof d !== "object") return renderJsonCard(data, { defaultOpen: true })
-
-  const roundMatch = filename.match(/round-(\d+)/)
-  const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
-  const turnMatch = filename.match(/turn-(\d+)/)
-  const turnLabel = turnMatch ? `Turn ${turnMatch[1]}` : ""
-  const entries = Object.entries(d)
-
-  let html = `<div class="section"><h2>Rebuttal Responses — ${roundLabel}${turnLabel ? ", " + turnLabel : ""} (${entries.length} finding${entries.length !== 1 ? "s" : ""})</h2>
-<div class="structured-card">`
-
+  let html = `<div class="review-section">
+  <h4>Auditor responses (${entries.length} finding${entries.length !== 1 ? "s" : ""})</h4>`
   for (const [findingId, response] of entries) {
     const decisionLabel =
       response.decision === "withdraw" ? "WITHDREW" :
@@ -350,7 +446,163 @@ export function renderRebuttalResponses(filename: string, data: unknown): string
 
     html += `</div>`
   }
+  html += `</div>`
+  return html
+}
 
+export type RebuttalReviewTurnData = {
+  turn: number
+  responses?: Record<string, RebuttalResponseEntry>
+  review?: { acceptedFindingIds: string[]; rebuttals: RebuttalEntry[] }
+}
+
+function renderRebuttalReviewTurnBlock(
+  turn: number,
+  data: RebuttalReviewTurnData,
+  options?: { turnHeading?: "h4" | false },
+): string {
+  const turnHeading = options?.turnHeading ?? "h4"
+  const hasResponses = data.responses && Object.keys(data.responses).length > 0
+  const hasReview = data.review !== undefined
+  if (!hasResponses && !hasReview) return ""
+
+  let html = `<div class="section-nested">`
+  if (turnHeading !== false) {
+    html += `<h4>Turn ${turn}</h4>`
+  }
+  html += `<div class="structured-card">`
+  if (hasResponses) {
+    html += renderAuditorResponsesSection(data.responses!)
+  }
+  if (hasReview) {
+    html += renderDrafterReviewBody(
+      data.review!.acceptedFindingIds ?? [],
+      data.review!.rebuttals ?? [],
+    )
+  }
+  html += `</div></div>`
+  return html
+}
+
+function renderWrittenRebuttalsSection(agentRebuttals: Array<{ agent: string; rebuttals: RebuttalEntry[] }>): string {
+  if (agentRebuttals.length === 0) return ""
+
+  let html = `<div class="section-nested"><h4>Written rebuttals</h4><div class="structured-card">`
+  for (const { agent, rebuttals } of agentRebuttals) {
+    html += `<div class="review-section">
+  <h4>${escapeHtml(agent)} (${rebuttals.length} finding${rebuttals.length !== 1 ? "s" : ""})</h4>`
+    if (rebuttals.length > 0) {
+      for (const r of rebuttals) {
+        html += renderRebuttalEntryBlock(r, "Drafter rebuttal")
+      }
+    } else {
+      html += `<div class="empty-inline">None</div>`
+    }
+    html += `</div>`
+  }
+  html += `</div></div>`
+  return html
+}
+
+export type RebuttalsRoundData = {
+  roundNum: number
+  agentRebuttals: Array<{ agent: string; rebuttals: RebuttalEntry[] }>
+  turns: RebuttalReviewTurnData[]
+}
+
+export function renderRebuttalsRound(
+  data: RebuttalsRoundData,
+  options?: { roundHeading?: "h3" | false; turnHeading?: "h4" | false },
+): string {
+  const hasWrite = data.agentRebuttals.some(({ rebuttals }) => rebuttals.length > 0)
+  const turnBlocks = data.turns
+    .map((turn) => renderRebuttalReviewTurnBlock(turn.turn, turn, { turnHeading: options?.turnHeading }))
+    .filter(Boolean)
+  if (!hasWrite && turnBlocks.length === 0) return ""
+
+  const roundHeading = options?.roundHeading ?? "h3"
+  let html = `<div class="section${roundHeading === "h3" ? " section-nested" : ""}">`
+  if (roundHeading !== false) {
+    html += `<h3>Round ${data.roundNum}</h3>`
+  }
+  if (hasWrite) {
+    html += renderWrittenRebuttalsSection(data.agentRebuttals)
+  }
+  html += turnBlocks.join("")
+  html += `</div>`
+  return html
+}
+
+export function renderRebuttalReviewRound(
+  roundNum: number,
+  turns: RebuttalReviewTurnData[],
+  options?: { roundHeading?: "h3" | false; turnHeading?: "h4" | false },
+): string {
+  const turnBlocks = turns
+    .map((turn) => renderRebuttalReviewTurnBlock(turn.turn, turn, { turnHeading: options?.turnHeading }))
+    .filter(Boolean)
+  if (turnBlocks.length === 0) return ""
+
+  const roundHeading = options?.roundHeading ?? "h3"
+  let html = `<div class="section${roundHeading === "h3" ? " section-nested" : ""}">`
+  if (roundHeading !== false) {
+    html += `<h3>Round ${roundNum}</h3>`
+  }
+  html += turnBlocks.join("")
+  html += `</div>`
+  return html
+}
+
+export function renderDrafterReview(
+  filename: string,
+  data: unknown,
+  options?: { roundHeading?: "h2" | "h3" | "h4" | false; title?: string },
+): string {
+  const d = data as { acceptedFindingIds?: string[]; rebuttals?: RebuttalEntry[] }
+  if (!d || typeof d !== "object") return renderJsonCard(data, { defaultOpen: true })
+
+  const roundMatch = filename.match(/round-(\d+)/)
+  const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
+  const accepted = d.acceptedFindingIds ?? []
+  const rebuttals = d.rebuttals ?? []
+  const roundHeading = options?.roundHeading ?? "h2"
+  const nested = roundHeading === "h3" || roundHeading === "h4"
+
+  let html = `<div class="section${nested ? " section-nested" : ""}">`
+  if (roundHeading !== false) {
+    html += `<${roundHeading}>${escapeHtml(options?.title ?? `Drafter Review — ${roundLabel}`)}</${roundHeading}>`
+  }
+  html += `<div class="structured-card">`
+  html += renderDrafterReviewBody(accepted, rebuttals)
+  html += `</div></div>`
+  return html
+}
+
+export function renderDrafterRebuttalReviewFile(filename: string, data: unknown): string {
+  const roundMatch = filename.match(/round-(\d+)/)
+  const turnMatch = filename.match(/turn-(\d+)/)
+  const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
+  const turnLabel = turnMatch ? `Turn ${turnMatch[1]}` : ""
+  return renderDrafterReview(filename, data, {
+    title: `Drafter Rebuttal Review — ${roundLabel}${turnLabel ? `, ${turnLabel}` : ""}`,
+  })
+}
+
+// ── auditor-rebuttal-responses-round-N-turn-M.json ──
+
+export function renderRebuttalResponses(filename: string, data: unknown): string {
+  const d = data as Record<string, RebuttalResponseEntry>
+  if (!d || typeof d !== "object") return renderJsonCard(data, { defaultOpen: true })
+
+  const roundMatch = filename.match(/round-(\d+)/)
+  const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
+  const turnMatch = filename.match(/turn-(\d+)/)
+  const turnLabel = turnMatch ? `Turn ${turnMatch[1]}` : ""
+  const entries = Object.entries(d)
+
+  let html = `<div class="section"><h2>Rebuttal Responses — ${escapeHtml(roundLabel)}${turnLabel ? `, ${turnLabel}` : ""} (${entries.length} finding${entries.length !== 1 ? "s" : ""})</h2>
+<div class="structured-card">`
+  html += renderAuditorResponsesSection(d)
   html += `</div></div>`
   return html
 }
@@ -364,6 +616,8 @@ export function renderStructuredJson(filename: string, data: unknown): string {
   if (/^audits-round-\d+\.json$/.test(filename)) return renderAuditRound(filename, data)
   if (/^aggregated-findings-round-\d+\.json$/.test(filename)) return renderConsensusCard(filename, data)
   if (/^drafter-finding-review-round-\d+\.json$/.test(filename)) return renderDrafterReview(filename, data)
+  if (/^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/.test(filename)) return renderDrafterRebuttalReviewFile(filename, data)
+  if (/^rebuttals-[\w-]+-round-\d+\.json$/.test(filename)) return renderRebuttalsInputFile(filename, data)
   if (/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(filename)) return renderRebuttalResponses(filename, data)
   return renderJsonViewer(data)
 }

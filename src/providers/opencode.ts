@@ -37,12 +37,17 @@ export const opencodeProvider: AgentProvider = {
   },
   async createRunHandle(input): Promise<AgentRunHandle> {
     const session = await createSession(input.config, input.title, input.parentId)
+    const roleRuntime = roleConfig(input.config, input.role)
     return {
       id: session.id,
       providerId: "opencode",
       role: input.role,
       title: input.title,
       providerAgent: providerAgentForRole(input.config, input.role),
+      sessionBootstrap: {
+        requestedModel: roleRuntime?.model,
+        variant: roleRuntime?.variant,
+      },
     }
   },
   async prompt(input) {

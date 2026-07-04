@@ -19,7 +19,7 @@ import {
   handlePostAskMessage,
 } from "./html-ask-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
-import { renderIndex, renderNodePage, renderRoundPage, renderFilesPage, renderRun, serveRawFile } from "./pages"
+import { renderIndex, renderNodePage, renderFilesPage, renderRun, serveRawFile } from "./pages"
 import { handleOpencodeBootstrapPost } from "./opencode-bootstrap-view"
 import { handleRunApi } from "./run-api"
 import { resolveRunName, safeFilePath, HOST, PORT, safeRunPath } from "./paths"
@@ -418,16 +418,6 @@ export function startViewServer(): void {
           )
         } catch (e) {
           console.error("Raw file error:", e)
-          return new Response("Internal error", { status: 500 })
-        }
-      }
-
-      const roundMatch = path.match(/^\/runs\/(.+?)\/round\/(\d+)$/)
-      if (roundMatch) {
-        try {
-          return await renderRoundPage(decodeURIComponent(roundMatch[1]), parseInt(roundMatch[2], 10))
-        } catch (e) {
-          console.error("Round page error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

@@ -17,8 +17,8 @@ import { basename, dirname, join } from "node:path"
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
 import type { RuntimeConfig } from "../config"
 import type { EventBus } from "../runner"
-import { estimateCursorCostUsd } from "../cursor-pricing"
-import { foldCursorUsage, hasUsage } from "../usage"
+import { estimateCursorCostUsd, resolveCursorPricingModelId } from "../cursor-pricing"
+import { foldCursorUsage, hasUsage, type UsageTotals } from "../usage"
 import type {
   AgentProvider,
   AgentRunHandle,
@@ -34,7 +34,12 @@ type CursorAgentHandle = Awaited<ReturnType<typeof Agent.create>>
 type CursorRunHandle = Awaited<ReturnType<CursorAgentHandle["send"]>>
 type CursorModel = Awaited<ReturnType<typeof Cursor.models.list>>[number]
 
-const activeAgents = new Map<string, { agent: CursorAgentHandle; run?: CursorRunHandle }>()
+const activeAgents = new Map<string, {
+  agent: CursorAgentHandle
+  run?: CursorRunHandle
+  requestedModel?: string
+  modelParams?: Array<{ id: string; value: string }>
+}>()
 let cachedModels: { apiKey: string; models: CursorModel[] } | undefined
 const cursorTransportRetryAttempts = 2
 const cursorAgentNameMaxLength = 100
@@ -294,6 +299,21 @@ async function sendCursorRun(input: {
   }
 }
 
+function logCursorPromptComplete(input: {
+  debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
+  role: AgentRole
+  handleId: string
+  runId: string
+  callIndex: number
+  requestedModel?: string
+  modelParams?: Array<{ id: string; value: string }>
+  resolvedModel?: string
+  durationMs?: number
+}) {
+  const { debugLog, ...data } = input
+  debugLog?.write("cursor.prompt.complete", data)
+}
+
 function logCursorPromptError(input: {
   debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
   role: AgentRole
@@ -399,6 +419,10 @@ async function saveCursorDebugFiles(input: {
   text: string
   artifacts?: unknown
   conversation?: unknown
+  requestedModel?: string
+  modelParams?: Array<{ id: string; value: string }>
+  resolvedModel?: string
+  completedAt?: string
 }) {
   await mkdir(dirname(input.outputFile), { recursive: true })
   const runSegment = safeDebugSegment(input.runId)
@@ -412,6 +436,10 @@ async function saveCursorDebugFiles(input: {
     attempt: input.attempt,
     outputFile: input.outputFile,
     requestedArtifact: cursorArtifactPath(input.outputFile),
+    requestedModel: input.requestedModel,
+    modelParams: input.modelParams,
+    resolvedModel: input.resolvedModel,
+    completedAt: input.completedAt,
   }
 
   const paths = {
@@ -476,6 +504,63 @@ function cursorUsageFromRun(run: CursorRunHandle, result: unknown) {
   return foldCursorUsage(raw)
 }
 
+function cursorUsageTotalsFromRun(
+  run: CursorRunHandle,
+  result: unknown,
+  model: string | undefined,
+): UsageTotals | undefined {
+  const raw = cursorRawUsageFromRun(run, result)
+  const folded = raw ? foldCursorUsage(raw) : undefined
+  if (!folded || !hasUsage(folded)) return undefined
+  const cost = raw ? estimateCursorCostUsd(resolveCursorPricingModelId(model), raw) : { costUsd: 0, costAvailable: false, costEstimated: true }
+  return {
+    tokensIn: folded.tokensIn,
+    tokensOut: folded.tokensOut,
+    ...(cost.costAvailable
+      ? { costUsd: cost.costUsd, costAvailable: true, costEstimated: cost.costEstimated }
+      : {}),
+  }
+}
+
+function cursorResolvedModel(result: unknown, requestedModel: string | undefined) {
+  const resultModel = (result as { model?: { id?: string } })?.model?.id
+  if (resultModel && resultModel !== "default") return resultModel
+  if (!requestedModel || requestedModel === "default") return "auto"
+  return requestedModel
+}
+
+function emitCursorSessionTelemetry(input: {
+  bus?: EventBus
+  role: AgentRole
+  handleId: string
+  roleRuntime: ReturnType<typeof roleConfig> | undefined
+  modelParams?: Array<{ id: string; value: string }>
+  runId: string
+  callIndex: number
+  durationMs?: number
+  result: unknown
+  usage?: UsageTotals
+}) {
+  if (!input.bus) return
+  input.bus.emit({
+    kind: "session.telemetry",
+    sessionID: input.handleId,
+    role: input.role,
+    provider: "cursor",
+    phase: "completed",
+    requestedModel: input.roleRuntime?.model,
+    modelParams: input.modelParams,
+    variant: input.roleRuntime?.variant,
+    cursorRunId: input.runId,
+    callIndex: input.callIndex,
+    durationMs: input.durationMs,
+    completedAt: Date.now(),
+    resolvedModel: cursorResolvedModel(input.result, input.roleRuntime?.model),
+    usage: input.usage,
+    usageSource: input.usage ? "sdk" : undefined,
+  })
+}
+
 function emitCursorRunUsage(
   bus: EventBus | undefined,
   sessionID: string,
@@ -487,7 +572,7 @@ function emitCursorRunUsage(
   const raw = cursorRawUsageFromRun(run, result)
   const folded = raw ? foldCursorUsage(raw) : undefined
   if (!folded || !hasUsage(folded)) return
-  const cost = raw ? estimateCursorCostUsd(model, raw) : { costUsd: 0, costAvailable: false, costEstimated: true }
+  const cost = raw ? estimateCursorCostUsd(resolveCursorPricingModelId(model), raw) : { costUsd: 0, costAvailable: false, costEstimated: true }
   bus.emit({
     kind: "agent.usage",
     sessionID,
@@ -625,13 +710,18 @@ export const cursorProvider: AgentProvider = {
       ...(mcpServers ? { mcpServers } : {}),
     })
     const agentId = agent.agentId
-    activeAgents.set(agentId, { agent })
+    activeAgents.set(agentId, { agent, requestedModel: model, modelParams })
     return {
       id: agentId,
       providerId: "cursor",
       role: input.role,
       title: input.title,
       providerAgent: input.config.roleBindings[input.role]?.providerAgent,
+      sessionBootstrap: {
+        requestedModel: model,
+        modelParams,
+        variant: input.config.roleBindings[input.role]?.variant,
+      },
       dispose: () => disposeAgent(agentId),
     }
   },
@@ -663,7 +753,33 @@ export const cursorProvider: AgentProvider = {
           if (status && status !== "finished" && status !== "completed") {
             throw new CursorRunStatusError(run.id, status, result)
           }
+          const usage = cursorUsageTotalsFromRun(run, result, roleRuntime?.model)
           emitCursorRunUsage(input.bus, input.handle.id, run, result, roleRuntime?.model)
+          const resolvedModel = cursorResolvedModel(result, roleRuntime?.model)
+          const durationMs = (result as { durationMs?: number }).durationMs
+          emitCursorSessionTelemetry({
+            bus: input.bus,
+            role: input.role,
+            handleId: input.handle.id,
+            roleRuntime,
+            modelParams: active.modelParams,
+            runId: run.id,
+            callIndex: 1,
+            durationMs,
+            result,
+            usage,
+          })
+          logCursorPromptComplete({
+            debugLog: input.telemetry?.debugLog,
+            role: input.role,
+            handleId: input.handle.id,
+            runId: run.id,
+            callIndex: 1,
+            requestedModel: active.requestedModel,
+            modelParams: active.modelParams,
+            resolvedModel,
+            durationMs,
+          })
           input.bus?.emit({
             kind: "agent.message.text",
             sessionID: input.handle.id,
@@ -755,6 +871,9 @@ export const cursorProvider: AgentProvider = {
                 conversation = { error: cursorErrorMessage(error) }
               }
             }
+            const resolvedModel = cursorResolvedModel(result, roleRuntime?.model)
+            const durationMs = (result as { durationMs?: number }).durationMs
+            const completedAt = new Date().toISOString()
             const debugPaths = await saveCursorDebugFiles({
               outputFile,
               role: input.role,
@@ -766,11 +885,39 @@ export const cursorProvider: AgentProvider = {
               text,
               artifacts: artifactsPayload,
               conversation,
+              requestedModel: active.requestedModel,
+              modelParams: active.modelParams,
+              resolvedModel,
+              completedAt,
             })
             if (status && status !== "finished" && status !== "completed") {
               throw new CursorRunStatusError(run.id, status, result)
             }
+            const usage = cursorUsageTotalsFromRun(run, result, roleRuntime?.model)
             emitCursorRunUsage(input.bus, input.handle.id, run, result, roleRuntime?.model)
+            emitCursorSessionTelemetry({
+              bus: input.bus,
+              role: input.role,
+              handleId: input.handle.id,
+              roleRuntime,
+              modelParams: active.modelParams,
+              runId: run.id,
+              callIndex: currentCallIndex,
+              durationMs,
+              result,
+              usage,
+            })
+            logCursorPromptComplete({
+              debugLog: input.telemetry?.debugLog,
+              role: input.role,
+              handleId: input.handle.id,
+              runId: run.id,
+              callIndex: currentCallIndex,
+              requestedModel: active.requestedModel,
+              modelParams: active.modelParams,
+              resolvedModel,
+              durationMs,
+            })
             await downloadCursorArtifact({
               agent: active.agent,
               handle: input.handle,

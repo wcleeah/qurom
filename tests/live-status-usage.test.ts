@@ -1,30 +1,23 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createEventBus } from "../src/runner.ts"
 import { createLiveStatusWriter } from "../src/live-status.ts"
+import { createSessionTelemetryWriter } from "../src/session-telemetry.ts"
 
-describe("createLiveStatusWriter usage", () => {
-  test("aggregates agent.usage deltas and snapshots them on node end", async () => {
+describe("live status without usage", () => {
+  test("does not persist token usage in live-status or node-history", async () => {
     const bus = createEventBus()
     const dir = await mkdtemp(join(tmpdir(), "qurom-live-status-"))
 
-    const writer = createLiveStatusWriter(bus, dir, { maxRounds: 3 })
+    const liveWriter = createLiveStatusWriter(bus, dir, { maxRounds: 3 })
+    const telemetryWriter = createSessionTelemetryWriter(dir, bus)
     try {
       bus.emit({ kind: "lifecycle", phase: "running", requestId: "req-1" })
       bus.emit({ kind: "session.created", sessionID: "ses-1", role: "source-auditor" })
       bus.emit({ kind: "graph.node", node: "runParallelAudits", phase: "start", state: { round: 0 } as never })
-
-      bus.emit({
-        kind: "agent.usage",
-        sessionID: "ses-1",
-        messageID: "msg-1",
-        tokensIn: 100,
-        tokensOut: 10,
-        source: "opencode",
-      })
       bus.emit({
         kind: "agent.usage",
         sessionID: "ses-1",
@@ -36,39 +29,40 @@ describe("createLiveStatusWriter usage", () => {
         costEstimated: false,
         source: "opencode",
       })
-
       bus.emit({ kind: "graph.node", node: "runParallelAudits", phase: "end", state: { round: 0 } as never })
+
+      await telemetryWriter.flush()
       await Bun.sleep(30)
 
-      const live = await Bun.file(`${dir}/live-status.json`).json() as {
-        usage: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean }
-        usageAvailable: boolean
-        nodeHistory: Array<{ usage?: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean }; usageAvailable?: boolean }>
+      const live = JSON.parse(await readFile(join(dir, "live-status.json"), "utf8")) as {
+        usage?: unknown
+        nodeHistory: Array<{ usage?: unknown; usageAvailable?: boolean }>
+      }
+      const sessionTelemetry = JSON.parse(await readFile(join(dir, "session-telemetry.json"), "utf8")) as {
+        sessions: Array<{ node?: string; calls: Array<{ usage?: { tokensIn: number } }> }>
       }
 
-      expect(live.usageAvailable).toBe(true)
-      expect(live.usage.tokensIn).toBe(150)
-      expect(live.usage.tokensOut).toBe(20)
-      expect(live.usage.costAvailable).toBe(true)
-      expect(live.usage.costUsd).toBeCloseTo(0.015)
-      expect(live.nodeHistory.at(-1)?.usageAvailable).toBe(true)
-      expect(live.nodeHistory.at(-1)?.usage?.tokensIn).toBe(150)
-      expect(live.nodeHistory.at(-1)?.usage?.costUsd).toBeCloseTo(0.015)
+      expect(live.usage).toBeUndefined()
+      expect(live.nodeHistory.at(-1)?.usage).toBeUndefined()
+      expect(live.nodeHistory.at(-1)?.usageAvailable).toBeUndefined()
+      expect(sessionTelemetry.sessions[0]?.node).toBe("runParallelAudits")
+      expect(sessionTelemetry.sessions[0]?.calls[0]?.usage?.tokensIn).toBe(150)
     } finally {
-      writer.dispose()
+      liveWriter.dispose()
+      telemetryWriter.dispose()
       await rm(dir, { recursive: true, force: true })
     }
   })
 
-  test("dedupes cumulative cursor usage and cost by run id", async () => {
+  test("records cursor cumulative usage in session-telemetry only", async () => {
     const bus = createEventBus()
     const dir = await mkdtemp(join(tmpdir(), "qurom-live-status-"))
 
-    const writer = createLiveStatusWriter(bus, dir, { maxRounds: 3 })
+    const liveWriter = createLiveStatusWriter(bus, dir, { maxRounds: 3 })
+    const telemetryWriter = createSessionTelemetryWriter(dir, bus)
     try {
       bus.emit({ kind: "session.created", sessionID: "ses-cursor", role: "research-drafter" })
       bus.emit({ kind: "graph.node", node: "draftFullDraft", phase: "start", state: { round: 0 } as never })
-
       bus.emit({
         kind: "agent.usage",
         sessionID: "ses-cursor",
@@ -93,17 +87,22 @@ describe("createLiveStatusWriter usage", () => {
         source: "cursor",
         cumulative: true,
       })
+
+      await telemetryWriter.flush()
       await Bun.sleep(30)
 
-      const live = await Bun.file(`${dir}/live-status.json`).json() as {
-        usage: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean }
+      const live = await Bun.file(join(dir, "live-status.json")).json() as Record<string, unknown>
+      const sessionTelemetry = await Bun.file(join(dir, "session-telemetry.json")).json() as {
+        sessions: Array<{ calls: Array<{ usage?: { tokensIn: number; tokensOut: number; costUsd?: number } }> }>
       }
-      expect(live.usage.tokensIn).toBe(300)
-      expect(live.usage.tokensOut).toBe(70)
-      expect(live.usage.costAvailable).toBe(true)
-      expect(live.usage.costUsd).toBeCloseTo(0.05)
+
+      expect(live.usage).toBeUndefined()
+      expect(sessionTelemetry.sessions[0]?.calls[0]?.usage?.tokensIn).toBe(300)
+      expect(sessionTelemetry.sessions[0]?.calls[0]?.usage?.tokensOut).toBe(70)
+      expect(sessionTelemetry.sessions[0]?.calls[0]?.usage?.costUsd).toBeCloseTo(0.05)
     } finally {
-      writer.dispose()
+      liveWriter.dispose()
+      telemetryWriter.dispose()
       await rm(dir, { recursive: true, force: true })
     }
   })

@@ -11,6 +11,7 @@ import {
   type BridgeFactory,
   type RuntimePrerequisites,
 } from "./runner"
+import { buildRunDirName, ensureRunDir, writeRunJsonArtifact } from "./output"
 import type { InputRequest } from "./schema"
 
 export type RunKind = "research" | "design"
@@ -30,7 +31,7 @@ export type RunManagerStatus = {
 
 export type RunManager = {
   status: () => RunManagerStatus
-  startResearch: (request: InputRequest) => Promise<{ runId: string }>
+  startResearch: (request: InputRequest) => Promise<{ runId: string; runPath: string }>
   resumeResearch: (runId: string, node?: string) => Promise<{ runId: string }>
   startDesign: (runId: string) => Promise<{ runId: string }>
   cancel: (runId?: string) => Promise<boolean>
@@ -56,22 +57,45 @@ function parseResumeRunId(raw: string): { runId: string; node?: string } {
   }
 }
 
+const UUID_SUFFIX =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function requestIdFromRunRef(runRef: string): string | undefined {
+  const trimmed = runRef.trim()
+  const suffix = trimmed.match(UUID_SUFFIX)?.[0]
+  if (!suffix) return undefined
+  if (suffix === trimmed) return suffix
+  return suffix
+}
+
+function runRefsMatch(activeRunId: string, requestedRunRef: string): boolean {
+  const active = activeRunId.trim()
+  const requested = requestedRunRef.trim()
+  if (!requested) return true
+  if (active === requested || requested.includes(active) || active.includes(requested)) return true
+  const requestedId = requestIdFromRunRef(requested)
+  const activeId = requestIdFromRunRef(active)
+  return Boolean(requestedId && activeId && requestedId === activeId)
+}
+
+/** @internal Exported for unit tests. */
+export const __runRefMatching = {
+  requestIdFromRunRef,
+  runRefsMatch,
+}
+
 export function createRunManager(deps: RunManagerDeps): RunManager {
   const lifecycle = deps.lifecycle ?? getProviderLifecycle()
   const loadBundle = deps.loadPromptBundleFn ?? loadPromptBundle
 
   let active: ActiveRun | undefined
-  let cachedPromptBundle: PromptBundle | undefined
 
   async function config(): Promise<RuntimeConfig> {
     return await Promise.resolve(deps.getConfig())
   }
 
   async function promptBundle(cfg: RuntimeConfig): Promise<PromptBundle> {
-    if (!cachedPromptBundle) {
-      cachedPromptBundle = await loadBundle(cfg)
-    }
-    return cachedPromptBundle
+    return await loadBundle(cfg)
   }
 
   function assertNotActive() {
@@ -157,22 +181,41 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
 
     async startResearch(request) {
       const runId = crypto.randomUUID()
-      const roles = configuredAgentRoles(await config())
-      return runPipeline({
+      const cfg = await config()
+      const runDirInput = {
+        requestId: runId,
+        inputMode: request.inputMode,
+        topic: request.inputMode === "topic" ? request.topic : undefined,
+        documentPath: request.inputMode === "document" ? request.documentPath : undefined,
+        documentText: request.inputMode === "document" ? request.documentText : undefined,
+      }
+      const runPath = buildRunDirName(runDirInput)
+      const runDir = await ensureRunDir(cfg.env.QUORUM_RUNS_DIR, runDirInput)
+      await writeRunJsonArtifact(runDir, "request.json", {
+        requestId: runId,
+        inputMode: request.inputMode,
+        topic: request.inputMode === "topic" ? request.topic : undefined,
+        documentPath: request.inputMode === "document" ? request.documentPath : undefined,
+      })
+
+      const roles = configuredAgentRoles(cfg)
+      await runPipeline({
         kind: "research",
         runId,
         roles,
-        execute: ({ bus, signal, bridgeFactory, prerequisites: prereqs, promptBundle: bundle, config: cfg }) =>
+        execute: ({ bus, signal, bridgeFactory, prerequisites: prereqs, promptBundle: bundle, config: pipelineCfg }) =>
           runResearchPipeline({
-            config: cfg,
+            config: pipelineCfg,
             prerequisites: prereqs,
             promptBundle: bundle,
             request,
+            requestId: runId,
             bus,
             signal,
             bridgeFactory,
           }),
       })
+      return { runId, runPath }
     },
 
     async resumeResearch(rawRunId, node) {
@@ -216,7 +259,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
 
     async cancel(runId) {
       if (!active) return false
-      if (runId && active.runId !== runId && !runId.includes(active.runId)) {
+      if (runId && !runRefsMatch(active.runId, runId)) {
         return false
       }
       active.abortController.abort()
@@ -230,7 +273,6 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
         await active.promise.catch(() => {})
       }
       await lifecycle.shutdown()
-      cachedPromptBundle = undefined
     },
   }
 }

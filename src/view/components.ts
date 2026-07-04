@@ -4,9 +4,14 @@ import { answeredQuestionsFromTranscript } from "../reader-transcript"
 import { renderReaderProfileSummary } from "./artifact-renderers"
 import { getNodeDefinition } from "./node-registry"
 import { escapeHtml, formatDurationMs, formatUsagePair, statusDot } from "./utils"
+import type { SessionTelemetryFile } from "../session-telemetry"
+import { sessionUsageForHistoryEntry, usageLabelForRole } from "./telemetry-view"
 import type { LiveStatus, NodeHistoryEntry } from "./types"
 
-export function renderAgentActivity(liveStatus: LiveStatus | null): string {
+export function renderAgentActivity(
+  liveStatus: LiveStatus | null,
+  sessionTelemetry?: SessionTelemetryFile | null,
+): string {
   if (!liveStatus || !liveStatus.agents || Object.keys(liveStatus.agents).length === 0) return ""
 
   const agents = Object.entries(liveStatus.agents)
@@ -16,7 +21,11 @@ export function renderAgentActivity(liveStatus: LiveStatus | null): string {
   let html = '<div class="section"><h2>Agent Activity</h2>'
 
   for (const [name, agent] of agents) {
-    html += `<div class="card card-compact"><div class="agent-card-title">${statusDot(agent.status)} ${escapeHtml(name)} <span class="agent-card-status">(${agent.status})</span>${agent.usageAvailable || agent.costAvailable ? ` <span class="agent-card-tokens dim-text">${escapeHtml(formatUsagePair(agent, agent.usageAvailable || agent.costAvailable === true))}</span>` : ""}</div>`
+    const usageLabel = usageLabelForRole(sessionTelemetry, name)
+    const usageHtml = usageLabel
+      ? ` <span class="agent-card-tokens dim-text">${escapeHtml(usageLabel)}</span>`
+      : ""
+    html += `<div class="card card-compact"><div class="agent-card-title">${statusDot(agent.status)} ${escapeHtml(name)} <span class="agent-card-status">(${agent.status})</span>${usageHtml}</div>`
 
     if (agent.reasoning) {
       html += `<details class="markdown-preview agent-reasoning"><summary>Reasoning</summary><pre>${escapeHtml(agent.reasoning)}</pre></details>`
@@ -47,6 +56,7 @@ export function renderAgentActivity(liveStatus: LiveStatus | null): string {
 export function renderNodeHistory(
   history: NodeHistoryEntry[],
   runName: string,
+  sessionTelemetry?: SessionTelemetryFile | null,
 ): string {
   if (!history.length) return ""
 
@@ -57,8 +67,9 @@ export function renderNodeHistory(
   for (const entry of nodes) {
     const elapsed = entry.durationMs ?? (entry.completedAt - entry.startedAt)
     const elapsedStr = formatDurationMs(elapsed)
-    const usageStr = entry.usageAvailable && entry.usage
-      ? ` · ${formatUsagePair(entry.usage, true)}`
+    const usage = sessionUsageForHistoryEntry(sessionTelemetry, entry)
+    const usageStr = usage.usageAvailable || usage.costAvailable
+      ? ` · ${formatUsagePair(usage, true)}`
       : ""
     const icon = entry.status === "completed" ? "✓" : "✗"
     const linkNode = getNodeDefinition(entry.node)?.pipelineLabel ?? entry.node

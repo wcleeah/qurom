@@ -1178,6 +1178,13 @@ code {
 }
 
 /* Drafter review card */
+.section-nested {
+  margin-top: 0.75rem;
+}
+.section-nested > h3,
+.section-nested > h4 {
+  margin-top: 0;
+}
 .review-section {
   padding: 0.55rem 0.85rem;
   border-bottom: 1px solid var(--border);
@@ -1396,6 +1403,16 @@ code {
 .node-history-meta { opacity: 0.6; font-size: 0.75rem; }
 .node-history-extra { opacity: 0.5; font-size: 0.72rem; }
 .node-history-error { color: var(--red); font-size: 0.72rem; }
+
+.global-round-nav {
+  margin-bottom: 0.65rem;
+}
+.global-round-strip {
+  margin-bottom: 0.15rem;
+}
+.node-scope-panels {
+  margin-top: 0.25rem;
+}
 
 .round-strip {
   display: flex;

@@ -1,5 +1,7 @@
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
+import { readSessionTelemetry, SESSION_TELEMETRY_FILENAME, type SessionTelemetryFile } from "../session-telemetry"
+import { readCursorUsageImport, CURSOR_USAGE_IMPORT_FILENAME, type CursorUsageImportFile } from "../cursor-usage-import"
 import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
 import { listStarredRunNames } from "./starred-store"
 import { isSqliteFile } from "./utils"
@@ -209,6 +211,8 @@ export function classifyFile(filename: string): FileClass {
   if (filename === "failure.json") return { group: "Run Metadata", subGroup: "Failures", label: "Failure details", description: "Research failure payload" }
   if (filename === "debug-log.jsonl") return { group: "Debug", subGroup: "Logs", label: "Debug log", description: "Chronological pipeline/recovery events" }
   if (filename === "node-history.json") return { group: "Debug", subGroup: "Timelines", label: "Node history", description: "Processed graph steps" }
+  if (filename === SESSION_TELEMETRY_FILENAME) return { group: "Debug", subGroup: "Telemetry", label: "Session telemetry", description: "Model, parameters, and usage per agent session" }
+  if (filename === CURSOR_USAGE_IMPORT_FILENAME) return { group: "Debug", subGroup: "Telemetry", label: "Cursor usage import", description: "CSV backfilled token usage for Cursor cloud calls" }
   if (filename === "live-status.json") return { group: "Debug", subGroup: "Live", label: "Live status", description: "Current dashboard snapshot" }
   if (/^cursor-[\w.-]+-call-\d+-attempt-\d+-[\w.-]+-(metadata|result|artifacts|conversation)\.json$/.test(filename)) {
     return { group: "Debug", subGroup: "Cursor", label: filename, description: "Cursor provider diagnostic artifact" }
@@ -248,4 +252,20 @@ export function classifyFile(filename: string): FileClass {
   if (/^design-html-round-\d+\.html$/.test(filename)) return { group: "Design", subGroup: "HTML Drafts", label: `HTML draft round ${round}`, description: "Generated design HTML" }
   if (filename === "design-failure.json") return { group: "Design Rounds", subGroup: "Failures", label: "Design failure details", description: "Design pipeline error payload" }
   return { group: "Other", subGroup: "Unclassified", label: filename, description: "Additional artifact" }
+}
+
+export async function readRunSessionTelemetry(runName: string): Promise<SessionTelemetryFile> {
+  try {
+    return await readSessionTelemetry(safeRunPath(runName))
+  } catch {
+    return { version: 1, sessions: [] }
+  }
+}
+
+export async function readRunCursorUsageImport(runName: string): Promise<CursorUsageImportFile | null> {
+  try {
+    return await readCursorUsageImport(safeRunPath(runName))
+  } catch {
+    return null
+  }
 }

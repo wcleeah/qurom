@@ -9,6 +9,7 @@ export type NodeDefinition = {
   order: number
   phase: NodePhase
   pipelineLabel?: string
+  miniLabel?: string
   liveNodeAliases?: string[]
   filePatterns: RegExp[]
   roundScoped: boolean
@@ -47,7 +48,8 @@ export const GRAPH_NODES: NodeDefinition[] = [
   },
   {
     id: "reviewFindingsByDrafter",
-    label: "Drafter review",
+    label: "Review Findings",
+    miniLabel: "Review Findings",
     order: 7,
     phase: "research",
     filePatterns: [/^drafter-finding-review-round-\d+\.json$/],
@@ -55,7 +57,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
   },
   {
     id: "runTargetedRebuttals",
-    label: "Targeted rebuttals",
+    label: "Write Rebuttals",
     order: 8,
     phase: "research",
     filePatterns: [
@@ -68,16 +70,19 @@ export const GRAPH_NODES: NodeDefinition[] = [
   },
   {
     id: "reviewRebuttalResponses",
-    label: "Rebuttal review",
+    label: "Rebuttals",
+    miniLabel: "Rebuttals",
     order: 9,
     phase: "research",
+    liveNodeAliases: ["runTargetedRebuttals"],
     filePatterns: [/^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/, /^disputed-round-\d+\.json$/],
     roundScoped: true,
     turnScoped: true,
   },
   {
     id: "aggregateConsensus",
-    label: "Aggregate consensus",
+    label: "Aggregate Consensus",
+    miniLabel: "Aggregate Consensus",
     order: 10,
     phase: "research",
     filePatterns: [/^aggregated-findings-round-\d+\.json$/],
@@ -148,6 +153,16 @@ const DESIGN_PHASE_NODE: Record<string, string> = {
   finalizing: "finalizeDesign",
 }
 
+export const REBUTTALS_VIEWER_NODE_ID = "reviewRebuttalResponses"
+
+export function isRebuttalsViewerNode(nodeId: string): boolean {
+  return nodeId === "runTargetedRebuttals" || nodeId === REBUTTALS_VIEWER_NODE_ID
+}
+
+export function rebuttalsTelemetryNodeId(_nodeId?: string): string {
+  return REBUTTALS_VIEWER_NODE_ID
+}
+
 export function getNodeDefinition(nodeId: string): NodeDefinition | undefined {
   return GRAPH_NODES.find((n) => n.id === nodeId || n.pipelineLabel === nodeId)
     ?? GRAPH_NODES.find((n) => n.liveNodeAliases?.includes(nodeId))
@@ -174,6 +189,20 @@ export function isNodeActive(liveStatus: LiveStatus | null, nodeId: string): boo
   if (def?.pipelineLabel && liveStatus.node === def.pipelineLabel) return true
   if (resolveLiveNode(liveStatus) === nodeId) return true
   return liveStatus.node === nodeId
+}
+
+export function filesForRebuttalsViewer(files: string[], index?: RunArtifactIndex, round?: number): string[] {
+  if (round === undefined) {
+    return [...new Set([
+      ...filesForNode("runTargetedRebuttals", files, index),
+      ...filesForNode(REBUTTALS_VIEWER_NODE_ID, files, index),
+    ])].sort()
+  }
+  const artifactIndex = index ?? indexRunArtifacts(files)
+  return [...new Set([
+    ...filesForNodeRound("runTargetedRebuttals", files, artifactIndex, round),
+    ...filesForNodeRound(REBUTTALS_VIEWER_NODE_ID, files, artifactIndex, round),
+  ])].sort()
 }
 
 export function filesForNode(nodeId: string, files: string[], index?: RunArtifactIndex): string[] {
@@ -210,6 +239,57 @@ export function filesForNode(nodeId: string, files: string[], index?: RunArtifac
   return [...new Set([...matched, ...roundFiles])].sort()
 }
 
+export function filesForNodeRound(
+  nodeId: string,
+  files: string[],
+  index: RunArtifactIndex,
+  round: number,
+): string[] {
+  const def = getNodeDefinition(nodeId)
+  if (!def) return []
+  if (!def.roundScoped) return filesForNode(nodeId, files, index)
+
+  const roundArt = index.rounds.find((entry) => entry.round === round)
+  const roundFiles: string[] = []
+  if (roundArt) {
+    if (nodeId === "draftFullDraft" && roundArt.draft) roundFiles.push(roundArt.draft)
+    if (nodeId === "runParallelAudits") {
+      if (roundArt.audits) roundFiles.push(roundArt.audits)
+      roundFiles.push(...roundArt.perAgentAudits)
+    }
+    if (nodeId === "reviewFindingsByDrafter" && roundArt.review) roundFiles.push(roundArt.review)
+    if (nodeId === "runTargetedRebuttals") {
+      for (const turn of roundArt.rebuttalTurns) {
+        if (turn.responses) roundFiles.push(turn.responses)
+        roundFiles.push(...turn.perAgentResponses)
+      }
+      roundFiles.push(...roundArt.perAgentRebuttalInputs)
+    }
+    if (nodeId === "reviewRebuttalResponses") {
+      if (roundArt.disputed) roundFiles.push(roundArt.disputed)
+      for (const turn of roundArt.rebuttalTurns) {
+        if (turn.drafterReview) roundFiles.push(turn.drafterReview)
+      }
+    }
+    if (nodeId === "aggregateConsensus" && roundArt.consensus) roundFiles.push(roundArt.consensus)
+    if (nodeId === "reviseDraft" && roundArt.unresolved) roundFiles.push(roundArt.unresolved)
+  }
+
+  const matched = files.filter((f) => {
+    if (!def.filePatterns.some((p) => p.test(f))) return false
+    const fileRound = roundFromFilename(f)
+    return fileRound === undefined || fileRound === round
+  })
+
+  return [...new Set([...matched, ...roundFiles])].sort()
+}
+
+function roundFromFilename(filename: string): number | undefined {
+  const match = filename.match(/round-(\d+)/)
+  if (!match?.[1]) return undefined
+  return parseInt(match[1], 10)
+}
+
 export type NodeKpi = { label: string; value: string }
 
 export function nodeKpis(nodeId: string, files: string[], index?: RunArtifactIndex): NodeKpi[] {
@@ -232,20 +312,11 @@ export function nodeKpis(nodeId: string, files: string[], index?: RunArtifactInd
       kpis.push({ label: "Audit rounds", value: String(bundles.length) })
       break
     }
+    case "reviewFindingsByDrafter":
     case "runTargetedRebuttals":
-    case "reviewRebuttalResponses": {
-      let turns = 0
-      for (const round of artifactIndex.rounds) {
-        turns += maxRebuttalTurn(round)
-      }
-      kpis.push({ label: "Rebuttal turns", value: String(turns) })
-      break
-    }
-    case "aggregateConsensus": {
-      const consensus = files.filter((f) => /^aggregated-findings-round-\d+\.json$/.test(f))
-      kpis.push({ label: "Consensus rounds", value: String(consensus.length) })
-      break
-    }
+    case "reviewRebuttalResponses":
+    case "aggregateConsensus":
+      return []
     case "runDesignHtml": {
       const html = files.filter((f) => /^design-html-round-\d+\.html$/.test(f))
       kpis.push({ label: "HTML drafts", value: String(html.length) })

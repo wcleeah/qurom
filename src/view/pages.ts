@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { POLLING_SCRIPT, NODE_REFRESH_SCRIPT, ROUND_REFRESH_SCRIPT, FILES_REFRESH_SCRIPT, INDEX_REFRESH_SCRIPT, ROUND_TABS_SCRIPT } from "./client-script"
+import { POLLING_SCRIPT, NODE_REFRESH_SCRIPT, FILES_REFRESH_SCRIPT, INDEX_REFRESH_SCRIPT, ROUND_TABS_SCRIPT } from "./client-script"
 import { renderRefreshControls } from "./refresh-controls"
 import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
 import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
@@ -9,12 +9,12 @@ import { tryGetRunManager } from "../run-manager"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard } from "./components"
-import { computeStats, getRunFiles, listRuns, readLiveStatus, readNodeHistory } from "./data"
-import { getNodeDefinition } from "./node-registry"
-import { renderNodeDashboard, renderNodeExecutionHistory, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
-import { renderLiveStatusMeta, renderRoundDetailPage, renderRoundStrip } from "./round-view"
+import { computeStats, getRunFiles, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry } from "./data"
+import { getNodeDefinition, isRebuttalsViewerNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
+import { renderNodeDashboard, renderGlobalResearchRoundStrip, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
+import { renderLiveStatusMeta, renderRoundStrip } from "./round-view"
 import { indexRunArtifacts } from "./run-artifacts"
-import { renderRunTelemetryStrip, resolveRunTelemetry, runElapsedMs } from "./telemetry-view"
+import { renderRunTelemetryStrip, renderSessionTelemetryTable, resolveRunTelemetry, runElapsedMs } from "./telemetry-view"
 import { renderFileBrowser } from "./file-browser"
 import { listHtmlReaderAskThreads } from "./html-ask-store"
 import { listHtmlReaderHighlights } from "./html-highlights-store"
@@ -68,9 +68,19 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
     return new Response("Not found", { status: 404 })
   }
 
-  const def = getNodeDefinition(nodeName)
+  const def = getNodeDefinition(nodeName) ?? getNodeDefinition(nodeName.replace(/Prompt|Resume$/, ""))
   if (!def && !getNodeDefinition(nodeName.replace(/Prompt|Resume$/, ""))) {
     return new Response(`Unknown node "${escapeHtml(nodeName)}"`, { status: 404 })
+  }
+
+  const resolvedViewerId = def?.id ?? nodeName
+  if (resolvedViewerId === "runTargetedRebuttals") {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: `/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(REBUTTALS_VIEWER_NODE_ID)}`,
+      },
+    })
   }
 
   let files: string[] = []
@@ -83,9 +93,23 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
   const fileSizes = await getFileSizes(runName, files)
   const liveStatus = await readLiveStatus(runName)
   const nodeHistory = await readNodeHistory(runName)
-  const displayName = def?.label ?? nodeName
-  const { body: dashboardBody, live: dashboardLive } = await renderNodeDashboard(runName, nodeName, files, fileSizes, liveStatus, nodeHistory)
-  const historyHtml = renderNodeExecutionHistory(nodeHistory, nodeName, runName)
+  const sessionTelemetry = await readRunSessionTelemetry(runName)
+  const displayName = isRebuttalsViewerNode(resolvedViewerId)
+    ? "Rebuttals"
+    : (def?.label ?? nodeName)
+  const isResearchNode = def?.phase === "research"
+  const globalRoundStrip = isResearchNode
+    ? renderGlobalResearchRoundStrip(runName, files, liveStatus, nodeHistory)
+    : ""
+  const { body: dashboardBody, live: dashboardLive } = await renderNodeDashboard(
+    runName,
+    nodeName,
+    files,
+    fileSizes,
+    liveStatus,
+    nodeHistory,
+    sessionTelemetry,
+  )
   const miniPipeline = renderNodeMiniPipeline(runName, nodeName, files)
   const showLiveRefresh = liveStatus?.phase === "running"
   const hasFinalMd = files.includes("final.md")
@@ -104,11 +128,11 @@ ${nodeControlsHtml}
   <h1>${escapeHtml(displayName)}</h1>
   <p class="muted-note dim-text">Run: ${escapeHtml(runName)} · ${escapeHtml(nodeName)}</p>
 </div>
+${globalRoundStrip ? `<div id="node-round-strip-section">${globalRoundStrip}</div>` : ""}
 ${miniPipeline}
 <div id="node-live-section">${dashboardLive}</div>
 <div id="node-dashboard-section">${dashboardBody}</div>
-<div id="node-history-section">${historyHtml}</div>
-${showLiveRefresh ? NODE_REFRESH_SCRIPT : ""}`
+${showLiveRefresh ? NODE_REFRESH_SCRIPT : ""}${isResearchNode ? ROUND_TABS_SCRIPT : ""}`
 
   const fullHtml = layout(`Node: ${displayName} — ${escapeHtml(runName)}`, html, {
     navbar: {
@@ -118,44 +142,6 @@ ${showLiveRefresh ? NODE_REFRESH_SCRIPT : ""}`
     },
   })
   return new Response(fullHtml, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  })
-}
-
-export async function renderRoundPage(runName: string, roundNum: number): Promise<Response> {
-  const canonical = await canonicalRunResponse(runName, `/round/${roundNum}`)
-  if (canonical.early) return canonical.early
-  runName = canonical.runName
-
-  try {
-    safeRunPath(runName)
-  } catch {
-    return new Response("Not found", { status: 404 })
-  }
-
-  let files: string[] = []
-  try {
-    files = await getRunFiles(runName)
-  } catch {
-    return new Response("Cannot read run directory", { status: 500 })
-  }
-
-  const fileSizes = await getFileSizes(runName, files)
-  const liveStatus = await readLiveStatus(runName)
-  const body = await renderRoundDetailPage(runName, roundNum, files, fileSizes, liveStatus)
-  const showLiveRefresh = liveStatus?.phase === "running"
-
-  const html = layout(`Round ${roundNum} — ${escapeHtml(runName)}`, `${showLiveRefresh ? renderRefreshControls() : ""}
-<div id="round-detail-section">${body}</div>
-${showLiveRefresh ? ROUND_REFRESH_SCRIPT : ""}`, {
-    navbar: {
-      section: "runs",
-      back: { href: `/runs/${encodeURIComponent(runName)}`, label: "← Back to run" },
-      title: `Round ${roundNum}`,
-    },
-  })
-
-  return new Response(html, {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -296,9 +282,10 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     if (!liveStatus) continue
     hasActiveRun = true
     const nodeHistory = await readNodeHistory(run.name)
+    const sessionTelemetry = await readRunSessionTelemetry(run.name)
     const elapsedMs = runElapsedMs(liveStatus, nodeHistory)
     const elapsed = elapsedMs !== undefined ? formatElapsed(elapsedMs) : ""
-    const { usage, usageAvailable, costAvailable } = resolveRunTelemetry(liveStatus, nodeHistory)
+    const { usage, usageAvailable, costAvailable } = resolveRunTelemetry(sessionTelemetry)
     const usageLabel = usageAvailable || costAvailable ? ` · ${formatUsagePair(usage, true)}` : ""
     const agentList = Object.entries(liveStatus.agents)
       .slice(0, 4)
@@ -566,14 +553,16 @@ export async function renderRun(name: string): Promise<Response> {
   }
 
   const nodeHistory = await readNodeHistory(name)
-  const agentActivityHtml = renderAgentActivity(liveStatus)
+  const sessionTelemetry = await readRunSessionTelemetry(name)
+  const agentActivityHtml = renderAgentActivity(liveStatus, sessionTelemetry)
   const roundStripHtml = await renderRoundStrip(name, files, liveStatus)
-  const nodeGridHtml = renderNodeGrid(name, files, liveStatus, researchStatus, nodeHistory)
+  const nodeGridHtml = renderNodeGrid(name, files, liveStatus, researchStatus, nodeHistory, sessionTelemetry)
   const liveMetaHtml = renderLiveStatusMeta(liveStatus)
   const telemetryHtml = renderRunTelemetryStrip(liveStatus, nodeHistory, {
     fileCount: files.length,
     totalBytes,
-  })
+  }, sessionTelemetry)
+  const sessionTelemetryHtml = renderSessionTelemetryTable(sessionTelemetry)
   const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
   const interviewChatHtml = renderInterviewChatCard(name, liveStatus)
@@ -598,6 +587,7 @@ export async function renderRun(name: string): Promise<Response> {
   const filesLinkSection = `<div class="section"><p><a href="/runs/${encodeURIComponent(name)}/files">Browse all ${files.length} files →</a></p></div>`
 
   const telemetrySection = `<div id="telemetry-section">${telemetryHtml}</div>`
+  const sessionTelemetrySection = `<div id="session-telemetry-section">${sessionTelemetryHtml}</div>`
   const agentActivitySection = `<div id="agent-activity-section">${agentActivityHtml}</div>`
   const roundStripSection = `<div id="round-strip-section">${roundStripHtml}</div>`
   const nodeGridSection = `<div id="node-grid-section">${nodeGridHtml}</div>`
@@ -649,6 +639,7 @@ ${designSummarySection}
 ${roundStripSection}
 ${agentActivitySection}
 ${nodeGridSection}
+${sessionTelemetrySection}
 ${debugLogSection}
 ${markdownSection}
 ${filesSection}

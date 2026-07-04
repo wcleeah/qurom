@@ -4,7 +4,8 @@ import { createAgentRuntime } from "./agent-runtime/runtime"
 import { createLiveStatusWriter, type NodeHistoryEntry } from "./live-status"
 import { createDebugLog, type DebugLog } from "./debug-log"
 import { abortSession } from "./opencode"
-import { removeEmptyRunDir, writeFailedArtifacts } from "./output"
+import { stat } from "node:fs/promises"
+import { removeEmptyRunDir, resolveRunDir, writeFailedArtifacts } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
 import { Command, GraphRecursionError } from "@langchain/langgraph"
 
@@ -17,6 +18,7 @@ import type { PromptBundle } from "./prompt-assets"
 import { answeredQuestionsFromTranscript } from "./reader-transcript"
 import { resolveRunForResume } from "./run-resume"
 import { join } from "node:path"
+import { createSessionTelemetryWriter } from "./session-telemetry"
 
 export type GraphFactory = typeof createGraph
 
@@ -34,6 +36,26 @@ export type RunnerEvent =
   | { kind: "session.status"; sessionID: string; status: string }
   | { kind: "session.error"; sessionID: string; name: string; message?: string }
   | { kind: "agent.metadata"; agent: string; sessionID: string; model?: string; variant?: string }
+  | {
+      kind: "session.telemetry"
+      sessionID: string
+      role?: string
+      provider: string
+      phase: "created" | "completed"
+      requestedModel?: string
+      modelParams?: Array<{ id: string; value: string }>
+      resolvedModel?: string
+      variant?: string
+      providerAgent?: string
+      cursorRunId?: string
+      callIndex?: number
+      durationMs?: number
+      completedAt?: number
+      node?: string
+      round?: number
+      usage?: import("./usage").UsageTotals
+      usageSource?: "sdk" | "csv-import"
+    }
   | { kind: "agent.message.start"; sessionID: string; messageID: string }
   | { kind: "agent.message.text"; sessionID: string; key: string; text: string; done?: boolean }
   | { kind: "agent.reasoning"; sessionID: string; key: string; text: string; done?: boolean }
@@ -173,6 +195,7 @@ export type RunResearchPipelineArgs = {
   prerequisites: RuntimePrerequisites
   promptBundle: RuntimePromptBundle
   request?: InputRequest
+  requestId?: string
   resume?: { runId: string; node?: string; checkpointId?: string }
   bus: EventBus
   signal?: AbortSignal
@@ -369,6 +392,10 @@ function normalizeFailure(error: unknown, bridgeStreamError: unknown) {
     failureReason: "runtime_error" as const,
     message: surfaced instanceof Error ? surfaced.message : String(surfaced),
   }
+}
+
+function isUserCancellation(signal: AbortSignal | undefined, bridgeStreamError: unknown): boolean {
+  return Boolean(signal?.aborted && !bridgeStreamError)
 }
 
 function salvageStateOutput(state: ResearchState) {
@@ -610,12 +637,13 @@ function attachResearchRunObservers(
   config: RuntimeConfig,
   bus: EventBus,
   opts?: { initialNodeHistory?: NodeHistoryEntry[]; logStart?: boolean },
-): { liveStatusWriter: ReturnType<typeof createLiveStatusWriter>; debugLog: DebugLog } {
+): { liveStatusWriter: ReturnType<typeof createLiveStatusWriter>; debugLog: DebugLog; sessionTelemetryWriter: ReturnType<typeof createSessionTelemetryWriter> } {
   const debugLog = createDebugLog(runDir)
   const liveStatusWriter = createLiveStatusWriter(bus, runDir, {
     maxRounds: config.quorumConfig.maxRounds,
     initialNodeHistory: opts?.initialNodeHistory,
   }, debugLog)
+  const sessionTelemetryWriter = createSessionTelemetryWriter(runDir, bus)
   if (opts?.logStart !== false) {
     debugLog.write("pipeline.start", {
       requestId,
@@ -629,7 +657,7 @@ function attachResearchRunObservers(
       designQuorum: config.quorumConfig.designQuorum?.enabled ?? false,
     })
   }
-  return { liveStatusWriter, debugLog }
+  return { liveStatusWriter, debugLog, sessionTelemetryWriter }
 }
 
 export async function runResearchPipeline(args: RunResearchPipelineArgs): Promise<RunResult> {
@@ -646,9 +674,27 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   if (!request) {
     throw new Error("runResearchPipeline requires either request or resume")
   }
-  const requestId = resolvedResume?.requestId ?? crypto.randomUUID()
+  const requestId = args.requestId ?? resolvedResume?.requestId ?? crypto.randomUUID()
   let runDir: string | undefined = resolvedResume?.runDir
   let interviewRunDir: string | undefined = resolvedResume?.runDir
+
+  if (!runDir && args.requestId && !resolvedResume) {
+    const candidateDir = resolveRunDir(config.env.QUORUM_RUNS_DIR, {
+      requestId,
+      inputMode: request.inputMode,
+      topic: request.inputMode === "topic" ? request.topic : undefined,
+      documentPath: request.inputMode === "document" ? request.documentPath : undefined,
+      documentText: request.inputMode === "document" ? request.documentText : undefined,
+    })
+    try {
+      if ((await stat(candidateDir)).isDirectory()) {
+        runDir = candidateDir
+        interviewRunDir = candidateDir
+      }
+    } catch {
+      // prepareOutputPath will create the directory later
+    }
+  }
 
   const telemetry = await telemetryFactory(config, {
     requestId,
@@ -660,6 +706,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   const bridgeAbort = new AbortController()
   let bridgeStreamError: unknown
   let liveStatusWriter: ReturnType<typeof createLiveStatusWriter> | undefined
+  let sessionTelemetryWriter: ReturnType<typeof createSessionTelemetryWriter> | undefined
   let debugLog: DebugLog | undefined
   const debugLogRef: { current: DebugLog | undefined } = { current: undefined }
   if (signal) {
@@ -683,6 +730,17 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   const trackAgentMetadata = (input: { agent: string; sessionID: string; model?: string; variant?: string }) => {
     if (input.variant) actualAgentVariants.set(input.agent, input.variant)
     bus.emit({ kind: "agent.metadata", ...input })
+    debugLogRef.current?.write("agent.metadata", input)
+    bus.emit({
+      kind: "session.telemetry",
+      sessionID: input.sessionID,
+      provider: "opencode",
+      phase: "completed",
+      providerAgent: input.agent,
+      resolvedModel: input.model,
+      variant: input.variant,
+      completedAt: Date.now(),
+    })
   }
   const sessionIDs = new Set<string>()
   const offSessionCreated = bus.on((event) => {
@@ -701,17 +759,20 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   try {
     await bridge.start()
 
-    if (resolvedResume?.runDir) {
-      const initialNodeHistory = await readNodeHistoryFromDisk(resolvedResume.runDir)
+    if (runDir) {
+      const initialNodeHistory = resolvedResume?.runDir
+        ? await readNodeHistoryFromDisk(resolvedResume.runDir)
+        : []
       const attached = attachResearchRunObservers(
-        resolvedResume.runDir,
+        runDir,
         request,
         requestId,
         config,
         bus,
-        { initialNodeHistory, logStart: false },
+        { initialNodeHistory, logStart: !resolvedResume?.runDir },
       )
       liveStatusWriter = attached.liveStatusWriter
+      sessionTelemetryWriter = attached.sessionTelemetryWriter
       debugLog = attached.debugLog
       debugLogRef.current = debugLog
     }
@@ -741,7 +802,9 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
                 interviewRunDir = op
                 runDir = op
                 const attached = attachResearchRunObservers(op, request, requestId, config, bus)
+                sessionTelemetryWriter?.dispose()
                 liveStatusWriter = attached.liveStatusWriter
+                sessionTelemetryWriter = attached.sessionTelemetryWriter
                 debugLog = attached.debugLog
                 debugLogRef.current = debugLog
                 bus.emit({
@@ -871,6 +934,28 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
       raw: runResult,
     }
   } catch (error) {
+    if (isUserCancellation(signal, bridgeStreamError)) {
+      debugLogRef.current?.write("pipeline.cancelled", { requestId, outputPath: runDir })
+      bus.emit({
+        kind: "lifecycle",
+        phase: "complete",
+        requestId,
+        traceId: telemetry.traceId,
+        ...(runDir ? { outputDir: runDir } : {}),
+      })
+      return {
+        requestId,
+        traceId: telemetry.traceId,
+        outputPath: runDir,
+        outcome: "cancelled",
+        raw: {
+          requestId,
+          status: "cancelled",
+          outputPath: runDir,
+        },
+      }
+    }
+
     debugLogRef.current?.write("pipeline.error", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
@@ -960,6 +1045,14 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
           // Live-status disposal errors must not mask the original failure.
         }
       }
+      if (sessionTelemetryWriter) {
+        try {
+          await sessionTelemetryWriter.flush()
+          sessionTelemetryWriter.dispose()
+        } catch {
+          // Session telemetry disposal errors must not mask the original failure.
+        }
+      }
       if (bridgeAbort.signal.aborted && sessionIDs.size > 0) {
         await Promise.allSettled([...sessionIDs].map((sessionID) => abortSessionFn(config, sessionID)))
      }
@@ -1005,6 +1098,8 @@ export function describeRunnerEvent(event: RunnerEvent): string {
       return `session.error:${event.sessionID}:${event.name}`
     case "agent.metadata":
       return `agent.metadata:${event.sessionID}:${event.agent}`
+    case "session.telemetry":
+      return `session.telemetry:${event.sessionID}:${event.phase}`
     case "agent.message.start":
       return `agent.message.start:${event.sessionID}`
     case "agent.message.text":
@@ -1059,12 +1154,24 @@ export async function runDesignPipeline(args: {
   const trackAgentMetadata = (input: { agent: string; sessionID: string; model?: string; variant?: string }) => {
     if (input.variant) actualAgentVariants.set(input.agent, input.variant)
     bus.emit({ kind: "agent.metadata", ...input })
+    debugLog.write("agent.metadata", input)
+    bus.emit({
+      kind: "session.telemetry",
+      sessionID: input.sessionID,
+      provider: "opencode",
+      phase: "completed",
+      providerAgent: input.agent,
+      resolvedModel: input.model,
+      variant: input.variant,
+      completedAt: Date.now(),
+    })
   }
 
   const debugLog = createDebugLog(runDir)
   const liveStatusWriter = createLiveStatusWriter(bus, () => runDir, {
     maxRounds: config.quorumConfig.maxRounds,
-  })
+  }, debugLog)
+  const sessionTelemetryWriter = createSessionTelemetryWriter(() => runDir, bus)
   const bridge = bridgeFactory(config, { bus, getRunDir: () => runDir })
   const bridgeAbort = new AbortController()
 
@@ -1143,6 +1250,10 @@ export async function runDesignPipeline(args: {
     throw error
   } finally {
     try { liveStatusWriter.dispose() } catch {}
+    try {
+      await sessionTelemetryWriter.flush()
+      sessionTelemetryWriter.dispose()
+    } catch {}
     try { await debugLog.close() } catch {}
     try { await bridge.stop() } catch {}
     try { await telemetry.shutdown() } catch {}

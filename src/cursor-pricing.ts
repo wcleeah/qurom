@@ -39,13 +39,41 @@ export function getCursorModelPricingTable(): CursorModelPricingFile {
   return table
 }
 
+export function resolveCursorPricingModelId(modelId: string | undefined): string | undefined {
+  if (!modelId || modelId === "default") return "auto"
+
+  if (modelId in table.models) return modelId
+
+  let candidate = modelId
+  while (candidate.includes("-")) {
+    candidate = candidate.replace(/-[^-]+$/, "")
+    if (candidate in table.models) return candidate
+  }
+
+  return modelId === "auto" ? "auto" : undefined
+}
+
+function pricingEntryForModel(modelId: string | undefined): CursorModelPricingEntry | undefined {
+  const resolved = resolveCursorPricingModelId(modelId)
+  if (!resolved) return undefined
+  if (resolved === "auto") {
+    return {
+      name: "Auto",
+      docSlug: "auto",
+      input: table.auto.input,
+      output: table.auto.output,
+      cache: table.auto.cache,
+      modelIdSource: "auto-pool",
+    }
+  }
+  return table.models[resolved]
+}
+
 export function estimateCursorCostUsd(
   modelId: string | undefined,
   raw: CursorRawUsage,
 ): { costUsd: number; costAvailable: boolean; costEstimated: boolean } {
-  if (!modelId) return { costUsd: 0, costAvailable: false, costEstimated: true }
-
-  const entry = table.models[modelId]
+  const entry = pricingEntryForModel(modelId)
   if (!entry) return { costUsd: 0, costAvailable: false, costEstimated: true }
 
   const inputTokens = raw.inputTokens ?? 0

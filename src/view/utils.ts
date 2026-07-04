@@ -124,12 +124,20 @@ export function formatTokenCount(n: number): string {
   return String(n)
 }
 
+export function formatTokenPair(
+  usage: { tokensIn: number; tokensOut: number } | undefined,
+  available?: boolean,
+): string {
+  if (!available || !usage) return "—"
+  return `${formatTokenCount(usage.tokensIn)} in / ${formatTokenCount(usage.tokensOut)} out`
+}
+
 export function formatUsagePair(
   usage: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean; costEstimated?: boolean } | undefined,
   available?: boolean,
 ): string {
   if (!available || !usage) return "—"
-  const tokens = `${formatTokenCount(usage.tokensIn)} in / ${formatTokenCount(usage.tokensOut)} out`
+  const tokens = formatTokenPair(usage, true)
   if (!usage.costAvailable) return tokens
   return `${tokens} · ${formatCostUsd(usage.costUsd ?? 0, { estimated: usage.costEstimated })}`
 }

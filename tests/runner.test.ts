@@ -192,28 +192,21 @@ describe("runResearchPipeline", () => {
       agents: [],
     } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
 
-    let threw: unknown
-    try {
-      await runResearchPipeline({
-        config: configWithTempArtifacts,
-        prerequisites,
-        promptBundle,
-        request: { inputMode: "topic", topic: "abort-fast" },
-        bus,
-        signal: ac.signal,
-        bridgeFactory,
-        telemetryFactory: async () => disabledTelemetry(),
-      })
-    } catch (error) {
-      threw = error
-    }
+    const result = await runResearchPipeline({
+      config: configWithTempArtifacts,
+      prerequisites,
+      promptBundle,
+      request: { inputMode: "topic", topic: "abort-fast" },
+      bus,
+      signal: ac.signal,
+      bridgeFactory,
+      telemetryFactory: async () => disabledTelemetry(),
+    })
 
-    // We pre-aborted the signal, so the graph invoke must reject. The runner
-    // must still have emitted lifecycle:starting and lifecycle:running before
-    // the failure, and lifecycle:error afterwards.
-    expect(threw).toBeDefined()
+    expect(result.outcome).toBe("cancelled")
     expect(events[0]).toMatchObject({ kind: "lifecycle", phase: "starting" })
-    expect(events.some((e) => e.kind === "lifecycle" && e.phase === "error")).toBe(true)
+    expect(events.some((e) => e.kind === "lifecycle" && e.phase === "complete")).toBe(true)
+    expect(events.some((e) => e.kind === "lifecycle" && e.phase === "error")).toBe(false)
     expect(sequence).toContain("bridge.start")
     expect(sequence).toContain("bridge.stop")
     expect(sequence.indexOf("bridge.start")).toBeLessThan(sequence.indexOf("bridge.stop"))
@@ -317,21 +310,20 @@ describe("runResearchPipeline", () => {
       agents: [],
     } as unknown as Parameters<typeof runResearchPipeline>[0]["prerequisites"]
 
-    await expect(
-      runResearchPipeline({
-        config: configWithTempArtifacts,
-        prerequisites,
-        promptBundle,
-        request: { inputMode: "topic", topic: "cancel" },
-        bus,
-        signal: ac.signal,
-        graphFactory,
-        bridgeFactory: () => ({ async start() {}, async stop() {} }),
-        abortSessionFn: abortSession,
-        telemetryFactory: async () => disabledTelemetry(),
-      }),
-    ).rejects.toThrow("cancelled")
+    const result = await runResearchPipeline({
+      config: configWithTempArtifacts,
+      prerequisites,
+      promptBundle,
+      request: { inputMode: "topic", topic: "cancel" },
+      bus,
+      signal: ac.signal,
+      graphFactory,
+      bridgeFactory: () => ({ async start() {}, async stop() {} }),
+      abortSessionFn: abortSession,
+      telemetryFactory: async () => disabledTelemetry(),
+    })
 
+    expect(result.outcome).toBe("cancelled")
     expect(abortSession).toHaveBeenCalledTimes(2)
     expect(abortSession).toHaveBeenCalledWith(configWithTempArtifacts, "drafter-1")
     expect(abortSession).toHaveBeenCalledWith(configWithTempArtifacts, "audit-1")

@@ -1,4 +1,7 @@
 import { loadRuntimeConfig, type QuorumConfig } from "../config"
+import { applyCursorUsageImport, parseCursorUsageCsv, type CursorUsageImportSummary } from "../cursor-usage-import"
+import { mkdir } from "node:fs/promises"
+import { join } from "node:path"
 import { listConfigSummary, normalizeQuorumConfig, updatePromptAsset, updateQuorumConfig, updateRoleBinding, updateRoleInstruction } from "../config-store"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
 import { getProviderLifecycle } from "../providers/lifecycle"
@@ -22,8 +25,26 @@ function parseOptionsJson(text: string | undefined) {
 }
 
 let lastProviderValidation: { ok: boolean; message: string } | undefined
+let lastCursorUsageImport: CursorUsageImportSummary | undefined
 
-export async function renderConfigIndex(options?: { error?: string; draftConfig?: QuorumConfig }): Promise<Response> {
+function renderCursorUsageImportSection(importSummary?: CursorUsageImportSummary) {
+  const summary = importSummary ?? lastCursorUsageImport
+  const summaryHtml = summary
+    ? `<div class="outcome-banner approved">Imported ${escapeHtml(summary.sourceFile)}: matched ${summary.matchedCalls}/${summary.metadataCalls} Cursor calls across ${summary.runsUpdated} run(s). Unmatched: ${summary.unmatchedCalls}.</div>`
+    : `<p class="tiny-text muted-text">Upload a Cursor usage CSV export to backfill token usage, cost (when present in the CSV), and models for cloud agent calls in existing runs.</p>`
+
+  return section("Cursor usage import", `${summaryHtml}
+<form class="config-form" method="POST" action="/config/cursor-usage-import" enctype="multipart/form-data">
+  <label class="form-field"><span>Usage CSV</span><input class="form-input" type="file" name="csv" accept=".csv,text/csv" required><small>Export from Cursor settings → Usage. Matches by Cloud Agent ID and call order.</small></label>
+  <div class="form-actions"><button type="submit" class="btn btn-primary">Import usage into runs</button></div>
+</form>`)
+}
+
+export async function renderConfigIndex(options?: {
+  error?: string
+  draftConfig?: QuorumConfig
+  importSummary?: CursorUsageImportSummary
+}): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
   const validation = lastProviderValidation
@@ -58,6 +79,7 @@ export async function renderConfigIndex(options?: { error?: string; draftConfig?
     `<div class="header-bar"><div class="header-main"><h1>Configuration</h1><div class="meta-row"><span class="meta-item">Active profile: <strong>${escapeHtml(summary.profile.name)}</strong></span></div></div></div>`,
     section("Status", statusCard),
     `<form class="config-form" method="POST" action="/config/validate"><div class="form-actions"><button type="submit" class="btn btn-primary">Validate providers</button></div></form>`,
+    renderCursorUsageImportSection(options?.importSummary),
     section("Quorum policy", quorumConfigForm),
   ].join("\n")
 
@@ -281,6 +303,40 @@ export async function renderConfigPrompts(): Promise<Response> {
 
 export async function handleConfigPost(req: Request, path: string): Promise<Response | undefined> {
   const config = await loadRuntimeConfig()
+
+  if (path === "/config/cursor-usage-import") {
+    try {
+      const form = await req.formData()
+      const file = form.get("csv")
+      if (!(file instanceof File)) {
+        return renderConfigIndex({ error: "Upload a CSV file in the csv field." })
+      }
+      const text = await file.text()
+      const totalCsvRows = Math.max(0, text.trim().split(/\r?\n/).length - 1)
+      const rows = parseCursorUsageCsv(text)
+      if (rows.length === 0) {
+        return renderConfigIndex({ error: "No Cloud Agent ID rows found in CSV." })
+      }
+
+      const importsDir = join(config.env.QUORUM_DATA_DIR, "usage-imports")
+      await mkdir(importsDir, { recursive: true })
+      const archiveName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]+/g, "-")}`
+      await Bun.write(join(importsDir, archiveName), text)
+
+      const summary = await applyCursorUsageImport({
+        runsDir: config.env.QUORUM_RUNS_DIR,
+        rows,
+        sourceFile: file.name,
+        totalCsvRows,
+      })
+      lastCursorUsageImport = summary
+      return renderConfigIndex({ importSummary: summary })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return renderConfigIndex({ error: message })
+    }
+  }
+
   if (path === "/config/validate") {
     const lifecycle = getProviderLifecycle()
     let release: (() => Promise<void>) | undefined

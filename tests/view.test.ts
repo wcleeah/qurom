@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
 import { renderDebugLogHtml } from "../src/view/debug-log-viewer.ts"
-import { renderStructuredJson } from "../src/view/artifact-renderers.ts"
+import { renderStructuredJson, renderConsensusRound, renderRebuttalsRound, renderRebuttalReviewRound, renderTargetedRebuttalsRound } from "../src/view/artifact-renderers.ts"
 import { POLLING_SCRIPT } from "../src/view/client-script.ts"
 import { renderInterviewChatCard } from "../src/view/components.ts"
-import { renderNodeGrid } from "../src/view/node-view.ts"
+import { renderNodeGrid, renderGlobalResearchRoundStrip, researchRoundNumbers } from "../src/view/node-view.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 import { classifyFile } from "../src/view/file-browser.ts"
 import { card, section, summaryRow, summaryTable } from "../src/view/html.ts"
@@ -41,6 +41,95 @@ describe("view artifact renderers", () => {
     expect(html).toContain("Reader profile")
     expect(html).toContain("Understand quorum reads")
     expect(html).toContain("linearizability")
+  })
+
+  test("renders rebuttal input files with structured rebuttal entries", () => {
+    const rebuttal = {
+      findingId: "run:0:source-auditor:1",
+      position: "rebut",
+      argument: "The source is accessible and supports the claim.",
+      evidence: ["Fetched transcript confirms timing guidance."],
+      requestedResolution: "reclassify",
+    }
+    const fileHtml = renderStructuredJson("rebuttals-source-auditor-round-0.json", [rebuttal])
+    expect(fileHtml).toContain("structured-card")
+    expect(fileHtml).toContain("rebuttal-entry")
+    expect(fileHtml).toContain("source-auditor")
+    expect(fileHtml).toContain("reclassify")
+
+    const roundHtml = renderTargetedRebuttalsRound(0, [{ agent: "source-auditor", rebuttals: [rebuttal] }])
+    expect(roundHtml).toContain("<h3>Round 0</h3>")
+    expect(roundHtml).toContain("Drafter rebuttal")
+  })
+
+  test("renders rebuttal review turns with auditor responses and drafter review sections", () => {
+    const response = {
+      findingId: "run:0:source-auditor:1",
+      decision: "uphold",
+      argument: "The source still does not support the claim.",
+      agent: "source-auditor",
+      turn: 1,
+    }
+    const review = {
+      acceptedFindingIds: ["run:0:source-auditor:1"],
+      rebuttals: [],
+    }
+    const html = renderRebuttalReviewRound(0, [{
+      turn: 1,
+      responses: { "run:0:source-auditor:1": response },
+      review,
+    }])
+
+    expect(html).toContain("<h3>Round 0</h3>")
+    expect(html).toContain("Auditor responses")
+    expect(html).toContain("Accepted (1 finding")
+    expect(html).toContain("UPHELD")
+  })
+
+  test("renders merged rebuttals round with written rebuttals and review turns", () => {
+    const rebuttal = {
+      findingId: "run:0:source-auditor:1",
+      position: "rebut",
+      argument: "The source supports the claim.",
+      evidence: ["Fetched transcript"],
+      requestedResolution: "reclassify",
+    }
+    const response = {
+      findingId: "run:0:source-auditor:1",
+      decision: "uphold",
+      argument: "Still insufficient.",
+      agent: "source-auditor",
+      turn: 1,
+    }
+    const html = renderRebuttalsRound({
+      roundNum: 0,
+      agentRebuttals: [{ agent: "source-auditor", rebuttals: [rebuttal] }],
+      turns: [{ turn: 1, responses: { "run:0:source-auditor:1": response } }],
+    })
+
+    expect(html).toContain("Written rebuttals")
+    expect(html).toContain("Auditor responses")
+    expect(html).toContain("UPHELD")
+  })
+
+  test("renders consensus rounds with outcome banner and unresolved findings section", () => {
+    const html = renderConsensusRound(0, {
+      outcome: "needs_revision",
+      approvedAgents: [],
+      unresolvedFindings: [{
+        severity: "major",
+        category: "clarity",
+        issue: "Missing timeline",
+        evidence: ["No consolidated sequence"],
+        required_fix: "Add timeline",
+        findingId: "run:0:clarity:1",
+        agent: "clarity-auditor",
+      }],
+    })
+
+    expect(html).toContain("<h3>Round 0</h3>")
+    expect(html).toContain("Needs revision")
+    expect(html).toContain("Unresolved findings (1)")
   })
 
   test("falls back to the generic JSON viewer for unknown artifacts", () => {
@@ -156,6 +245,25 @@ describe("view components", () => {
 
     expect(html).toContain("Discover reader")
     expect(html).toContain("✓")
+  })
+
+  test("renders a run-scoped global research round strip", () => {
+    const files = ["draft-round-0.md", "audits-round-0.json", "draft-round-1.md"]
+    expect(researchRoundNumbers(files, null)).toEqual([0, 1])
+
+    const html = renderGlobalResearchRoundStrip("example-run", files, {
+      phase: "running",
+      round: 1,
+      maxRounds: 2,
+      agents: {},
+      nodeHistory: [],
+    })
+
+    expect(html).toContain("data-run-round-tabs=\"example-run\"")
+    expect(html).toContain('data-round-tab="total"')
+    expect(html).toContain('data-round-tab="0"')
+    expect(html).toContain('data-round-tab="1"')
+    expect(html).toContain("round-chip-live")
   })
 
   test("renders finalizeDesign in the node grid", () => {

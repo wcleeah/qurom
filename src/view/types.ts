@@ -32,12 +32,6 @@ export interface RequestJson {
 export interface LiveAgentStatus {
   status: "idle" | "running" | "complete" | "error"
   tool?: string
-  tokensIn: number
-  tokensOut: number
-  usageAvailable?: boolean
-  costUsd?: number
-  costAvailable?: boolean
-  costEstimated?: boolean
   toolCalls: Array<{
     tool: string
     status: "running" | "completed" | "error"
@@ -75,9 +69,6 @@ export interface NodeHistoryEntry {
   summary?: Record<string, unknown>
   artifacts?: string[]
   durationMs?: number
-  usage?: UsageTotals
-  usageAvailable?: boolean
-  usageByAgent?: Record<string, AgentUsageSnapshot>
 }
 
 export interface LiveStatus {
@@ -91,11 +82,6 @@ export interface LiveStatus {
   rebuttalTurn?: number
   activeRebuttalCount?: number
   unresolvedFindingCount?: number
-  usage?: UsageTotals
-  usageAvailable?: boolean
-  nodeUsage?: UsageTotals
-  nodeUsageAvailable?: boolean
-  nodeUsageByAgent?: Record<string, AgentUsageSnapshot>
   agents: Record<string, LiveAgentStatus>
   nodeHistory: NodeHistoryEntry[]
   error?: string

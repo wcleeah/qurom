@@ -186,6 +186,20 @@ export function createAgentRuntime(
       const handle = await provider.createRunHandle({ config, role, title, parentId })
       if (!provider.capabilities.has("streamingEvents")) {
         bus?.emit({ kind: "session.created", sessionID: handle.id, role })
+        if (handle.sessionBootstrap) {
+          bus?.emit({
+            kind: "session.telemetry",
+            sessionID: handle.id,
+            role,
+            provider: handle.providerId,
+            phase: "created",
+            requestedModel: handle.sessionBootstrap.requestedModel,
+            modelParams: handle.sessionBootstrap.modelParams,
+            variant: handle.sessionBootstrap.variant,
+            providerAgent: handle.providerAgent,
+            completedAt: Date.now(),
+          })
+        }
       }
       return handle
     },

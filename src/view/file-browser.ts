@@ -8,8 +8,9 @@ export function renderFileBrowser(input: {
   runName: string
   files: string[]
   fileSizes: Map<string, number>
+  hideSubgroupHeadings?: boolean
 }): string {
-  const { runName, files, fileSizes } = input
+  const { runName, files, fileSizes, hideSubgroupHeadings = false } = input
   const groups = new Map<string, Array<{ name: string } & FileClass>>()
 
   for (const f of files) {
@@ -53,7 +54,7 @@ export function renderFileBrowser(input: {
 
     const subgroupHtml = [...subGroups.entries()]
       .map(([subGroupName, subItems]) => `<div class="file-subgroup">
-  <div class="file-subgroup-title">${escapeHtml(subGroupName)} <span class="dim-text">(${subItems.length})</span></div>
+  ${hideSubgroupHeadings ? "" : `<div class="file-subgroup-title">${escapeHtml(subGroupName)} <span class="dim-text">(${subItems.length})</span></div>`}
   <ul class="file-list">${subItems.map(renderFileItem).join("")}</ul>
 </div>`)
       .join("")

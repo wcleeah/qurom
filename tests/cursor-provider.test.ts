@@ -719,7 +719,7 @@ describe("cursorProvider", () => {
     expect(result.text).toBe("recovered response")
     expect(sendCalls).toHaveLength(2)
     expect(cancelCalled).toBe(true)
-    expect(debugEvents).toHaveLength(1)
+    expect(debugEvents).toHaveLength(2)
     expect(debugEvents[0]).toMatchObject({
       type: "cursor.prompt.error",
       data: {
@@ -730,6 +730,13 @@ describe("cursorProvider", () => {
         name: "CursorRunStatusError",
         runId: "cursor-run-1",
         status: "error",
+      },
+    })
+    expect(debugEvents[1]).toMatchObject({
+      type: "cursor.prompt.complete",
+      data: {
+        role: "research-drafter",
+        handleId: "bc-cursor-agent-1",
       },
     })
   })

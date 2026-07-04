@@ -8,6 +8,7 @@ const RUN_DETAIL_SECTION_IDS = [
   "round-strip-section",
   "agent-activity-section",
   "node-grid-section",
+  "session-telemetry-section",
   "debug-log-section",
   "failure-banner-section",
   "interview-chat-section",
@@ -120,6 +121,10 @@ function buildRefreshScript(options: {
           if (id === "round-strip-section" && typeof window.__quorumInitRoundTabs === "function") {
             window.__quorumInitRoundTabs()
           }
+          if ((id === "node-dashboard-section" || id === "node-round-strip-section")
+            && typeof window.__quorumInitRoundTabs === "function") {
+            window.__quorumInitRoundTabs()
+          }
         } else if (oldEl && !newEl) {
           oldEl.innerHTML = ""
         }
@@ -217,13 +222,7 @@ export const POLLING_SCRIPT = buildRefreshScript({
 
 /** Live refresh for node detail pages. */
 export const NODE_REFRESH_SCRIPT = buildRefreshScript({
-  sectionIds: ["node-controls-section", "node-live-section", "node-history-section"],
-  defaultAutoRefresh: true,
-})
-
-/** Live refresh for round detail pages. */
-export const ROUND_REFRESH_SCRIPT = buildRefreshScript({
-  sectionIds: ["round-detail-section"],
+  sectionIds: ["node-controls-section", "node-round-strip-section", "node-live-section", "node-dashboard-section"],
   defaultAutoRefresh: true,
 })
 
@@ -242,16 +241,21 @@ export const INDEX_REFRESH_SCRIPT = buildRefreshScript({
 /** @deprecated Use NODE_REFRESH_SCRIPT */
 export const NODE_MANUAL_REFRESH_SCRIPT = NODE_REFRESH_SCRIPT
 
-/** Tab switching for research round audit tables on the run detail page. */
+/** Tab switching for research round scope on run and node pages. */
 export const ROUND_TABS_SCRIPT = /* html */ `
 <script>
 (function () {
-  function roundTabStorageKey() {
+  function roundTabStorageKey(strip) {
+    const runName = strip instanceof HTMLElement ? strip.getAttribute("data-run-round-tabs") : null
+    if (runName) return "research-round-tab:/runs/" + runName
     return "round-tab:" + window.location.pathname
   }
 
-  function applyRoundTab(roundNum) {
-    document.querySelectorAll("[data-round-tab]").forEach((btn) => {
+  function applyRoundTab(roundNum, strip) {
+    const scope = strip ?? document.querySelector("[data-round-tablist]")
+    if (!(scope instanceof HTMLElement)) return
+
+    scope.querySelectorAll("[data-round-tab]").forEach((btn) => {
       if (!(btn instanceof HTMLElement)) return
       const active = btn.getAttribute("data-round-tab") === String(roundNum)
       btn.classList.toggle("active", active)
@@ -261,35 +265,30 @@ export const ROUND_TABS_SCRIPT = /* html */ `
       if (!(panel instanceof HTMLElement)) return
       panel.hidden = panel.getAttribute("data-round-panel") !== String(roundNum)
     })
-    const details = document.querySelector("[data-round-details-link]")
-    if (details instanceof HTMLAnchorElement) {
-      const runMatch = window.location.pathname.match(/\\/runs\\/([^/]+)/)
-      if (runMatch) {
-        details.href = "/runs/" + encodeURIComponent(decodeURIComponent(runMatch[1])) + "/round/" + roundNum
-      }
-    }
   }
 
   function initRoundTabs() {
     const strip = document.querySelector("[data-round-tablist]")
-    if (!strip) return
-    let selected = sessionStorage.getItem(roundTabStorageKey())
+    if (!(strip instanceof HTMLElement)) return
+    let selected = sessionStorage.getItem(roundTabStorageKey(strip))
     if (!selected || !document.querySelector('[data-round-panel="' + selected + '"]')) {
       const activeBtn = strip.querySelector("[data-round-tab].active")
       selected = activeBtn?.getAttribute("data-round-tab")
         ?? strip.querySelector("[data-round-tab]")?.getAttribute("data-round-tab")
     }
-    if (selected) applyRoundTab(selected)
+    if (selected) applyRoundTab(selected, strip)
   }
 
   document.addEventListener("click", (event) => {
     const btn = event.target instanceof Element ? event.target.closest("[data-round-tab]") : null
     if (!(btn instanceof HTMLButtonElement)) return
+    const strip = btn.closest("[data-round-tablist]")
+    if (!(strip instanceof HTMLElement)) return
     event.preventDefault()
     const round = btn.getAttribute("data-round-tab")
     if (!round) return
-    sessionStorage.setItem(roundTabStorageKey(), round)
-    applyRoundTab(round)
+    sessionStorage.setItem(roundTabStorageKey(strip), round)
+    applyRoundTab(round, strip)
   })
 
   window.__quorumInitRoundTabs = initRoundTabs

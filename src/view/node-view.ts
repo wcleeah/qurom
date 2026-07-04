@@ -1,14 +1,77 @@
 import { renderFileBrowser } from "./file-browser"
-import { GRAPH_NODES, filesForNode, getNodeDefinition, isNodeActive, isNodeComplete, nodeKpis, resolveLiveNode } from "./node-registry"
-import { indexRunArtifacts, maxRebuttalTurn, roundHasRebuttals } from "./run-artifacts"
+import { GRAPH_NODES, filesForNode, filesForNodeRound, filesForRebuttalsViewer, getNodeDefinition, isNodeActive, isNodeComplete, isRebuttalsViewerNode, nodeKpis, rebuttalsTelemetryNodeId, resolveLiveNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
+import { indexRunArtifacts, roundHasRebuttalActivity, type RoundArtifacts } from "./run-artifacts"
 import { renderAgentActivity } from "./components"
-import { renderAllAuditRounds } from "./audit-view"
-import { renderConsensusCard, renderDrafterReview } from "./artifact-renderers"
-import { nodeHistoryTotalsForNode, renderAgentUsageTable, renderNodeTelemetryMeta } from "./telemetry-view"
+import {
+  buildRoundAuditVoteRows,
+  readAuditBundle,
+  renderAllAuditRounds,
+  renderAuditorFindingsBlocks,
+  renderAuditVoteTable,
+  renderRoundAuditVoteTable,
+} from "./audit-view"
+import { renderConsensusRound, renderDrafterReview, renderRebuttalsRound, type RebuttalsRoundData, type RebuttalReviewTurnData } from "./artifact-renderers"
+import type { AggregatedFindings } from "./types"
+import {
+  renderNodeSessionUsageTable,
+  renderNodeTelemetryMeta,
+  sessionTotalsForLiveNode,
+  sessionTotalsForNode,
+  sessionTotalsForNodeRound,
+  sessionUsageForHistoryEntry,
+} from "./telemetry-view"
 import { tableWrap } from "./html"
 import { safeFilePath } from "./paths"
+import type { SessionTelemetryFile } from "../session-telemetry"
 import { escapeHtml, formatDurationMs, formatElapsed, formatUsagePair } from "./utils"
-import type { LiveStatus, NodeHistoryEntry, RunStatus } from "./types"
+import type { LiveStatus, NodeHistoryEntry, RebuttalEntry, RebuttalResponseEntry, RunStatus } from "./types"
+
+type NodeScope = "total" | number
+
+export function researchRoundNumbers(
+  files: string[],
+  liveStatus: LiveStatus | null,
+  nodeHistory: NodeHistoryEntry[] = [],
+): number[] {
+  const index = indexRunArtifacts(files)
+  const rounds = new Set<number>()
+  for (const round of index.rounds) rounds.add(round.round)
+  for (const entry of nodeHistory) rounds.add(entry.round)
+  if (liveStatus?.phase === "running" && liveStatus.round !== undefined) {
+    rounds.add(liveStatus.round)
+  }
+  return [...rounds].sort((a, b) => a - b)
+}
+
+export function renderGlobalResearchRoundStrip(
+  runName: string,
+  files: string[],
+  liveStatus: LiveStatus | null,
+  nodeHistory: NodeHistoryEntry[] = [],
+): string {
+  const rounds = researchRoundNumbers(files, liveStatus, nodeHistory)
+  if (rounds.length === 0) return ""
+
+  const currentRound = liveStatus?.phase === "running" ? liveStatus.round : undefined
+  const defaultTab = currentRound !== undefined ? String(currentRound) : "total"
+
+  let tabs = `<button type="button" class="round-chip${defaultTab === "total" ? " active" : ""}" data-round-tab="total" role="tab" aria-selected="${defaultTab === "total" ? "true" : "false"}">
+  <span class="round-chip-num">Total</span>
+</button>`
+
+  for (const roundNum of rounds) {
+    const isCurrent = currentRound === roundNum
+    const tabActive = defaultTab === String(roundNum)
+    tabs += `<button type="button" class="round-chip${tabActive ? " active" : ""}" data-round-tab="${roundNum}" role="tab" aria-selected="${tabActive ? "true" : "false"}">
+  <span class="round-chip-num">R${roundNum}</span>
+  ${isCurrent ? `<span class="round-chip-live">●</span>` : ""}
+</button>`
+  }
+
+  return `<div class="global-round-nav">
+  <div class="round-strip global-round-strip" data-round-tablist data-run-round-tabs="${escapeHtml(runName)}" role="tablist" aria-label="Research round scope">${tabs}</div>
+</div>`
+}
 
 export function renderNodeGrid(
   runName: string,
@@ -16,6 +79,7 @@ export function renderNodeGrid(
   liveStatus: LiveStatus | null,
   researchStatus: RunStatus = "running",
   nodeHistory: NodeHistoryEntry[] = [],
+  sessionTelemetry?: SessionTelemetryFile | null,
 ): string {
   const index = indexRunArtifacts(files)
   const activeNode = resolveLiveNode(liveStatus)
@@ -23,11 +87,13 @@ export function renderNodeGrid(
   let cards = ""
   for (const node of GRAPH_NODES) {
     if (node.phase === "setup" && node.order > 4) continue
+    if (node.id === "runTargetedRebuttals") continue
     const nodeId = node.pipelineLabel ?? node.id
     const active = activeNode === node.id || isNodeActive(liveStatus, node.id)
     const completed = isNodeComplete(node.id, files, researchStatus, liveStatus, index)
     const kpis = nodeKpis(node.id, files, index)
-    const totals = nodeHistoryTotalsForNode(nodeHistory, node.id)
+    const telemetryNode = node.id === REBUTTALS_VIEWER_NODE_ID ? rebuttalsTelemetryNodeId() : node.id
+    const totals = sessionTotalsForNode(sessionTelemetry, nodeHistory, telemetryNode)
     if (totals.durationMs > 0) {
       kpis.unshift({ label: "Time", value: formatDurationMs(totals.durationMs) })
     }
@@ -56,6 +122,7 @@ export function renderNodeExecutionHistory(
   entries: NodeHistoryEntry[],
   nodeName: string,
   _runName: string,
+  sessionTelemetry?: SessionTelemetryFile | null,
 ): string {
   const def = getNodeDefinition(nodeName)
   const aliases = new Set([nodeName, ...(def?.liveNodeAliases ?? []), def?.id, def?.pipelineLabel].filter(Boolean) as string[])
@@ -66,8 +133,9 @@ export function renderNodeExecutionHistory(
   for (const entry of [...filtered].reverse()) {
     const elapsed = entry.durationMs ?? (entry.completedAt - entry.startedAt)
     const elapsedStr = formatDurationMs(elapsed)
-    const usageStr = entry.usageAvailable && entry.usage
-      ? ` · ${formatUsagePair(entry.usage, true)}`
+    const usage = sessionUsageForHistoryEntry(sessionTelemetry, entry)
+    const usageStr = usage.usageAvailable || usage.costAvailable
+      ? ` · ${formatUsagePair(usage, true)}`
       : ""
     const icon = entry.status === "completed" ? "✓" : "✗"
     html += `<div class="node-history-row">
@@ -93,6 +161,237 @@ function formatSummary(summary: Record<string, unknown>): string {
   return parts.join(", ").slice(0, 120)
 }
 
+function emptyRoundArtifacts(round: number): RoundArtifacts {
+  return { round, perAgentAudits: [], rebuttalTurns: [], perAgentRebuttalInputs: [] }
+}
+
+function renderSummarySection(kpis: ReturnType<typeof nodeKpis>): string {
+  if (kpis.length === 0) return ""
+  const kpiRows = kpis.map((k) => `<tr><td>${escapeHtml(k.label)}</td><td>${escapeHtml(k.value)}</td></tr>`).join("")
+  return `<div class="section"><h2>Summary</h2><div class="card">${tableWrap(`<table class="summary-table">${kpiRows}</table>`)}</div></div>`
+}
+
+function renderArtifactsSection(
+  runName: string,
+  files: string[],
+  fileSizes: Map<string, number>,
+): string {
+  if (files.length === 0) return ""
+  const subsetSizes = new Map<string, number>()
+  for (const f of files) subsetSizes.set(f, fileSizes.get(f) ?? 0)
+  return `<div class="section"><h2>Artifacts</h2>${renderFileBrowser({ runName, files, fileSizes: subsetSizes, hideSubgroupHeadings: true })}</div>`
+}
+
+async function renderAuditRoundPanelBody(
+  runName: string,
+  round: RoundArtifacts,
+  liveStatus: LiveStatus | null,
+  isCurrentRound: boolean,
+): Promise<string> {
+  if (round.audits) {
+    const data = await readAuditBundle(runName, round.audits)
+    if (data) {
+      const rawHref = `/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(round.audits)}`
+      const expanded = isCurrentRound
+      return `<div class="audit-round-panel">
+  <div class="audit-round-panel-header">
+    <a class="tiny-text" href="${rawHref}">${escapeHtml(round.audits)}</a>
+  </div>
+  ${renderAuditVoteTable(data)}
+  <details class="audit-findings-details"${expanded ? " open" : ""}>
+    <summary>Findings by auditor (${data.reduce((n, a) => n + (a.findings?.length ?? 0), 0)} total)</summary>
+    ${renderAuditorFindingsBlocks(data)}
+  </details>
+</div>`
+    }
+  }
+
+  const rows = await buildRoundAuditVoteRows(runName, round, liveStatus, { isCurrentRound })
+  if (rows.length === 0) {
+    return `<p class="empty-inline dim-text">No auditor results yet.</p>`
+  }
+  return renderRoundAuditVoteTable(rows)
+}
+
+async function loadAgentRebuttals(
+  runName: string,
+  files: string[],
+): Promise<Array<{ agent: string; rebuttals: RebuttalEntry[] }>> {
+  const agentRebuttals: Array<{ agent: string; rebuttals: RebuttalEntry[] }> = []
+  for (const file of files) {
+    try {
+      const raw = await Bun.file(safeFilePath(runName, file)).text()
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) continue
+      const agentMatch = file.match(/^rebuttals-([\w-]+)-round-\d+\.json$/)
+      agentRebuttals.push({
+        agent: agentMatch?.[1] ?? file,
+        rebuttals: parsed,
+      })
+    } catch { /* skip */ }
+  }
+  return agentRebuttals
+}
+
+async function loadRebuttalTurnData(
+  runName: string,
+  entry: RoundArtifacts,
+): Promise<RebuttalReviewTurnData[]> {
+  const turnData: RebuttalReviewTurnData[] = []
+  for (const turnArt of entry.rebuttalTurns) {
+    if (!turnArt.drafterReview && !turnArt.responses) continue
+    let responses: Record<string, RebuttalResponseEntry> | undefined
+    let review: { acceptedFindingIds: string[]; rebuttals: RebuttalEntry[] } | undefined
+    if (turnArt.responses) {
+      try {
+        const raw = await Bun.file(safeFilePath(runName, turnArt.responses)).text()
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          responses = parsed
+        }
+      } catch { /* skip */ }
+    }
+    if (turnArt.drafterReview) {
+      try {
+        const raw = await Bun.file(safeFilePath(runName, turnArt.drafterReview)).text()
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          review = parsed
+        }
+      } catch { /* skip */ }
+    }
+    if (responses || review) {
+      turnData.push({ turn: turnArt.turn, responses, review })
+    }
+  }
+  return turnData
+}
+
+async function renderNodeScopeBody(
+  scope: NodeScope,
+  runName: string,
+  nodeName: string,
+  resolvedId: string,
+  files: string[],
+  fileSizes: Map<string, number>,
+  liveStatus: LiveStatus | null,
+  nodeHistory: NodeHistoryEntry[],
+  sessionTelemetry: SessionTelemetryFile | null | undefined,
+  roundScoped: boolean,
+): Promise<string> {
+  const index = indexRunArtifacts(files)
+  const round = scope === "total" ? undefined : scope
+  const isCurrentRound = round !== undefined
+    && liveStatus?.phase === "running"
+    && liveStatus.round === round
+  let content = ""
+
+  if (resolvedId === "runParallelAudits") {
+    if (scope === "total") {
+      const roundsWithAudits = index.rounds.filter((r) => r.audits)
+      if (roundsWithAudits.length > 0) {
+        content += `<div class="section"><h2>All audit rounds</h2>
+${await renderAllAuditRounds(runName, roundsWithAudits, liveStatus?.phase === "running" ? liveStatus.round : undefined, { includeNav: false })}
+</div>`
+      } else if (liveStatus?.phase === "running" && resolveLiveNode(liveStatus) === "runParallelAudits") {
+        const roundArt = index.rounds.find((r) => r.round === liveStatus.round) ?? emptyRoundArtifacts(liveStatus.round)
+        content += `<div class="section"><h2>Round ${liveStatus.round} audits</h2>
+${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, true)}
+</div>`
+      }
+    } else {
+      const roundArt = index.rounds.find((r) => r.round === round) ?? emptyRoundArtifacts(round)
+      content += `<div class="section"><h2>Round ${round} audits</h2>
+${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, isCurrentRound)}
+</div>`
+    }
+  }
+
+  if (resolvedId === "reviewFindingsByDrafter") {
+    const reviews = scope === "total"
+      ? index.rounds.filter((r) => r.review)
+      : index.rounds.filter((r) => r.round === round && r.review)
+    if (reviews.length > 0) {
+      content += `<div class="section"><h2>${scope === "total" ? "Drafter reviews by round" : `Round ${round} drafter review`}</h2>`
+      for (const entry of reviews) {
+        if (!entry.review) continue
+        try {
+          const raw = await Bun.file(safeFilePath(runName, entry.review)).text()
+          content += renderDrafterReview(entry.review, JSON.parse(raw), {
+            roundHeading: scope === "total" ? "h3" : false,
+          })
+        } catch { /* skip */ }
+      }
+      content += `</div>`
+    }
+  }
+
+  if (resolvedId === "aggregateConsensus") {
+    const consensusRounds = scope === "total"
+      ? index.rounds.filter((r) => r.consensus)
+      : index.rounds.filter((r) => r.round === round && r.consensus)
+    if (consensusRounds.length > 0) {
+      content += `<div class="section"><h2>${scope === "total" ? "Consensus by round" : `Round ${round} consensus`}</h2>`
+      for (const entry of consensusRounds) {
+        if (!entry.consensus) continue
+        try {
+          const raw = await Bun.file(safeFilePath(runName, entry.consensus)).text()
+          content += renderConsensusRound(entry.round, JSON.parse(raw) as AggregatedFindings, {
+            roundHeading: scope === "total" ? "h3" : false,
+          })
+        } catch { /* skip */ }
+      }
+      content += `</div>`
+    }
+  }
+
+  if (isRebuttalsViewerNode(resolvedId)) {
+    const rebuttalRounds = scope === "total"
+      ? index.rounds.filter(roundHasRebuttalActivity)
+      : index.rounds.filter((r) => r.round === round && roundHasRebuttalActivity(r))
+    if (rebuttalRounds.length > 0) {
+      content += `<div class="section"><h2>${scope === "total" ? "Rebuttals by round" : `Round ${round} rebuttals`}</h2>`
+      for (const entry of rebuttalRounds) {
+        const roundData: RebuttalsRoundData = {
+          roundNum: entry.round,
+          agentRebuttals: await loadAgentRebuttals(runName, entry.perAgentRebuttalInputs),
+          turns: await loadRebuttalTurnData(runName, entry),
+        }
+        const turnHeading = scope === "total" || roundData.turns.length > 1 ? "h4" as const : false
+        content += renderRebuttalsRound(roundData, {
+          roundHeading: scope === "total" ? "h3" : false,
+          turnHeading,
+        })
+      }
+      content += `</div>`
+    }
+  }
+
+  if (scope !== "total" && !roundScoped && !content) {
+    content += `<p class="muted-note dim-text">This step applies to the full run.</p>`
+  }
+
+  const telemetryNode = isRebuttalsViewerNode(resolvedId) ? rebuttalsTelemetryNodeId() : resolvedId
+  const telemetryHtml = renderNodeTelemetryMeta(liveStatus, nodeHistory, telemetryNode, sessionTelemetry, round)
+  let body = telemetryHtml ?? ""
+  body += content
+  body += renderNodeSessionUsageTable(sessionTelemetry, nodeHistory, telemetryNode, round, liveStatus)
+
+  const kpis = nodeKpis(resolvedId, files, index)
+  if (kpis.length > 0 && scope === "total") {
+    body += renderSummarySection(kpis)
+  }
+
+  const nodeFiles = isRebuttalsViewerNode(resolvedId)
+    ? filesForRebuttalsViewer(files, index, round)
+    : round !== undefined
+      ? filesForNodeRound(resolvedId, files, index, round)
+      : filesForNode(resolvedId, files, index)
+  body += renderArtifactsSection(runName, nodeFiles, fileSizes)
+
+  return body
+}
+
 export async function renderNodeDashboard(
   runName: string,
   nodeName: string,
@@ -100,123 +399,108 @@ export async function renderNodeDashboard(
   fileSizes: Map<string, number>,
   liveStatus: LiveStatus | null,
   nodeHistory: NodeHistoryEntry[] = [],
+  sessionTelemetry?: SessionTelemetryFile | null,
 ): Promise<{ body: string; live: string }> {
   const def = getNodeDefinition(nodeName) ?? getNodeDefinition(nodeName.replace(/Prompt|Resume$/, ""))
   const resolvedId = def?.id ?? nodeName
-  const index = indexRunArtifacts(files)
-  const nodeFiles = filesForNode(resolvedId, files, index)
-  const active = isNodeActive(liveStatus, resolvedId)
-  const focusRound = liveStatus?.phase === "running" ? liveStatus.round : undefined
+  const active = isRebuttalsViewerNode(resolvedId)
+    ? isNodeActive(liveStatus, "runTargetedRebuttals") || isNodeActive(liveStatus, REBUTTALS_VIEWER_NODE_ID)
+    : isNodeActive(liveStatus, resolvedId)
+  const isResearch = def?.phase === "research"
+  const rounds = isResearch ? researchRoundNumbers(files, liveStatus, nodeHistory) : []
 
   let body = ""
   let live = ""
 
-  if (resolvedId === "runParallelAudits" && index.rounds.some((r) => r.audits)) {
-    body += `<div class="section"><h2>Audits by round</h2>
-${await renderAllAuditRounds(runName, index.rounds, focusRound)}
-</div>`
-  }
+  if (isResearch && rounds.length > 0) {
+    let panels = `<div class="node-scope-panel" data-round-panel="total" role="tabpanel">${await renderNodeScopeBody(
+      "total",
+      runName,
+      nodeName,
+      resolvedId,
+      files,
+      fileSizes,
+      liveStatus,
+      nodeHistory,
+      sessionTelemetry,
+      def?.roundScoped ?? false,
+    )}</div>`
 
-  if (resolvedId === "reviewFindingsByDrafter") {
-    const reviews = index.rounds.filter((r) => r.review)
-    if (reviews.length > 0) {
-      body += `<div class="section"><h2>Drafter reviews by round</h2>`
-      for (const round of reviews) {
-        if (!round.review) continue
-        try {
-          const raw = await Bun.file(safeFilePath(runName, round.review)).text()
-          body += renderDrafterReview(round.review, JSON.parse(raw))
-        } catch { /* skip */ }
-      }
-      body += `</div>`
+    for (const roundNum of rounds) {
+      panels += `<div class="node-scope-panel" data-round-panel="${roundNum}" role="tabpanel" hidden>${await renderNodeScopeBody(
+        roundNum,
+        runName,
+        nodeName,
+        resolvedId,
+        files,
+        fileSizes,
+        liveStatus,
+        nodeHistory,
+        sessionTelemetry,
+        def?.roundScoped ?? false,
+      )}</div>`
     }
-  }
 
-  if (resolvedId === "aggregateConsensus") {
-    const consensusRounds = index.rounds.filter((r) => r.consensus)
-    if (consensusRounds.length > 0) {
-      body += `<div class="section"><h2>Consensus by round</h2>`
-      for (const round of consensusRounds) {
-        if (!round.consensus) continue
-        try {
-          const raw = await Bun.file(safeFilePath(runName, round.consensus)).text()
-          body += renderConsensusCard(round.consensus, JSON.parse(raw))
-        } catch { /* skip */ }
-      }
-      body += `</div>`
-    }
-  }
-
-  if ((resolvedId === "runTargetedRebuttals" || resolvedId === "reviewRebuttalResponses") && index.rounds.some(roundHasRebuttals)) {
-    body += `<div class="section"><h2>Rebuttal turns by round</h2><div class="card stack-card stack-card-tight">`
-    for (const round of index.rounds) {
-      if (!roundHasRebuttals(round)) continue
-      const turns = round.rebuttalTurns.map((t) => {
-        const links: string[] = []
-        if (t.responses) links.push(`<a href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(t.responses)}">T${t.turn} responses</a>`)
-        if (t.drafterReview) links.push(`<a href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(t.drafterReview)}">T${t.turn} review</a>`)
-        return links.join(" · ")
-      }).filter(Boolean)
-      body += `<div class="round-step done">
-  <a href="/runs/${encodeURIComponent(runName)}/round/${round.round}">Round ${round.round}</a>
-  · ${maxRebuttalTurn(round)} turn${maxRebuttalTurn(round) !== 1 ? "s" : ""}: ${turns.join(" | ")}
-</div>`
-    }
-    body += `</div></div>`
-  }
-
-  const totals = nodeHistoryTotalsForNode(nodeHistory, resolvedId)
-  const telemetryHtml = renderNodeTelemetryMeta(liveStatus, nodeHistory, nodeName)
-  if (telemetryHtml) {
-    body += telemetryHtml
-  }
-
-  body += renderAgentUsageTable(
-    active && liveStatus?.nodeUsageByAgent
-      ? liveStatus.nodeUsageByAgent
-      : totals.usageByAgent,
-    active ? liveStatus?.agents : undefined,
-  )
-
-  const kpis = nodeKpis(resolvedId, files, index)
-  if (kpis.length > 0) {
-    let kpiRows = kpis.map((k) => `<tr><td>${escapeHtml(k.label)}</td><td>${escapeHtml(k.value)}</td></tr>`).join("")
-    body += `<div class="section"><h2>Summary</h2><div class="card">${tableWrap(`<table class="summary-table">${kpiRows}</table>`)}</div></div>`
-  }
-
-  if (nodeFiles.length > 0) {
-    const subsetSizes = new Map<string, number>()
-    for (const f of nodeFiles) subsetSizes.set(f, fileSizes.get(f) ?? 0)
-    body += `<div class="section"><h2>Artifacts</h2>${renderFileBrowser({ runName, files: nodeFiles, fileSizes: subsetSizes })}</div>`
+    body = `<div class="node-scope-panels">${panels}</div>`
+  } else {
+    body = await renderNodeScopeBody(
+      "total",
+      runName,
+      nodeName,
+      resolvedId,
+      files,
+      fileSizes,
+      liveStatus,
+      nodeHistory,
+      sessionTelemetry,
+      def?.roundScoped ?? false,
+    )
   }
 
   if (active && liveStatus) {
+    const totals = sessionTotalsForLiveNode(sessionTelemetry, liveStatus)
     const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : ""
-    const usageLabel = liveStatus.nodeUsageAvailable && liveStatus.nodeUsage
-      ? ` · ${formatUsagePair(liveStatus.nodeUsage, true)}`
+    const usageLabel = totals.usageAvailable || totals.costAvailable
+      ? ` · ${formatUsagePair(totals.usage, true)}`
       : ""
     live += `<div class="card active-run-hero">
   <span class="badge badge-running">● Running</span>
   <span class="dim-text">${escapeHtml(resolvedId)} · ${escapeHtml(elapsed)}${escapeHtml(usageLabel)}</span>
 </div>`
-    live += renderAgentActivity(liveStatus)
+    live += renderAgentActivity(liveStatus, sessionTelemetry)
   }
 
   return { body, live }
 }
 
 export function renderNodeMiniPipeline(runName: string, currentNode: string, files: string[]): string {
-  const researchNodes = GRAPH_NODES.filter((n) => n.phase === "research" && n.order <= 14)
+  const miniPipelineIds = new Set([
+    "draftFullDraft",
+    "runParallelAudits",
+    "reviewFindingsByDrafter",
+    REBUTTALS_VIEWER_NODE_ID,
+    "aggregateConsensus",
+    "computeConfidence",
+  ])
+  const researchNodes = GRAPH_NODES.filter((n) => miniPipelineIds.has(n.id))
   const index = indexRunArtifacts(files)
   const currentDef = getNodeDefinition(currentNode)
   const currentId = currentDef?.id ?? currentNode
+  const highlightedId = currentId === "reviseDraft"
+    ? "draftFullDraft"
+    : isRebuttalsViewerNode(currentId)
+      ? REBUTTALS_VIEWER_NODE_ID
+      : currentId
 
   let html = `<div class="round-nav">`
-  for (const node of researchNodes.slice(0, 8)) {
-    const done = filesForNode(node.id, files, index).length > 0
-    const cls = node.id === currentId ? "round-nav-chip active" : done ? "round-nav-chip done" : "round-nav-chip"
+  for (const node of researchNodes) {
+    const done = node.id === REBUTTALS_VIEWER_NODE_ID
+      ? filesForRebuttalsViewer(files, index).length > 0
+      : filesForNode(node.id, files, index).length > 0
+    const cls = node.id === highlightedId ? "round-nav-chip active" : done ? "round-nav-chip done" : "round-nav-chip"
     const linkId = node.pipelineLabel ?? node.id
-    html += `<a class="${cls}" href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(linkId)}">${escapeHtml(node.label.split(" ")[0])}</a>`
+    const navLabel = node.miniLabel ?? node.label.split(" ")[0]
+    html += `<a class="${cls}" href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(linkId)}">${escapeHtml(navLabel)}</a>`
   }
   html += `</div>`
   return html

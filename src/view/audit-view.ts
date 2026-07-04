@@ -239,6 +239,7 @@ export async function renderAllAuditRounds(
   runName: string,
   rounds: Array<{ round: number; audits?: string }>,
   focusRound?: number,
+  options?: { includeNav?: boolean },
 ): Promise<string> {
   const panels: string[] = []
   const withAudits = rounds.filter((r) => r.audits)
@@ -255,6 +256,10 @@ export async function renderAllAuditRounds(
 
   if (panels.length === 0) {
     return `<p class="empty-inline dim-text">No audit bundles yet.</p>`
+  }
+
+  if (options?.includeNav === false) {
+    return panels.join("")
   }
 
   const roundNav = withAudits.map((r) =>

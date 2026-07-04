@@ -8,7 +8,7 @@ configureViewServer({ admin: process.argv.includes("--admin") })
 const config = await loadRuntimeConfig()
 await resolveOpencodeBootstrap({ interactive: false, workspaceDir: config.env.OPENCODE_DIRECTORY })
 
-initRunManager({ getConfig: () => config })
+initRunManager({ getConfig: loadRuntimeConfig })
 
 const shutdown = async () => {
   const { getRunManager } = await import("./run-manager")

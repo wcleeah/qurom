@@ -62,8 +62,8 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
         }
       }
       const request = inputRequestSchema.parse(body)
-      const { runId } = await getRunManager().startResearch(request)
-      return redirectOrJson(req, url, `/runs/${encodeURIComponent(runId)}`, { ok: true, runId })
+      const { runId, runPath } = await getRunManager().startResearch(request)
+      return redirectOrJson(req, url, `/runs/${encodeURIComponent(runPath)}`, { ok: true, runId, runPath })
     } catch (error) {
       return errorResponse(error, req, url)
     }

@@ -190,6 +190,11 @@ export function roundHasRebuttals(round: RoundArtifacts): boolean {
   return round.rebuttalTurns.length > 0 || round.perAgentRebuttalInputs.length > 0
 }
 
+export function roundHasRebuttalActivity(round: RoundArtifacts): boolean {
+  return round.perAgentRebuttalInputs.length > 0
+    || round.rebuttalTurns.some((t) => t.responses || t.drafterReview)
+}
+
 export function maxRebuttalTurn(round: RoundArtifacts): number {
   if (round.rebuttalTurns.length === 0) return 0
   return Math.max(...round.rebuttalTurns.map((t) => t.turn))

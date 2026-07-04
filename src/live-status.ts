@@ -2,9 +2,6 @@ import { writeFile, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import type { EventBus } from "./runner"
 import type { DebugLog } from "./debug-log"
-import { addUsage, emptyUsage, type UsageTotals, usageDelta } from "./usage"
-
-export type { UsageTotals }
 
 export interface ToolCallEntry {
   tool: string
@@ -20,15 +17,8 @@ export interface ToolCallEntry {
 export interface LiveAgentStatus {
   status: "idle" | "running" | "complete" | "error"
   tool?: string
-  tokensIn: number
-  tokensOut: number
-  usageAvailable: boolean
   toolCalls: ToolCallEntry[]
   reasoning: string
-}
-
-export interface AgentUsageSnapshot extends UsageTotals {
-  usageAvailable: boolean
 }
 
 export interface NodeHistoryEntry {
@@ -43,9 +33,6 @@ export interface NodeHistoryEntry {
   summary?: Record<string, unknown>
   artifacts?: string[]
   durationMs?: number
-  usage?: UsageTotals
-  usageAvailable?: boolean
-  usageByAgent?: Record<string, AgentUsageSnapshot>
 }
 
 export interface LiveStatus {
@@ -59,11 +46,6 @@ export interface LiveStatus {
   rebuttalTurn?: number
   activeRebuttalCount?: number
   unresolvedFindingCount?: number
-  usage: UsageTotals
-  usageAvailable: boolean
-  nodeUsage: UsageTotals
-  nodeUsageAvailable: boolean
-  nodeUsageByAgent: Record<string, AgentUsageSnapshot>
   agents: Record<string, LiveAgentStatus>
   nodeHistory: NodeHistoryEntry[]
   error?: string
@@ -80,17 +62,6 @@ const WRITE_INTERVAL_MS = 3000
 const MAX_TOOL_CALLS_PER_AGENT = 20
 const MAX_REASONING_LENGTH = 800
 
-function sumHistoryUsage(history: NodeHistoryEntry[]): { usage: UsageTotals; usageAvailable: boolean } {
-  const usage = emptyUsage()
-  let usageAvailable = false
-  for (const entry of history) {
-    if (!entry.usageAvailable || !entry.usage) continue
-    usageAvailable = true
-    addUsage(usage, entry.usage)
-  }
-  return { usage, usageAvailable }
-}
-
 function earliestHistoryStart(history: NodeHistoryEntry[]): number | undefined {
   if (history.length === 0) return undefined
   return history.reduce((min, entry) => Math.min(min, entry.startedAt), history[0]!.startedAt)
@@ -103,26 +74,17 @@ export function createLiveStatusWriter(
   _debugLog?: DebugLog,
 ): { dispose: () => void; setAwaitingReaderReply: (value: LiveStatus["awaitingReaderReply"]) => void } {
   const initialHistory = config.initialNodeHistory ?? []
-  const initialRunUsage = sumHistoryUsage(initialHistory)
   const status: LiveStatus = {
     phase: "running",
     round: 0,
     maxRounds: config.maxRounds,
     runStartedAt: earliestHistoryStart(initialHistory) ?? Date.now(),
-    usage: initialRunUsage.usage,
-    usageAvailable: initialRunUsage.usageAvailable,
-    nodeUsage: emptyUsage(),
-    nodeUsageAvailable: false,
-    nodeUsageByAgent: {},
     agents: {},
     nodeHistory: initialHistory,
   }
 
   const sessionAgent = new Map<string, LiveAgentStatus>()
-  const sessionRoles = new Map<string, string>()
   const toolCallMap = new Map<string, ToolCallEntry>()
-  const messageUsageTotals = new Map<string, UsageTotals>()
-  const cursorRunUsageTotals = new Map<string, UsageTotals>()
 
   const interval = setInterval(writeStatus, WRITE_INTERVAL_MS)
   let disposed = false
@@ -139,47 +101,6 @@ export function createLiveStatusWriter(
   function setAwaitingReaderReply(value: LiveStatus["awaitingReaderReply"]) {
     status.awaitingReaderReply = value
     scheduleWriteStatus()
-  }
-
-  function resetNodeUsageTracking() {
-    status.nodeUsage = emptyUsage()
-    status.nodeUsageAvailable = false
-    status.nodeUsageByAgent = {}
-    messageUsageTotals.clear()
-    cursorRunUsageTotals.clear()
-  }
-
-  function ensureNodeAgentUsage(role: string): AgentUsageSnapshot {
-    const existing = status.nodeUsageByAgent[role]
-    if (existing) return existing
-    const created: AgentUsageSnapshot = { ...emptyUsage(), usageAvailable: false }
-    status.nodeUsageByAgent[role] = created
-    return created
-  }
-
-  function applyUsageDelta(delta: UsageTotals, sessionID: string) {
-    if (delta.tokensIn === 0 && delta.tokensOut === 0 && !delta.costAvailable) return
-
-    if (delta.tokensIn > 0 || delta.tokensOut > 0) {
-      status.usageAvailable = true
-      status.nodeUsageAvailable = true
-    }
-
-    addUsage(status.usage, delta)
-    addUsage(status.nodeUsage, delta)
-
-    const agent = sessionAgent.get(sessionID)
-    if (agent) {
-      addUsage(agent, delta)
-      if (delta.tokensIn > 0 || delta.tokensOut > 0) agent.usageAvailable = true
-    }
-
-    const role = sessionRoles.get(sessionID)
-    if (role) {
-      const nodeAgent = ensureNodeAgentUsage(role)
-      addUsage(nodeAgent, delta)
-      if (delta.tokensIn > 0 || delta.tokensOut > 0) nodeAgent.usageAvailable = true
-    }
   }
 
   async function writeStatus() {
@@ -252,7 +173,6 @@ export function createLiveStatusWriter(
           status.nodeStartedAt = Date.now()
           status.agents = {}
           sessionAgent.clear()
-          resetNodeUsageTracking()
           if (event.state && typeof event.state === "object") {
             const s = event.state as Record<string, unknown>
             if (typeof s.round === "number") status.round = s.round
@@ -283,11 +203,6 @@ export function createLiveStatusWriter(
             researchPhase: typeof s?.status === "string" ? s.status : status.researchPhase,
             rebuttalTurn: status.rebuttalTurn,
             summary: summarizeNodeState(event.node, event.state),
-            usage: { ...status.nodeUsage },
-            usageAvailable: status.nodeUsageAvailable,
-            usageByAgent: Object.fromEntries(
-              Object.entries(status.nodeUsageByAgent).map(([role, usage]) => [role, { ...usage }]),
-            ),
           }
           status.nodeHistory.push(entry)
           void writeNodeHistory()
@@ -301,22 +216,17 @@ export function createLiveStatusWriter(
           enhancing: "interactiveEnhance",
           finalizing: "finalizeDesign",
         }
-        status.node = nodeMap[event.phase] ?? `runDesignHtml`
+        status.node = nodeMap[event.phase] ?? "runDesignHtml"
         status.nodeStartedAt = Date.now()
         status.agents = {}
         sessionAgent.clear()
-        resetNodeUsageTracking()
         status.round = event.round
         break
       }
       case "session.created": {
         if (event.role === "root") break
-        sessionRoles.set(event.sessionID, event.role)
         const agent: LiveAgentStatus = {
           status: "idle",
-          tokensIn: 0,
-          tokensOut: 0,
-          usageAvailable: false,
           toolCalls: [],
           reasoning: "",
         }
@@ -332,33 +242,6 @@ export function createLiveStatusWriter(
           : event.status === "error" ? "error"
           : "running"
         agent.status = mapped
-        break
-      }
-      case "agent.usage": {
-        const next: UsageTotals = {
-          tokensIn: event.tokensIn,
-          tokensOut: event.tokensOut,
-          ...(event.costAvailable
-            ? {
-                costUsd: event.costUsd ?? 0,
-                costAvailable: true,
-                costEstimated: event.costEstimated,
-              }
-            : {}),
-        }
-        let delta = next
-        if (event.cumulative) {
-          const key = event.runID ?? `${event.sessionID}:cumulative`
-          const previous = cursorRunUsageTotals.get(key) ?? emptyUsage()
-          delta = usageDelta(previous, next)
-          cursorRunUsageTotals.set(key, next)
-        } else if (event.messageID) {
-          const previous = messageUsageTotals.get(event.messageID) ?? emptyUsage()
-          delta = usageDelta(previous, next)
-          messageUsageTotals.set(event.messageID, next)
-        }
-        applyUsageDelta(delta, event.sessionID)
-        scheduleWriteStatus()
         break
       }
       case "agent.tool": {
@@ -400,9 +283,9 @@ export function createLiveStatusWriter(
         agent.reasoning = event.text.slice(-MAX_REASONING_LENGTH)
         break
       }
-      case "agent.metadata": {
+      case "agent.metadata":
+      case "agent.usage":
         break
-      }
     }
   })
 

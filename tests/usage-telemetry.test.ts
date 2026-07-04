@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { estimateCursorCostUsd } from "../src/cursor-pricing.ts"
+import { estimateCursorCostUsd, resolveCursorPricingModelId } from "../src/cursor-pricing.ts"
 import {
   addUsage,
   emptyUsage,
@@ -11,10 +11,15 @@ import {
   usageDelta,
 } from "../src/usage.ts"
 import {
+  nodeHistoryEntriesForNodeScope,
   nodeHistoryTotalsForNode,
+  renderNodeSessionUsageTable,
   renderRunTelemetryStrip,
+  renderSessionTelemetryTable,
   resolveRunTelemetry,
   resolveRunUsage,
+  sessionTotalsForNodeRound,
+  sessionsForNodeScope,
 } from "../src/view/telemetry-view.ts"
 
 describe("usage folding", () => {
@@ -84,17 +89,26 @@ describe("cursor pricing", () => {
     expect(result.costUsd).toBeCloseTo(0.5)
   })
 
-  test("returns unavailable for unknown model ids", () => {
-    expect(estimateCursorCostUsd("unknown-model", { inputTokens: 1000 })).toEqual({
-      costUsd: 0,
-      costAvailable: false,
-      costEstimated: true,
+  test("estimates auto pool cost from raw token buckets", () => {
+    const result = estimateCursorCostUsd("auto", {
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
     })
+    expect(result.costAvailable).toBe(true)
+    expect(result.costEstimated).toBe(true)
+    expect(result.costUsd).toBeCloseTo(1.25)
+  })
+
+  test("maps default and composite csv slugs to pricing entries", () => {
+    expect(resolveCursorPricingModelId("default")).toBe("auto")
+    expect(resolveCursorPricingModelId("gpt-5.5-low")).toBe("gpt-5.5")
   })
 })
 
 describe("telemetry view", () => {
-  test("aggregates node history totals by node aliases", () => {
+  test("aggregates session telemetry totals by node aliases", () => {
     const totals = nodeHistoryTotalsForNode([
       {
         node: "runParallelAudits",
@@ -103,31 +117,44 @@ describe("telemetry view", () => {
         status: "completed",
         round: 0,
         durationMs: 4000,
-        usageAvailable: true,
-        usage: {
-          tokensIn: 1000,
-          tokensOut: 100,
-          costUsd: 0.12,
-          costAvailable: true,
-        },
-        usageByAgent: {
-          "source-auditor": {
-            tokensIn: 600,
-            tokensOut: 60,
-            costUsd: 0.07,
-            costAvailable: true,
-            usageAvailable: true,
-          },
-          methodologist: {
-            tokensIn: 400,
-            tokensOut: 40,
-            costUsd: 0.05,
-            costAvailable: true,
-            usageAvailable: true,
-          },
-        },
       },
-    ], "runParallelAudits")
+    ], "runParallelAudits", {
+      version: 1,
+      sessions: [
+        {
+          sessionId: "ses-a",
+          role: "source-auditor",
+          provider: "opencode",
+          node: "runParallelAudits",
+          calls: [{
+            completedAt: new Date(2000).toISOString(),
+            usage: {
+              tokensIn: 600,
+              tokensOut: 60,
+              costUsd: 0.07,
+              costAvailable: true,
+            },
+            usageSource: "sdk",
+          }],
+        },
+        {
+          sessionId: "ses-b",
+          role: "methodologist",
+          provider: "opencode",
+          node: "runParallelAudits",
+          calls: [{
+            completedAt: new Date(3000).toISOString(),
+            usage: {
+              tokensIn: 400,
+              tokensOut: 40,
+              costUsd: 0.05,
+              costAvailable: true,
+            },
+            usageSource: "sdk",
+          }],
+        },
+      ],
+    })
 
     expect(totals.durationMs).toBe(4000)
     expect(totals.usage.tokensIn).toBe(1000)
@@ -143,20 +170,26 @@ describe("telemetry view", () => {
       runStartedAt: Date.now() - 65_000,
       round: 1,
       maxRounds: 3,
-      usage: {
-        tokensIn: 1200,
-        tokensOut: 300,
-        costUsd: 0.042,
-        costAvailable: true,
-        costEstimated: true,
-      },
-      usageAvailable: true,
-      nodeUsage: emptyUsage(),
-      nodeUsageAvailable: false,
-      nodeUsageByAgent: {},
       agents: {},
       nodeHistory: [],
-    }, [])
+    }, [], undefined, {
+      version: 1,
+      sessions: [{
+        sessionId: "ses-1",
+        role: "research-drafter",
+        provider: "opencode",
+        calls: [{
+          usage: {
+            tokensIn: 1200,
+            tokensOut: 300,
+            costUsd: 0.042,
+            costAvailable: true,
+            costEstimated: true,
+          },
+          usageSource: "sdk",
+        }],
+      }],
+    })
 
     expect(html).toContain("telemetry-strip")
     expect(html).toContain("elapsed")
@@ -175,24 +208,25 @@ describe("telemetry view", () => {
     expect(html).toContain("1.4 MB")
   })
 
-  test("resolveRunTelemetry falls back to node history", () => {
-    const resolved = resolveRunTelemetry(null, [
-      {
-        node: "draftFullDraft",
-        startedAt: 1,
-        completedAt: 2,
-        status: "completed",
-        round: 0,
-        usageAvailable: true,
-        usage: {
-          tokensIn: 500,
-          tokensOut: 50,
-          costUsd: 0.01,
-          costAvailable: true,
-          costEstimated: false,
-        },
-      },
-    ])
+  test("resolveRunTelemetry reads session telemetry only", () => {
+    const resolved = resolveRunTelemetry({
+      version: 1,
+      sessions: [{
+        sessionId: "ses-1",
+        role: "research-drafter",
+        provider: "opencode",
+        calls: [{
+          usage: {
+            tokensIn: 500,
+            tokensOut: 50,
+            costUsd: 0.01,
+            costAvailable: true,
+            costEstimated: false,
+          },
+          usageSource: "sdk",
+        }],
+      }],
+    })
     expect(resolved.usageAvailable).toBe(true)
     expect(resolved.costAvailable).toBe(true)
     expect(resolved.usage.tokensIn).toBe(500)
@@ -200,18 +234,332 @@ describe("telemetry view", () => {
   })
 
   test("resolveRunUsage remains compatible", () => {
-    const resolved = resolveRunUsage(null, [
-      {
-        node: "draftFullDraft",
-        startedAt: 1,
-        completedAt: 2,
-        status: "completed",
-        round: 0,
-        usageAvailable: true,
-        usage: { tokensIn: 500, tokensOut: 50 },
-      },
-    ])
+    const resolved = resolveRunUsage(null, [], {
+      version: 1,
+      sessions: [{
+        sessionId: "ses-1",
+        role: "research-drafter",
+        provider: "opencode",
+        calls: [{
+          usage: { tokensIn: 500, tokensOut: 50 },
+          usageSource: "sdk",
+        }],
+      }],
+    })
     expect(resolved.usageAvailable).toBe(true)
     expect(resolved.usage.tokensIn).toBe(500)
+  })
+
+  test("renderSessionTelemetryTable sorts sessions by latest activity descending", () => {
+    const html = renderSessionTelemetryTable({
+      version: 1,
+      sessions: [
+        {
+          sessionId: "ses-old",
+          role: "source-auditor",
+          provider: "opencode",
+          createdAt: "2026-07-04T10:00:00.000Z",
+          calls: [{
+            completedAt: "2026-07-04T10:00:00.000Z",
+            usage: { tokensIn: 100, tokensOut: 10 },
+            usageSource: "sdk",
+          }],
+        },
+        {
+          sessionId: "ses-new",
+          role: "methodologist",
+          provider: "opencode",
+          createdAt: "2026-07-04T12:00:00.000Z",
+          calls: [{
+            completedAt: "2026-07-04T12:00:00.000Z",
+            usage: { tokensIn: 200, tokensOut: 20 },
+            usageSource: "sdk",
+          }],
+        },
+      ],
+    })
+
+    expect(html).toContain("Session model telemetry")
+    expect(html.indexOf("methodologist")).toBeLessThan(html.indexOf("source-auditor"))
+    expect(html).toContain("2026-07-04 12:00:00 UTC")
+    expect(html).toContain("2026-07-04 10:00:00 UTC")
+  })
+
+  test("sessionTotalsForNodeRound scopes usage to a single research round", () => {
+    const totals = sessionTotalsForNodeRound({
+      version: 1,
+      sessions: [
+        {
+          sessionId: "ses-r0",
+          role: "source-auditor",
+          provider: "opencode",
+          node: "runParallelAudits",
+          round: 0,
+          calls: [{
+            completedAt: new Date(500).toISOString(),
+            usage: { tokensIn: 100, tokensOut: 10, costUsd: 0.01, costAvailable: true },
+            usageSource: "sdk",
+          }],
+        },
+        {
+          sessionId: "ses-r1",
+          role: "methodologist",
+          provider: "opencode",
+          node: "runParallelAudits",
+          round: 1,
+          calls: [{
+            completedAt: new Date(3000).toISOString(),
+            usage: { tokensIn: 400, tokensOut: 40, costUsd: 0.04, costAvailable: true },
+            usageSource: "sdk",
+          }],
+        },
+      ],
+    }, [
+      {
+        node: "runParallelAudits",
+        startedAt: 1,
+        completedAt: 1000,
+        status: "completed",
+        round: 0,
+        durationMs: 999,
+      },
+      {
+        node: "runParallelAudits",
+        startedAt: 2000,
+        completedAt: 4000,
+        status: "completed",
+        round: 1,
+        durationMs: 2000,
+      },
+    ], "runParallelAudits", 1)
+
+    expect(totals.durationMs).toBe(2000)
+    expect(totals.usage.tokensIn).toBe(400)
+    expect(Object.keys(totals.usageByAgent)).toEqual(["methodologist"])
+  })
+
+  test("renderNodeSessionUsageTable includes model and parameters for scoped sessions", () => {
+    const html = renderNodeSessionUsageTable({
+      version: 1,
+      sessions: [
+        {
+          sessionId: "ses-r0",
+          role: "source-auditor",
+          provider: "opencode",
+          node: "runParallelAudits",
+          round: 0,
+          modelParams: [{ id: "temperature", value: "0.2" }],
+          calls: [{
+            completedAt: new Date(500).toISOString(),
+            resolvedModel: "gpt-5.5-medium",
+            usage: { tokensIn: 100, tokensOut: 10, costUsd: 0.01, costAvailable: true },
+            usageSource: "sdk",
+          }],
+        },
+        {
+          sessionId: "ses-r1",
+          role: "methodologist",
+          provider: "cursor",
+          node: "runParallelAudits",
+          round: 1,
+          calls: [{
+            completedAt: new Date(3000).toISOString(),
+            resolvedModel: "composer-2.5",
+            usage: { tokensIn: 400, tokensOut: 40, costUsd: 0.04, costAvailable: true },
+            usageSource: "sdk",
+          }],
+        },
+      ],
+    }, [
+      {
+        node: "runParallelAudits",
+        startedAt: 1,
+        completedAt: 1000,
+        status: "completed",
+        round: 0,
+        durationMs: 999,
+      },
+      {
+        node: "runParallelAudits",
+        startedAt: 2000,
+        completedAt: 4000,
+        status: "completed",
+        round: 1,
+        durationMs: 2000,
+      },
+    ], "runParallelAudits", 1)
+
+    expect(html).toContain("Agent token usage")
+    expect(html).toContain("composer-2.5")
+    expect(html).toContain("methodologist")
+    expect(html).not.toContain("source-auditor")
+    expect(html).not.toContain("temperature=0.2")
+  })
+
+  test("sessionsForNodeScope filters by node history when session node is missing", () => {
+    const scoped = sessionsForNodeScope({
+      version: 1,
+      sessions: [{
+        sessionId: "ses-import",
+        role: "source-auditor",
+        provider: "cursor",
+        modelParams: [{ id: "variant", value: "low" }],
+        calls: [{
+          completedAt: new Date(500).toISOString(),
+          resolvedModel: "gpt-5.5-low",
+          usage: { tokensIn: 100, tokensOut: 10 },
+          usageSource: "csv-import",
+        }],
+      }],
+    }, [{
+      node: "runParallelAudits",
+      startedAt: 1,
+      completedAt: 1000,
+      status: "completed",
+      round: 0,
+      durationMs: 999,
+    }], "runParallelAudits")
+
+    expect(scoped).toHaveLength(1)
+    expect(scoped[0]?.calls[0]?.resolvedModel).toBe("gpt-5.5-low")
+  })
+
+  test("sessionTotalsForNodeRound attributes calls by node-history timing, not stale session round", () => {
+    const nodeHistory = [
+      {
+        node: "runParallelAudits",
+        startedAt: 1,
+        completedAt: 1000,
+        status: "completed" as const,
+        round: 0,
+        durationMs: 999,
+      },
+      {
+        node: "runParallelAudits",
+        startedAt: 2000,
+        completedAt: 4000,
+        status: "completed" as const,
+        round: 2,
+        durationMs: 2000,
+      },
+    ]
+    const sessionTelemetry = {
+      version: 1 as const,
+      sessions: [{
+        sessionId: "ses-auditor",
+        role: "source-auditor",
+        provider: "opencode",
+        node: "runParallelAudits",
+        round: 2,
+        calls: [
+          {
+            completedAt: new Date(500).toISOString(),
+            usage: { tokensIn: 100, tokensOut: 10, costUsd: 0.01, costAvailable: true },
+            usageSource: "sdk" as const,
+          },
+          {
+            completedAt: new Date(3500).toISOString(),
+            usage: { tokensIn: 400, tokensOut: 40, costUsd: 0.04, costAvailable: true },
+            usageSource: "sdk" as const,
+          },
+        ],
+      }],
+    }
+
+    expect(sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, "runParallelAudits", 0).usage.tokensIn).toBe(100)
+    expect(sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, "runParallelAudits", 2).usage.tokensIn).toBe(400)
+  })
+
+  test("draftFullDraft round tabs follow draft-round-N producers (imported telemetry)", () => {
+    const nodeHistory = [
+      { node: "draftFullDraft", startedAt: Date.parse("2026-07-04T09:05:21.159Z"), completedAt: Date.parse("2026-07-04T09:07:04.434Z"), status: "completed" as const, round: 0, durationMs: 103275 },
+      { node: "reviseDraft", startedAt: Date.parse("2026-07-04T09:10:45.105Z"), completedAt: Date.parse("2026-07-04T09:12:17.723Z"), status: "completed" as const, round: 0, durationMs: 92618 },
+      { node: "reviseDraft", startedAt: Date.parse("2026-07-04T09:14:16.686Z"), completedAt: Date.parse("2026-07-04T09:15:11.179Z"), status: "completed" as const, round: 1, durationMs: 54493 },
+      { node: "reviseDraft", startedAt: Date.parse("2026-07-04T09:18:17.996Z"), completedAt: Date.parse("2026-07-04T09:19:29.561Z"), status: "completed" as const, round: 2, durationMs: 71565 },
+    ]
+    const sessionTelemetry = {
+      version: 1 as const,
+      sessions: [
+        { sessionId: "draft-r0", role: "research-drafter", provider: "cursor", calls: [{ completedAt: "2026-07-04T09:05:24.245Z", usage: { tokensIn: 206265, tokensOut: 1 }, usageSource: "csv-import" as const, resolvedModel: "auto" }] },
+        { sessionId: "revise-r0", role: "research-drafter", provider: "cursor", calls: [{ completedAt: "2026-07-04T09:10:49.083Z", usage: { tokensIn: 213419, tokensOut: 1 }, usageSource: "csv-import" as const, resolvedModel: "auto" }] },
+        { sessionId: "revise-r1", role: "research-drafter", provider: "cursor", calls: [{ completedAt: "2026-07-04T09:14:19.731Z", usage: { tokensIn: 81822, tokensOut: 1 }, usageSource: "csv-import" as const, resolvedModel: "auto" }] },
+        { sessionId: "revise-r2", role: "research-drafter", provider: "cursor", calls: [{ completedAt: "2026-07-04T09:18:22.089Z", usage: { tokensIn: 151997, tokensOut: 1 }, usageSource: "csv-import" as const, resolvedModel: "auto" }] },
+        { sessionId: "review-r1", role: "research-drafter", provider: "cursor", calls: [{ completedAt: "2026-07-04T09:13:59.909Z", usage: { tokensIn: 49259, tokensOut: 1 }, usageSource: "csv-import" as const, resolvedModel: "auto" }] },
+      ],
+    }
+
+    expect(nodeHistoryEntriesForNodeScope(nodeHistory, "draftFullDraft", 0).map((e) => e.node)).toEqual(["draftFullDraft"])
+    expect(nodeHistoryEntriesForNodeScope(nodeHistory, "draftFullDraft", 1).map((e) => e.node)).toEqual(["reviseDraft"])
+    expect(nodeHistoryEntriesForNodeScope(nodeHistory, "draftFullDraft", 2)[0]?.round).toBe(1)
+
+    expect(sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, "draftFullDraft", 0).usage.tokensIn).toBe(206265)
+    expect(sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, "draftFullDraft", 1).usage.tokensIn).toBe(213419)
+    expect(sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, "draftFullDraft", 2).usage.tokensIn).toBe(81822)
+    expect(sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, "draftFullDraft", 3).usage.tokensIn).toBe(151997)
+    expect(sessionsForNodeScope(sessionTelemetry, nodeHistory, "draftFullDraft", 1)).toHaveLength(1)
+    expect(sessionsForNodeScope(sessionTelemetry, nodeHistory, "draftFullDraft", 1)[0]?.sessionId).toBe("revise-r0")
+  })
+
+  test("reviewRebuttalResponses includes auditor rebuttal sessions from runTargetedRebuttals", () => {
+    const nodeHistory = [
+      {
+        node: "runTargetedRebuttals",
+        startedAt: Date.parse("2026-07-04T09:10:07.871Z"),
+        completedAt: Date.parse("2026-07-04T09:10:45.042Z"),
+        status: "completed" as const,
+        round: 0,
+        rebuttalTurn: 1,
+        durationMs: 37171,
+      },
+      {
+        node: "reviewRebuttalResponses",
+        startedAt: Date.parse("2026-07-04T09:10:45.053Z"),
+        completedAt: Date.parse("2026-07-04T09:10:45.055Z"),
+        status: "completed" as const,
+        round: 0,
+        rebuttalTurn: 1,
+        durationMs: 2,
+      },
+    ]
+    const sessionTelemetry = {
+      version: 1 as const,
+      sessions: [
+        {
+          sessionId: "auditor-rebuttal",
+          role: "source-auditor",
+          provider: "cursor",
+          calls: [{
+            completedAt: "2026-07-04T09:10:11.515Z",
+            usage: { tokensIn: 98300, tokensOut: 1600, costUsd: 0.05, costAvailable: true },
+            usageSource: "csv-import" as const,
+            resolvedModel: "auto",
+          }],
+        },
+        {
+          sessionId: "drafter-review",
+          role: "research-drafter",
+          provider: "cursor",
+          calls: [{
+            completedAt: "2026-07-04T09:10:50.000Z",
+            usage: { tokensIn: 12000, tokensOut: 800, costUsd: 0.01, costAvailable: true },
+            usageSource: "csv-import" as const,
+            resolvedModel: "auto",
+          }],
+        },
+      ],
+    }
+
+    expect(nodeHistoryEntriesForNodeScope(nodeHistory, "reviewRebuttalResponses", 0).map((e) => e.node)).toEqual([
+      "runTargetedRebuttals",
+      "reviewRebuttalResponses",
+    ])
+    expect(sessionsForNodeScope(sessionTelemetry, nodeHistory, "reviewRebuttalResponses", 0)).toHaveLength(1)
+    expect(sessionsForNodeScope(sessionTelemetry, nodeHistory, "reviewRebuttalResponses", 0)[0]?.role).toBe("source-auditor")
+    expect(sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, "reviewRebuttalResponses", 0).usage.tokensIn).toBe(98300)
+
+    const html = renderNodeSessionUsageTable(sessionTelemetry, nodeHistory, "reviewRebuttalResponses", 0)
+    expect(html).toContain("Agent token usage")
+    expect(html).toContain("source-auditor")
+    expect(html).toContain("98.3k in")
   })
 })

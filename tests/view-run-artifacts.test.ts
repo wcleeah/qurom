@@ -205,9 +205,9 @@ describe("node grid rebuttal detection", () => {
       "running",
     )
 
-    expect(html).toContain("Targeted rebuttals")
-    expect(html).toContain("Rebuttal review")
-    expect(html).toContain("/runs/example-run/node/runTargetedRebuttals")
+    expect(html).toContain("Rebuttals")
+    expect(html).toContain("/runs/example-run/node/reviewRebuttalResponses")
+    expect(html).not.toContain("/runs/example-run/node/runTargetedRebuttals")
   })
 
   test("highlights active node in the grid", () => {
@@ -266,13 +266,8 @@ describe("renderRoundStrip audit summaries", () => {
     expect(html).toContain("Research rounds")
     expect(html).toContain("round-audit-panels")
     expect(html).toContain('data-round-tab="0"')
-    expect(html).toContain("data-round-details-link")
-    expect(html).toContain("methodologist")
-    expect(html).toContain("revise")
-    expect(html).toContain("fact-checker")
-    expect(html).toContain("approve")
-    expect(html).toContain("audit-vote-table-compact")
-    expect(html).toContain("/runs/demo-run/round/0")
+    expect(html).not.toContain("data-round-details-link")
+    expect(html).not.toContain("/runs/demo-run/round/")
   })
 
   test("shows live loading rows while parallel audits are running", async () => {
