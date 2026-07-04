@@ -1,5 +1,6 @@
 import {
   Agent,
+  AgentBusyError,
   Cursor,
   CursorAgentError,
   CursorSdkError,
@@ -260,6 +261,34 @@ function shouldRetryCursorPrompt(error: unknown) {
   return error instanceof CursorSdkError
     ? error.isRetryable || isCursorTransportError(error)
     : isCursorTransportError(error)
+}
+
+async function cancelCursorRun(run: CursorRunHandle | undefined) {
+  if (!run?.supports("cancel")) return
+  try {
+    await run.cancel()
+  } catch {
+    // Best-effort: a failed cancel should not mask the original prompt error.
+  }
+}
+
+async function sendCursorRun(input: {
+  active: { agent: CursorAgentHandle; run?: CursorRunHandle }
+  prompt: string
+  onDelta?: (args: { update: unknown }) => void
+}): Promise<CursorRunHandle> {
+  try {
+    const run = await input.active.agent.send(input.prompt, {
+      onDelta: input.onDelta,
+    })
+    input.active.run = run
+    return run
+  } catch (error) {
+    if (error instanceof AgentBusyError && input.active.run) {
+      return input.active.run
+    }
+    throw error
+  }
 }
 
 function logCursorPromptError(input: {
@@ -576,10 +605,11 @@ export const cursorProvider: AgentProvider = {
           const messageID = `cursor:${input.handle.id}:${attempt}:${Date.now()}`
           input.bus?.emit({ kind: "agent.message.start", sessionID: input.handle.id, messageID })
           input.bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "running" })
-          const run = await active.agent.send(input.prompt, {
+          const run = await sendCursorRun({
+            active,
+            prompt: input.prompt,
             onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
           })
-          active.run = run
           const result = await run.wait()
           const status = (result as { status?: string }).status
           const text = extractRunText(result)
@@ -611,7 +641,10 @@ export const cursorProvider: AgentProvider = {
             willRetry,
             error,
           })
-          if (willRetry) continue
+          if (willRetry) {
+            await cancelCursorRun(active.run)
+            continue
+          }
           input.bus?.emit({
             kind: "session.error",
             sessionID: input.handle.id,
@@ -650,10 +683,11 @@ export const cursorProvider: AgentProvider = {
           try {
             const messageID = `cursor:${input.handle.id}:${attempt}:${Date.now()}`
             input.bus?.emit({ kind: "agent.message.start", sessionID: input.handle.id, messageID })
-            const run = await active.agent.send(prompt, {
+            const run = await sendCursorRun({
+              active,
+              prompt,
               onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
             })
-            active.run = run
             const result = await run.wait()
             const status = (result as { status?: string }).status
             const text = extractRunText(result)
@@ -713,6 +747,7 @@ export const cursorProvider: AgentProvider = {
               error,
             })
             if (willRetry) {
+              await cancelCursorRun(active.run)
               continue
             }
             if (error instanceof CursorAgentError) {

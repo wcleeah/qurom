@@ -13,6 +13,7 @@ const sendCalls: string[] = []
 let waitResult: unknown = { status: "finished", result: "plain response" }
 let waitResults: unknown[] = []
 let waitErrors: unknown[] = []
+let sendErrors: unknown[] = []
 let artifactPath = "artifacts/reader-profile.json"
 let artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
 let cancelCalled = false
@@ -39,9 +40,16 @@ mock.module("@cursor/sdk", () => {
     }
   }
   class CursorAgentError extends CursorSdkError {}
+  class AgentBusyError extends CursorAgentError {
+    constructor(message = "[agent_busy] Agent already has an active run") {
+      super(message, { isRetryable: false, code: "agent_busy", status: 409 })
+      this.name = "AgentBusyError"
+    }
+  }
   return {
     CursorSdkError,
     CursorAgentError,
+    AgentBusyError,
     Cursor: {
       models: {
         list: mock(async () => [{
@@ -100,6 +108,8 @@ mock.module("@cursor/sdk", () => {
           },
           async send(prompt: string, options?: { onDelta?: (args: { update: unknown }) => void }) {
             sendCalls.push(prompt)
+            const sendError = sendErrors.shift()
+            if (sendError) throw sendError
             options?.onDelta?.({ update: { type: "thinking-delta", text: "thinking..." } })
             options?.onDelta?.({
               update: {
@@ -117,7 +127,7 @@ mock.module("@cursor/sdk", () => {
             })
             options?.onDelta?.({ update: { type: "text-delta", text: "hello" } })
             return {
-              id: "cursor-run-1",
+              id: `cursor-run-${sendCalls.length}`,
               supports(op: string) {
                 return op === "cancel"
               },
@@ -142,6 +152,7 @@ mock.module("@cursor/sdk", () => {
   }
 })
 
+const { AgentBusyError } = await import("@cursor/sdk")
 const { cursorProvider, clampCursorAgentName } = await import("../src/providers/cursor")
 
 const config: RuntimeConfig = {
@@ -173,6 +184,7 @@ beforeEach(() => {
   waitResult = { status: "finished", result: "plain response" }
   waitResults = []
   waitErrors = []
+  sendErrors = []
   artifactPath = "artifacts/reader-profile.json"
   artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
   cancelCalled = false
@@ -706,6 +718,7 @@ describe("cursorProvider", () => {
 
     expect(result.text).toBe("recovered response")
     expect(sendCalls).toHaveLength(2)
+    expect(cancelCalled).toBe(true)
     expect(debugEvents).toHaveLength(1)
     expect(debugEvents[0]).toMatchObject({
       type: "cursor.prompt.error",
@@ -719,5 +732,53 @@ describe("cursorProvider", () => {
         status: "error",
       },
     })
+  })
+
+  test("attaches to the active run when send returns agent_busy", async () => {
+    const outputFile = await tempOutputFile("message.txt")
+    artifactPath = "artifacts/message.txt"
+    artifactBytes = Buffer.from("recovered response")
+    waitResults = [
+      { status: "error", result: "", message: "transient run failure" },
+      { status: "finished", result: "recovered response" },
+    ]
+    sendErrors = [null, new AgentBusyError()]
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    const result = await cursorProvider.prompt({
+      config,
+      handle,
+      role: "research-drafter",
+      prompt: "hello",
+      outputFile,
+    })
+
+    expect(result.text).toBe("recovered response")
+    expect(sendCalls).toHaveLength(2)
+    expect(cancelCalled).toBe(true)
+    expect(result.raw).toMatchObject({ runId: "cursor-run-1" })
+  })
+
+  test("fails agent_busy when there is no active run to attach", async () => {
+    const outputFile = await tempOutputFile("message.txt")
+    sendErrors = [new AgentBusyError()]
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    await expect(cursorProvider.prompt({
+      config,
+      handle,
+      role: "research-drafter",
+      prompt: "hello",
+      outputFile,
+    })).rejects.toThrow(/agent_busy/)
+    expect(sendCalls).toHaveLength(1)
   })
 })
