@@ -10,9 +10,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["bun"],
-    "lib": ["ESNext", "DOM"],
-    "jsx": "react-jsx",
-    "jsxImportSource": "@opentui/react"
+    "lib": ["ESNext", "DOM"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "defaults/**/*.json"]
+  "include": ["src/**/*.ts", "defaults/**/*.json"]
 }

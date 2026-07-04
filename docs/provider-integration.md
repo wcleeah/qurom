@@ -8,6 +8,19 @@ The most important rule: **declare only the capabilities the provider actually s
 
 ---
 
+## Built-in providers
+
+| Provider | Default? | Typical use |
+|---|---|---|
+| `opencode` | yes (`DEFAULT_PROVIDER` in `src/role-registry.ts`) | Local OpenCode sessions, streaming tool/permission events, native file attachments, provider-managed agents under `.opencode/agents/` |
+| `cursor` | no | Cursor cloud agents via `@cursor/sdk`; role instructions from SQLite; inline structured JSON and remote artifact download |
+
+Roles resolve to a provider through SQLite role bindings (`/config` in the dashboard, seeded from `defaults/quorum-config.sqlite`). A single run may use **both** providers if different roles are bound differently.
+
+Provider processes/servers are acquired lazily through `getProviderLifecycle()` in `src/providers/lifecycle.ts` — reference-counted per run, torn down after idle timeout.
+
+---
+
 ## Provider Shape
 
 Create `src/providers/<provider>.ts` and export an `AgentProvider`.
@@ -16,7 +29,7 @@ Required fields and methods:
 
 | Member | Purpose |
 |---|---|
-| `id` | Stable provider id used in `quorum.config.json` and SQLite role bindings. |
+| `id` | Stable provider id used in SQLite role bindings (seeded from `defaults/quorum-config.sqlite`). |
 | `capabilities` | Set of provider capabilities. Keep this honest and minimal. |
 | `createRunHandle(input)` | Create a provider session/run handle for one logical agent run. |
 | `prompt(input)` | Execute a prompt and return `ProviderPromptResult<T>`. |
@@ -30,6 +43,7 @@ Optional methods:
 | `createEventBridge(input)` | The provider emits streaming events that should flow into the runner event bus. |
 | `validate(input)` | The provider can validate credentials, model ids, role bindings, or local prerequisites. |
 | `configForm(input)` | The provider needs custom controls in the web config UI. |
+| `outputInstructions(input)` | The provider needs custom wording for file-output / structured-output instructions (see Cursor). |
 
 After implementing the provider, register it in `src/providers/registry.ts`.
 
@@ -41,15 +55,17 @@ Capabilities are runtime promises. If a capability is set, shared code will rely
 
 | Capability | Meaning |
 |---|---|
+| `plainTextOutput` | Provider can return unstructured text inline (no JSON schema). |
 | `plainJsonOutput` | Provider can return structured JSON inline in the model response. |
 | `jsonFileOutput` | Provider can write structured JSON to the local output file requested by the app. |
 | `fileOutput` | Provider can produce arbitrary text/file artifacts requested by the app. |
 | `inputFileAttachments` | Provider can receive local files as native prompt attachments. |
 | `inlineInputContext` | Provider can receive app-inlined file context inside the prompt text. |
+| `roleInstructions` | Provider should receive role instruction text from SQLite prepended/wrapped by `AgentRuntime` (Cursor). |
 | `streamingEvents` | Provider can emit live session/message/tool events. |
 | `toolEvents` | Provider event stream includes tool execution state. |
 | `permissionEvents` | Provider event stream includes permission ask/reply state. |
-| `providerManagedAgents` | Provider has named agent definitions or role identities outside the app. |
+| `providerManagedAgents` | Provider has named agent definitions or role identities outside the app (OpenCode). |
 
 Do not set `jsonFileOutput` just because research-qurom wants a JSON artifact in `runs/`. Inline-only providers should return JSON inline. The app can persist parsed JSON to the artifact path after validation.
 
@@ -101,9 +117,9 @@ For inline structured providers, prefer `runProviderStructuredPrompt()`. It:
 
 Do not hardcode structured JSON output instructions in prompt assets or provider agent files.
 
-`src/graph.ts` appends provider-aware output instructions:
+`AgentRuntime` in `src/agent-runtime/runtime.ts` appends provider-aware output instructions via `renderPromptForOutputMode()`:
 
-- `jsonFileOutput`: write JSON to the requested output file and respond with `OK`.
+- `jsonFileOutput`: write JSON to the requested output file (optionally customized by `provider.outputInstructions()`).
 - Inline-only: return JSON inline and do not write an output file.
 
 When adding a new structured JSON prompt, keep the prompt asset focused on the task behavior. Add the output contract in graph/app code so it can adapt to provider capabilities.
@@ -167,8 +183,9 @@ Common event mappings:
 | Tool call started/updated/finished | `agent.tool` |
 | Permission requested | `agent.permission` |
 | Permission answered | `agent.permission.replied` |
+| Token usage reported | `agent.usage` |
 
-If the provider cannot stream, do not fake fine-grained events. The runtime can still emit enough lifecycle status for the TUI and logs.
+If the provider cannot stream, do not fake fine-grained events. `AgentRuntime` emits coarse `session.status` / `session.error` events for non-streaming providers, which is enough for the web dashboard and logs.
 
 ---
 
@@ -182,7 +199,7 @@ Implement `validate()` when the provider has prerequisites that can fail before 
 - unsupported role configuration,
 - missing provider-side agent definitions.
 
-Implement `configForm()` when roles need provider-specific settings in `bun run view`.
+Implement `configForm()` when roles need provider-specific settings in the dashboard (`/config`, or `bun run view:admin` for shipped-defaults editing).
 
 Good config forms:
 
@@ -193,20 +210,38 @@ Good config forms:
 
 OpenCode is special: its model, tool permissions, and role instructions are file-backed in `.opencode/agents/*.md`. The config UI shows those files as read-only and directs users to edit them directly.
 
+Cursor is different: role instructions come from SQLite (`defaults/roles/` seed content) and are injected when `roleInstructions` capability is set. Model and MCP settings are provider-owned form fields.
+
 ---
 
-## Provider Registration
+## Provider lifecycle
+
+Do not call `provider.prepare()` directly from graph or runner code for each run.
+
+Use `getProviderLifecycle()`:
+
+- `acquireForRoles(config, roles)` before a pipeline run (`src/run-manager.ts`)
+- `acquire(config, providerId)` for narrower surfaces such as HTML ask (`src/view/html-ask-sse.ts`)
+- matching release function in `finally`
+- `shutdown()` on process exit
+
+`prepare()` should start servers, sync agent files, or warm credentials. Return `{ cleanup }` so lifecycle can tear providers down after the idle timeout.
+
+The deprecated `prepareConfiguredProviders()` in `src/providers/registry.ts` forwards to lifecycle and should not be used in new code.
+
+---
+
+## Provider registration
 
 Provider registration belongs in `src/providers/registry.ts`.
 
 Make sure registration supports:
 
-- lookup by stable provider id,
-- role-to-provider resolution through `agentRuntime.roles`,
-- fallback to `agentRuntime.defaultProvider`,
-- prerequisite validation for all configured providers.
+- lookup by stable provider id via `getProvider(id)`
+- role-to-provider resolution via `providerForRole(config, role)` (falls back to `DEFAULT_PROVIDER`)
+- prerequisite validation via `validateProviderPrerequisites(config)` for all configured providers
 
-Keep provider ids stable. Changing an id breaks existing config rows and `quorum.config.json` role bindings.
+Keep provider ids stable. Changing an id breaks existing SQLite role-binding rows.
 
 ---
 
@@ -259,7 +294,7 @@ Before merging a provider change, answer these:
 2. Does structured output work for both success and malformed-output paths?
 3. Are app artifacts written only after successful validation?
 4. Are attachments preserved or explicitly rejected?
-5. Does cancellation call the provider's abort path when available?
+5. Does cancellation call the provider's abort path when available? (`AgentRuntime.abort()`; pipeline cancel also aborts tracked OpenCode sessions in `src/runner.ts`)
 6. Are sessions disposed, kept alive, or rehydrated deliberately?
 7. Does the config UI expose only provider-owned settings?
 8. Do tests cover the provider's output mode and lifecycle behavior?

@@ -1,4 +1,0 @@
-- parse streamed event / text, render as json / markdown, or find a way to better present them
-- slight delay after consensus reached to summary screen
-- summary screen too pack
-- some kind of indicator / notification when node proceeded
