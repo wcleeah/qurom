@@ -5,7 +5,7 @@ import { DEFAULT_PROVIDER } from "../role-registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
 import { card, section, summaryRow, summaryTable } from "./html"
 import { layout } from "./layout"
-import { configBackLink, configNav } from "./config-nav"
+import { configNavbarOptions } from "./config-nav"
 import { readActiveOpencodeAgent, renderOpencodeAgentReadonly } from "./opencode-agent-display"
 import { parseQuorumConfigForm, quorumConfigFormScript, renderQuorumConfigForm } from "./quorum-config-form"
 import { escapeHtml } from "./utils"
@@ -50,15 +50,16 @@ export async function renderConfigIndex(options?: { error?: string; draftConfig?
   })
 
   const body = [
-    configBackLink(),
-    configNav("overview"),
     `<div class="header-bar"><div class="header-main"><h1>Configuration</h1><div class="meta-row"><span class="meta-item">Active profile: <strong>${escapeHtml(summary.profile.name)}</strong></span></div></div></div>`,
     section("Status", statusCard),
     `<form class="config-form" method="POST" action="/config/validate"><div class="form-actions"><button type="submit" class="btn btn-primary">Validate providers</button></div></form>`,
     section("Quorum policy", quorumConfigForm),
   ].join("\n")
 
-  return new Response(layout("Configuration", body, quorumConfigFormScript), {
+  return new Response(layout("Configuration", body, {
+    extraHead: quorumConfigFormScript,
+    navbar: configNavbarOptions("Configuration", "overview"),
+  }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -201,8 +202,6 @@ ${roleInstructions}`
   }))
 
   const body = [
-    configBackLink(),
-    configNav("roles"),
     `<div class="header-bar"><div class="header-main"><h1>Roles</h1></div></div>`,
     section("Role provider bindings", cards.join("\n")),
   ].join("\n")
@@ -244,7 +243,10 @@ ${roleInstructions}`
   }
 })();
 </script>`
-  return new Response(layout("Config Roles", body, roleFormScript), {
+  return new Response(layout("Config Roles", body, {
+    extraHead: roleFormScript,
+    navbar: configNavbarOptions("Roles", "roles"),
+  }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -261,13 +263,13 @@ export async function renderConfigPrompts(): Promise<Response> {
   })
 
   const body = [
-    configBackLink(),
-    configNav("prompts"),
     `<div class="header-bar"><div class="header-main"><h1>Prompts</h1></div></div>`,
     section("Prompt assets", cards.join("\n")),
   ].join("\n")
 
-  return new Response(layout("Config Prompts", body), {
+  return new Response(layout("Config Prompts", body, {
+    navbar: configNavbarOptions("Prompts", "prompts"),
+  }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }

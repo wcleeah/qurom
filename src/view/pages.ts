@@ -9,6 +9,7 @@ import { listHtmlReaderAskThreads } from "./html-ask-store"
 import { listHtmlReaderHighlights } from "./html-highlights-store"
 import { getHtmlReaderNotes } from "./html-notes-store"
 import { renderHtmlViewerPage } from "./html-viewer"
+import { appNavbarAction } from "./app-nav"
 import { badge, formatRelative, layout } from "./layout"
 import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
 import { STAR_SCRIPT } from "./star-script"
@@ -51,8 +52,7 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
     files = await getRunFiles(runName)
   } catch { /* ignore */ }
 
-  let html = `<a class="back-link" href="/runs/${encodeURIComponent(runName)}">← Back to run</a>
-<div class="header-bar">
+  let html = `<div class="header-bar">
   <h1>Node: ${escapeHtml(nodeName)}</h1>
   <p class="muted-note dim-text">Run: ${escapeHtml(runName)}</p>
 </div>`
@@ -100,7 +100,13 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
 </div>`
   }
 
-  const fullHtml = layout(`Node: ${nodeName} — ${escapeHtml(runName)}`, html)
+  const fullHtml = layout(`Node: ${nodeName} — ${escapeHtml(runName)}`, html, {
+    navbar: {
+      section: "runs",
+      back: { href: `/runs/${encodeURIComponent(runName)}`, label: "← Back to run" },
+      title: `Node: ${nodeName}`,
+    },
+  })
   return new Response(fullHtml, {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
@@ -156,7 +162,7 @@ export async function renderDebugLog(runName: string, files: string[]): Promise<
   return html
 }
 
-export async function renderRunNav(currentName: string): Promise<string> {
+export async function renderRunNavActions(currentName: string): Promise<string> {
   let names: string[]
   try {
     const entries = await readdir(getRunsDir(), { withFileTypes: true })
@@ -173,12 +179,17 @@ export async function renderRunNav(currentName: string): Promise<string> {
 
   const prevName = index < names.length - 1 ? names[index + 1] : null
   const nextName = index > 0 ? names[index - 1] : null
+  const actions: string[] = []
 
-  return `<div class="run-nav">
-  ${prevName ? `<a href="/runs/${encodeURIComponent(prevName)}">← Prev</a>` : '<span></span>'}
-  <a href="/">↑ All runs</a>
-  ${nextName ? `<a href="/runs/${encodeURIComponent(nextName)}">Next →</a>` : '<span></span>'}
-</div>`
+  if (prevName) {
+    actions.push(appNavbarAction(`/runs/${encodeURIComponent(prevName)}`, "← Prev"))
+  }
+  actions.push(appNavbarAction("/", "All runs"))
+  if (nextName) {
+    actions.push(appNavbarAction(`/runs/${encodeURIComponent(nextName)}`, "Next →"))
+  }
+
+  return actions.join("")
 }
 
 // ---------------------------------------------------------------------------
@@ -286,10 +297,6 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
 </div>`
 
   const body = `
-<div class="site-nav">
-  <a href="/" class="active">Runs</a>
-  <a href="/config">Config</a>
-</div>
 <h1 class="page-title">Runs</h1>
 ${filterHtml}
 ${statsHtml}
@@ -298,7 +305,7 @@ ${activeRunHtml}
 ${STAR_SCRIPT}`
 
   const extraHead = hasActiveRun ? `<meta http-equiv="refresh" content="8">` : ""
-  const html = layout("Runs — quorum", body, extraHead)
+  const html = layout("Runs — quorum", body, { extraHead, navbar: { section: "runs" } })
   return new Response(html, {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
@@ -658,7 +665,7 @@ export async function renderRun(name: string): Promise<Response> {
   const nodeHistoryHtml = renderNodeHistory(liveStatus, name)
   const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
-  const runNavHtml = await renderRunNav(name)
+  const runNavActions = await renderRunNavActions(name)
   const interviewChatHtml = renderInterviewChatCard(name, liveStatus)
 
   const extraHead = ""  // Background poll handles refresh
@@ -682,8 +689,6 @@ export async function renderRun(name: string): Promise<Response> {
 </div></div>`
 
   const body = `
-${runNavHtml}
-<a class="back-link" href="/">← Back to runs</a>
 ${liveStatus?.phase === "running" ? `<div class="refresh-controls">
   <span id="refresh-dot" class="refresh-dot" aria-hidden="true"></span>
   <span id="refresh-status">Polling every 8s</span>
@@ -720,7 +725,15 @@ ${filesSection}
 ${STAR_SCRIPT}
 ${liveStatus?.phase === "running" ? POLLING_SCRIPT : ""}`
 
-  const html = layout(`${escapeHtml(topic)} — quorum run`, body, extraHead)
+  const html = layout(`${escapeHtml(topic)} — quorum run`, body, {
+    extraHead,
+    navbar: {
+      section: "runs",
+      back: { href: "/", label: "← Back to runs" },
+      title: topic,
+      actionsHtml: runNavActions,
+    },
+  })
 
   return new Response(html, {
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -760,15 +773,16 @@ export async function serveRawFile(
     const rawContent = await file.text()
     const htmlBody = `<div class="md-content">${renderMarkdown(rawContent)}</div>`
     const baseName = basename(filePath)
-    const html = layout(
-      `${baseName} — ${escapeHtml(runName)}`,
-      `
-<a class="back-link" href="/runs/${encodeURIComponent(runName)}">← Back to run</a>
-<p class="muted-note source-note">
-  <a href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(filePath)}?source=1">View raw source</a>
-</p>
-${htmlBody}`,
-    )
+    const runHref = `/runs/${encodeURIComponent(runName)}`
+    const sourceHref = `${runHref}/raw/${encodeURIComponent(filePath)}?source=1`
+    const html = layout(`${baseName} — ${escapeHtml(runName)}`, htmlBody, {
+      navbar: {
+        section: "runs",
+        back: { href: runHref, label: "← Back to run" },
+        title: baseName,
+        actionsHtml: appNavbarAction(sourceHref, "View raw source"),
+      },
+    })
     return new Response(html, {
       headers: { "content-type": "text/html; charset=utf-8" },
     })
@@ -807,17 +821,16 @@ ${htmlBody}`,
       ? renderStructuredJson(baseName, parsed)
       : renderJsonCard(parsed, { defaultOpen: true })
 
-    const html = layout(
-      `${baseName} — ${escapeHtml(runName)}`,
-      `
-<a class="back-link" href="/runs/${encodeURIComponent(runName)}">← Back to run</a>
-<div class="row-inline page-title">
-  <h2 class="title-reset">${escapeHtml(baseName)}</h2>
-  <a href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(filePath)}?source=1" class="muted-note">View raw source</a>
-</div>
-${structuredHtml}
-`,
-    )
+    const runHref = `/runs/${encodeURIComponent(runName)}`
+    const sourceHref = `${runHref}/raw/${encodeURIComponent(filePath)}?source=1`
+    const html = layout(`${baseName} — ${escapeHtml(runName)}`, structuredHtml, {
+      navbar: {
+        section: "runs",
+        back: { href: runHref, label: "← Back to run" },
+        title: baseName,
+        actionsHtml: appNavbarAction(sourceHref, "View raw source"),
+      },
+    })
     return new Response(html, {
       headers: { "content-type": "text/html; charset=utf-8" },
     })

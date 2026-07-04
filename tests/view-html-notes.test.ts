@@ -66,7 +66,7 @@ describe("html viewer page", () => {
     const html = renderHtmlViewerPage("alpha-run", "final.html", "Saved note", [])
 
     expect(html).toContain('class="html-viewer-shell"')
-    expect(html).toContain('class="html-viewer-navbar"')
+    expect(html).toContain('class="app-navbar"')
     expect(html).toContain("← Back to run")
     expect(html).toContain("/runs/alpha-run")
     expect(html).toContain('class="html-viewer-frame"')

@@ -26,7 +26,7 @@ import { DEFAULT_PROVIDER } from "../role-registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
 import { card, section } from "./html"
 import { layout } from "./layout"
-import { configBackLink, configNav } from "./config-nav"
+import { configNavbarOptions } from "./config-nav"
 import { readDefaultsOpencodeAgent, renderOpencodeAgentReadonly } from "./opencode-agent-display"
 import { parseQuorumConfigForm, quorumConfigFormScript, renderQuorumConfigForm } from "./quorum-config-form"
 import { escapeHtml } from "./utils"
@@ -64,14 +64,15 @@ export async function renderConfigDefaultsIndex(options?: { error?: string; draf
   ].join("\n")
 
   const body = [
-    configBackLink(),
-    configNav("defaults"),
     `<div class="header-bar"><div class="header-main"><h1>Default resources</h1><div class="meta-row"><span class="meta-item">Directory: <code>${escapeHtml(summary.root)}</code></span></div></div></div>`,
     section("Overview", overviewCards),
     section("Quorum policy", quorumConfigForm),
   ].join("\n")
 
-  return new Response(layout("Default resources", body, quorumConfigFormScript), {
+  return new Response(layout("Default resources", body, {
+    extraHead: quorumConfigFormScript,
+    navbar: configNavbarOptions("Default resources", "defaults"),
+  }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -92,13 +93,13 @@ export async function renderConfigDefaultsPrompts(): Promise<Response> {
   })
 
   const body = [
-    configBackLink(),
-    configNav("defaults"),
     `<div class="header-bar"><div class="header-main"><h1>Default prompts</h1></div></div>`,
     section("Shipped prompt templates", cards.join("\n")),
   ].join("\n")
 
-  return new Response(layout("Default prompts", body), {
+  return new Response(layout("Default prompts", body, {
+    navbar: configNavbarOptions("Default prompts", "defaults"),
+  }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -119,13 +120,13 @@ export async function renderConfigDefaultsRoles(): Promise<Response> {
   })
 
   const body = [
-    configBackLink(),
-    configNav("defaults"),
     `<div class="header-bar"><div class="header-main"><h1>Default role instructions</h1></div></div>`,
     section("Shipped role instructions", cards.join("\n")),
   ].join("\n")
 
-  return new Response(layout("Default roles", body), {
+  return new Response(layout("Default roles", body, {
+    navbar: configNavbarOptions("Default role instructions", "defaults"),
+  }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -143,13 +144,13 @@ export async function renderConfigDefaultsOpencode(): Promise<Response> {
   })
 
   const body = [
-    configBackLink(),
-    configNav("defaults"),
     `<div class="header-bar"><div class="header-main"><h1>Default OpenCode agents</h1></div></div>`,
     section("Shipped OpenCode agent definitions", cards.join("\n") || "<p class=\"muted-text\">No defaults OpenCode agents found.</p>"),
   ].join("\n")
 
-  return new Response(layout("Default OpenCode agents", body), {
+  return new Response(layout("Default OpenCode agents", body, {
+    navbar: configNavbarOptions("Default OpenCode agents", "defaults"),
+  }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -289,8 +290,6 @@ export async function renderConfigDefaultsBindings(): Promise<Response> {
   })
 
   const body = [
-    configBackLink(),
-    configNav("defaults"),
     `<div class="header-bar"><div class="header-main"><h1>Default role bindings</h1></div></div>`,
     section("Shipped provider bindings", cards.join("\n")),
   ].join("\n")
@@ -326,7 +325,10 @@ export async function renderConfigDefaultsBindings(): Promise<Response> {
 })();
 </script>`
 
-  return new Response(layout("Default role bindings", body, roleFormScript), {
+  return new Response(layout("Default role bindings", body, {
+    extraHead: roleFormScript,
+    navbar: configNavbarOptions("Default role bindings", "defaults"),
+  }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }

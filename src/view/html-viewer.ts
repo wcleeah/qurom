@@ -8,6 +8,7 @@ import { askThreadsToJson, HTML_ASK_SCRIPT } from "./html-viewer-ask"
 import { HTML_VIEWER_MARKDOWN_SCRIPT } from "./html-viewer-markdown"
 import type { HtmlReaderAskThread } from "./html-ask-store"
 import { highlightsToJson, HTML_HIGHLIGHTS_SCRIPT } from "./html-viewer-highlights"
+import { appNavbarAction, appNavbarButton, renderAppNavbar } from "./app-nav"
 import { layoutHtmlViewer } from "./layout"
 import { escapeHtml } from "./utils"
 
@@ -168,22 +169,22 @@ export function renderHtmlViewerPage(
   const initialSaveLabel = notes.trim().length > 0 ? "All changes saved" : "Notes auto-save"
   const highlightsJson = highlightsToJson(highlights)
   const askThreadsJson = askThreadsToJson(askThreads)
+  const navbarActions = [
+    appNavbarButton("Hide panel", 'class="app-navbar-action html-viewer-sidebar-toggle" data-html-sidebar-toggle aria-expanded="true"'),
+    appNavbarAction(`${rawHref}?source=1`, "View raw"),
+    appNavbarAction(downloadHref, "Download", "html-viewer-download", `download="${escapeHtml(baseName)}"`),
+  ].join("")
+  const navbar = renderAppNavbar({
+    section: "runs",
+    back: { href: runHref, label: "← Back to run" },
+    title: baseName,
+    actionsHtml: navbarActions,
+  })
 
   const body = `<div class="html-viewer-shell">
   <div data-html-highlights-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-highlights="${highlightsJson}"></div>
   <div data-html-ask-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-threads="${askThreadsJson}" data-highlights="${highlightsJson}"></div>
-  <header class="html-viewer-navbar">
-    <div class="html-viewer-navbar-start">
-      <a class="html-viewer-back" href="${runHref}">← Back to run</a>
-      <span class="html-viewer-filename" title="${escapeHtml(filePath)}">${escapeHtml(baseName)}</span>
-    </div>
-    <div class="html-viewer-navbar-actions">
-      <button type="button" class="html-viewer-sidebar-toggle" data-html-sidebar-toggle aria-expanded="true">Hide panel</button>
-      <a class="html-viewer-action" href="${rawHref}?source=1">View raw</a>
-      <a class="html-viewer-action html-viewer-download" href="${downloadHref}" download="${escapeHtml(baseName)}">Download</a>
-      <button type="button" class="theme-toggle html-viewer-theme-toggle" data-theme-toggle aria-label="Toggle color theme"></button>
-    </div>
-  </header>
+  ${navbar}
   <div class="html-viewer-main">
     <div class="html-viewer-frame-wrap">
       <iframe class="html-viewer-frame" src="${embedSrc}" title="${escapeHtml(baseName)}"></iframe>

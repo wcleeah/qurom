@@ -16,14 +16,14 @@ function field(label: string, name: string, value: string | number, type: "numbe
 }
 
 function checkbox(name: string, label: string, checked: boolean, help = "") {
-  return `<label class="form-field form-checkbox"><input type="checkbox" name="${escapeHtml(name)}" value="1"${checked ? " checked" : ""}><span>${escapeHtml(label)}</span>${help ? `<small>${escapeHtml(help)}</small>` : ""}</label>`
+  return `<label class="form-checkbox"><input type="checkbox" name="${escapeHtml(name)}" value="1"${checked ? " checked" : ""}><span>${escapeHtml(label)}</span>${help ? `<small>${escapeHtml(help)}</small>` : ""}</label>`
 }
 
 function researchToolsSection(config: QuorumConfig) {
   const prefer = new Set(config.researchTools.prefer)
   const checkboxes = RESEARCH_TOOL_IDS.map((id) => {
     const checked = prefer.has(id) ? " checked" : ""
-    return `<label class="form-field form-checkbox"><input type="checkbox" name="researchTools.prefer" value="${escapeHtml(id)}"${checked}><span>${escapeHtml(id)}</span></label>`
+    return `<label class="form-checkbox"><input type="checkbox" name="researchTools.prefer" value="${escapeHtml(id)}"${checked}><span>${escapeHtml(id)}</span></label>`
   }).join("\n")
   const providerOptions = RESEARCH_TOOL_IDS.map((id) => {
     const selected = config.researchTools.webSearchProvider === id ? " selected" : ""
@@ -31,7 +31,7 @@ function researchToolsSection(config: QuorumConfig) {
   }).join("")
   return `<div class="form-section">
   <h3>Research tools</h3>
-  <div class="form-field"><span>Preferred tools</span>${checkboxes}</div>
+  <div class="form-field"><span>Preferred tools</span><div class="checkbox-group">${checkboxes}</div></div>
   <label class="form-field"><span>Web search provider</span><select class="form-input" name="researchTools.webSearchProvider">${providerOptions}</select></label>
 </div>`
 }

@@ -1,3 +1,4 @@
+import { renderAppNavbar, type AppNavbarOptions } from "./app-nav"
 import { CSS } from "./styles"
 import { escapeHtml } from "./utils"
 import type { RunStatus } from "./types"
@@ -6,24 +7,38 @@ const THEME_BOOT_SCRIPT = `(function(){try{var t=localStorage.getItem("theme");i
 
 const THEME_TOGGLE_SCRIPT = `(function(){
   var root=document.documentElement;
-  var btn=document.querySelector("[data-theme-toggle]");
-  if(!btn)return;
+  var buttons=document.querySelectorAll("[data-theme-toggle]");
+  if(!buttons.length)return;
   function current(){
     var t=root.getAttribute("data-theme");
     if(t)return t;
     return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
   }
-  function render(){btn.textContent=current()==="dark"?"Light":"Dark";}
-  render();
-  btn.addEventListener("click",function(){
-    var next=current()==="dark"?"light":"dark";
-    root.setAttribute("data-theme",next);
-    try{localStorage.setItem("theme",next);}catch(e){}
-    render();
+  function render(btn){btn.textContent=current()==="dark"?"Light":"Dark";}
+  buttons.forEach(function(btn){render(btn);});
+  buttons.forEach(function(btn){
+    btn.addEventListener("click",function(){
+      var next=current()==="dark"?"light":"dark";
+      root.setAttribute("data-theme",next);
+      try{localStorage.setItem("theme",next);}catch(e){}
+      buttons.forEach(render);
+    });
   });
 })();`
 
-export function layout(title: string, body: string, extraHead = ""): string {
+export type LayoutOptions = {
+  extraHead?: string
+  navbar?: AppNavbarOptions
+}
+
+function resolveLayoutOptions(options?: LayoutOptions | string): LayoutOptions {
+  if (typeof options === "string") return { extraHead: options }
+  return options ?? {}
+}
+
+export function layout(title: string, body: string, options?: LayoutOptions | string): string {
+  const { extraHead = "", navbar = { section: "runs" } } = resolveLayoutOptions(options)
+  const navbarHtml = renderAppNavbar(navbar)
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -39,9 +54,11 @@ ${THEME_BOOT_SCRIPT}
 </script>
 ${extraHead}
 </head>
-<body>
-<button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme"></button>
+<body class="app-body">
+${navbarHtml}
+<main class="app-main">
 ${body}
+</main>
 <script>
 ${THEME_TOGGLE_SCRIPT}
 </script>

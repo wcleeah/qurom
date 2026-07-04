@@ -51,7 +51,7 @@ describe("view artifact renderers", () => {
 
 describe("view assets and html helpers", () => {
   test("keeps styles and client script split into focused modules", () => {
-    expect(CSS).toContain(".stack-card")
+    expect(CSS).toContain(".app-navbar")
     expect(CSS).toContain(".html-viewer-shell")
     expect(CSS).not.toContain("<script>")
     expect(POLLING_SCRIPT).toContain("<script>")
@@ -258,7 +258,8 @@ describe("html viewer renderer", () => {
   test("includes sticky navbar controls and notes form action", () => {
     const html = renderHtmlViewerPage("example-run", "design-html-round-0.html", "", [])
 
-    expect(html).toContain("html-viewer-navbar")
+    expect(html).toContain("app-navbar")
+    expect(html).toContain("app-navbar-pill")
     expect(html).toContain("/runs/example-run/html-notes")
     expect(html).toContain('data-html-notes-form')
     expect(html).toContain("data-html-save-indicator")
