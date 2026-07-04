@@ -46,6 +46,23 @@ export function configuredAgentRoles(config: RuntimeConfig): AgentRole[] {
   return listConfiguredAgentRoles(config)
 }
 
+export function providersForRoles(config: RuntimeConfig, roles: AgentRole[]): AgentProvider[] {
+  const unique = new Map<AgentProviderId, AgentProvider>()
+  for (const role of roles) {
+    const provider = providerForRole(config, role)
+    unique.set(provider.id, provider)
+  }
+  return [...unique.values()]
+}
+
+export function rolesUsingProvider(config: RuntimeConfig, providerId: AgentProviderId): AgentRole[] {
+  return configuredAgentRoles(config).filter((role) => providerForRole(config, role).id === providerId)
+}
+
+export function hasProviderWithEventBridge(config: RuntimeConfig, roles: AgentRole[]): boolean {
+  return providersForRoles(config, roles).some((provider) => typeof provider.createEventBridge === "function")
+}
+
 export async function validateProviderPrerequisites(config: RuntimeConfig) {
   const roles = configuredAgentRoles(config)
   const rolesByProvider = new Map<AgentProvider, AgentRole[]>()
@@ -66,21 +83,8 @@ export async function validateProviderPrerequisites(config: RuntimeConfig) {
   }
 }
 
+/** @deprecated Prefer lazy acquire via {@link getProviderLifecycle} from `./lifecycle.ts`. */
 export async function prepareConfiguredProviders(config: RuntimeConfig): Promise<() => Promise<void>> {
-  const uniqueProviders = new Set<AgentProvider>()
-  for (const role of configuredAgentRoles(config)) {
-    uniqueProviders.add(providerForRole(config, role))
-  }
-
-  const cleanups: Array<() => Promise<void>> = []
-  for (const provider of uniqueProviders) {
-    const prepared = await provider.prepare?.({ config })
-    if (prepared?.cleanup) cleanups.push(prepared.cleanup)
-  }
-
-  return async () => {
-    for (const cleanup of cleanups.reverse()) {
-      await cleanup().catch(() => {})
-    }
-  }
+  const { getProviderLifecycle } = await import("./lifecycle")
+  return getProviderLifecycle().acquireForRoles(config, configuredAgentRoles(config))
 }

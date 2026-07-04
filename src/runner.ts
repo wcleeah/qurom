@@ -11,6 +11,7 @@ import { Command, GraphRecursionError } from "@langchain/langgraph"
 import type { RuntimeConfig } from "./config"
 import { AUDITOR_ROLES, DRAFTER_ROLE } from "./role-registry"
 import { researchStateSchema, type GraphInput, type InputRequest, type ResearchState } from "./schema"
+import { hasProviderWithEventBridge, providersForRoles } from "./providers/registry"
 import type { validateProviderPrerequisites } from "./providers/registry"
 import type { PromptBundle } from "./prompt-assets"
 import { answeredQuestionsFromTranscript } from "./reader-transcript"
@@ -128,6 +129,40 @@ export type BridgeFactory = (
     onStreamError?: (error: unknown) => void
   },
 ) => Bridge
+
+export function createNoOpBridge(): Bridge {
+  return {
+    async start() {},
+    async stop() {},
+  }
+}
+
+export function createBridgeForRoles(
+  config: RuntimeConfig,
+  roles: string[],
+  opts: {
+    bus: EventBus
+    getRunDir: () => string | undefined
+    onStreamError?: (error: unknown) => void
+  },
+): Bridge {
+  if (!hasProviderWithEventBridge(config, roles)) {
+    return createNoOpBridge()
+  }
+
+  for (const provider of providersForRoles(config, roles)) {
+    if (provider.createEventBridge) {
+      return provider.createEventBridge({
+        config,
+        bus: opts.bus,
+        getRunDir: opts.getRunDir,
+        onStreamError: opts.onStreamError,
+      })
+    }
+  }
+
+  return createNoOpBridge()
+}
 
 export type RuntimePrerequisites = Awaited<ReturnType<typeof validateProviderPrerequisites>>
 
