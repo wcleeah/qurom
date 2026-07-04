@@ -20,6 +20,8 @@ import {
 } from "./html-ask-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
 import { renderIndex, renderNodePage, renderRoundPage, renderFilesPage, renderRun, serveRawFile } from "./pages"
+import { handleOpencodeBootstrapPost } from "./opencode-bootstrap-view"
+import { handleRunApi } from "./run-api"
 import { resolveRunName, safeFilePath, HOST, PORT, safeRunPath } from "./paths"
 import { setRunStarred } from "./starred-store"
 import { viewServerAdminEnabled } from "./server-options"
@@ -57,6 +59,18 @@ export function startViewServer(): void {
           return await renderIndex(url.searchParams)
         } catch (e) {
           console.error("GET / error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const runApiResponse = await handleRunApi(req, path, url)
+      if (runApiResponse) return runApiResponse
+
+      if (path === "/api/opencode-bootstrap" && req.method === "POST") {
+        try {
+          return await handleOpencodeBootstrapPost(req)
+        } catch (e) {
+          console.error("POST /api/opencode-bootstrap error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }
