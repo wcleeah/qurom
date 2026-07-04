@@ -58,9 +58,9 @@ describe("renderRunActionStrip", () => {
 })
 
 describe("resolveRunVerdict", () => {
-  test("reports design approved", () => {
+  test("reports design complete", () => {
     const result = resolveRunVerdict({ researchStatus: "approved", designStatus: "approved" })
-    expect(result.verdictText).toContain("Design approved")
+    expect(result.verdictText).toContain("Design complete")
     expect(result.errored).toBe(false)
   })
 

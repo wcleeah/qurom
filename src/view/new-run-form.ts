@@ -20,7 +20,7 @@ const TAB_COPY: Record<string, { hint: string; submit: string }> = {
     submit: "Resume research",
   },
   design: {
-    hint: "Resume the design quorum for an approved research run.",
+    hint: "Resume HTML generation for a research-complete run.",
     submit: "Resume design",
   },
 }
@@ -90,7 +90,7 @@ export function renderNewRunForm(options: NewRunFormOptions): string {
       </form>
       <form class="new-run-panel config-form" data-new-run-panel="design" method="POST" action="/api/runs/design-placeholder" data-design-form role="tabpanel">
         ${panelHint("design")}
-        <label class="form-field"><span>Approved run ID</span>
+        <label class="form-field"><span>Research run ID</span>
           <input class="form-input" name="runId" placeholder="my-topic-abc123" required${disabled} />
         </label>
         <div class="form-actions new-run-actions"><button type="submit" class="btn btn-primary"${disabled}>${TAB_COPY.design.submit}</button></div>

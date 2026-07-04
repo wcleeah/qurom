@@ -151,7 +151,13 @@ a:hover { text-decoration: underline; }
 .title-reset { margin: 0; }
 .muted-note { color: var(--muted); font-size: 0.8rem; }
 .source-note { margin-bottom: 1rem; }
-.header-main { flex: 1; min-width: 0; }
+.header-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
 .danger-text { color: var(--red); }
 .success-text { color: var(--green); }
 .running-text { color: var(--orange); }
@@ -475,9 +481,12 @@ a:hover { text-decoration: underline; }
 .meta-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem 1rem;
 }
 .meta-item {
+  display: inline-flex;
+  align-items: center;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 0.75rem;
@@ -1393,6 +1402,20 @@ code {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+.round-strip-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+.round-strip-head h2 {
+  margin: 0;
+}
+.round-strip-details-link {
+  text-decoration: none;
+}
 .round-chip {
   display: inline-flex;
   align-items: center;
@@ -1402,6 +1425,27 @@ code {
   border-radius: 999px;
   text-decoration: none;
   font-size: 0.82rem;
+  background: inherit;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+}
+.round-audit-panels {
+  margin-top: 0.75rem;
+}
+.round-audit-panel {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--card-bg, var(--bg));
+}
+.round-audit-panel-head {
+  margin-bottom: 0.5rem;
+}
+.final-output-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
 }
 .round-chip.active {
   border-color: var(--accent);

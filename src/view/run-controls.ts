@@ -150,7 +150,7 @@ export function resolveRunVerdict(input: {
   }
 
   if (input.designStatus === "approved") {
-    return { errored: false, verdictText: "Research approved · Design approved" }
+    return { errored: false, verdictText: "Research approved · Design complete" }
   }
   if (input.designStatus === "failed") {
     return { errored: true, verdictText: "Research approved · Design failed (best-effort HTML saved)" }

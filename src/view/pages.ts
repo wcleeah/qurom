@@ -1,10 +1,10 @@
 import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { POLLING_SCRIPT, NODE_REFRESH_SCRIPT, ROUND_REFRESH_SCRIPT, FILES_REFRESH_SCRIPT, INDEX_REFRESH_SCRIPT } from "./client-script"
+import { POLLING_SCRIPT, NODE_REFRESH_SCRIPT, ROUND_REFRESH_SCRIPT, FILES_REFRESH_SCRIPT, INDEX_REFRESH_SCRIPT, ROUND_TABS_SCRIPT } from "./client-script"
 import { renderRefreshControls } from "./refresh-controls"
 import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
 import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
-import { renderRunControlsSection, renderNodeControlsSection, renderRunCompletionBanner, resolveRunResumeActions, resolveRunVerdict } from "./run-controls"
+import { renderRunControlsSection, renderNodeControlsSection, resolveRunResumeActions } from "./run-controls"
 import { tryGetRunManager } from "../run-manager"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
@@ -13,6 +13,7 @@ import { computeStats, getRunFiles, listRuns, readLiveStatus, readNodeHistory } 
 import { getNodeDefinition } from "./node-registry"
 import { renderNodeDashboard, renderNodeExecutionHistory, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
 import { renderLiveStatusMeta, renderRoundDetailPage, renderRoundStrip } from "./round-view"
+import { indexRunArtifacts } from "./run-artifacts"
 import { renderRunTelemetryStrip, resolveRunTelemetry, runElapsedMs } from "./telemetry-view"
 import { renderFileBrowser } from "./file-browser"
 import { listHtmlReaderAskThreads } from "./html-ask-store"
@@ -22,7 +23,7 @@ import { renderHtmlViewerPage } from "./html-viewer"
 import { tableWrap } from "./html"
 import { renderDebugLogHtml, type DebugLogEntry } from "./debug-log-viewer"
 import { appNavbarAction } from "./app-nav"
-import { badge, formatRelative, layout } from "./layout"
+import { badge, formatRelative, layout, phaseBadge, designPhaseBadge, designStatusLabel } from "./layout"
 import { getRunsDir, resolveRunName, safeFilePath, safeRunPath } from "./paths"
 import { STAR_SCRIPT } from "./star-script"
 import { isRunStarred } from "./starred-store"
@@ -333,7 +334,7 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
       const iconsStr = run.hasFinalHtml ? ` <span class="tiny-text muted-text">html</span>` : ""
 
       const designBadge = run.designStatus
-        ? `<span class="badge ${run.designStatus === "approved" ? "badge-approved" : run.designStatus === "failed" ? "badge-failed" : "badge-running"} design-badge">design: ${run.designStatus}</span>`
+        ? `<span class="badge ${run.designStatus === "approved" ? "badge-approved" : run.designStatus === "failed" ? "badge-failed" : "badge-running"} design-badge">design: ${escapeHtml(designStatusLabel(run.designStatus))}</span>`
         : ""
 
       runCards += `<div class="run-card">
@@ -480,20 +481,6 @@ export async function renderRun(name: string): Promise<Response> {
   // Live status (if run is active)
   const liveStatus = await readLiveStatus(name)
 
-  // Overall status: combine research + design
-  let status: RunStatus = "running"
-  if (researchStatus === "approved" && design?.status === "approved") {
-    status = "approved"
-  } else if (researchStatus === "approved" && !design) {
-    status = "approved" // research passed, no design phase
-  } else if (researchStatus === "approved" && design?.status === "failed") {
-    status = "failed"
-  } else if (researchStatus === "failed") {
-    status = "failed"
-  } else if (researchStatus === "approved" && design) {
-    status = "running" // research passed, design still running or pending
-  }
-
   const topic =
     requestJson?.inputSummary?.title ??
     requestJson?.topic ??
@@ -501,79 +488,12 @@ export async function renderRun(name: string): Promise<Response> {
 
   const starred = await isRunStarred(name)
 
-  // ── Counts for quick stats ──
-  const draftCount = countByPattern(files, /^draft-round-\d+\.md$/)
-  const auditCount = countByPattern(files, /^audits-round-\d+\.json$/)
-  const aggregatedCount = countByPattern(files, /^aggregated-findings-round-\d+\.json$/)
-  const rebuttalCount =
-    countByPattern(files, /^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/) +
-    countByPattern(files, /^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/)
-  const reviewCount = countByPattern(files, /^drafter-finding-review-round-\d+\.json$/)
-  const designFilesCount = countByPattern(files, /^design-/)
-  void designFilesCount
-
   const totalBytes = [...fileSizes.values()].reduce((a, b) => a + b, 0)
-
-  // ── Quick stats dashboard (artifact counts only; files/size live in telemetry strip) ──
-  const statCards: string[] = []
-
-  if (draftCount > 0) {
-    statCards.push(`
-  <div class="run-stat">
-    <div class="run-stat-value">${draftCount}</div>
-    <div class="run-stat-label">Drafts</div>
-  </div>`)
-  }
-
-  if (auditCount > 0) {
-    statCards.push(`
-  <div class="run-stat">
-    <div class="run-stat-value">${auditCount}</div>
-    <div class="run-stat-label">Audits</div>
-  </div>`)
-  }
-
-  if (rebuttalCount > 0) {
-    statCards.push(`
-  <div class="run-stat">
-    <div class="run-stat-value">${rebuttalCount}</div>
-    <div class="run-stat-label">Rebuttals</div>
-  </div>`)
-  }
-
-  if (reviewCount > 0) {
-    statCards.push(`
-  <div class="run-stat">
-    <div class="run-stat-value">${reviewCount}</div>
-    <div class="run-stat-label">Reviews</div>
-  </div>`)
-  }
-
-  if (aggregatedCount > 0) {
-    statCards.push(`
-  <div class="run-stat">
-    <div class="run-stat-value">${aggregatedCount}</div>
-    <div class="run-stat-label">Aggregations</div>
-  </div>`)
-  }
-
-  if (design && design.hasDesignFiles) {
-    const designHtmlCount = countByPattern(files, /^design-html-round-\d+\.html$/)
-    statCards.push(`
-  <div class="run-stat">
-    <div class="run-stat-value">${designHtmlCount}</div>
-    <div class="run-stat-label">Design HTML</div>
-  </div>`)
-  }
-
-  const statsHtml = statCards.length > 0
-    ? `<div class="run-stats-grid">${statCards.join("")}</div>`
-    : ""
 
   // ── Design summary card ──
   let designSummaryHtml = ""
   if (design && design.hasDesignFiles) {
-    const designOutcomeLabel = design.status === "approved" ? "Approved"
+    const designOutcomeLabel = design.status === "approved" ? "Complete"
       : design.status === "failed" ? "Failed"
       : "Running"
     const designOutcomeClass = design.status === "approved" ? "approved"
@@ -593,58 +513,55 @@ export async function renderRun(name: string): Promise<Response> {
 </div>`
   }
 
-  // ── Hero: final.html ──
-  let heroHtml = ""
+  // ── Final output (prominent quick-access links) ──
+  let finalOutputHtml = ""
+  const finalOutputLinks: string[] = []
+
   if (hasFinalHtml) {
-    heroHtml = `<div class="card">
-  <div class="row-inline card-compact">
-    <h2 class="title-reset">Final rendered page</h2>
-  </div>
-  <a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.html" target="_blank" rel="noopener">
-    Open final.html →
-  </a>
-</div>`
-  }
-
-  // ── Key output file links (prominent quick-access) ──
-  let keyOutputsHtml = ""
-  const keyLinks: string[] = []
-
-  if (hasFinalMd) {
-    const sz = fileSizes.get("final.md") ?? 0
-    keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.md">
-  View final.md — approved draft (${formatBytes(sz)})
+    finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.html" target="_blank" rel="noopener">
+  Open final.html →
 </a>`)
-  }
-  if (hasLatestDraft) {
-    const sz = fileSizes.get("latest-draft.md") ?? 0
-    keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/latest-draft.md">
-  View latest-draft.md — failed run (${formatBytes(sz)})
+  } else {
+    if (hasFinalMd) {
+      const sz = fileSizes.get("final.md") ?? 0
+      finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.md">
+  View final.md (${formatBytes(sz)})
 </a>`)
-  }
-  if (hasFailureJson) {
-    keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/failure.json">
-  View failure.json — error details
+    } else if (hasLatestDraft) {
+      const sz = fileSizes.get("latest-draft.md") ?? 0
+      finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/latest-draft.md">
+  View latest-draft.md (${formatBytes(sz)})
 </a>`)
-  }
+    } else {
+      const latestDraftRound = files
+        .filter((f) => /^draft-round-\d+\.md$/.test(f))
+        .sort()
+        .pop()
+      if (latestDraftRound) {
+        const sz = fileSizes.get(latestDraftRound) ?? 0
+        finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/${encodeURIComponent(latestDraftRound)}">
+  View ${latestDraftRound} (${formatBytes(sz)})
+</a>`)
+      }
+    }
 
-  // Design outputs
-  if (design && design.hasDesignFiles) {
     const latestDesignHtml = files
       .filter((f) => /^design-html-round-\d+\.html$/.test(f))
       .sort()
       .pop()
     if (latestDesignHtml) {
-      keyLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/${encodeURIComponent(latestDesignHtml)}">
+      finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/${encodeURIComponent(latestDesignHtml)}">
   View ${latestDesignHtml} — design draft
 </a>`)
     }
   }
 
-  if (keyLinks.length > 0) {
-    keyOutputsHtml = `<div class="section">
-  <h2>Key outputs</h2>
-  ${keyLinks.join("\n")}
+  if (finalOutputLinks.length > 0) {
+    finalOutputHtml = `<div class="section">
+  <h2>Final output</h2>
+  <div class="final-output-links">
+    ${finalOutputLinks.join("\n")}
+  </div>
 </div>`
   }
 
@@ -663,13 +580,6 @@ export async function renderRun(name: string): Promise<Response> {
 
   const isRunning = liveStatus?.phase === "running"
   const runActiveGlobally = Boolean(tryGetRunManager()?.status().active)
-  const showCompletion = liveStatus && (liveStatus.phase === "complete" || liveStatus.phase === "error")
-  const verdict = resolveRunVerdict({
-    researchStatus: researchStatus,
-    designStatus: design?.status ?? null,
-    liveError: liveStatus?.phase === "error" ? liveStatus.error : undefined,
-    hasFailureJson,
-  })
   const resumeActions = resolveRunResumeActions({
     isRunning,
     hasFinalMd,
@@ -679,14 +589,8 @@ export async function renderRun(name: string): Promise<Response> {
   const runControlsHtml = renderRunControlsSection({
     runName: name,
     isRunning,
-    showCompletion: Boolean(showCompletion),
-    completionHtml: showCompletion
-      ? renderRunCompletionBanner({
-        errored: verdict.errored,
-        verdictText: verdict.verdictText,
-        outputDir: dirPath,
-      })
-      : "",
+    showCompletion: false,
+    completionHtml: "",
     resumeActions,
     runActiveGlobally,
   })
@@ -701,15 +605,21 @@ export async function renderRun(name: string): Promise<Response> {
   const failureBannerSection = `<div id="failure-banner-section">${failureBannerHtml}</div>`
   const interviewChatSection = `<div id="interview-chat-section">${interviewChatHtml}</div>`
   const markdownSection = ""
-  const statsSection = `<div id="stats-section">${statsHtml}</div>`
-  const heroSection = `<div id="hero-section">${heroHtml}</div>`
-  const keyOutputsSection = `<div id="key-outputs-section">${keyOutputsHtml}</div>`
+  const finalOutputSection = `<div id="final-output-section">${finalOutputHtml}</div>`
   const designSummarySection = `<div id="design-summary-section">${designSummaryHtml}</div>`
   const filesSection = `<div id="files-section">${filesLinkSection}</div>`
+
+  const hasResearchRounds = indexRunArtifacts(files).rounds.length > 0
 
   const inputModeLabel = requestJson?.inputMode
     ? `<span class="meta-item">Input: <strong>${escapeHtml(requestJson.inputMode)}</strong></span>`
     : ""
+
+  const showDesignStatus = design !== null || (researchStatus === "approved" && hasFinalMd)
+  const designStatus: RunStatus = design?.status ?? "running"
+  const statusTagsHtml = `<span class="meta-item">${phaseBadge("Research", researchStatus)}</span>${
+    showDesignStatus ? `<span class="meta-item">${designPhaseBadge(designStatus)}</span>` : ""
+  }`
 
   const extraHead = ""
 
@@ -724,7 +634,7 @@ ${interviewChatSection}
       <h1>${escapeHtml(topic)}</h1>
     </div>
     <div class="meta-row">
-      <span class="meta-item">${badge(status)}</span>
+      ${statusTagsHtml}
       <span class="meta-item">ID: <strong>${escapeHtml(requestJson?.requestId ?? name)}</strong></span>
       ${inputModeLabel}
       ${liveMetaHtml}
@@ -734,17 +644,16 @@ ${interviewChatSection}
 
 ${failureBannerSection}
 ${telemetrySection}
+${finalOutputSection}
+${designSummarySection}
 ${roundStripSection}
 ${agentActivitySection}
 ${nodeGridSection}
 ${debugLogSection}
 ${markdownSection}
-${statsSection}
-${designSummarySection}
-${heroSection}
-${keyOutputsSection}
 ${filesSection}
 ${STAR_SCRIPT}
+${hasResearchRounds ? ROUND_TABS_SCRIPT : ""}
 ${isRunning ? POLLING_SCRIPT : ""}`
 
   const html = layout(`${escapeHtml(topic)} — quorum run`, body, {

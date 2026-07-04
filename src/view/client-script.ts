@@ -12,9 +12,7 @@ const RUN_DETAIL_SECTION_IDS = [
   "failure-banner-section",
   "interview-chat-section",
   "markdown-section",
-  "stats-section",
-  "hero-section",
-  "key-outputs-section",
+  "final-output-section",
   "design-summary-section",
   "files-section",
 ]
@@ -119,6 +117,9 @@ function buildRefreshScript(options: {
         if (sectionShouldSkipSwap(id, oldEl)) continue
         if (oldEl && newEl) {
           oldEl.innerHTML = newEl.innerHTML
+          if (id === "round-strip-section" && typeof window.__quorumInitRoundTabs === "function") {
+            window.__quorumInitRoundTabs()
+          }
         } else if (oldEl && !newEl) {
           oldEl.innerHTML = ""
         }
@@ -240,3 +241,58 @@ export const INDEX_REFRESH_SCRIPT = buildRefreshScript({
 
 /** @deprecated Use NODE_REFRESH_SCRIPT */
 export const NODE_MANUAL_REFRESH_SCRIPT = NODE_REFRESH_SCRIPT
+
+/** Tab switching for research round audit tables on the run detail page. */
+export const ROUND_TABS_SCRIPT = /* html */ `
+<script>
+(function () {
+  function roundTabStorageKey() {
+    return "round-tab:" + window.location.pathname
+  }
+
+  function applyRoundTab(roundNum) {
+    document.querySelectorAll("[data-round-tab]").forEach((btn) => {
+      if (!(btn instanceof HTMLElement)) return
+      const active = btn.getAttribute("data-round-tab") === String(roundNum)
+      btn.classList.toggle("active", active)
+      btn.setAttribute("aria-selected", active ? "true" : "false")
+    })
+    document.querySelectorAll("[data-round-panel]").forEach((panel) => {
+      if (!(panel instanceof HTMLElement)) return
+      panel.hidden = panel.getAttribute("data-round-panel") !== String(roundNum)
+    })
+    const details = document.querySelector("[data-round-details-link]")
+    if (details instanceof HTMLAnchorElement) {
+      const runMatch = window.location.pathname.match(/\\/runs\\/([^/]+)/)
+      if (runMatch) {
+        details.href = "/runs/" + encodeURIComponent(decodeURIComponent(runMatch[1])) + "/round/" + roundNum
+      }
+    }
+  }
+
+  function initRoundTabs() {
+    const strip = document.querySelector("[data-round-tablist]")
+    if (!strip) return
+    let selected = sessionStorage.getItem(roundTabStorageKey())
+    if (!selected || !document.querySelector('[data-round-panel="' + selected + '"]')) {
+      const activeBtn = strip.querySelector("[data-round-tab].active")
+      selected = activeBtn?.getAttribute("data-round-tab")
+        ?? strip.querySelector("[data-round-tab]")?.getAttribute("data-round-tab")
+    }
+    if (selected) applyRoundTab(selected)
+  }
+
+  document.addEventListener("click", (event) => {
+    const btn = event.target instanceof Element ? event.target.closest("[data-round-tab]") : null
+    if (!(btn instanceof HTMLButtonElement)) return
+    event.preventDefault()
+    const round = btn.getAttribute("data-round-tab")
+    if (!round) return
+    sessionStorage.setItem(roundTabStorageKey(), round)
+    applyRoundTab(round)
+  })
+
+  window.__quorumInitRoundTabs = initRoundTabs
+  initRoundTabs()
+})()
+</script>`

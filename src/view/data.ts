@@ -246,6 +246,6 @@ export function classifyFile(filename: string): FileClass {
     return { group: "Rebuttals", subGroup: "Drafter Reviews", label: `Drafter rebuttal review round ${round} turn ${turn}`, description: "Drafter review of auditor responses" }
   }
   if (/^design-html-round-\d+\.html$/.test(filename)) return { group: "Design", subGroup: "HTML Drafts", label: `HTML draft round ${round}`, description: "Generated design HTML" }
-  if (filename === "design-failure.json") return { group: "Design Rounds", subGroup: "Failures", label: "Design failure details", description: "Design quorum error payload" }
+  if (filename === "design-failure.json") return { group: "Design Rounds", subGroup: "Failures", label: "Design failure details", description: "Design pipeline error payload" }
   return { group: "Other", subGroup: "Unclassified", label: filename, description: "Additional artifact" }
 }

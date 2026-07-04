@@ -17,6 +17,33 @@ function stepRow(label: string, detail: string, done: boolean, active?: boolean)
   return `<div class="${cls}"><span class="round-step-icon">${icon}</span> <span class="round-step-label">${escapeHtml(label)}</span> <span class="round-step-detail dim-text">${detail}</span></div>`
 }
 
+type RoundStripMeta = {
+  round: RoundArtifacts
+  isCurrent: boolean
+  outcomeText: string
+  outcomeClass: string
+}
+
+async function loadRoundStripMeta(
+  runName: string,
+  round: RoundArtifacts,
+  isCurrent: boolean,
+): Promise<RoundStripMeta> {
+  let outcomeText = isCurrent ? "in progress" : "…"
+  let outcomeClass = "badge-running"
+  if (round.consensus) {
+    try {
+      const raw = await Bun.file(safeFilePath(runName, round.consensus)).text()
+      const consensus = summarizeConsensusData(JSON.parse(raw))
+      outcomeText = outcomeLabelForRound(consensus.outcome)
+      outcomeClass = outcomeClassForRound(consensus.outcome)
+    } catch {
+      outcomeText = "view"
+    }
+  }
+  return { round, isCurrent, outcomeText, outcomeClass }
+}
+
 export async function renderRoundStrip(
   runName: string,
   files: string[],
@@ -26,48 +53,50 @@ export async function renderRoundStrip(
   if (index.rounds.length === 0) return ""
 
   const currentRound = liveStatus?.phase === "running" ? liveStatus.round : index.maxRound
+  const defaultActiveRound = index.rounds.some((r) => r.round === currentRound)
+    ? currentRound
+    : index.maxRound
 
-  let chips = ""
-  let auditPanels = ""
+  const metas: RoundStripMeta[] = []
   for (const round of index.rounds) {
     const isCurrent = round.round === currentRound && liveStatus?.phase === "running"
-    const cls = isCurrent ? "round-chip active" : "round-chip"
-    let outcomeText = isCurrent ? "in progress" : "…"
-    let outcomeClass = "badge-running"
-    if (round.consensus) {
-      try {
-        const raw = await Bun.file(safeFilePath(runName, round.consensus)).text()
-        const consensus = summarizeConsensusData(JSON.parse(raw))
-        outcomeText = outcomeLabelForRound(consensus.outcome)
-        outcomeClass = outcomeClassForRound(consensus.outcome)
-      } catch {
-        outcomeText = "view"
-      }
-    }
-    chips += `<a class="${cls}" href="/runs/${encodeURIComponent(runName)}/round/${round.round}">
+    metas.push(await loadRoundStripMeta(runName, round, isCurrent))
+  }
+
+  let tabs = ""
+  let panels = ""
+  for (const meta of metas) {
+    const { round, isCurrent, outcomeText, outcomeClass } = meta
+    const tabActive = round.round === defaultActiveRound
+    tabs += `<button type="button" class="round-chip${tabActive ? " active" : ""}" data-round-tab="${round.round}" role="tab" aria-selected="${tabActive ? "true" : "false"}">
   <span class="round-chip-num">R${round.round}</span>
   ${isCurrent ? `<span class="round-chip-live">●</span>` : ""}
   <span class="round-chip-outcome dim-text">${escapeHtml(outcomeText)}</span>
-</a>`
+</button>`
 
     const auditRows = await buildRoundAuditVoteRows(runName, round, liveStatus, { isCurrentRound: isCurrent })
-    if (auditRows.length === 0) continue
+    const panelBody = auditRows.length > 0
+      ? renderRoundAuditVoteTable(auditRows)
+      : `<p class="empty-inline dim-text">No audit data yet.</p>`
 
-    auditPanels += `<div class="round-audit-card">
-  <div class="round-audit-card-head">
-    <span class="round-audit-card-title">Round ${round.round}</span>
+    panels += `<div class="round-audit-panel" data-round-panel="${round.round}" role="tabpanel"${tabActive ? "" : " hidden"}>
+  <div class="round-audit-panel-head">
     <span class="badge ${outcomeClass}">${escapeHtml(outcomeText)}</span>
-    <a class="round-audit-card-link tiny-text" href="/runs/${encodeURIComponent(runName)}/round/${round.round}">Details →</a>
   </div>
-  ${renderRoundAuditVoteTable(auditRows)}
+  ${panelBody}
 </div>`
   }
 
-  const auditSection = auditPanels
-    ? `<div class="round-audit-summaries">${auditPanels}</div>`
-    : ""
+  const detailsHref = `/runs/${encodeURIComponent(runName)}/round/${defaultActiveRound}`
 
-  return `<div class="section"><h2>Research rounds</h2><div class="round-strip">${chips}</div>${auditSection}</div>`
+  return `<div class="section">
+  <div class="round-strip-head">
+    <h2>Research rounds</h2>
+    <a class="round-strip-details-link tiny-text" href="${detailsHref}" data-round-details-link>Details →</a>
+  </div>
+  <div class="round-strip" data-round-tablist role="tablist" aria-label="Research rounds">${tabs}</div>
+  <div class="round-audit-panels">${panels}</div>
+</div>`
 }
 
 export async function renderRoundDetailPage(

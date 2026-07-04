@@ -98,6 +98,28 @@ export function badge(status: RunStatus): string {
   return `<span class="badge ${cls}">${status}</span>`
 }
 
+export function phaseBadge(phase: string, status: RunStatus): string {
+  const cls =
+    status === "approved" ? "badge-approved" :
+    status === "failed" ? "badge-failed" :
+    "badge-running"
+  return `<span class="badge ${cls}">${escapeHtml(phase)}: ${escapeHtml(status)}</span>`
+}
+
+/** User-facing design phase label — design has no quorum approval step. */
+export function designStatusLabel(status: RunStatus): string {
+  if (status === "approved") return "complete"
+  return status
+}
+
+export function designPhaseBadge(status: RunStatus): string {
+  const cls =
+    status === "approved" ? "badge-approved" :
+    status === "failed" ? "badge-failed" :
+    "badge-running"
+  return `<span class="badge ${cls}">Design: ${escapeHtml(designStatusLabel(status))}</span>`
+}
+
 export function formatDate(ms: number): string {
   return new Date(ms).toLocaleString("en-US", {
     year: "numeric",

@@ -264,7 +264,9 @@ describe("renderRoundStrip audit summaries", () => {
     const html = await renderRoundStrip("demo-run", ["draft-round-0.md", "audits-round-0.json"], null)
 
     expect(html).toContain("Research rounds")
-    expect(html).toContain("round-audit-summaries")
+    expect(html).toContain("round-audit-panels")
+    expect(html).toContain('data-round-tab="0"')
+    expect(html).toContain("data-round-details-link")
     expect(html).toContain("methodologist")
     expect(html).toContain("revise")
     expect(html).toContain("fact-checker")
