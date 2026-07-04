@@ -31,6 +31,9 @@ describe("createLiveStatusWriter usage", () => {
         messageID: "msg-1",
         tokensIn: 150,
         tokensOut: 20,
+        costUsd: 0.015,
+        costAvailable: true,
+        costEstimated: false,
         source: "opencode",
       })
 
@@ -38,22 +41,26 @@ describe("createLiveStatusWriter usage", () => {
       await Bun.sleep(30)
 
       const live = await Bun.file(`${dir}/live-status.json`).json() as {
-        usage: { tokensIn: number; tokensOut: number }
+        usage: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean }
         usageAvailable: boolean
-        nodeHistory: Array<{ usage?: { tokensIn: number; tokensOut: number }; usageAvailable?: boolean }>
+        nodeHistory: Array<{ usage?: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean }; usageAvailable?: boolean }>
       }
 
       expect(live.usageAvailable).toBe(true)
-      expect(live.usage).toEqual({ tokensIn: 150, tokensOut: 20 })
+      expect(live.usage.tokensIn).toBe(150)
+      expect(live.usage.tokensOut).toBe(20)
+      expect(live.usage.costAvailable).toBe(true)
+      expect(live.usage.costUsd).toBeCloseTo(0.015)
       expect(live.nodeHistory.at(-1)?.usageAvailable).toBe(true)
-      expect(live.nodeHistory.at(-1)?.usage).toEqual({ tokensIn: 150, tokensOut: 20 })
+      expect(live.nodeHistory.at(-1)?.usage?.tokensIn).toBe(150)
+      expect(live.nodeHistory.at(-1)?.usage?.costUsd).toBeCloseTo(0.015)
     } finally {
       writer.dispose()
       await rm(dir, { recursive: true, force: true })
     }
   })
 
-  test("dedupes cumulative cursor usage by run id", async () => {
+  test("dedupes cumulative cursor usage and cost by run id", async () => {
     const bus = createEventBus()
     const dir = await mkdtemp(join(tmpdir(), "qurom-live-status-"))
 
@@ -68,6 +75,9 @@ describe("createLiveStatusWriter usage", () => {
         runID: "run-1",
         tokensIn: 200,
         tokensOut: 40,
+        costUsd: 0.02,
+        costAvailable: true,
+        costEstimated: true,
         source: "cursor",
         cumulative: true,
       })
@@ -77,15 +87,21 @@ describe("createLiveStatusWriter usage", () => {
         runID: "run-1",
         tokensIn: 300,
         tokensOut: 70,
+        costUsd: 0.05,
+        costAvailable: true,
+        costEstimated: true,
         source: "cursor",
         cumulative: true,
       })
       await Bun.sleep(30)
 
       const live = await Bun.file(`${dir}/live-status.json`).json() as {
-        usage: { tokensIn: number; tokensOut: number }
+        usage: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean }
       }
-      expect(live.usage).toEqual({ tokensIn: 300, tokensOut: 70 })
+      expect(live.usage.tokensIn).toBe(300)
+      expect(live.usage.tokensOut).toBe(70)
+      expect(live.usage.costAvailable).toBe(true)
+      expect(live.usage.costUsd).toBeCloseTo(0.05)
     } finally {
       writer.dispose()
       await rm(dir, { recursive: true, force: true })

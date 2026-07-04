@@ -74,6 +74,9 @@ export type RunnerEvent =
       messageID?: string
       runID?: string
       cumulative?: boolean
+      costUsd?: number
+      costAvailable?: boolean
+      costEstimated?: boolean
     }
   | { kind: "result"; runResult: unknown }
   | {

@@ -35,6 +35,9 @@ export interface LiveAgentStatus {
   tokensIn: number
   tokensOut: number
   usageAvailable?: boolean
+  costUsd?: number
+  costAvailable?: boolean
+  costEstimated?: boolean
   toolCalls: Array<{
     tool: string
     status: "running" | "completed" | "error"
@@ -51,6 +54,9 @@ export interface LiveAgentStatus {
 export interface UsageTotals {
   tokensIn: number
   tokensOut: number
+  costUsd?: number
+  costAvailable?: boolean
+  costEstimated?: boolean
 }
 
 export interface AgentUsageSnapshot extends UsageTotals {

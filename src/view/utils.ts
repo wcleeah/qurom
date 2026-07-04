@@ -125,11 +125,29 @@ export function formatTokenCount(n: number): string {
 }
 
 export function formatUsagePair(
-  usage: { tokensIn: number; tokensOut: number } | undefined,
+  usage: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean; costEstimated?: boolean } | undefined,
   available?: boolean,
 ): string {
   if (!available || !usage) return "—"
-  return `${formatTokenCount(usage.tokensIn)} in / ${formatTokenCount(usage.tokensOut)} out`
+  const tokens = `${formatTokenCount(usage.tokensIn)} in / ${formatTokenCount(usage.tokensOut)} out`
+  if (!usage.costAvailable) return tokens
+  return `${tokens} · ${formatCostUsd(usage.costUsd ?? 0, { estimated: usage.costEstimated })}`
+}
+
+export function formatCostUsd(amount: number, opts?: { estimated?: boolean }): string {
+  const abs = Math.abs(amount)
+  let formatted: string
+  if (abs >= 1) formatted = `$${amount.toFixed(2)}`
+  else if (abs >= 0.01) formatted = `$${amount.toFixed(3)}`
+  else formatted = `$${amount.toFixed(4)}`
+  return opts?.estimated ? `~${formatted} est.` : formatted
+}
+
+export function formatUsageAndCostPair(
+  usage: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean; costEstimated?: boolean } | undefined,
+  usageAvailable?: boolean,
+): string {
+  return formatUsagePair(usage, usageAvailable)
 }
 
 export function statusDot(status: string): string {

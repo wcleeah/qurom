@@ -159,7 +159,7 @@ export function renderAgentActivity(liveStatus: LiveStatus | null): string {
   let html = '<div class="section"><h2>Agent Activity</h2>'
 
   for (const [name, agent] of agents) {
-    html += `<div class="card card-compact"><div class="agent-card-title">${statusDot(agent.status)} ${escapeHtml(name)} <span class="agent-card-status">(${agent.status})</span>${agent.usageAvailable ? ` <span class="agent-card-tokens dim-text">${escapeHtml(formatUsagePair({ tokensIn: agent.tokensIn, tokensOut: agent.tokensOut }, true))}</span>` : ""}</div>`
+    html += `<div class="card card-compact"><div class="agent-card-title">${statusDot(agent.status)} ${escapeHtml(name)} <span class="agent-card-status">(${agent.status})</span>${agent.usageAvailable || agent.costAvailable ? ` <span class="agent-card-tokens dim-text">${escapeHtml(formatUsagePair(agent, agent.usageAvailable || agent.costAvailable === true))}</span>` : ""}</div>`
 
     if (agent.reasoning) {
       html += `<details class="markdown-preview agent-reasoning"><summary>Reasoning</summary><pre>${escapeHtml(agent.reasoning)}</pre></details>`

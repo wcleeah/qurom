@@ -31,8 +31,8 @@ export function renderNodeGrid(
     if (totals.durationMs > 0) {
       kpis.unshift({ label: "Time", value: formatDurationMs(totals.durationMs) })
     }
-    if (totals.usageAvailable) {
-      kpis.unshift({ label: "Tokens", value: formatUsagePair(totals.usage, true) })
+    if (totals.usageAvailable || totals.costAvailable) {
+      kpis.unshift({ label: "Usage", value: formatUsagePair(totals.usage, true) })
     }
 
     let statusIcon = "○"

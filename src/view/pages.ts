@@ -9,7 +9,7 @@ import { computeStats, getRunFiles, listRuns, readLiveStatus, readNodeHistory } 
 import { getNodeDefinition } from "./node-registry"
 import { renderNodeDashboard, renderNodeExecutionHistory, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
 import { renderLiveStatusMeta, renderRoundDetailPage, renderRoundStrip } from "./round-view"
-import { renderRunTelemetryStrip, resolveRunUsage, runElapsedMs } from "./telemetry-view"
+import { renderRunTelemetryStrip, resolveRunTelemetry, runElapsedMs } from "./telemetry-view"
 import { renderFileBrowser } from "./file-browser"
 import { listHtmlReaderAskThreads } from "./html-ask-store"
 import { listHtmlReaderHighlights } from "./html-highlights-store"
@@ -265,8 +265,8 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     const nodeHistory = await readNodeHistory(run.name)
     const elapsedMs = runElapsedMs(liveStatus, nodeHistory)
     const elapsed = elapsedMs !== undefined ? formatElapsed(elapsedMs) : ""
-    const { usage, usageAvailable } = resolveRunUsage(liveStatus, nodeHistory)
-    const usageLabel = usageAvailable ? ` · ${formatUsagePair(usage, true)}` : ""
+    const { usage, usageAvailable, costAvailable } = resolveRunTelemetry(liveStatus, nodeHistory)
+    const usageLabel = usageAvailable || costAvailable ? ` · ${formatUsagePair(usage, true)}` : ""
     const agentList = Object.entries(liveStatus.agents)
       .slice(0, 4)
       .map(([name, a]) => `${statusDot(a.status)} ${escapeHtml(name)}${a.tool ? ` · ${escapeHtml(a.tool)}` : ""}`)

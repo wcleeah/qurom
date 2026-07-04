@@ -410,6 +410,48 @@ describe("createOpencodeEventBridge", () => {
     await bridge.stop()
   })
 
+  test("emits agent.usage with cost when message.updated includes tokens and cost", async () => {
+    const bus = createEventBus()
+    const events = collect(bus)
+    const { client, controller } = makeStubClient()
+
+    const bridge = createOpencodeEventBridge(baseConfig, {
+      bus,
+      getRunDir: () => "/tmp/unused",
+      clientFactory: () => client as never,
+    })
+
+    await bridge.start()
+
+    controller.push({
+      type: "message.updated",
+      properties: {
+        sessionID: "s1",
+        info: {
+          id: "m-cost",
+          role: "assistant",
+          cost: 0.0123,
+          tokens: { input: 100, output: 20, cache: { read: 5, write: 0 } },
+        },
+      },
+    })
+    await flush()
+    await bridge.stop()
+
+    const usage = events.find((e) => e.kind === "agent.usage")
+    expect(usage).toMatchObject({
+      kind: "agent.usage",
+      sessionID: "s1",
+      messageID: "m-cost",
+      tokensIn: 105,
+      tokensOut: 20,
+      source: "opencode",
+      costUsd: 0.0123,
+      costAvailable: true,
+      costEstimated: false,
+    })
+  })
+
   test("scopes the SSE subscription to the configured opencode directory", async () => {
     const bus = createEventBus()
     const { client, controller } = makeStubClient()

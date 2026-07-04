@@ -158,24 +158,27 @@ export function createLiveStatusWriter(
   }
 
   function applyUsageDelta(delta: UsageTotals, sessionID: string) {
-    if (delta.tokensIn === 0 && delta.tokensOut === 0) return
+    if (delta.tokensIn === 0 && delta.tokensOut === 0 && !delta.costAvailable) return
 
-    status.usageAvailable = true
-    status.nodeUsageAvailable = true
+    if (delta.tokensIn > 0 || delta.tokensOut > 0) {
+      status.usageAvailable = true
+      status.nodeUsageAvailable = true
+    }
+
     addUsage(status.usage, delta)
     addUsage(status.nodeUsage, delta)
 
     const agent = sessionAgent.get(sessionID)
     if (agent) {
       addUsage(agent, delta)
-      agent.usageAvailable = true
+      if (delta.tokensIn > 0 || delta.tokensOut > 0) agent.usageAvailable = true
     }
 
     const role = sessionRoles.get(sessionID)
     if (role) {
       const nodeAgent = ensureNodeAgentUsage(role)
       addUsage(nodeAgent, delta)
-      nodeAgent.usageAvailable = true
+      if (delta.tokensIn > 0 || delta.tokensOut > 0) nodeAgent.usageAvailable = true
     }
   }
 
@@ -332,7 +335,17 @@ export function createLiveStatusWriter(
         break
       }
       case "agent.usage": {
-        const next = { tokensIn: event.tokensIn, tokensOut: event.tokensOut }
+        const next: UsageTotals = {
+          tokensIn: event.tokensIn,
+          tokensOut: event.tokensOut,
+          ...(event.costAvailable
+            ? {
+                costUsd: event.costUsd ?? 0,
+                costAvailable: true,
+                costEstimated: event.costEstimated,
+              }
+            : {}),
+        }
         let delta = next
         if (event.cumulative) {
           const key = event.runID ?? `${event.sessionID}:cumulative`

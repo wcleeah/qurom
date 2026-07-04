@@ -189,6 +189,7 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
         if (event.properties.info.role !== "assistant") continue
         const info = event.properties.info as {
           id: string
+          cost?: number
           tokens?: { input?: number; output?: number; cache?: { read?: number; write?: number } }
         }
         const sessionID = event.properties.sessionID
@@ -201,6 +202,9 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
             tokensIn: folded.tokensIn,
             tokensOut: folded.tokensOut,
             source: "opencode",
+            ...(typeof info.cost === "number"
+              ? { costUsd: info.cost, costAvailable: true, costEstimated: false }
+              : {}),
           })
         }
         if (seenAssistantMessages.has(info.id)) continue
