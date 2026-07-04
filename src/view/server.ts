@@ -19,7 +19,7 @@ import {
   handlePostAskMessage,
 } from "./html-ask-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
-import { renderIndex, renderNodePage, renderRun, serveRawFile } from "./pages"
+import { renderIndex, renderNodePage, renderRoundPage, renderFilesPage, renderRun, serveRawFile } from "./pages"
 import { safeFilePath, HOST, PORT, safeRunPath } from "./paths"
 import { setRunStarred } from "./starred-store"
 import { viewServerAdminEnabled } from "./server-options"
@@ -398,6 +398,26 @@ export function startViewServer(): void {
           )
         } catch (e) {
           console.error("Raw file error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const roundMatch = path.match(/^\/runs\/(.+?)\/round\/(\d+)$/)
+      if (roundMatch) {
+        try {
+          return await renderRoundPage(decodeURIComponent(roundMatch[1]), parseInt(roundMatch[2], 10))
+        } catch (e) {
+          console.error("Round page error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const filesMatch = path.match(/^\/runs\/(.+?)\/files$/)
+      if (filesMatch) {
+        try {
+          return await renderFilesPage(decodeURIComponent(filesMatch[1]))
+        } catch (e) {
+          console.error("Files page error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

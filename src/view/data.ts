@@ -3,16 +3,36 @@ import { join } from "node:path"
 import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
 import { listStarredRunNames } from "./starred-store"
 import { isSqliteFile } from "./utils"
-import type { FileClass, LiveStatus, RequestJson, RunMeta, RunStats, RunStatus } from "./types"
+import type { FileClass, LiveStatus, NodeHistoryEntry, RequestJson, RunMeta, RunStats, RunStatus } from "./types"
 
 export async function readLiveStatus(runName: string): Promise<LiveStatus | null> {
   try {
     const p = safeFilePath(runName, "live-status.json")
     const st = await stat(p)
-    if (Date.now() - st.mtime.getTime() > 30_000) return null
+    if (Date.now() - st.mtime.getTime() <= 30_000) {
+      return await Bun.file(p).json() as LiveStatus
+    }
+  } catch {
+    // fall through to run-status snapshot
+  }
+
+  try {
+    const p = safeFilePath(runName, "run-status.json")
     return await Bun.file(p).json() as LiveStatus
   } catch {
     return null
+  }
+}
+
+export async function readNodeHistory(runName: string): Promise<NodeHistoryEntry[]> {
+  const live = await readLiveStatus(runName)
+  if (live?.nodeHistory?.length) return live.nodeHistory
+
+  try {
+    const p = safeFilePath(runName, "node-history.json")
+    return await Bun.file(p).json() as NodeHistoryEntry[]
+  } catch {
+    return []
   }
 }
 
@@ -208,8 +228,23 @@ export function classifyFile(filename: string): FileClass {
   if (/^drafter-finding-review-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Reviews", label: `Drafter review round ${round}`, description: "Accepted findings and rebuttal choices" }
   if (/^aggregated-findings-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Consensus", label: `Consensus round ${round}`, description: "Aggregated unresolved findings/outcome" }
   if (/^unresolved-findings-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Consensus", label: `Unresolved findings round ${round}`, description: "Findings carried into revision" }
-  if (/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(filename)) return { group: "Rebuttals", subGroup: "Auditor Responses", label: `Auditor rebuttal response round ${round}`, description: "Auditor response to drafter rebuttals" }
-  if (/^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/.test(filename)) return { group: "Rebuttals", subGroup: "Drafter Reviews", label: `Drafter rebuttal review round ${round}`, description: "Drafter review of auditor responses" }
+  if (/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(filename)) {
+    const turn = filename.match(/turn-(\d+)/)?.[1]
+    return { group: "Rebuttals", subGroup: "Auditor Responses", label: `Auditor responses round ${round} turn ${turn}`, description: "Aggregated auditor rebuttal responses" }
+  }
+  if (/^auditor-rebuttal-responses-[\w-]+-round-\d+\.json$/.test(filename)) {
+    const agent = agentFrom(filename, "auditor-rebuttal-responses")
+    return { group: "Rebuttals", subGroup: "Per-Agent Responses", label: `${agent} rebuttal round ${round}`, description: "Individual auditor rebuttal response" }
+  }
+  if (/^rebuttals-[\w-]+-round-\d+\.json$/.test(filename)) {
+    const agent = agentFrom(filename, "rebuttals")
+    return { group: "Rebuttals", subGroup: "Rebuttal Inputs", label: `${agent} rebuttals round ${round}`, description: "Rebuttals sent to auditor" }
+  }
+  if (/^disputed-round-\d+\.json$/.test(filename)) return { group: "Rebuttals", subGroup: "Disputed", label: `Disputed findings round ${round}`, description: "Findings under rebuttal review" }
+  if (/^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/.test(filename)) {
+    const turn = filename.match(/turn-(\d+)/)?.[1]
+    return { group: "Rebuttals", subGroup: "Drafter Reviews", label: `Drafter rebuttal review round ${round} turn ${turn}`, description: "Drafter review of auditor responses" }
+  }
   if (/^design-html-round-\d+\.html$/.test(filename)) return { group: "Design", subGroup: "HTML Drafts", label: `HTML draft round ${round}`, description: "Generated design HTML" }
   if (filename === "design-failure.json") return { group: "Design Rounds", subGroup: "Failures", label: "Design failure details", description: "Design quorum error payload" }
   return { group: "Other", subGroup: "Unclassified", label: filename, description: "Additional artifact" }

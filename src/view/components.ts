@@ -2,8 +2,10 @@ import { tableWrap } from "./html"
 import { safeFilePath } from "./paths"
 import { answeredQuestionsFromTranscript } from "../reader-transcript"
 import { renderReaderProfileSummary } from "./artifact-renderers"
+import { indexRunArtifacts } from "./run-artifacts"
+import { getNodeDefinition, isNodeActive, resolveLiveNode } from "./node-registry"
 import { escapeHtml, statusDot } from "./utils"
-import type { LiveAgentStatus, LiveStatus, RunStatus } from "./types"
+import type { LiveAgentStatus, LiveStatus, NodeHistoryEntry, RunStatus } from "./types"
 
 export function renderLivePipeline(
   liveStatus: LiveStatus | null,
@@ -11,26 +13,45 @@ export function renderLivePipeline(
   researchStatus: RunStatus,
   runName?: string,
 ): string {
-  const activeNode = liveStatus?.node
+  const activeNode = resolveLiveNode(liveStatus)
   const liveAgents = liveStatus?.agents ?? {}
+  const artifactIndex = indexRunArtifacts(files)
+  const currentRound = liveStatus?.phase === "running" ? liveStatus.round : artifactIndex.maxRound
 
-  // Determine node completion from files on disk
   const hasFile = (pattern: RegExp) => files.some((f) => pattern.test(f))
   const hasReaderProfile = hasFile(/^reader-profile(?:-\d+)?\.json$/)
   const hasDraft = hasFile(/^draft-round-\d+\.md$/)
   const hasAudits = hasFile(/^audits-round-\d+\.json$/)
   const hasDrafterReview = hasFile(/^drafter-finding-review-round-\d+\.json$/)
-  const hasRebuttals = hasFile(/^auditor-rebuttal-responses-.*-round-\d+\.json$/)
-  const hasRebuttalReview = hasFile(/^drafter-rebuttal-review-round-\d+\.json$/)
+  const hasRebuttals = hasFile(/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/)
+    || hasFile(/^auditor-rebuttal-responses-[\w-]+-round-\d+\.json$/)
+  const hasRebuttalReview = hasFile(/^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/)
   const hasAggregated = hasFile(/^aggregated-findings-round-\d+\.json$/)
   const hasFinalMd = hasFile(/^final\.md$/)
   const hasLatestDraft = hasFile(/^latest-draft\.md$/)
 
-  function nodeRow(num: number, label: string, completed: boolean, isActive: boolean, meta?: string, agentList?: string): string {
-    const icon = isActive ? "●" : completed ? "✓" : "○"
-    const cls = isActive ? "pipeline-node active" : "pipeline-node"
-    const labelHtml = runName && completed
-      ? `<a href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(label)}">${escapeHtml(label)}</a>`
+  function roundComplete(pattern: RegExp, round: number): boolean {
+    return files.some((f) => {
+      const m = f.match(pattern)
+      if (!m?.[1]) return false
+      return parseInt(m[1], 10) <= round
+    })
+  }
+
+  function nodeRow(
+    num: number,
+    label: string,
+    linkId: string,
+    completed: boolean,
+    active: boolean,
+    meta?: string,
+    agentList?: string,
+  ): string {
+    const icon = active ? "●" : completed ? "✓" : "○"
+    const cls = active ? "pipeline-node active" : "pipeline-node"
+    const linkable = runName && (completed || active)
+    const labelHtml = linkable
+      ? `<a href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(linkId)}">${escapeHtml(label)}</a>`
       : escapeHtml(label)
     return `<div class="${cls}">
   <div class="pipeline-node-label"><span class="pipeline-icon">${icon}</span> ${num}. ${labelHtml}${meta ? ` <span class="pipeline-node-meta">${meta}</span>` : ""}</div>
@@ -50,68 +71,62 @@ export function renderLivePipeline(
       .join("\n")
   }
 
-  const isActive = (node: string) => activeNode === node
-  const interviewActive = isActive("discoverReaderPrompt") || isActive("discoverReaderResume")
+  const interviewActive = isNodeActive(liveStatus, "discoverReader")
   const profileReady = hasReaderProfile && !interviewActive
   const researchDone = researchStatus === "approved" || researchStatus === "failed"
   const terminalLabel = researchStatus === "approved" ? "finalizeApprovedDraft" : researchStatus === "failed" ? "finalizeFailedRun" : "finalize"
+  const auditRoundCount = files.filter((f) => /^audits-round-\d+\.json$/.test(f)).length
+  const draftRoundCount = files.filter((f) => /^draft-round-\d+\.md$/.test(f)).length
+  const rebuttalTurnCount = files.filter((f) => /^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(f)).length
+
+  const auditsComplete = currentRound >= 0 && roundComplete(/^audits-round-(\d+)\.json$/, currentRound) && hasAudits
+  const reviewComplete = currentRound >= 0 && roundComplete(/^drafter-finding-review-round-(\d+)\.json$/, currentRound) && hasDrafterReview
+  const rebuttalsComplete = hasRebuttals
+  const rebuttalReviewComplete = hasRebuttalReview
+  const aggregatedComplete = currentRound >= 0 && roundComplete(/^aggregated-findings-round-(\d+)\.json$/, currentRound) && hasAggregated
 
   let html = '<div class="section"><h2>Pipeline</h2><div class="card stack-card stack-card-tight">'
 
-  // Research nodes
-  html += nodeRow(1, "ingestRequest", true, isActive("ingestRequest"))
-  html += nodeRow(2, "summarizeInputDocument", researchStatus !== "running" || hasFile(/./), isActive("summarizeInputDocument"))
-  html += nodeRow(3, "prepareOutputPath", hasFile(/./), isActive("prepareOutputPath"))
-  html += nodeRow(4, "discoverReader", profileReady, interviewActive,
+  html += nodeRow(1, "ingestRequest", "ingestRequest", true, activeNode === "ingestRequest")
+  html += nodeRow(2, "summarizeInputDocument", "summarizeInputDocument", researchStatus !== "running" || hasFile(/./), activeNode === "summarizeInputDocument")
+  html += nodeRow(3, "prepareOutputPath", "prepareOutputPath", hasFile(/./), activeNode === "prepareOutputPath")
+  html += nodeRow(4, "discoverReader", "discoverReader", profileReady, interviewActive,
     profileReady ? "· profile ready" : (interviewActive ? "· interviewing" : ""),
     interviewActive ? agentListHtml(liveAgents) : "")
-  html += nodeRow(5, "draftFullDraft", hasDraft, isActive("draftFullDraft"),
-    hasDraft ? `· ${files.filter((f) => /^draft-round-\d+\.md$/.test(f)).length} rounds` : "",
-    isActive("draftFullDraft") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(6, "runParallelAudits", hasAudits, isActive("runParallelAudits"),
-    hasAudits ? `· ${files.filter((f) => /^audits-round-\d+\.json$/.test(f)).length} rounds` : "",
-    isActive("runParallelAudits") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(7, "reviewFindingsByDrafter", hasDrafterReview, isActive("reviewFindingsByDrafter"),
-    "", isActive("reviewFindingsByDrafter") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(8, "runTargetedRebuttals", hasRebuttals, isActive("runTargetedRebuttals"),
-    "", isActive("runTargetedRebuttals") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(9, "reviewRebuttalResponses", hasRebuttalReview, isActive("reviewRebuttalResponses"),
-    "", isActive("reviewRebuttalResponses") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(10, "aggregateConsensus", hasAggregated, isActive("aggregateConsensus"))
-  html += nodeRow(11, "computeConfidence", hasAggregated, isActive("computeConfidence"))
-  html += nodeRow(12, researchDone ? terminalLabel : "reviseDraft", researchDone, isActive("reviseDraft") || isActive("finalizeApprovedDraft") || isActive("finalizeFailedRun"))
-  html += nodeRow(13, "summarizeOutputArtifact", hasFinalMd || hasLatestDraft, isActive("summarizeOutputArtifact"))
+  html += nodeRow(5, "draftFullDraft", "draftFullDraft", hasDraft, activeNode === "draftFullDraft",
+    hasDraft ? `· ${draftRoundCount} round${draftRoundCount !== 1 ? "s" : ""}` : "",
+    activeNode === "draftFullDraft" ? agentListHtml(liveAgents) : "")
+  html += nodeRow(6, "runParallelAudits", "runParallelAudits", auditsComplete, activeNode === "runParallelAudits",
+    hasAudits ? `· ${auditRoundCount} audit round${auditRoundCount !== 1 ? "s" : ""}` : "",
+    activeNode === "runParallelAudits" ? agentListHtml(liveAgents) : "")
+  html += nodeRow(7, "reviewFindingsByDrafter", "reviewFindingsByDrafter", reviewComplete, activeNode === "reviewFindingsByDrafter",
+    "", activeNode === "reviewFindingsByDrafter" ? agentListHtml(liveAgents) : "")
+  html += nodeRow(8, "runTargetedRebuttals", "runTargetedRebuttals", rebuttalsComplete, activeNode === "runTargetedRebuttals",
+    rebuttalTurnCount > 0 ? `· ${rebuttalTurnCount} turn${rebuttalTurnCount !== 1 ? "s" : ""}` : "",
+    activeNode === "runTargetedRebuttals" ? agentListHtml(liveAgents) : "")
+  html += nodeRow(9, "reviewRebuttalResponses", "reviewRebuttalResponses", rebuttalReviewComplete, activeNode === "reviewRebuttalResponses",
+    "", activeNode === "reviewRebuttalResponses" ? agentListHtml(liveAgents) : "")
+  html += nodeRow(10, "aggregateConsensus", "aggregateConsensus", aggregatedComplete, activeNode === "aggregateConsensus")
+  html += nodeRow(11, "computeConfidence", "computeConfidence", hasFile(/^confidence\.json$/) || aggregatedComplete, activeNode === "computeConfidence")
+  html += nodeRow(12, researchDone ? terminalLabel : "reviseDraft", researchDone ? terminalLabel : "reviseDraft", researchDone, activeNode === "reviseDraft" || activeNode === "finalizeApprovedDraft" || activeNode === "finalizeFailedRun")
+  html += nodeRow(13, "summarizeOutputArtifact", "summarizeOutputArtifact", hasFinalMd || hasLatestDraft, activeNode === "summarizeOutputArtifact")
 
-  // Design nodes (flattened into main graph)
-  const hasDesignHtml = hasFile(/^design-html-round-0\.html$/)
-
-  // Always show design nodes — status varies by completion
-  const designMeta = researchStatus === "approved"
-    ? "(pending)"
-    : researchStatus === "running"
-      ? "(after research)"
-      : ""
-  html += nodeRow(14, "runDesignHtml", hasDesignHtml, isActive("runDesignHtml"),
-    hasDesignHtml ? "" : designMeta, isActive("runDesignHtml") ? agentListHtml(liveAgents) : "")
-  html += nodeRow(15, "interactiveEnhance", hasDesignHtml, isActive("interactiveEnhance"),
-    "", isActive("interactiveEnhance") ? agentListHtml(liveAgents) : "")
-  // finalizeDesign writes final.html; it's the terminal step for the design phase.
-  // Show it whenever a design phase ran. Active only briefly before __end__.
+  const hasDesignHtml = hasFile(/^design-html-round-\d+\.html$/)
+  const designMeta = researchStatus === "approved" ? "(pending)" : researchStatus === "running" ? "(after research)" : ""
+  html += nodeRow(14, "runDesignHtml", "runDesignHtml", hasDesignHtml, activeNode === "runDesignHtml",
+    hasDesignHtml ? "" : designMeta, activeNode === "runDesignHtml" ? agentListHtml(liveAgents) : "")
+  html += nodeRow(15, "interactiveEnhance", "interactiveEnhance", hasDesignHtml, activeNode === "interactiveEnhance",
+    "", activeNode === "interactiveEnhance" ? agentListHtml(liveAgents) : "")
   const hasFinalHtmlFile = files.includes("final.html")
-  const designRan = hasDesignHtml
-  if (designRan) {
-    html += nodeRow(16, "finalizeDesign", hasFinalHtmlFile, isActive("finalizeDesign"),
+  if (hasDesignHtml) {
+    html += nodeRow(16, "finalizeDesign", "finalizeDesign", hasFinalHtmlFile, activeNode === "finalizeDesign",
       hasFinalHtmlFile ? "· final.html written" : "",
-      isActive("finalizeDesign") ? agentListHtml(liveAgents) : "")
+      activeNode === "finalizeDesign" ? agentListHtml(liveAgents) : "")
   }
 
   html += '</div></div>'
   return html
 }
-
-// ---------------------------------------------------------------------------
-// Agent activity (tool calls + reasoning)
-// ---------------------------------------------------------------------------
 
 export function renderAgentActivity(liveStatus: LiveStatus | null): string {
   if (!liveStatus || !liveStatus.agents || Object.keys(liveStatus.agents).length === 0) return ""
@@ -125,12 +140,10 @@ export function renderAgentActivity(liveStatus: LiveStatus | null): string {
   for (const [name, agent] of agents) {
     html += `<div class="card card-compact"><div class="agent-card-title">${statusDot(agent.status)} ${escapeHtml(name)} <span class="agent-card-status">(${agent.status})</span></div>`
 
-    // Reasoning (latest chunk)
     if (agent.reasoning) {
       html += `<details class="markdown-preview agent-reasoning"><summary>Reasoning</summary><pre>${escapeHtml(agent.reasoning)}</pre></details>`
     }
 
-    // Tool calls
     if (agent.toolCalls.length > 0) {
       let toolTable = '<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Tool</th><th>Status</th><th>Input</th><th>Output</th></tr></thead><tbody>'
       for (const tc of agent.toolCalls.slice(-10).reverse()) {
@@ -153,14 +166,13 @@ export function renderAgentActivity(liveStatus: LiveStatus | null): string {
   return html
 }
 
-// ---------------------------------------------------------------------------
-// Node history timeline
-// ---------------------------------------------------------------------------
+export function renderNodeHistory(
+  history: NodeHistoryEntry[],
+  runName: string,
+): string {
+  if (!history.length) return ""
 
-export function renderNodeHistory(liveStatus: LiveStatus | null, runName: string): string {
-  if (!liveStatus?.nodeHistory?.length) return ""
-
-  const nodes = [...liveStatus.nodeHistory].reverse()
+  const nodes = [...history].reverse()
 
   let html = '<div class="section"><h2>Node History</h2><div class="card stack-card stack-card-history">'
 
@@ -168,11 +180,13 @@ export function renderNodeHistory(liveStatus: LiveStatus | null, runName: string
     const elapsed = entry.completedAt - entry.startedAt
     const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(1)}s` : `${elapsed}ms`
     const icon = entry.status === "completed" ? "✓" : "✗"
+    const linkNode = getNodeDefinition(entry.node)?.pipelineLabel ?? entry.node
     html += `<div class="node-history-row">
   <span class="node-history-icon ${entry.status === "completed" ? "success-text" : "danger-text"}">${icon}</span>
-  <a class="node-history-link" href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(entry.node)}">${escapeHtml(entry.node)}</a>
+  <a class="node-history-link" href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(linkNode)}">${escapeHtml(entry.node)}</a>
   <span class="node-history-meta">${elapsedStr}</span>
-  ${entry.round > 0 ? `<span class="node-history-extra">· round ${entry.round}</span>` : ""}
+  ${entry.round >= 0 ? `<span class="node-history-extra">· round ${entry.round}</span>` : ""}
+  ${entry.rebuttalTurn ? `<span class="node-history-extra">· turn ${entry.rebuttalTurn}</span>` : ""}
   ${entry.summary ? `<span class="node-history-extra">· ${escapeHtml(JSON.stringify(entry.summary))}</span>` : ""}
   ${entry.error ? `<span class="node-history-error">${escapeHtml(entry.error.slice(0, 80))}</span>` : ""}
 </div>`
@@ -208,11 +222,6 @@ export function renderInterviewChatCard(runName: string, liveStatus: LiveStatus 
       </details>`
     : ""
 
-  // Current pending newQuestions: one bubble + one textarea each. No hidden
-  // question carry — the POST handler reads the answers by index only, and
-  // the pairing with questions is reconstructed from transcript position at
-  // prompt-build time (the interviewer sees the full transcript anyway).
-  // required on every textarea = browser-level validation, no JS.
   const inputsHtml = newQuestions.length > 0
     ? newQuestions.map((q, i) =>
         `<div class="chat-question-block">
@@ -249,13 +258,11 @@ export async function renderFailureBanner(
   files: string[],
   liveStatus: LiveStatus | null,
 ): Promise<string> {
-  // Check for failure from files
   const hasFinalMd = files.includes("final.md")
   const hasFailureJson = files.includes("failure.json")
   const hasLatestDraft = files.includes("latest-draft.md")
   const liveError = liveStatus?.phase === "error" ? liveStatus.error : undefined
 
-  // If final.md exists, the run was approved (latest-draft.md may exist from design phase)
   if (hasFinalMd) return ""
   if (!hasFailureJson && !hasLatestDraft && !liveError) return ""
 
@@ -272,7 +279,6 @@ export async function renderFailureBanner(
     } catch { /* ignore */ }
   }
 
-  // Try summary.json for more detail
   if (files.includes("summary.json")) {
     try {
       const p = safeFilePath(runName, "summary.json")
@@ -292,4 +298,3 @@ export async function renderFailureBanner(
   ${errorMessage ? `<div class="failure-banner-error">${escapeHtml(errorMessage)}</div>` : ""}
 </div>`
 }
-

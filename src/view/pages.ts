@@ -1,10 +1,13 @@
 import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { POLLING_SCRIPT } from "./client-script"
+import { POLLING_SCRIPT, NODE_MANUAL_REFRESH_SCRIPT } from "./client-script"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard, renderLivePipeline, renderNodeHistory } from "./components"
-import { computeStats, getRunFiles, listRuns, readLiveStatus } from "./data"
+import { computeStats, getRunFiles, listRuns, readLiveStatus, readNodeHistory } from "./data"
+import { getNodeDefinition, isNodeActive } from "./node-registry"
+import { renderNodeDashboard, renderNodeExecutionHistory, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
+import { renderLiveStatusMeta, renderRoundDetailPage, renderRoundStrip } from "./round-view"
 import { renderFileBrowser } from "./file-browser"
 import { listHtmlReaderAskThreads } from "./html-ask-store"
 import { listHtmlReaderHighlights } from "./html-highlights-store"
@@ -27,90 +30,121 @@ function renderStarButton(runName: string, starred: boolean): string {
 }
 
 export async function renderNodePage(runName: string, nodeName: string): Promise<Response> {
-  let dirPath: string
   try {
-    dirPath = safeRunPath(runName)
+    safeRunPath(runName)
   } catch {
     return new Response("Not found", { status: 404 })
   }
 
-  // Read node history from file
-  let nodeHistory: any[] = []
-  try {
-    const f = Bun.file(`${dirPath}/node-history.json`)
-    if (await f.exists()) {
-      nodeHistory = await f.json() as any[]
-    }
-  } catch { /* ignore */ }
-
-  // Find the target node (latest occurrence)
-  const nodeEntries = nodeHistory.filter((n: any) => n.node === nodeName)
-  if (nodeEntries.length === 0) {
-    return new Response(`Node "${escapeHtml(nodeName)}" not found in run history`, { status: 404 })
+  const def = getNodeDefinition(nodeName)
+  if (!def && !getNodeDefinition(nodeName.replace(/Prompt|Resume$/, ""))) {
+    return new Response(`Unknown node "${escapeHtml(nodeName)}"`, { status: 404 })
   }
 
-  // Get run files for artifact links
   let files: string[] = []
   try {
     files = await getRunFiles(runName)
-  } catch { /* ignore */ }
-
-  let html = `<div class="header-bar">
-  <h1>Node: ${escapeHtml(nodeName)}</h1>
-  <p class="muted-note dim-text">Run: ${escapeHtml(runName)}</p>
-</div>`
-
-  for (let i = nodeEntries.length - 1; i >= 0; i--) {
-    const entry = nodeEntries[i]
-    if (!entry) continue
-    const elapsed = entry.completedAt && entry.startedAt
-      ? `${((entry.completedAt - entry.startedAt) / 1000).toFixed(1)}s`
-      : "unknown"
-    const statusLabel = entry.status === "completed" ? "Completed" : "Error"
-    const statusCls = entry.status === "completed" ? "success-text" : "danger-text"
-
-    html += `<div class="section">
-  <h2>Execution #${nodeEntries.length - i} <span class="${statusCls} tiny-text">${statusLabel}</span></h2>
-  <div class="card">
-    ${tableWrap(`<table class="summary-table">
-      <tr><td>Status</td><td>${statusLabel}</td></tr>
-      <tr><td>Duration</td><td>${elapsed}</td></tr>
-      <tr><td>Round</td><td>${entry.round ?? 0}</td></tr>
-      ${entry.summary ? Object.entries(entry.summary as Record<string, unknown>).map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`).join("") : ""}
-      ${entry.error ? `<tr><td>Error</td><td class="danger-text">${escapeHtml(String(entry.error))}</td></tr>` : ""}
-    </table>`)}
-  </div>
-</div>`
+  } catch {
+    return new Response("Cannot read run directory", { status: 500 })
   }
 
-  // Show related artifacts (files matching node pattern)
-  const relatedFiles = files.filter((f) => {
-    const lower = f.toLowerCase()
-    const nodeLower = nodeName.toLowerCase()
-    return lower.includes(nodeLower) ||
-      (nodeLower === "draftfulldraft" && lower.includes("draft-round")) ||
-      (nodeLower === "runparallelaudits" && lower.includes("audits-round")) ||
-      (nodeLower === "aggregateconsensus" && lower.includes("aggregated-findings")) ||
-      (nodeLower === "finalizedesign" && lower === "final.html")
-  })
+  const fileSizes = await getFileSizes(runName, files)
+  const liveStatus = await readLiveStatus(runName)
+  const nodeHistory = await readNodeHistory(runName)
+  const displayName = def?.label ?? nodeName
+  const resolvedId = def?.id ?? nodeName
+  const { body: dashboardBody, live: dashboardLive } = await renderNodeDashboard(runName, nodeName, files, fileSizes, liveStatus)
+  const historyHtml = renderNodeExecutionHistory(nodeHistory, nodeName, runName)
+  const miniPipeline = renderNodeMiniPipeline(runName, nodeName, files)
+  const nodeIsActive = isNodeActive(liveStatus, resolvedId)
 
-  if (relatedFiles.length > 0) {
-    html += `<div class="section">
-  <h2>Related artifacts</h2>
-  <ul class="file-list">
-    ${relatedFiles.map((f) => `<li><a href="/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(f)}">${escapeHtml(f)}</a></li>`).join("")}
-  </ul>
-</div>`
-  }
+  const html = `${nodeIsActive ? `<div class="refresh-controls">
+  <span id="refresh-dot" class="refresh-dot" aria-hidden="true"></span>
+  <span id="refresh-status">Auto-refresh off · click Refresh to update live activity</span>
+  <button type="button" class="refresh-button" data-refresh-now>Refresh now</button>
+</div>` : ""}
+<div class="header-bar">
+  <h1>${escapeHtml(displayName)}</h1>
+  <p class="muted-note dim-text">Run: ${escapeHtml(runName)} · ${escapeHtml(nodeName)}</p>
+</div>
+${miniPipeline}
+<div id="node-live-section">${dashboardLive}</div>
+<div id="node-dashboard-section">${dashboardBody}</div>
+<div id="node-history-section">${historyHtml}</div>
+${nodeIsActive ? NODE_MANUAL_REFRESH_SCRIPT : ""}`
 
-  const fullHtml = layout(`Node: ${nodeName} — ${escapeHtml(runName)}`, html, {
+  const fullHtml = layout(`Node: ${displayName} — ${escapeHtml(runName)}`, html, {
     navbar: {
       section: "runs",
       back: { href: `/runs/${encodeURIComponent(runName)}`, label: "← Back to run" },
-      title: `Node: ${nodeName}`,
+      title: displayName,
     },
   })
   return new Response(fullHtml, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  })
+}
+
+export async function renderRoundPage(runName: string, roundNum: number): Promise<Response> {
+  try {
+    safeRunPath(runName)
+  } catch {
+    return new Response("Not found", { status: 404 })
+  }
+
+  let files: string[] = []
+  try {
+    files = await getRunFiles(runName)
+  } catch {
+    return new Response("Cannot read run directory", { status: 500 })
+  }
+
+  const fileSizes = await getFileSizes(runName, files)
+  const liveStatus = await readLiveStatus(runName)
+  const body = await renderRoundDetailPage(runName, roundNum, files, fileSizes, liveStatus)
+
+  const html = layout(`Round ${roundNum} — ${escapeHtml(runName)}`, `${body}`, {
+    navbar: {
+      section: "runs",
+      back: { href: `/runs/${encodeURIComponent(runName)}`, label: "← Back to run" },
+      title: `Round ${roundNum}`,
+    },
+  })
+
+  return new Response(html, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  })
+}
+
+export async function renderFilesPage(runName: string): Promise<Response> {
+  try {
+    safeRunPath(runName)
+  } catch {
+    return new Response("Not found", { status: 404 })
+  }
+
+  let files: string[] = []
+  try {
+    files = await getRunFiles(runName)
+  } catch {
+    return new Response("Cannot read run directory", { status: 500 })
+  }
+
+  const fileSizes = await getFileSizes(runName, files)
+  const fileListHtml = renderFileBrowser({ runName, files, fileSizes })
+
+  const html = layout(`Files — ${escapeHtml(runName)}`, `<div class="section">
+  <h1 class="page-title">All files</h1>
+  ${fileListHtml}
+</div>`, {
+    navbar: {
+      section: "runs",
+      back: { href: `/runs/${encodeURIComponent(runName)}`, label: "← Back to run" },
+      title: "All files",
+    },
+  })
+
+  return new Response(html, {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
 }
@@ -611,26 +645,24 @@ export async function renderRun(name: string): Promise<Response> {
 </div>`
   }
 
-  const fileListHtml = renderFileBrowser({ runName: name, files, fileSizes })
-
-  // ── Assemble body ──
-  const inputModeLabel = requestJson?.inputMode
-    ? `<span class="meta-item">Input: <strong>${escapeHtml(requestJson.inputMode)}</strong></span>`
-    : ""
-
   const pipelineHtml = renderLivePipeline(liveStatus, files, researchStatus, name)
   const agentActivityHtml = renderAgentActivity(liveStatus)
-  const nodeHistoryHtml = renderNodeHistory(liveStatus, name)
+  const nodeHistory = await readNodeHistory(name)
+  const nodeHistoryHtml = renderNodeHistory(nodeHistory, name)
+  const roundStripHtml = await renderRoundStrip(name, files, liveStatus)
+  const nodeGridHtml = renderNodeGrid(name, files, liveStatus, researchStatus)
+  const liveMetaHtml = renderLiveStatusMeta(liveStatus)
   const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
   const interviewChatHtml = renderInterviewChatCard(name, liveStatus)
 
-  const extraHead = ""  // Background poll handles refresh
+  const filesLinkSection = `<div class="section"><p><a href="/runs/${encodeURIComponent(name)}/files">Browse all ${files.length} files →</a></p></div>`
 
-  // Wrap dynamic sections with IDs for background polling
   const pipelineSection = `<div id="pipeline-section">${pipelineHtml}</div>`
   const agentActivitySection = `<div id="agent-activity-section">${agentActivityHtml}</div>`
   const nodeHistorySection = `<div id="node-history-section">${nodeHistoryHtml}</div>`
+  const roundStripSection = `<div id="round-strip-section">${roundStripHtml}</div>`
+  const nodeGridSection = `<div id="node-grid-section">${nodeGridHtml}</div>`
   const debugLogSection = `<div id="debug-log-section">${debugLogHtml}</div>`
   const failureBannerSection = `<div id="failure-banner-section">${failureBannerHtml}</div>`
   const interviewChatSection = `<div id="interview-chat-section">${interviewChatHtml}</div>`
@@ -640,10 +672,13 @@ export async function renderRun(name: string): Promise<Response> {
   const keyOutputsSection = `<div id="key-outputs-section">${keyOutputsHtml}</div>`
   const phaseSection = `<div id="phase-section">${phaseHtml}</div>`
   const designSummarySection = `<div id="design-summary-section">${designSummaryHtml}</div>`
-  const filesSection = `<div id="files-section"><div class="section">
-  <h2>All files</h2>
-  ${fileListHtml}
-</div></div>`
+  const filesSection = `<div id="files-section">${filesLinkSection}</div>`
+
+  const inputModeLabel = requestJson?.inputMode
+    ? `<span class="meta-item">Input: <strong>${escapeHtml(requestJson.inputMode)}</strong></span>`
+    : ""
+
+  const extraHead = ""
 
   const body = `
 ${liveStatus?.phase === "running" ? `<div class="refresh-controls">
@@ -662,13 +697,16 @@ ${interviewChatSection}
       <span class="meta-item">${badge(status)}</span>
       <span class="meta-item">ID: <strong>${escapeHtml(requestJson?.requestId ?? name)}</strong></span>
       ${inputModeLabel}
+      ${liveMetaHtml}
     </div>
   </div>
 </div>
 
 ${failureBannerSection}
 ${pipelineSection}
+${roundStripSection}
 ${agentActivitySection}
+${nodeGridSection}
 ${nodeHistorySection}
 ${debugLogSection}
 ${markdownSection}

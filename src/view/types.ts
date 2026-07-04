@@ -47,22 +47,31 @@ export interface LiveAgentStatus {
   reasoning: string
 }
 
+export interface NodeHistoryEntry {
+  node: string
+  startedAt: number
+  completedAt: number
+  status: "completed" | "error"
+  error?: string
+  round: number
+  rebuttalTurn?: number
+  researchPhase?: string
+  summary?: Record<string, unknown>
+  artifacts?: string[]
+}
+
 export interface LiveStatus {
   phase: "running" | "complete" | "error"
   node?: string
   nodeStartedAt?: number
   round: number
   maxRounds: number
+  researchPhase?: string
+  rebuttalTurn?: number
+  activeRebuttalCount?: number
+  unresolvedFindingCount?: number
   agents: Record<string, LiveAgentStatus>
-  nodeHistory: Array<{
-    node: string
-    startedAt: number
-    completedAt: number
-    status: "completed" | "error"
-    error?: string
-    round: number
-    summary?: Record<string, unknown>
-  }>
+  nodeHistory: NodeHistoryEntry[]
   error?: string
   awaitingReaderReply?: {
     turn: number

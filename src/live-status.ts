@@ -30,7 +30,10 @@ export interface NodeHistoryEntry {
   status: "completed" | "error"
   error?: string
   round: number
+  rebuttalTurn?: number
+  researchPhase?: string
   summary?: Record<string, unknown>
+  artifacts?: string[]
 }
 
 export interface LiveStatus {
@@ -39,6 +42,10 @@ export interface LiveStatus {
   nodeStartedAt?: number
   round: number
   maxRounds: number
+  researchPhase?: string
+  rebuttalTurn?: number
+  activeRebuttalCount?: number
+  unresolvedFindingCount?: number
   agents: Record<string, LiveAgentStatus>
   nodeHistory: NodeHistoryEntry[]
   error?: string
@@ -100,6 +107,18 @@ export function createLiveStatusWriter(
     }
   }
 
+  async function writeRunStatusSnapshot() {
+    if (disposed) return
+    const dir = resolveDir()
+    if (!dir) return
+    try {
+      const snapshot = { ...status, phase: status.phase, agents: {} }
+      await writeFile(join(dir, "run-status.json"), JSON.stringify(snapshot))
+    } catch {
+      // Silently ignore write failures
+    }
+  }
+
   async function deleteStatus() {
     if (disposed || !resolveDir()) return
     try {
@@ -129,11 +148,13 @@ export function createLiveStatusWriter(
         } else if (event.phase === "complete") {
           status.phase = "complete"
           clearInterval(interval)
+          void writeRunStatusSnapshot()
           void deleteStatus()
         } else if (event.phase === "error") {
           status.phase = "error"
           status.error = event.error instanceof Error ? event.error.message : String(event.error ?? "")
           clearInterval(interval)
+          void writeRunStatusSnapshot()
           void deleteStatus()
         }
         break
@@ -142,37 +163,52 @@ export function createLiveStatusWriter(
         if (event.phase === "start") {
           status.node = event.node
           status.nodeStartedAt = Date.now()
-          // Clear agents for new node
           status.agents = {}
           sessionAgent.clear()
-          if (event.state && "round" in event.state && typeof event.state.round === "number") {
-            status.round = event.state.round
+          if (event.state && typeof event.state === "object") {
+            const s = event.state as Record<string, unknown>
+            if (typeof s.round === "number") status.round = s.round
+            if (typeof s.status === "string") status.researchPhase = s.status
+            if (s.rebuttalTurnCounts && typeof s.rebuttalTurnCounts === "object") {
+              const counts = s.rebuttalTurnCounts as Record<string, number>
+              const turns = Object.values(counts)
+              status.rebuttalTurn = turns.length > 0 ? Math.max(...turns) : undefined
+            }
+            if (s.activeRebuttals && typeof s.activeRebuttals === "object") {
+              status.activeRebuttalCount = Object.keys(s.activeRebuttals as object).length
+            }
+            if (Array.isArray(s.unresolvedFindings)) {
+              status.unresolvedFindingCount = s.unresolvedFindings.length
+            }
           }
         } else if (event.phase === "end") {
-          // Record node completion in history
+          const s = event.state as Record<string, unknown> | undefined
           const entry: NodeHistoryEntry = {
             node: event.node,
             startedAt: status.nodeStartedAt ?? Date.now(),
             completedAt: Date.now(),
-            status: (event.state as any)?.status === "failed" || (event.state as any)?.failureReason ? "error" : "completed",
+            status: s?.status === "failed" || s?.failureReason ? "error" : "completed",
             round: status.round,
+            researchPhase: typeof s?.status === "string" ? s.status : status.researchPhase,
+            rebuttalTurn: status.rebuttalTurn,
             summary: summarizeNodeState(event.node, event.state),
           }
           status.nodeHistory.push(entry)
-          // Persist node history to disk immediately
           void writeNodeHistory()
         }
         break
       }
       case "design.phase": {
-        const phaseStr =
-          event.phase === "drafting" ? "design: drafting"
-          : `design: ${event.phase} round ${event.round}`
-        status.node = phaseStr
+        const nodeMap: Record<string, string> = {
+          drafting: "runDesignHtml",
+          enhancing: "interactiveEnhance",
+          finalizing: "finalizeDesign",
+        }
+        status.node = nodeMap[event.phase] ?? `runDesignHtml`
         status.nodeStartedAt = Date.now()
-        // Clear agents for new design phase
         status.agents = {}
         sessionAgent.clear()
+        status.round = event.round
         break
       }
       case "session.created": {
@@ -306,11 +342,41 @@ function summarizeNodeState(node: string, state: unknown): Record<string, unknow
       transcriptTurns: Array.isArray(s.interviewTranscript) ? Math.ceil(s.interviewTranscript.length / 2) : 0,
     }
   }
-  if (node === "draftFullDraft") {
-    return { round: s.round, draftLen: typeof s.draft === "string" ? (s.draft as string).length : 0 }
+  if (node === "draftFullDraft" || node === "reviseDraft") {
+    return {
+      round: s.round,
+      draftLen: typeof s.draft === "string" ? (s.draft as string).length : 0,
+      unresolved: Array.isArray(s.unresolvedFindings) ? s.unresolvedFindings.length : undefined,
+    }
+  }
+  if (node === "runParallelAudits") {
+    const audits = Array.isArray(s.audits) ? s.audits as Array<{ findings?: unknown[] }> : []
+    const findings = audits.reduce((n, a) => n + (a.findings?.length ?? 0), 0)
+    return { round: s.round, auditorCount: audits.length, findingCount: findings }
+  }
+  if (node === "reviewFindingsByDrafter") {
+    const active = s.activeRebuttals && typeof s.activeRebuttals === "object"
+      ? Object.keys(s.activeRebuttals as object).length
+      : 0
+    return { round: s.round, activeRebuttals: active, status: s.status }
+  }
+  if (node === "runTargetedRebuttals" || node === "reviewRebuttalResponses") {
+    const counts = s.rebuttalTurnCounts && typeof s.rebuttalTurnCounts === "object"
+      ? Object.values(s.rebuttalTurnCounts as Record<string, number>)
+      : []
+    return {
+      round: s.round,
+      rebuttalTurn: counts.length > 0 ? Math.max(...counts) : undefined,
+      status: s.status,
+    }
   }
   if (node === "aggregateConsensus" || node === "computeConfidence") {
-    return { status: s.status, round: s.round, approvedAgents: (s as any).approvedAgents?.length }
+    return {
+      status: s.status,
+      round: s.round,
+      approvedAgents: Array.isArray(s.approvedAgents) ? s.approvedAgents.length : undefined,
+      unresolved: Array.isArray(s.unresolvedFindings) ? s.unresolvedFindings.length : undefined,
+    }
   }
   return undefined
 }
