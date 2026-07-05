@@ -14,7 +14,7 @@ function normalizeUsageForDisplay(
   usage: UsageTotals,
   usageSource?: SessionTelemetryFile["sessions"][number]["calls"][number]["usageSource"],
 ): UsageTotals {
-  if (usageSource === "turso-import" && usage.costAvailable) {
+  if ((usageSource === "turso-import" || usageSource === "opencode-import") && usage.costAvailable) {
     return { ...usage, costEstimated: false }
   }
   if (usageSource === "csv-import" && usage.costAvailable && !usage.costEstimated) {

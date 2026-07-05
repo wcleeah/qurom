@@ -48,3 +48,15 @@ export function opencodeAgentsDir(workspaceDir?: string): string {
 export function defaultsOpencodeAgentsDir(workspaceDir?: string): string {
   return join(repoDefaultsDir(workspaceDir), "opencode", "agents")
 }
+
+export function defaultOpenCodeDbPath(): string {
+  const explicit = process.env.OPENCODE_DB?.trim()
+  if (explicit) return explicit
+  const xdg = process.env.XDG_DATA_HOME?.trim()
+  const base = xdg || join(homedir(), ".local", "share")
+  return join(base, "opencode", "opencode.db")
+}
+
+export async function isOpenCodeDbAvailable(dbPath = defaultOpenCodeDbPath()): Promise<boolean> {
+  return Bun.file(dbPath).exists()
+}

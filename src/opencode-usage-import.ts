@@ -1,7 +1,9 @@
-import { createClient, type Client } from "@libsql/client"
+import { Database } from "bun:sqlite"
+import { existsSync } from "node:fs"
 import { readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
+import { defaultOpenCodeDbPath } from "./data-paths"
 import {
   applySessionTelemetryEvent,
   readSessionTelemetry,
@@ -14,9 +16,9 @@ import { foldOpencodeTokens, hasUsage } from "./usage"
 export const DEBUG_LOG_FILENAME = "debug-log.jsonl"
 export const OPENCODE_USAGE_IMPORT_FILENAME = "opencode-usage-import.json"
 
-const TURSO_BATCH_SIZE = 100
+const SESSION_BATCH_SIZE = 100
 
-export type OpenCodeTursoSessionUsage = {
+export type OpenCodeSessionUsage = {
   sessionId: string
   agent: string | null
   modelId: string | null
@@ -55,7 +57,7 @@ export type OpenCodeUsageMatch = {
 
 export type OpenCodeUsageImportFile = {
   importedAt: string
-  source: "turso"
+  source: "opencode-db"
   matches: OpenCodeUsageMatch[]
   unmatchedSessionIds: string[]
 }
@@ -69,7 +71,19 @@ export type OpenCodeUsageImportSummary = {
   runsUpdated: number
 }
 
-export type TursoQueryClient = Pick<Client, "execute" | "close">
+type SessionUsageRow = {
+  session_id: string
+  agent: string | null
+  model_id: string | null
+  provider_id: string | null
+  tokens_in: number
+  tokens_out: number
+  tokens_cache_read: number
+  tokens_cache_write: number
+  reported_cost: number
+  duration_ms: number
+  completed_at: number | null
+}
 
 type RunBackfillCandidate = {
   runDir: string
@@ -77,15 +91,12 @@ type RunBackfillCandidate = {
   record: SessionTelemetryRecord
 }
 
-export function isTursoConfigured(): boolean {
-  return Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN)
+export function isOpenCodeDbConfigured(dbPath = defaultOpenCodeDbPath()): boolean {
+  return existsSync(dbPath)
 }
 
-export function createTursoClient(): TursoQueryClient | null {
-  const url = process.env.TURSO_DATABASE_URL
-  const authToken = process.env.TURSO_AUTH_TOKEN
-  if (!url || !authToken) return null
-  return createClient({ url, authToken })
+function openOpenCodeDb(dbPath: string): Database {
+  return new Database(dbPath, { readonly: true })
 }
 
 function latestCall(record: SessionTelemetryRecord) {
@@ -146,7 +157,7 @@ export async function parseDebugLogOpenCodeSessions(runDir: string): Promise<Dis
   return [...sessions.values()]
 }
 
-function usageFromTursoRow(row: OpenCodeTursoSessionUsage) {
+function usageFromSessionRow(row: OpenCodeSessionUsage) {
   return {
     tokensIn: row.tokensIn,
     tokensOut: row.tokensOut,
@@ -160,7 +171,7 @@ function usageFromTursoRow(row: OpenCodeTursoSessionUsage) {
   }
 }
 
-function foldTursoTokenFields(input: {
+function foldMessageTokenFields(input: {
   tokens_in: number
   tokens_out: number
   tokens_cache_read: number
@@ -173,62 +184,68 @@ function foldTursoTokenFields(input: {
   })
 }
 
-export async function fetchTursoSessionUsage(
-  client: TursoQueryClient,
+const SESSION_USAGE_QUERY = `
+  SELECT
+    session_id,
+    MAX(json_extract(data, '$.agent')) AS agent,
+    MAX(json_extract(data, '$.modelID')) AS model_id,
+    MAX(json_extract(data, '$.providerID')) AS provider_id,
+    COALESCE(SUM(CAST(json_extract(data, '$.tokens.input') AS INTEGER)), 0) AS tokens_in,
+    COALESCE(SUM(CAST(json_extract(data, '$.tokens.output') AS INTEGER)), 0) AS tokens_out,
+    COALESCE(SUM(CAST(json_extract(data, '$.tokens.cache.read') AS INTEGER)), 0) AS tokens_cache_read,
+    COALESCE(SUM(CAST(json_extract(data, '$.tokens.cache.write') AS INTEGER)), 0) AS tokens_cache_write,
+    COALESCE(SUM(CAST(json_extract(data, '$.cost') AS REAL)), 0) AS reported_cost,
+    COALESCE(SUM(
+      CASE WHEN json_extract(data, '$.time.completed') IS NOT NULL
+        AND json_extract(data, '$.time.created') IS NOT NULL
+      THEN CAST(json_extract(data, '$.time.completed') AS INTEGER)
+         - CAST(json_extract(data, '$.time.created') AS INTEGER)
+      ELSE 0 END
+    ), 0) AS duration_ms,
+    MAX(CAST(json_extract(data, '$.time.completed') AS INTEGER)) AS completed_at
+  FROM message
+  WHERE json_extract(data, '$.role') = 'assistant'
+    AND session_id IN (
+`
+
+function rowToSessionUsage(row: SessionUsageRow): OpenCodeSessionUsage {
+  const folded = foldMessageTokenFields({
+    tokens_in: Number(row.tokens_in ?? 0),
+    tokens_out: Number(row.tokens_out ?? 0),
+    tokens_cache_read: Number(row.tokens_cache_read ?? 0),
+    tokens_cache_write: Number(row.tokens_cache_write ?? 0),
+  })
+  const reportedCost = Number(row.reported_cost ?? 0)
+  const completedAtRaw = row.completed_at
+  return {
+    sessionId: String(row.session_id),
+    agent: row.agent == null ? null : String(row.agent),
+    modelId: row.model_id == null ? null : String(row.model_id),
+    providerId: row.provider_id == null ? null : String(row.provider_id),
+    tokensIn: folded.tokensIn,
+    tokensOut: folded.tokensOut,
+    costUsd: reportedCost,
+    costAvailable: reportedCost > 0,
+    durationMs: Number(row.duration_ms ?? 0),
+    completedAt: completedAtRaw == null ? null : Number(completedAtRaw),
+  }
+}
+
+export function fetchOpenCodeSessionUsage(
+  db: Database,
   sessionIds: string[],
-): Promise<Map<string, OpenCodeTursoSessionUsage>> {
-  const output = new Map<string, OpenCodeTursoSessionUsage>()
+): Map<string, OpenCodeSessionUsage> {
+  const output = new Map<string, OpenCodeSessionUsage>()
   if (sessionIds.length === 0) return output
 
-  for (let index = 0; index < sessionIds.length; index += TURSO_BATCH_SIZE) {
-    const batch = sessionIds.slice(index, index + TURSO_BATCH_SIZE)
+  for (let index = 0; index < sessionIds.length; index += SESSION_BATCH_SIZE) {
+    const batch = sessionIds.slice(index, index + SESSION_BATCH_SIZE)
     const placeholders = batch.map(() => "?").join(", ")
-    const result = await client.execute({
-      sql: `
-        SELECT
-          session_id,
-          agent,
-          model_id,
-          provider_id,
-          COALESCE(SUM(tokens_in), 0) AS tokens_in,
-          COALESCE(SUM(tokens_out), 0) AS tokens_out,
-          COALESCE(SUM(tokens_cache_read), 0) AS tokens_cache_read,
-          COALESCE(SUM(tokens_cache_write), 0) AS tokens_cache_write,
-          COALESCE(SUM(cost), 0) AS reported_cost,
-          COALESCE(SUM(response_time_ms), 0) AS duration_ms,
-          MAX(time_completed) AS completed_at
-        FROM responses
-        WHERE session_id IN (${placeholders})
-        GROUP BY session_id
-      `,
-      args: batch,
-    })
+    const sql = `${SESSION_USAGE_QUERY}${placeholders})\n  GROUP BY session_id`
+    const rows = db.query(sql).all(...batch) as SessionUsageRow[]
 
-    for (const row of result.rows) {
-      const sessionId = String(row.session_id)
-      const folded = foldTursoTokenFields({
-        tokens_in: Number(row.tokens_in ?? 0),
-        tokens_out: Number(row.tokens_out ?? 0),
-        tokens_cache_read: Number(row.tokens_cache_read ?? 0),
-        tokens_cache_write: Number(row.tokens_cache_write ?? 0),
-      })
-      const reportedCost = Number(row.reported_cost ?? 0)
-      const completedAtRaw = row.completed_at
-      output.set(sessionId, {
-        sessionId,
-        agent: row.agent == null ? null : String(row.agent),
-        modelId: row.model_id == null ? null : String(row.model_id),
-        providerId: row.provider_id == null ? null : String(row.provider_id),
-        tokensIn: folded.tokensIn,
-        tokensOut: folded.tokensOut,
-        costUsd: reportedCost,
-        costAvailable: reportedCost > 0,
-        durationMs: Number(row.duration_ms ?? 0),
-        completedAt:
-          completedAtRaw == null || completedAtRaw === ""
-            ? null
-            : Number(completedAtRaw),
-      })
+    for (const row of rows) {
+      output.set(row.session_id, rowToSessionUsage(row))
     }
   }
 
@@ -290,10 +307,10 @@ async function listBackfillCandidates(runsDir: string): Promise<{
   return { candidates, runsScanned }
 }
 
-function buildMatch(record: SessionTelemetryRecord, turso: OpenCodeTursoSessionUsage): OpenCodeUsageMatch {
-  const usage = usageFromTursoRow(turso)
-  const completedAt = turso.completedAt
-    ? new Date(turso.completedAt).toISOString()
+function buildMatch(record: SessionTelemetryRecord, usage: OpenCodeSessionUsage): OpenCodeUsageMatch {
+  const usageTotals = usageFromSessionRow(usage)
+  const completedAt = usage.completedAt
+    ? new Date(usage.completedAt).toISOString()
     : new Date().toISOString()
 
   return {
@@ -301,14 +318,14 @@ function buildMatch(record: SessionTelemetryRecord, turso: OpenCodeTursoSessionU
     role: record.role,
     node: record.node,
     round: record.round,
-    providerAgent: record.providerAgent ?? turso.agent ?? undefined,
-    resolvedModel: turso.modelId ?? latestCall(record)?.resolvedModel,
-    durationMs: turso.durationMs > 0 ? turso.durationMs : latestCall(record)?.durationMs,
+    providerAgent: record.providerAgent ?? usage.agent ?? undefined,
+    resolvedModel: usage.modelId ?? latestCall(record)?.resolvedModel,
+    durationMs: usage.durationMs > 0 ? usage.durationMs : latestCall(record)?.durationMs,
     completedAt,
-    tokensIn: usage.tokensIn,
-    tokensOut: usage.tokensOut,
-    costUsd: usage.costUsd,
-    costAvailable: usage.costAvailable ?? false,
+    tokensIn: usageTotals.tokensIn,
+    tokensOut: usageTotals.tokensOut,
+    costUsd: usageTotals.costUsd,
+    costAvailable: usageTotals.costAvailable ?? false,
     costEstimated: false,
   }
 }
@@ -338,7 +355,7 @@ function mergeImportIntoSessionTelemetry(
         costAvailable: match.costAvailable,
         costEstimated: match.costEstimated,
       },
-      usageSource: "turso-import",
+      usageSource: "opencode-import",
     })
   }
   return next
@@ -346,37 +363,37 @@ function mergeImportIntoSessionTelemetry(
 
 export async function applyOpenCodeUsageImport(input: {
   runsDir: string
-  tursoClient?: TursoQueryClient | null
+  dbPath?: string
 }): Promise<OpenCodeUsageImportSummary> {
-  const client = input.tursoClient ?? createTursoClient()
-  if (!client) {
-    throw new Error("Turso not configured (missing TURSO_DATABASE_URL / TURSO_AUTH_TOKEN)")
+  const dbPath = input.dbPath ?? defaultOpenCodeDbPath()
+  if (!(await Bun.file(dbPath).exists())) {
+    throw new Error(`OpenCode database not found at ${dbPath}`)
   }
 
-  const ownsClient = !input.tursoClient
+  const db = openOpenCodeDb(dbPath)
   try {
     const { candidates, runsScanned } = await listBackfillCandidates(input.runsDir)
     const sessionIds = [...new Set(candidates.map((item) => item.record.sessionId))]
-    const tursoBySession = await fetchTursoSessionUsage(client, sessionIds)
+    const usageBySession = fetchOpenCodeSessionUsage(db, sessionIds)
 
     const byRun = new Map<string, { runName: string; matches: OpenCodeUsageMatch[]; unmatched: string[] }>()
     let matchedSessions = 0
 
     for (const candidate of candidates) {
-      const turso = tursoBySession.get(candidate.record.sessionId)
+      const usage = usageBySession.get(candidate.record.sessionId)
       const bucket = byRun.get(candidate.runDir) ?? {
         runName: candidate.runName,
         matches: [],
         unmatched: [],
       }
 
-      if (!turso || !hasUsage({ tokensIn: turso.tokensIn, tokensOut: turso.tokensOut })) {
+      if (!usage || !hasUsage({ tokensIn: usage.tokensIn, tokensOut: usage.tokensOut })) {
         bucket.unmatched.push(candidate.record.sessionId)
         byRun.set(candidate.runDir, bucket)
         continue
       }
 
-      bucket.matches.push(buildMatch(candidate.record, turso))
+      bucket.matches.push(buildMatch(candidate.record, usage))
       matchedSessions++
       byRun.set(candidate.runDir, bucket)
     }
@@ -387,7 +404,7 @@ export async function applyOpenCodeUsageImport(input: {
 
       const importFile: OpenCodeUsageImportFile = {
         importedAt: new Date().toISOString(),
-        source: "turso",
+        source: "opencode-db",
         matches: payload.matches,
         unmatchedSessionIds: payload.unmatched,
       }
@@ -411,7 +428,7 @@ export async function applyOpenCodeUsageImport(input: {
       runsUpdated,
     }
   } finally {
-    if (ownsClient) client.close()
+    db.close()
   }
 }
 

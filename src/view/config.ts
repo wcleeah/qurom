@@ -1,8 +1,9 @@
 import { loadRuntimeConfig, type QuorumConfig } from "../config"
 import { applyCursorUsageImport, parseCursorUsageCsv, type CursorUsageImportSummary } from "../cursor-usage-import"
+import { defaultOpenCodeDbPath } from "../data-paths"
 import {
   applyOpenCodeUsageImport,
-  isTursoConfigured,
+  isOpenCodeDbConfigured,
   type OpenCodeUsageImportSummary,
 } from "../opencode-usage-import"
 import { mkdir } from "node:fs/promises"
@@ -48,10 +49,11 @@ function renderCursorUsageImportSection(importSummary?: CursorUsageImportSummary
 
 function renderOpenCodeUsageImportSection(importSummary?: OpenCodeUsageImportSummary) {
   const summary = importSummary ?? lastOpenCodeUsageImport
-  const tursoConfigured = isTursoConfigured()
-  const statusHtml = tursoConfigured
-    ? `<p class="tiny-text muted-text">Turso credentials detected. Creates or fills <code>session-telemetry.json</code> for OpenCode runs by reading session IDs from each run's debug log and looking up usage in Turso.</p>`
-    : `<div class="outcome-banner failed">Turso not configured. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in the environment.</div>`
+  const dbPath = defaultOpenCodeDbPath()
+  const dbAvailable = isOpenCodeDbConfigured(dbPath)
+  const statusHtml = dbAvailable
+    ? `<p class="tiny-text muted-text">Creates or fills <code>session-telemetry.json</code> for OpenCode runs by reading session IDs from each run's debug log and looking up usage in OpenCode's local database at <code>${escapeHtml(dbPath)}</code>.</p>`
+    : `<div class="outcome-banner failed">OpenCode database not found at <code>${escapeHtml(dbPath)}</code>. Run OpenCode locally first, or set <code>OPENCODE_DB</code> to the correct path.</div>`
   const summaryHtml = summary
     ? `<div class="outcome-banner approved">Backfilled ${summary.matchedSessions}/${summary.sessionsNeedingBackfill} OpenCode session(s) across ${summary.runsUpdated} run(s). Unmatched: ${summary.unmatchedSessions}.</div>`
     : ""
@@ -59,7 +61,7 @@ function renderOpenCodeUsageImportSection(importSummary?: OpenCodeUsageImportSum
   return section("OpenCode usage backfill", `${statusHtml}
 ${summaryHtml}
 <form class="config-form" method="POST" action="/config/opencode-usage-import">
-  <div class="form-actions"><button type="submit" class="btn btn-primary"${tursoConfigured ? "" : " disabled"}>Backfill OpenCode usage from Turso</button></div>
+  <div class="form-actions"><button type="submit" class="btn btn-primary"${dbAvailable ? "" : " disabled"}>Backfill OpenCode usage from local DB</button></div>
 </form>`)
 }
 

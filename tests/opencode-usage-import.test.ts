@@ -1,17 +1,53 @@
 import { describe, expect, test } from "bun:test"
+import { Database } from "bun:sqlite"
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 import {
   applyOpenCodeUsageImport,
-  fetchTursoSessionUsage,
+  fetchOpenCodeSessionUsage,
+  isOpenCodeDbConfigured,
   parseDebugLogOpenCodeSessions,
   sessionNeedsBackfill,
-  type TursoQueryClient,
 } from "../src/opencode-usage-import.ts"
 import { readSessionTelemetry, SESSION_TELEMETRY_FILENAME } from "../src/session-telemetry.ts"
 import { foldOpencodeTokens } from "../src/usage.ts"
+
+function createTestOpenCodeDb(dbPath: string, rows: Array<{ sessionId: string; data: Record<string, unknown> }>) {
+  const db = new Database(dbPath, { create: true })
+  db.run(`
+    CREATE TABLE message (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      time_created INTEGER NOT NULL,
+      time_updated INTEGER NOT NULL,
+      data TEXT NOT NULL
+    )
+  `)
+  for (const [index, row] of rows.entries()) {
+    db.run(
+      "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
+      [`msg-${index}`, row.sessionId, 1_700_000_000_000, 1_700_000_000_000, JSON.stringify(row.data)],
+    )
+  }
+  db.close()
+}
+
+describe("isOpenCodeDbConfigured", () => {
+  test("returns false when database file is missing", async () => {
+    const runsDir = await mkdtemp(join(tmpdir(), "opencode-db-missing-"))
+    const dbPath = join(runsDir, "missing-opencode.db")
+    expect(isOpenCodeDbConfigured(dbPath)).toBe(false)
+  })
+
+  test("returns true when database file exists", async () => {
+    const runsDir = await mkdtemp(join(tmpdir(), "opencode-db-present-"))
+    const dbPath = join(runsDir, "opencode.db")
+    createTestOpenCodeDb(dbPath, [])
+    expect(isOpenCodeDbConfigured(dbPath)).toBe(true)
+  })
+})
 
 describe("sessionNeedsBackfill", () => {
   test("targets opencode sessions with missing or zero usage", () => {
@@ -53,35 +89,29 @@ describe("sessionNeedsBackfill", () => {
   })
 })
 
-describe("fetchTursoSessionUsage", () => {
+describe("fetchOpenCodeSessionUsage", () => {
   test("folds cache tokens into tokensIn", async () => {
-    const client: TursoQueryClient = {
-      async execute() {
-        return {
-          columns: [],
-          rows: [
-            {
-              session_id: "ses-fold",
-              agent: "research-drafter",
-              model_id: "claude-sonnet-4",
-              provider_id: "anthropic",
-              tokens_in: 100,
-              tokens_out: 20,
-              tokens_cache_read: 300,
-              tokens_cache_write: 50,
-              reported_cost: 0.42,
-              duration_ms: 1200,
-              completed_at: 1_700_000_000_000,
-            },
-          ],
-          rowsAffected: 0,
-          columnTypes: [],
-        }
+    const runsDir = await mkdtemp(join(tmpdir(), "opencode-fetch-"))
+    const dbPath = join(runsDir, "opencode.db")
+    createTestOpenCodeDb(dbPath, [
+      {
+        sessionId: "ses-fold",
+        data: {
+          role: "assistant",
+          agent: "research-drafter",
+          modelID: "claude-sonnet-4",
+          providerID: "anthropic",
+          cost: 0.42,
+          tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 300, write: 50 } },
+          time: { created: 1_700_000_000_000, completed: 1_700_000_001_200 },
+        },
       },
-      close() {},
-    }
+    ])
 
-    const usage = await fetchTursoSessionUsage(client, ["ses-fold"])
+    const db = new Database(dbPath, { readonly: true })
+    const usage = fetchOpenCodeSessionUsage(db, ["ses-fold"])
+    db.close()
+
     const row = usage.get("ses-fold")
     expect(row?.tokensIn).toBe(
       foldOpencodeTokens({ input: 100, output: 20, cache: { read: 300, write: 50 } }).tokensIn,
@@ -115,7 +145,7 @@ describe("parseDebugLogOpenCodeSessions", () => {
 })
 
 describe("applyOpenCodeUsageImport", () => {
-  test("creates session-telemetry from debug log and Turso", async () => {
+  test("creates session-telemetry from debug log and opencode.db", async () => {
     const runsDir = await mkdtemp(join(tmpdir(), "opencode-import-debug-"))
     const runDir = join(runsDir, "demo-run")
     await mkdir(runDir, { recursive: true })
@@ -128,37 +158,23 @@ describe("applyOpenCodeUsageImport", () => {
       "utf8",
     )
 
-    const tursoClient: TursoQueryClient = {
-      async execute({ args }) {
-        const sessionId = String(args?.[0] ?? "")
-        if (sessionId !== "ses-missing") {
-          return { columns: [], rows: [], rowsAffected: 0, columnTypes: [] }
-        }
-        return {
-          columns: [],
-          rows: [
-            {
-              session_id: "ses-missing",
-              agent: "research-drafter",
-              model_id: "claude-sonnet-4",
-              provider_id: "anthropic",
-              tokens_in: 1000,
-              tokens_out: 250,
-              tokens_cache_read: 0,
-              tokens_cache_write: 0,
-              reported_cost: 0.15,
-              duration_ms: 4500,
-              completed_at: 1_700_000_000_000,
-            },
-          ],
-          rowsAffected: 0,
-          columnTypes: [],
-        }
+    const dbPath = join(runsDir, "opencode.db")
+    createTestOpenCodeDb(dbPath, [
+      {
+        sessionId: "ses-missing",
+        data: {
+          role: "assistant",
+          agent: "research-drafter",
+          modelID: "claude-sonnet-4",
+          providerID: "anthropic",
+          cost: 0.15,
+          tokens: { input: 1000, output: 250, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1_700_000_000_000, completed: 1_700_000_004_500 },
+        },
       },
-      close() {},
-    }
+    ])
 
-    const summary = await applyOpenCodeUsageImport({ runsDir, tursoClient })
+    const summary = await applyOpenCodeUsageImport({ runsDir, dbPath })
     expect(summary.runsScanned).toBe(1)
     expect(summary.matchedSessions).toBe(1)
     expect(summary.runsUpdated).toBe(1)
@@ -168,10 +184,10 @@ describe("applyOpenCodeUsageImport", () => {
     expect(missing?.provider).toBe("opencode")
     expect(missing?.node).toBe("draftFullDraft")
     expect(missing?.calls[0]?.usage?.tokensIn).toBe(1000)
-    expect(missing?.calls[0]?.usageSource).toBe("turso-import")
+    expect(missing?.calls[0]?.usageSource).toBe("opencode-import")
   })
 
-  test("gap-fills opencode sessions from Turso and skips sessions with usage", async () => {
+  test("gap-fills opencode sessions from opencode.db and skips sessions with usage", async () => {
     const runsDir = await mkdtemp(join(tmpdir(), "opencode-import-"))
     const runDir = join(runsDir, "demo-run")
     await mkdir(runDir, { recursive: true })
@@ -216,37 +232,23 @@ describe("applyOpenCodeUsageImport", () => {
       "utf8",
     )
 
-    const tursoClient: TursoQueryClient = {
-      async execute({ args }) {
-        const sessionId = String(args?.[0] ?? "")
-        if (sessionId !== "ses-missing") {
-          return { columns: [], rows: [], rowsAffected: 0, columnTypes: [] }
-        }
-        return {
-          columns: [],
-          rows: [
-            {
-              session_id: "ses-missing",
-              agent: "research-drafter",
-              model_id: "claude-sonnet-4",
-              provider_id: "anthropic",
-              tokens_in: 1000,
-              tokens_out: 250,
-              tokens_cache_read: 0,
-              tokens_cache_write: 0,
-              reported_cost: 0.15,
-              duration_ms: 4500,
-              completed_at: 1_700_000_000_000,
-            },
-          ],
-          rowsAffected: 0,
-          columnTypes: [],
-        }
+    const dbPath = join(runsDir, "opencode.db")
+    createTestOpenCodeDb(dbPath, [
+      {
+        sessionId: "ses-missing",
+        data: {
+          role: "assistant",
+          agent: "research-drafter",
+          modelID: "claude-sonnet-4",
+          providerID: "anthropic",
+          cost: 0.15,
+          tokens: { input: 1000, output: 250, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1_700_000_000_000, completed: 1_700_000_004_500 },
+        },
       },
-      close() {},
-    }
+    ])
 
-    const summary = await applyOpenCodeUsageImport({ runsDir, tursoClient })
+    const summary = await applyOpenCodeUsageImport({ runsDir, dbPath })
     expect(summary.runsScanned).toBe(1)
     expect(summary.sessionsNeedingBackfill).toBe(1)
     expect(summary.matchedSessions).toBe(1)
@@ -257,7 +259,7 @@ describe("applyOpenCodeUsageImport", () => {
     const missing = telemetry.sessions.find((session) => session.sessionId === "ses-missing")
     expect(missing?.calls[0]?.usage?.tokensIn).toBe(1000)
     expect(missing?.calls[0]?.usage?.tokensOut).toBe(250)
-    expect(missing?.calls[0]?.usageSource).toBe("turso-import")
+    expect(missing?.calls[0]?.usageSource).toBe("opencode-import")
     expect(missing?.calls[0]?.resolvedModel).toBe("claude-sonnet-4")
 
     const existing = telemetry.sessions.find((session) => session.sessionId === "ses-has-usage")
