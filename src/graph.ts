@@ -17,6 +17,7 @@ import type { AgentRunHandle } from "./providers/types"
 import type { PromptBundle } from "./prompt-assets"
 import { buildResearchToolHint } from "./research-tools"
 import { summarizeMarkdown } from "./summarizer"
+import { tagOutputArtifact } from "./tagger"
 import { designHtml } from "./design-quorum"
 import { formatReaderProfileForPrompt, readerContextBlock as buildReaderContextBlock } from "./reader-profile"
 import { AUDITOR_ROLES, DRAFTER_ROLE } from "./role-registry"
@@ -1960,6 +1961,26 @@ async function finalizeDesignNode(
   return researchStateSchema.parse(state)
 }
 
+export async function enrichApprovedOutput(
+  config: RuntimeConfig,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  runtime = createAgentRuntime(config),
+) {
+  const tagPromise = telemetry
+    ? tagOutputArtifact(config, state, {
+        run: telemetry.run,
+        parentObservation: telemetry.currentNode,
+        trackSessionObservation: telemetry.trackSessionObservation,
+        trackAgentMetadata: telemetry.trackAgentMetadata,
+        debugLog: telemetry.debugLog,
+      }, runtime)
+    : tagOutputArtifact(config, state, undefined, runtime)
+  const summaryState = await summarizeOutputArtifact(config, state, telemetry, runtime)
+  await tagPromise
+  return summaryState
+}
+
 export async function summarizeOutputArtifact(config: RuntimeConfig, state: ResearchState, telemetry?: GraphTelemetry, runtime = createAgentRuntime(config)) {
   if (state.status !== "approved" && state.status !== "failed") {
     throw new Error(`Invalid status for summarizeOutputArtifact: ${state.status}`)
@@ -2190,6 +2211,11 @@ export function createGraph(
     .addNode("finalizeFailedRun", async (state) =>
       withNodeTelemetry("finalizeFailedRun", state, () => finalizeFailedRun(config, state)),
     )
+    .addNode("enrichApprovedOutput", async (state) =>
+      withNodeTelemetry("enrichApprovedOutput", state, () =>
+        enrichApprovedOutput(config, state, graphTelemetry, runtime),
+      ),
+    )
     .addNode("summarizeOutputArtifact", async (state) =>
       withNodeTelemetry("summarizeOutputArtifact", state, () => summarizeOutputArtifact(config, state, graphTelemetry, runtime)),
     )
@@ -2235,8 +2261,12 @@ export function createGraph(
       "finalizeFailedRun",
     ])
     .addEdge("reviseDraft", "runParallelAudits")
-    .addEdge("finalizeApprovedDraft", "summarizeOutputArtifact")
+    .addEdge("finalizeApprovedDraft", "enrichApprovedOutput")
     .addEdge("finalizeFailedRun", "summarizeOutputArtifact")
+    .addConditionalEdges("enrichApprovedOutput", (state) => routeAfterSummarize(config, state), [
+      "runDesignHtml",
+      "__end__",
+    ])
     .addConditionalEdges("summarizeOutputArtifact", (state) => routeAfterSummarize(config, state), [
       "runDesignHtml",
       "__end__",

@@ -46,6 +46,21 @@ export const quorumConfigSchema = z.object({
       enabled: z.boolean().default(true),
     })
     .default({ maxTurns: 6, enabled: true }),
+  tagging: z
+    .object({
+      enabled: z.boolean().default(true),
+      maxArticleTags: z.number().int().positive().max(32).default(8),
+      maxNoteTags: z.number().int().positive().max(32).default(8),
+      predefinedTags: z
+        .array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/))
+        .default([]),
+    })
+    .default({
+      enabled: true,
+      maxArticleTags: 8,
+      maxNoteTags: 8,
+      predefinedTags: [],
+    }),
 })
 
 export type QuorumConfig = z.infer<typeof quorumConfigSchema>

@@ -3,6 +3,7 @@ import type { AgentRole } from "./providers/types"
 
 export const DRAFTER_ROLE = "research-drafter"
 export const SUMMARIZER_ROLE = "markdown-summarizer"
+export const TAGGER_ROLE = "research-tagger"
 export const DESIGNER_ROLE = "html-designer"
 
 export const AUDITOR_ROLES = [
@@ -15,6 +16,7 @@ export const UTILITY_ROLES = [
   "reader-interviewer",
   "json-fixer",
   "html-reading-companion",
+  TAGGER_ROLE,
 ] as const
 
 export const DESIGN_QUORUM_ROLES = [
@@ -40,7 +42,7 @@ export function configuredAgentRoles(config: RuntimeConfig): AgentRole[] {
 }
 
 export function requiredOpenCodeAgentRoles(config: RuntimeConfig): AgentRole[] {
-  const roles: AgentRole[] = [DRAFTER_ROLE, ...AUDITOR_ROLES, SUMMARIZER_ROLE]
+  const roles: AgentRole[] = [DRAFTER_ROLE, ...AUDITOR_ROLES, SUMMARIZER_ROLE, TAGGER_ROLE]
   if (config.quorumConfig.designQuorum?.enabled) {
     roles.push(DESIGNER_ROLE)
   }

@@ -57,6 +57,60 @@ export const markdownSummarySchema = z.object({
   slugHint: nonEmptyStringSchema.optional(),
 })
 
+export const tagSlugSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+
+export const articleTagEntrySchema = z.object({
+  slug: tagSlugSchema,
+  label: nonEmptyStringSchema,
+  matchedPredefined: z.boolean(),
+})
+
+export const articleTagsResultSchema = z.object({
+  tags: z.array(articleTagEntrySchema),
+})
+
+export function createArticleTagsResultSchema(input: {
+  predefinedTags: string[]
+  maxArticleTags: number
+}) {
+  const predefined = new Set(input.predefinedTags)
+  return articleTagsResultSchema.superRefine((value, ctx) => {
+    if (value.tags.length > input.maxArticleTags) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `At most ${input.maxArticleTags} tags allowed`,
+        path: ["tags"],
+      })
+    }
+    const seen = new Set<string>()
+    for (let i = 0; i < value.tags.length; i++) {
+      const tag = value.tags[i]!
+      if (seen.has(tag.slug)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate tag slug: ${tag.slug}`,
+          path: ["tags", i, "slug"],
+        })
+      }
+      seen.add(tag.slug)
+      if (tag.matchedPredefined && !predefined.has(tag.slug)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `matchedPredefined requires slug to be in predefinedTags: ${tag.slug}`,
+          path: ["tags", i, "slug"],
+        })
+      }
+      if (!tag.matchedPredefined && predefined.has(tag.slug)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Predefined slug must use matchedPredefined: true: ${tag.slug}`,
+          path: ["tags", i, "matchedPredefined"],
+        })
+      }
+    }
+  })
+}
+
 export const runDisplaySummarySchema = markdownSummarySchema.extend({
   sourcePath: nonEmptyStringSchema.optional(),
 })
@@ -383,6 +437,8 @@ export const researchStateSchema = researchStateObjectSchema.superRefine((value,
 export type InputRequest = z.infer<typeof inputRequestSchema>
 export type GraphInput = z.infer<typeof graphInputSchema>
 export type MarkdownSummary = z.infer<typeof markdownSummarySchema>
+export type ArticleTagEntry = z.infer<typeof articleTagEntrySchema>
+export type ArticleTagsResult = z.infer<typeof articleTagsResultSchema>
 export type RunDisplaySummary = z.infer<typeof runDisplaySummarySchema>
 export type AuditResult = z.infer<typeof auditResultSchema>
 export type AuditResultRecord = z.infer<typeof auditResultRecordSchema>

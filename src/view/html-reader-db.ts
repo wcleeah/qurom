@@ -74,10 +74,52 @@ CREATE INDEX IF NOT EXISTS idx_library_notes_run_file
   `)
 }
 
+export function ensureTagsSchema(db: Database): void {
+  db.run(`
+CREATE TABLE IF NOT EXISTS tags (
+  slug TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('predefined', 'agent', 'user')),
+  created_at TEXT NOT NULL
+);
+  `)
+  db.run(`
+CREATE TABLE IF NOT EXISTS article_tags (
+  run_name TEXT NOT NULL,
+  tag_slug TEXT NOT NULL REFERENCES tags(slug),
+  source TEXT NOT NULL CHECK (source IN ('agent', 'user')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (run_name, tag_slug)
+);
+  `)
+  db.run(`
+CREATE TABLE IF NOT EXISTS note_tags (
+  note_id TEXT NOT NULL REFERENCES library_notes(id) ON DELETE CASCADE,
+  tag_slug TEXT NOT NULL REFERENCES tags(slug),
+  source TEXT NOT NULL CHECK (source IN ('propagated', 'user')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (note_id, tag_slug)
+);
+  `)
+  db.run(`
+CREATE INDEX IF NOT EXISTS idx_article_tags_run
+  ON article_tags (run_name);
+  `)
+  db.run(`
+CREATE INDEX IF NOT EXISTS idx_note_tags_note
+  ON note_tags (note_id);
+  `)
+  db.run(`
+CREATE INDEX IF NOT EXISTS idx_note_tags_slug
+  ON note_tags (tag_slug);
+  `)
+}
+
 export function openHtmlReaderDb(dbPath: string): Database {
   const db = new Database(dbPath, { create: true, strict: true })
   db.run("PRAGMA journal_mode = WAL")
   ensureLibraryNotesSchema(db)
+  ensureTagsSchema(db)
   db.run(`
 CREATE TABLE IF NOT EXISTS html_reader_notes (
   run_name TEXT NOT NULL,

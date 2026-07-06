@@ -13,5 +13,11 @@
   "readerDiscovery": {
     "maxTurns": 6,
     "enabled": true
+  },
+  "tagging": {
+    "enabled": true,
+    "maxArticleTags": 8,
+    "maxNoteTags": 8,
+    "predefinedTags": []
   }
 }
