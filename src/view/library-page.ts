@@ -9,6 +9,7 @@ import {
   resolveLibrarySource,
   type LibraryNote,
 } from "./library-notes-store"
+import { displayHighlightQuote } from "./library-notes-types"
 import { section } from "./html"
 import { layout, formatRelative } from "./layout"
 import { renderLibraryTagFilter, renderTagChip, TAG_FORMS_SCRIPT } from "./tag-ui"
@@ -21,7 +22,7 @@ function parseTagFilter(searchParams: URLSearchParams): string[] {
 }
 
 function renderHighlightPrimary(note: LibraryNote): string {
-  const quote = note.quote?.trim() ?? ""
+  const quote = displayHighlightQuote(note.quote)
   const body = note.body.trim()
   if (body) {
     return `<div class="library-item-body">${escapeHtml(body)}</div>

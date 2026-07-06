@@ -5,6 +5,7 @@ import type { RuntimeConfig } from "../config"
 import type { PromptFileInput } from "../opencode"
 import { buildResearchToolHint } from "../research-tools"
 import type { HtmlReaderHighlight } from "./html-highlights-store"
+import { displayHighlightQuote } from "./library-notes-types"
 import { safeRunPath } from "./paths"
 import type { AskScope } from "./html-ask-store"
 
@@ -80,7 +81,7 @@ export async function buildAskPrompt(input: AskPromptBuildInput): Promise<AskPro
     if (!highlight) {
       throw new Error("Highlight context is required for highlight scope bootstrap")
     }
-    values.quote = highlight.quote
+    values.quote = displayHighlightQuote(highlight.quote)
     values.prefix = highlight.prefix
     values.suffix = highlight.suffix
   }

@@ -67,6 +67,10 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   const noteLastSaved = new Map()
   const noteSaveInFlight = new Map()
 
+  function displayQuote(quote) {
+    return String(quote || "").trim()
+  }
+
   function escapeHtml(text) {
     return String(text)
       .replace(/&/g, "&amp;")
@@ -302,7 +306,7 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
         '<button type="button" class="html-viewer-highlight-item-main" data-highlight-open="' + escapeHtml(item.id) + '" aria-expanded="' + (expanded ? "true" : "false") + '">' +
         '<span class="html-viewer-highlight-swatch" style="background:' + rgba + '"></span>' +
         '<div class="html-viewer-highlight-item-text">' +
-        '<div class="html-viewer-highlight-quote">' + escapeHtml(item.quote) + badge + noteBadge + '</div>' +
+        '<div class="html-viewer-highlight-quote">' + escapeHtml(displayQuote(item.quote)) + badge + noteBadge + '</div>' +
         '<div class="html-viewer-highlight-meta muted-text">' + escapeHtml(formatTime(item.createdAt)) + '</div>' +
         '</div></button>' +
         '<div class="html-viewer-highlight-item-actions">' +
@@ -380,7 +384,7 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
       composeBlock.hidden = !hasPending
     }
     if (selectionInput instanceof HTMLTextAreaElement) {
-      selectionInput.value = pendingSelection?.quote ?? ""
+      selectionInput.value = pendingSelection ? displayQuote(pendingSelection.quote) : ""
       selectionInput.readOnly = true
     }
     if (saveBtn instanceof HTMLButtonElement) {

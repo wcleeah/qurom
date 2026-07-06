@@ -58,8 +58,12 @@ export const HTML_ASK_SCRIPT = /* html */ `
       .replace(/"/g, "&quot;")
   }
 
+  function displayQuote(quote) {
+    return String(quote || "").trim()
+  }
+
   function truncate(text, max) {
-    const trimmed = String(text || "").trim()
+    const trimmed = displayQuote(text)
     if (trimmed.length <= max) return trimmed
     return trimmed.slice(0, max - 1) + "…"
   }
@@ -97,7 +101,7 @@ export const HTML_ASK_SCRIPT = /* html */ `
 
   function highlightQuote(id) {
     const item = highlights.find((entry) => entry.id === id)
-    return item ? item.quote : "Highlight"
+    return item ? displayQuote(item.quote) : "Highlight"
   }
 
   function formatRelative(iso) {

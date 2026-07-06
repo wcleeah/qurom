@@ -11,6 +11,7 @@ import {
   updateHtmlReaderHighlightNote,
 } from "../src/view/html-highlights-store.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
+import { displayHighlightQuote } from "../src/view/library-notes-types.ts"
 
 let dir: string
 let originalDataDir: string | undefined
@@ -93,6 +94,22 @@ describe("html reader highlights store", () => {
     expect(await updateHtmlReaderHighlightNote("alpha-run", "final.html", "missing", "x")).toBeNull()
   })
 
+  test("stores highlight quote without trimming", async () => {
+    const created = await createHtmlReaderHighlight({
+      runName: "alpha-run",
+      filePath: "final.html",
+      color: "yellow",
+      quote: "cheap. ",
+      prefix: "",
+      suffix: "runnext",
+    })
+
+    expect(created.quote).toBe("cheap. ")
+
+    const listed = await listHtmlReaderHighlights("alpha-run", "final.html")
+    expect(listed[0]?.quote).toBe("cheap. ")
+  })
+
   test("rejects empty quote and invalid color", async () => {
     await expect(createHtmlReaderHighlight({
       runName: "alpha-run",
@@ -122,6 +139,11 @@ describe("html reader highlights store", () => {
 })
 
 describe("html viewer highlights UI", () => {
+  test("displayHighlightQuote trims for UI", () => {
+    expect(displayHighlightQuote("cheap. ")).toBe("cheap.")
+    expect(displayHighlightQuote("  hello  ")).toBe("hello")
+  })
+
   test("highlightsToJson escapes quotes for HTML attributes", async () => {
     const { highlightsToJson } = await import("../src/view/html-viewer-highlights.ts")
     const json = highlightsToJson([{

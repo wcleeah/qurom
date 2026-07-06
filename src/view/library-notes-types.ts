@@ -50,6 +50,11 @@ export function isHighlightColor(value: string): value is HighlightColor {
   return (HIGHLIGHT_COLORS as readonly string[]).includes(value)
 }
 
+/** Trim highlight quote text for UI only; stored quotes keep the raw selection. */
+export function displayHighlightQuote(quote: string | null | undefined): string {
+  return quote?.trim() ?? ""
+}
+
 export function libraryNoteToHighlight(note: LibraryNote): HtmlReaderHighlight {
   return {
     id: note.id,

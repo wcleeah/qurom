@@ -189,10 +189,10 @@ export async function createHighlight(input: {
   suffix?: string
 }): Promise<HtmlReaderHighlight> {
   validateHtmlReaderTarget(input.runName, input.filePath)
-  const quote = input.quote.trim()
-  if (!quote) {
+  if (!input.quote.trim()) {
     throw new Error("Highlight quote is required")
   }
+  const quote = input.quote
   if (!isHighlightColor(input.color)) {
     throw new Error("Invalid highlight color")
   }
