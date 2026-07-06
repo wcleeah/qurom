@@ -165,7 +165,12 @@ export const TAG_FORMS_SCRIPT = `<script>
   function openMenu(menu, input) {
     if (!(menu instanceof HTMLElement)) return;
     menu.hidden = false;
-    if (input instanceof HTMLInputElement) input.setAttribute("aria-expanded", "true");
+    if (input instanceof HTMLInputElement) {
+      input.setAttribute("aria-expanded", "true");
+      requestAnimationFrame(function() {
+        menu.scrollIntoView({ block: "nearest" });
+      });
+    }
   }
 
   function renderTagMenu(picker, query) {

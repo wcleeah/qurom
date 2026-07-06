@@ -3166,21 +3166,23 @@ body.html-viewer-body {
 }
 
 .tag-picker-control {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
 }
 
 .tag-picker-menu {
-  position: absolute;
-  top: calc(100% + 0.2rem);
-  left: 0;
-  right: 0;
-  z-index: 30;
+  width: 100%;
   max-height: 12rem;
   overflow: auto;
   border: 1px solid var(--border);
   background: var(--card);
   border-radius: var(--radius-sm);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.tag-picker-menu[hidden] {
+  display: none !important;
 }
 
 .tag-picker-option {
