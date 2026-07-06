@@ -262,20 +262,50 @@ export const HTML_ASK_SCRIPT = /* html */ `
     setStatus("", false)
   }
 
-  async function deleteChat(threadId) {
+  async function refreshThreadsFromServer() {
     try {
-      await fetch(
+      const resp = await fetch(apiBase + "/threads?file=" + encodeURIComponent(filePath))
+      if (!resp.ok) return
+      const data = await resp.json()
+      threads = Array.isArray(data.threads) ? data.threads : []
+      if (activeThreadId && !threads.some((thread) => thread.id === activeThreadId)) {
+        startNewChat()
+        return
+      }
+      renderChatList()
+      renderBootstrapUi()
+    } catch {}
+  }
+
+  function rollbackOptimisticSend(previousMessages, savedMessage, assistantEl) {
+    renderMessages(previousMessages)
+    if (input instanceof HTMLTextAreaElement) input.value = savedMessage
+    if (assistantEl instanceof HTMLElement) assistantEl.remove()
+  }
+
+  async function deleteChat(threadId) {
+    let deleted = false
+    try {
+      const resp = await fetch(
         apiBase + "/threads/" + encodeURIComponent(threadId) + "?file=" + encodeURIComponent(filePath),
         { method: "DELETE" },
       )
+      deleted = resp.ok
     } catch {}
-    messageCache.delete(threadId)
-    threads = threads.filter((thread) => thread.id !== threadId)
-    if (activeThreadId === threadId) {
-      startNewChat()
+    if (!deleted) {
+      setStatus("Could not delete chat.", true)
+      await refreshThreadsFromServer()
       return
     }
-    renderChatList()
+    messageCache.delete(threadId)
+    if (activeThreadId === threadId) {
+      activeThreadId = null
+      try { localStorage.removeItem(threadStorageKey) } catch {}
+    }
+    await refreshThreadsFromServer()
+    if (!activeThreadId) {
+      startNewChat()
+    }
   }
 
   function parseSseChunk(buffer, handler) {
@@ -317,13 +347,15 @@ export const HTML_ASK_SCRIPT = /* html */ `
       payload.highlightId = bootstrapHighlightId
     }
 
-    const userBubble = { role: "user", content: message }
-    const current = activeThreadId ? (messageCache.get(activeThreadId) || []) : []
-    renderMessages([...current, userBubble])
+    const savedMessage = message
+    const userBubble = { role: "user", content: savedMessage }
+    const previousMessages = activeThreadId ? (messageCache.get(activeThreadId) || []).slice() : []
+    renderMessages([...previousMessages, userBubble])
     input.value = ""
 
     let assistantText = ""
     let assistantEl = null
+    let sendCommitted = false
     if (messagesEl instanceof HTMLElement) {
       assistantEl = document.createElement("div")
       assistantEl.className = "html-viewer-ask-message html-viewer-ask-message-assistant"
@@ -343,14 +375,28 @@ export const HTML_ASK_SCRIPT = /* html */ `
       })
 
       if (resp.status === 409) {
+        rollbackOptimisticSend(previousMessages, savedMessage, assistantEl)
         setStatus("Already waiting for a reply on this thread.", true)
         return
       }
       if (resp.status === 410) {
+        rollbackOptimisticSend(previousMessages, savedMessage, assistantEl)
         setStatus("Conversation expired. Delete and start a new chat.", true)
         return
       }
+      if (resp.status === 404) {
+        rollbackOptimisticSend(previousMessages, savedMessage, assistantEl)
+        let errorMessage = "Highlight not found."
+        try {
+          const data = await resp.json()
+          if (data && typeof data.message === "string") errorMessage = data.message
+        } catch {}
+        setStatus(errorMessage, true)
+        await refreshThreadsFromServer()
+        return
+      }
       if (!resp.ok || !resp.body) {
+        rollbackOptimisticSend(previousMessages, savedMessage, assistantEl)
         throw new Error("request failed")
       }
 
@@ -369,7 +415,7 @@ export const HTML_ASK_SCRIPT = /* html */ `
                 id: data.threadId,
                 scope: data.scope,
                 highlightId: data.highlightId || null,
-                firstUserPreview: message,
+                firstUserPreview: savedMessage,
                 updatedAt: new Date().toISOString(),
               })
             }
@@ -383,20 +429,25 @@ export const HTML_ASK_SCRIPT = /* html */ `
             if (messagesEl instanceof HTMLElement) messagesEl.scrollTop = messagesEl.scrollHeight
           }
           if (eventName === "error") {
+            if (!sendCommitted) {
+              rollbackOptimisticSend(previousMessages, savedMessage, assistantEl)
+              void refreshThreadsFromServer()
+            }
             setStatus(data.message || "Something went wrong.", true)
           }
           if (eventName === "done") {
+            sendCommitted = true
             if (assistantBody) {
               cancelAnimationFrame(markdownRenderFrame)
               assistantBody.innerHTML = renderMarkdownHtml(data.text || assistantText)
             }
-            const messages = messageCache.get(activeThreadId) || current
+            const messages = (messageCache.get(activeThreadId) || previousMessages).slice()
             messages.push(userBubble)
             messages.push({ role: "assistant", content: data.text || assistantText })
             messageCache.set(activeThreadId, messages)
             const thread = threads.find((entry) => entry.id === activeThreadId)
             if (thread) {
-              thread.firstUserPreview = thread.firstUserPreview || message
+              thread.firstUserPreview = thread.firstUserPreview || savedMessage
               thread.lastMessagePreview = data.text || assistantText
               thread.updatedAt = new Date().toISOString()
               threads.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
@@ -406,8 +457,14 @@ export const HTML_ASK_SCRIPT = /* html */ `
           }
         })
       }
+      if (!sendCommitted) {
+        rollbackOptimisticSend(previousMessages, savedMessage, assistantEl)
+        await refreshThreadsFromServer()
+      }
     } catch {
+      rollbackOptimisticSend(previousMessages, savedMessage, assistantEl)
       setStatus("Failed to send message.", true)
+      await refreshThreadsFromServer()
     } finally {
       streaming = false
       sendBtn.disabled = false
@@ -438,26 +495,43 @@ export const HTML_ASK_SCRIPT = /* html */ `
 
   window.addEventListener("html-ask-open", (event) => {
     const detail = event.detail || {}
+    if (activeThreadId) {
+      setStatus("Start a new chat before asking about a different highlight.", true)
+      return
+    }
     startNewChat({
       scope: "highlight",
       highlightId: detail.highlightId || null,
     })
   })
 
+  window.addEventListener("html-highlights-changed", (event) => {
+    const detail = event.detail || {}
+    if (Array.isArray(detail.highlights)) {
+      highlights = detail.highlights
+      if (!activeThreadId) syncBootstrapSelect()
+    }
+  })
+
   let restoredThreadId = null
   try { restoredThreadId = localStorage.getItem(threadStorageKey) } catch {}
-  const restoredThread = restoredThreadId ? threads.find((thread) => thread.id === restoredThreadId) : null
-  if (restoredThread) {
-    activeThreadId = restoredThread.id
+  if (restoredThreadId) {
+    activeThreadId = restoredThreadId
   }
 
   renderChatList()
   renderBootstrapUi()
-  if (activeThreadId) {
-    void loadMessages(activeThreadId)
-  } else {
-    renderMessages([])
-  }
+  renderMessages([])
+
+  void refreshThreadsFromServer().then(() => {
+    if (activeThreadId) {
+      void loadMessages(activeThreadId).catch(() => {
+        startNewChat()
+      })
+    } else {
+      renderMessages([])
+    }
+  })
 
   syncAskSheet(askPanel instanceof HTMLElement && !askPanel.hidden)
 })();

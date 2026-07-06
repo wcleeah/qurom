@@ -104,7 +104,7 @@ export async function listHtmlReaderAskThreads(
 ): Promise<HtmlReaderAskThread[]> {
   validateHtmlReaderTarget(runName, htmlFile)
   return withHtmlReaderDb((db) => {
-    const rows = db.query<ThreadRow, [string, string]>(
+    const rows = db.query<ThreadRow, [string, string]    >(
       `SELECT t.id, t.run_name, t.html_file, t.md_file, t.md_mtime_ms, t.scope, t.highlight_id,
               t.provider, t.handle_id, t.status, t.created_at, t.updated_at,
               (
@@ -121,6 +121,9 @@ export async function listHtmlReaderAskThreads(
               ) AS first_user_preview
        FROM html_reader_ask_threads t
        WHERE t.run_name = ? AND t.html_file = ?
+         AND EXISTS (
+           SELECT 1 FROM html_reader_ask_messages m WHERE m.thread_id = t.id
+         )
        ORDER BY t.updated_at DESC`,
     ).all(runName, htmlFile)
     return rows.map(rowToThread)
@@ -243,10 +246,39 @@ export async function deleteHtmlReaderAskThread(
 ): Promise<boolean> {
   validateHtmlReaderTarget(runName, htmlFile)
   return withHtmlReaderDb((db) => {
+    db.query("DELETE FROM html_reader_ask_messages WHERE thread_id = ?").run(threadId)
     const result = db.query(
       "DELETE FROM html_reader_ask_threads WHERE run_name = ? AND html_file = ? AND id = ?",
     ).run(runName, htmlFile, threadId)
     return result.changes > 0
+  })
+}
+
+export async function deleteEmptyHtmlReaderAskThread(
+  runName: string,
+  htmlFile: string,
+  threadId: string,
+): Promise<boolean> {
+  const count = await countHtmlReaderAskMessages(threadId)
+  if (count > 0) return false
+  return deleteHtmlReaderAskThread(runName, htmlFile, threadId)
+}
+
+export async function purgeEmptyHtmlReaderAskThreads(runName: string, htmlFile: string): Promise<number> {
+  validateHtmlReaderTarget(runName, htmlFile)
+  return withHtmlReaderDb((db) => {
+    const orphans = db.query<{ id: string }, [string, string]>(
+      `SELECT t.id
+       FROM html_reader_ask_threads t
+       WHERE t.run_name = ? AND t.html_file = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM html_reader_ask_messages m WHERE m.thread_id = t.id
+         )`,
+    ).all(runName, htmlFile)
+    for (const row of orphans) {
+      db.query("DELETE FROM html_reader_ask_threads WHERE id = ?").run(row.id)
+    }
+    return orphans.length
   })
 }
 

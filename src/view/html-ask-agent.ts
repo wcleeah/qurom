@@ -10,11 +10,12 @@ import {
   resolveSourceMarkdown,
   type ResolvedSourceMarkdown,
 } from "./html-ask-context"
-import { getHtmlReaderHighlight } from "./html-highlights-store"
+import { getHtmlReaderHighlight, type HtmlReaderHighlight } from "./html-highlights-store"
 import {
   appendHtmlReaderAskMessage,
   countHtmlReaderAskMessages,
   createHtmlReaderAskThread,
+  deleteEmptyHtmlReaderAskThread,
   getHtmlReaderAskThread,
   resetHtmlReaderAskThread,
   updateHtmlReaderAskThread,
@@ -36,6 +37,15 @@ export class AskThreadStaleError extends Error {
   constructor(threadId: string) {
     super(`Thread ${threadId} provider handle is no longer available`)
     this.name = "AskThreadStaleError"
+  }
+}
+
+export class HighlightNotFoundError extends Error {
+  readonly highlightId: string
+  constructor(highlightId: string) {
+    super("Highlight not found")
+    this.name = "HighlightNotFoundError"
+    this.highlightId = highlightId
   }
 }
 
@@ -69,13 +79,17 @@ function cacheHandle(threadId: string, handle: AgentRunHandle) {
   handleCache.set(threadId, handle)
 }
 
-function getCachedHandle(threadId: string, thread: HtmlReaderAskThread): AgentRunHandle | null {
-  const cached = handleCache.get(threadId)
-  if (cached) return cached
-  if (thread.handleId && thread.status !== "stale") {
-    return null
+function getCachedHandle(threadId: string): AgentRunHandle | null {
+  return handleCache.get(threadId) ?? null
+}
+
+function assertThreadAvailable(thread: HtmlReaderAskThread): void {
+  if (runningThreads.has(thread.id)) {
+    throw new AskThreadBusyError(thread.id)
   }
-  return null
+  if (thread.status === "running") {
+    throw new AskThreadBusyError(thread.id)
+  }
 }
 
 async function createProviderHandle(input: {
@@ -89,6 +103,18 @@ async function createProviderHandle(input: {
     HTML_READING_COMPANION_ROLE,
     threadTitle(input.threadId),
   )
+}
+
+async function loadHighlightForBootstrap(
+  runName: string,
+  htmlFile: string,
+  highlightId: string,
+): Promise<HtmlReaderHighlight> {
+  const highlight = await getHtmlReaderHighlight(runName, htmlFile, highlightId)
+  if (!highlight) {
+    throw new HighlightNotFoundError(highlightId)
+  }
+  return highlight
 }
 
 export async function resolveOrCreateAskThread(input: {
@@ -136,7 +162,7 @@ export async function ensureAskThreadHandle(input: {
     throw new AskThreadStaleError(input.thread.id)
   }
 
-  const cached = getCachedHandle(input.thread.id, input.thread)
+  const cached = getCachedHandle(input.thread.id)
   if (cached) return cached
 
   if (input.thread.handleId) {
@@ -168,6 +194,8 @@ export async function resetAskThread(input: {
 }): Promise<void> {
   const thread = await getHtmlReaderAskThread(input.runName, input.htmlFile, input.threadId)
   if (!thread) return
+
+  runningThreads.delete(thread.id)
 
   const cached = handleCache.get(thread.id)
   if (cached) {
@@ -201,60 +229,86 @@ export async function prepareAskMessage(input: {
     throw new Error("highlightId is required for highlight bootstrap")
   }
 
+  if (!input.threadId && input.scope === "highlight" && input.highlightId) {
+    await loadHighlightForBootstrap(input.runName, input.htmlFile, input.highlightId)
+  }
+
   const { config, promptBundle } = await ensureAskRuntime()
-  const { thread, created, source } = await resolveOrCreateAskThread(input)
-  if (runningThreads.has(thread.id)) {
-    throw new AskThreadBusyError(thread.id)
-  }
+  let thread: HtmlReaderAskThread | undefined
+  let created = false
+  let reserved = false
 
-  const messageCount = await countHtmlReaderAskMessages(thread.id)
-  const bootstrap = messageCount === 0
-  const handle = await ensureAskThreadHandle({
-    thread,
-    source,
-    runName: input.runName,
-    htmlFile: input.htmlFile,
-  })
+  try {
+    const resolved = await resolveOrCreateAskThread(input)
+    thread = resolved.thread
+    created = resolved.created
+    const { source } = resolved
 
-  let highlight = null
-  if (thread.scope === "highlight") {
-    highlight = await getHtmlReaderHighlight(input.runName, input.htmlFile, thread.highlightId!)
-    if (!highlight) {
-      throw new Error("Highlight not found")
+    assertThreadAvailable(thread)
+
+    const messageCount = await countHtmlReaderAskMessages(thread.id)
+    const bootstrap = messageCount === 0
+
+    if (bootstrap && thread.scope === "highlight" && thread.highlightId) {
+      await loadHighlightForBootstrap(input.runName, input.htmlFile, thread.highlightId)
     }
-  }
 
-  const built = await buildAskPrompt({
-    scope: thread.scope,
-    message: input.message,
-    highlight,
-    bootstrap,
-    source,
-    config,
-    promptAssets: {
-      htmlAskPage: promptBundle.assets.htmlAskPage,
-      htmlAskHighlight: promptBundle.assets.htmlAskHighlight,
-    },
-  })
+    runningThreads.add(thread.id)
+    reserved = true
+    await updateHtmlReaderAskThread({ threadId: thread.id, status: "running" })
 
-  const userMessage = await appendHtmlReaderAskMessage({
-    threadId: thread.id,
-    role: "user",
-    content: input.message,
-  })
+    const handle = await ensureAskThreadHandle({
+      thread,
+      source,
+      runName: input.runName,
+      htmlFile: input.htmlFile,
+    })
 
-  runningThreads.add(thread.id)
-  await updateHtmlReaderAskThread({ threadId: thread.id, status: "running" })
+    let highlight: HtmlReaderHighlight | null = null
+    if (bootstrap && thread.scope === "highlight" && thread.highlightId) {
+      highlight = await loadHighlightForBootstrap(input.runName, input.htmlFile, thread.highlightId)
+    }
 
-  return {
-    thread,
-    created,
-    bootstrap,
-    source,
-    handle,
-    prompt: built.prompt,
-    inputFiles: built.inputFiles,
-    userMessageId: userMessage.id,
+    const built = await buildAskPrompt({
+      scope: thread.scope,
+      message: input.message,
+      highlight,
+      bootstrap,
+      source,
+      config,
+      promptAssets: {
+        htmlAskPage: promptBundle.assets.htmlAskPage,
+        htmlAskHighlight: promptBundle.assets.htmlAskHighlight,
+      },
+    })
+
+    const userMessage = await appendHtmlReaderAskMessage({
+      threadId: thread.id,
+      role: "user",
+      content: input.message,
+    })
+
+    return {
+      thread,
+      created,
+      bootstrap,
+      source,
+      handle,
+      prompt: built.prompt,
+      inputFiles: built.inputFiles,
+      userMessageId: userMessage.id,
+    }
+  } catch (error) {
+    if (thread) {
+      if (reserved) {
+        runningThreads.delete(thread.id)
+        await updateHtmlReaderAskThread({ threadId: thread.id, status: "idle" }).catch(() => {})
+      }
+      if (created) {
+        await deleteEmptyHtmlReaderAskThread(input.runName, input.htmlFile, thread.id).catch(() => {})
+      }
+    }
+    throw error
   }
 }
 
@@ -273,6 +327,13 @@ export function isAskThreadRunning(threadId: string): boolean {
   return runningThreads.has(threadId)
 }
 
+async function recoverStaleRunningThread(thread: HtmlReaderAskThread): Promise<void> {
+  if (thread.status === "running" && !runningThreads.has(thread.id)) {
+    await updateHtmlReaderAskThread({ threadId: thread.id, status: "idle" })
+    thread.status = "idle"
+  }
+}
+
 export async function preflightAskMessage(input: {
   runName: string
   htmlFile: string
@@ -280,9 +341,6 @@ export async function preflightAskMessage(input: {
   highlightId?: string | null
   threadId?: string | null
 }): Promise<{ thread: HtmlReaderAskThread | null; source: ResolvedSourceMarkdown }> {
-  const source = await resolveSourceMarkdown(input.runName)
-  await ensureAskRuntime()
-
   if (!input.threadId) {
     if (!input.scope) {
       throw new Error("scope is required when starting a new chat")
@@ -290,6 +348,15 @@ export async function preflightAskMessage(input: {
     if (input.scope === "highlight" && !input.highlightId) {
       throw new Error("highlightId is required for highlight bootstrap")
     }
+    if (input.scope === "highlight" && input.highlightId) {
+      await loadHighlightForBootstrap(input.runName, input.htmlFile, input.highlightId)
+    }
+  }
+
+  const source = await resolveSourceMarkdown(input.runName)
+  await ensureAskRuntime()
+
+  if (!input.threadId) {
     return { thread: null, source }
   }
 
@@ -301,9 +368,8 @@ export async function preflightAskMessage(input: {
     await updateHtmlReaderAskThread({ threadId: thread.id, status: "stale" })
     thread.status = "stale"
   }
-  if (runningThreads.has(thread.id)) {
-    throw new AskThreadBusyError(thread.id)
-  }
+  await recoverStaleRunningThread(thread)
+  assertThreadAvailable(thread)
   if (thread.status === "stale") {
     throw new AskThreadStaleError(thread.id)
   }
@@ -312,6 +378,12 @@ export async function preflightAskMessage(input: {
     thread.status = "stale"
     throw new AskThreadStaleError(thread.id)
   }
+
+  const messageCount = await countHtmlReaderAskMessages(thread.id)
+  if (messageCount === 0 && thread.scope === "highlight" && thread.highlightId) {
+    await loadHighlightForBootstrap(input.runName, input.htmlFile, thread.highlightId)
+  }
+
   return { thread, source }
 }
 

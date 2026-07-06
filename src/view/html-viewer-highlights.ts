@@ -474,6 +474,9 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
       const item = data.highlight
       if (!item) throw new Error("missing highlight")
       highlights.push(item)
+      window.dispatchEvent(new CustomEvent("html-highlights-changed", {
+        detail: { highlights: highlights.slice() },
+      }))
       const doc = iframe.contentDocument
       if (doc) {
         syncStylesheet(doc)
@@ -497,6 +500,9 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
       })
       if (!resp.ok) throw new Error("delete failed")
       highlights = highlights.filter((item) => item.id !== id)
+      window.dispatchEvent(new CustomEvent("html-highlights-changed", {
+        detail: { highlights: highlights.slice() },
+      }))
       if (selectedHighlightId === id) selectedHighlightId = null
       noteSaveTimers.delete(id)
       noteLastSaved.delete(id)

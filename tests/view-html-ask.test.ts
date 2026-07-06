@@ -12,8 +12,10 @@ import {
   createHtmlReaderAskThread,
   listHtmlReaderAskMessages,
   listHtmlReaderAskThreads,
+  purgeEmptyHtmlReaderAskThreads,
 } from "../src/view/html-ask-store.ts"
 import { formatSseEvent } from "../src/view/html-ask-sse.ts"
+import { HighlightNotFoundError, preflightAskMessage } from "../src/view/html-ask-agent.ts"
 import { handleListAskThreads } from "../src/view/html-ask-routes.ts"
 import { openHtmlReaderDb } from "../src/view/html-reader-db.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
@@ -133,7 +135,7 @@ describe("html ask store", () => {
     expect(messages[0]?.content).toBe("Hello")
   })
 
-  test("allows multiple page bootstrap threads after migration", async () => {
+  test("listHtmlReaderAskThreads hides threads without messages", async () => {
     await createHtmlReaderAskThread({
       runName: "alpha-run",
       htmlFile: "final.html",
@@ -142,7 +144,7 @@ describe("html ask store", () => {
       scope: "page",
       provider: "cursor",
     })
-    await createHtmlReaderAskThread({
+    const withMessage = await createHtmlReaderAskThread({
       runName: "alpha-run",
       htmlFile: "final.html",
       mdFile: "final.md",
@@ -150,9 +152,25 @@ describe("html ask store", () => {
       scope: "page",
       provider: "cursor",
     })
+    await appendHtmlReaderAskMessage({ threadId: withMessage.id, role: "user", content: "Visible" })
 
     const listed = await listHtmlReaderAskThreads("alpha-run", "final.html")
-    expect(listed).toHaveLength(2)
+    expect(listed).toHaveLength(1)
+    expect(listed[0]?.id).toBe(withMessage.id)
+  })
+
+  test("purgeEmptyHtmlReaderAskThreads removes orphan threads", async () => {
+    await createHtmlReaderAskThread({
+      runName: "alpha-run",
+      htmlFile: "final.html",
+      mdFile: "final.md",
+      mdMtimeMs: 1,
+      scope: "highlight",
+      highlightId: "missing-highlight",
+      provider: "cursor",
+    })
+    expect(await purgeEmptyHtmlReaderAskThreads("alpha-run", "final.html")).toBe(1)
+    expect(await listHtmlReaderAskThreads("alpha-run", "final.html")).toHaveLength(0)
   })
 
   test("migrates legacy unique constraint schema", () => {
@@ -197,7 +215,7 @@ describe("html ask routes and ui", () => {
   })
 
   test("lists threads via route handler", async () => {
-    await createHtmlReaderAskThread({
+    const thread = await createHtmlReaderAskThread({
       runName: "alpha-run",
       htmlFile: "final.html",
       mdFile: "final.md",
@@ -205,9 +223,19 @@ describe("html ask routes and ui", () => {
       scope: "page",
       provider: "cursor",
     })
+    await appendHtmlReaderAskMessage({ threadId: thread.id, role: "user", content: "Hello" })
     const resp = await handleListAskThreads("alpha-run", "final.html")
     const data = await resp.json() as { threads: unknown[] }
     expect(data.threads).toHaveLength(1)
+  })
+
+  test("preflightAskMessage rejects missing highlight bootstrap", async () => {
+    await expect(preflightAskMessage({
+      runName: "alpha-run",
+      htmlFile: "final.html",
+      scope: "highlight",
+      highlightId: "does-not-exist",
+    })).rejects.toBeInstanceOf(HighlightNotFoundError)
   })
 
   test("renders Ask tab UI with flat chat list", () => {

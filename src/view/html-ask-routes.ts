@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises"
 import {
   AskThreadBusyError,
   AskThreadStaleError,
+  HighlightNotFoundError,
   HTML_READING_COMPANION_ROLE,
   NoSourceMarkdownError,
   preflightAskMessage,
@@ -14,6 +15,7 @@ import {
   deleteHtmlReaderAskThread,
   listHtmlReaderAskMessages,
   listHtmlReaderAskThreads,
+  purgeEmptyHtmlReaderAskThreads,
   type AskScope,
 } from "./html-ask-store"
 import { validateHtmlReaderTarget } from "./html-reader-db"
@@ -34,6 +36,7 @@ async function validateHtmlFile(runName: string, file: string): Promise<void> {
 
 export async function handleListAskThreads(runName: string, file: string): Promise<Response> {
   await validateHtmlFile(runName, file)
+  await purgeEmptyHtmlReaderAskThreads(runName, file)
   const threads = await listHtmlReaderAskThreads(runName, file)
   return Response.json({ ok: true, threads })
 }
@@ -120,6 +123,9 @@ export async function handlePostAskMessage(req: Request, runName: string): Promi
     }
     if (error instanceof AskThreadStaleError) {
       return Response.json({ ok: false, code: "thread_stale", canReset: true, message: error.message }, { status: 410 })
+    }
+    if (error instanceof HighlightNotFoundError) {
+      return Response.json({ ok: false, code: "highlight_not_found", message: error.message }, { status: 404 })
     }
     if (error instanceof NoSourceMarkdownError) {
       return Response.json({ ok: false, code: "no_source_markdown", message: error.message }, { status: 400 })
