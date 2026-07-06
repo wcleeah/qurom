@@ -1,6 +1,6 @@
 import { escapeHtml } from "./utils"
 
-export type AppSection = "runs" | "config"
+export type AppSection = "runs" | "library" | "config"
 
 export type AppNavbarOptions = {
   section: AppSection
@@ -13,7 +13,7 @@ export type AppNavbarOptions = {
 function appNavPills(active: AppSection): string {
   const pill = (href: string, label: string, isActive: boolean) =>
     `<a class="app-navbar-pill${isActive ? " app-navbar-pill-active" : ""}" href="${href}">${label}</a>`
-  return `<nav class="app-navbar-pills" aria-label="Site">${pill("/", "Runs", active === "runs")}${pill("/config", "Config", active === "config")}</nav>`
+  return `<nav class="app-navbar-pills" aria-label="Site">${pill("/", "Runs", active === "runs")}${pill("/library", "Library", active === "library")}${pill("/config", "Config", active === "config")}</nav>`
 }
 
 export function appNavbarAction(href: string, label: string, className = "", extraAttrs = ""): string {

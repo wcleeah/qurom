@@ -1,7 +1,7 @@
 import { viewServerAdminEnabled } from "./server-options"
 import type { AppNavbarOptions } from "./app-nav"
 
-export type ConfigTab = "overview" | "roles" | "prompts" | "defaults"
+export type ConfigTab = "overview" | "roles" | "prompts" | "defaults" | "migrate"
 
 export function configSubNav(active: ConfigTab) {
   const link = (href: string, label: string, tab: ConfigTab) =>
@@ -9,10 +9,14 @@ export function configSubNav(active: ConfigTab) {
   const defaultsLink = viewServerAdminEnabled()
     ? link("/config/defaults", "Defaults", "defaults")
     : ""
+  const migrateLink = viewServerAdminEnabled()
+    ? link("/config/migrate", "Migrate", "migrate")
+    : ""
   return `${link("/config", "Active", "overview")}
   ${link("/config/roles", "Roles", "roles")}
   ${link("/config/prompts", "Prompts", "prompts")}
-  ${defaultsLink}`
+  ${defaultsLink}
+  ${migrateLink}`
 }
 
 export function configNavbarOptions(title: string, active: ConfigTab): AppNavbarOptions {

@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises"
 import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "./config"
+import { handleConfigMigratePost, renderConfigMigrate } from "./config-migrate"
 import {
   handleConfigDefaultsPost,
   renderConfigDefaultsBindings,
@@ -20,6 +21,7 @@ import {
   handlePostAskMessage,
 } from "./html-ask-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
+import { renderLibraryPage } from "./library-page"
 import { renderIndex, renderNodePage, renderFilesPage, renderRun, serveRawFile } from "./pages"
 import { handleOpencodeBootstrapPost } from "./opencode-bootstrap-view"
 import { handleRunApi } from "./run-api"
@@ -76,6 +78,15 @@ export function startViewServer(): void {
         }
       }
 
+      if (path === "/library") {
+        try {
+          return await renderLibraryPage()
+        } catch (e) {
+          console.error("GET /library error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
       if (path === "/config") {
         try {
           return await renderConfigIndex()
@@ -106,6 +117,21 @@ export function startViewServer(): void {
       if (path.startsWith("/config/defaults")) {
         if (defaultsRoutesDisabled()) {
           return new Response("Not found", { status: 404 })
+        }
+      }
+
+      if (path.startsWith("/config/migrate")) {
+        if (defaultsRoutesDisabled()) {
+          return new Response("Not found", { status: 404 })
+        }
+      }
+
+      if (path === "/config/migrate") {
+        try {
+          return await renderConfigMigrate()
+        } catch (e) {
+          console.error("GET /config/migrate error:", e)
+          return new Response("Internal error", { status: 500 })
         }
       }
 
@@ -159,6 +185,11 @@ export function startViewServer(): void {
           if (path.startsWith("/config/defaults") && defaultsRoutesDisabled()) {
             return new Response("Not found", { status: 404 })
           }
+          if (path.startsWith("/config/migrate") && defaultsRoutesDisabled()) {
+            return new Response("Not found", { status: 404 })
+          }
+          const migrateResponse = await handleConfigMigratePost(req, path)
+          if (migrateResponse) return migrateResponse
           const defaultsResponse = await handleConfigDefaultsPost(req, path)
           if (defaultsResponse) return defaultsResponse
           const response = await handleConfigPost(req, path)
