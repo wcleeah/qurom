@@ -36,9 +36,48 @@ export async function withHtmlReaderDb<T>(fn: (db: Database) => T): Promise<T> {
     db.close()
   }
 }
+export function tableExists(db: Database, name: string): boolean {
+  const row = db.query<{ count: number }, [string]>(
+    "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(name)
+  return (row?.count ?? 0) > 0
+}
+
+export function ensureLibraryNotesSchema(db: Database): void {
+  db.run(`
+CREATE TABLE IF NOT EXISTS library_notes (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('page', 'highlight')),
+  run_name TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  quote TEXT,
+  prefix TEXT NOT NULL DEFAULT '',
+  suffix TEXT NOT NULL DEFAULT '',
+  color TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+  `)
+  db.run(`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_library_notes_page_unique
+  ON library_notes (run_name, file_path)
+  WHERE kind = 'page';
+  `)
+  db.run(`
+CREATE INDEX IF NOT EXISTS idx_library_notes_updated
+  ON library_notes (updated_at DESC);
+  `)
+  db.run(`
+CREATE INDEX IF NOT EXISTS idx_library_notes_run_file
+  ON library_notes (run_name, file_path);
+  `)
+}
+
 export function openHtmlReaderDb(dbPath: string): Database {
   const db = new Database(dbPath, { create: true, strict: true })
   db.run("PRAGMA journal_mode = WAL")
+  ensureLibraryNotesSchema(db)
   db.run(`
 CREATE TABLE IF NOT EXISTS html_reader_notes (
   run_name TEXT NOT NULL,
