@@ -18,7 +18,6 @@ export const HTML_ASK_SCRIPT = /* html */ `
   const runName = root.dataset.runName || ""
   const filePath = root.dataset.file || ""
   const apiBase = "/runs/" + encodeURIComponent(runName) + "/html-ask"
-  const threadStorageKey = "html-viewer-ask-thread:" + filePath
 
   let threads = []
   try { threads = JSON.parse(root.dataset.threads || "[]") } catch { threads = [] }
@@ -123,6 +122,16 @@ export const HTML_ASK_SCRIPT = /* html */ `
     return truncate(highlightQuote(thread.highlightId), 32)
   }
 
+  function applyThreadBootstrap(thread) {
+    if (!thread) {
+      bootstrapScope = "page"
+      bootstrapHighlightId = null
+      return
+    }
+    bootstrapScope = thread.scope === "highlight" ? "highlight" : "page"
+    bootstrapHighlightId = thread.scope === "highlight" ? (thread.highlightId || null) : null
+  }
+
   function readBootstrapFromSelect() {
     if (!(bootstrapSelect instanceof HTMLSelectElement)) {
       bootstrapScope = "page"
@@ -188,6 +197,7 @@ export const HTML_ASK_SCRIPT = /* html */ `
   }
 
   askTab?.addEventListener("click", () => {
+    startNewChat()
     setTimeout(() => syncAskSheet(true), 0)
   })
 
@@ -203,7 +213,9 @@ export const HTML_ASK_SCRIPT = /* html */ `
       const label = truncate(thread.firstUserPreview || thread.lastMessagePreview || "New conversation", 56)
       rows.push(
         '<div class="html-viewer-ask-chat-row' + (active ? " html-viewer-ask-chat-row-active" : "") + '">' +
-        '<button type="button" class="html-viewer-ask-chat-open" data-ask-thread-id="' + escapeHtml(thread.id) + '">' +
+        '<button type="button" class="html-viewer-ask-chat-open" data-ask-thread-id="' + escapeHtml(thread.id) + '"' +
+        (active ? ' aria-current="true"' : "") + ">" +
+        (active ? '<span class="html-viewer-ask-chat-selected">Selected</span>' : "") +
         '<span class="html-viewer-ask-chat-title">' + escapeHtml(label) + "</span>" +
         '<span class="html-viewer-ask-chat-meta">' +
         '<span class="html-viewer-ask-chat-badge">' + escapeHtml(bootstrapLabel(thread)) + "</span> " +
@@ -249,7 +261,7 @@ export const HTML_ASK_SCRIPT = /* html */ `
 
   async function selectChat(threadId) {
     activeThreadId = threadId
-    try { localStorage.setItem(threadStorageKey, threadId) } catch {}
+    applyThreadBootstrap(threads.find((entry) => entry.id === threadId))
     renderChatList()
     renderBootstrapUi()
     await loadMessages(threadId)
@@ -259,7 +271,6 @@ export const HTML_ASK_SCRIPT = /* html */ `
     activeThreadId = null
     bootstrapScope = options?.scope || "page"
     bootstrapHighlightId = options?.highlightId || null
-    try { localStorage.removeItem(threadStorageKey) } catch {}
     renderChatList()
     renderBootstrapUi()
     renderMessages([])
@@ -304,7 +315,6 @@ export const HTML_ASK_SCRIPT = /* html */ `
     messageCache.delete(threadId)
     if (activeThreadId === threadId) {
       activeThreadId = null
-      try { localStorage.removeItem(threadStorageKey) } catch {}
     }
     await refreshThreadsFromServer()
     if (!activeThreadId) {
@@ -423,7 +433,6 @@ export const HTML_ASK_SCRIPT = /* html */ `
                 updatedAt: new Date().toISOString(),
               })
             }
-            try { localStorage.setItem(threadStorageKey, data.threadId) } catch {}
             renderChatList()
             renderBootstrapUi()
           }
@@ -517,25 +526,8 @@ export const HTML_ASK_SCRIPT = /* html */ `
     }
   })
 
-  let restoredThreadId = null
-  try { restoredThreadId = localStorage.getItem(threadStorageKey) } catch {}
-  if (restoredThreadId) {
-    activeThreadId = restoredThreadId
-  }
-
-  renderChatList()
-  renderBootstrapUi()
-  renderMessages([])
-
-  void refreshThreadsFromServer().then(() => {
-    if (activeThreadId) {
-      void loadMessages(activeThreadId).catch(() => {
-        startNewChat()
-      })
-    } else {
-      renderMessages([])
-    }
-  })
+  startNewChat()
+  void refreshThreadsFromServer()
 
   syncAskSheet(askPanel instanceof HTMLElement && !askPanel.hidden)
 })();

@@ -1,17 +1,53 @@
 import type { ArticleTagRecord, NoteTagRecord } from "../tags-store"
 import { escapeHtml } from "./utils"
 
+export type TagPickerOption = {
+  slug: string
+  label: string
+}
+
+function allTagsDataset(allTags: TagPickerOption[]): string {
+  return escapeHtml(JSON.stringify(allTags))
+}
+
 export function renderTagChip(slug: string, label: string, removable = false, source?: string): string {
   const sourceAttr = source ? ` data-tag-source="${escapeHtml(source)}"` : ""
   const removeBtn = removable
-    ? `<button type="submit" class="tag-chip-remove" name="slug" value="${escapeHtml(slug)}" aria-label="Remove tag ${escapeHtml(label)}">×</button>`
+    ? `<button type="button" class="tag-chip-remove" data-tag-slug="${escapeHtml(slug)}" aria-label="Remove tag ${escapeHtml(label)}">×</button>`
     : ""
-  return `<span class="tag-chip"${sourceAttr}><span class="tag-chip-label">${escapeHtml(label)}</span>${removeBtn}</span>`
+  return `<span class="tag-chip" data-tag-slug="${escapeHtml(slug)}"${sourceAttr}><span class="tag-chip-label">${escapeHtml(label)}</span>${removeBtn}</span>`
+}
+
+export function renderTagPicker(input: {
+  allTags: TagPickerOption[]
+  noteId?: string
+  runName?: string
+  label?: string
+  placeholder?: string
+}): string {
+  const attrs = [
+    'class="tag-picker"',
+    'data-tag-picker',
+    `data-all-tags="${allTagsDataset(input.allTags)}"`,
+  ]
+  if (input.noteId) attrs.push(`data-note-id="${escapeHtml(input.noteId)}"`)
+  if (input.runName) attrs.push(`data-run-name="${escapeHtml(input.runName)}"`)
+  const label = input.label ?? "Add tags"
+  const placeholder = input.placeholder ?? "Search or create tags…"
+  return `<div ${attrs.join(" ")}>
+  <label class="form-field tag-picker-field"><span>${escapeHtml(label)}</span>
+    <div class="tag-picker-control">
+      <input class="form-input tag-picker-input" type="text" placeholder="${escapeHtml(placeholder)}" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+      <div class="tag-picker-menu" hidden role="listbox"></div>
+    </div>
+  </label>
+</div>`
 }
 
 export function renderArticleTagsSection(input: {
   runName: string
   tags: ArticleTagRecord[]
+  allTags: TagPickerOption[]
   canRetag: boolean
 }): string {
   const chips = input.tags.length
@@ -34,12 +70,12 @@ export function renderArticleTagsSection(input: {
     </div>
   </div>
   <div class="tag-chip-list">${chips}</div>
-  <form class="config-form tag-add-form" method="POST" action="/api/runs/${encodeURIComponent(input.runName)}/tags" data-tag-add-form>
-    <label class="form-field"><span>Add tag</span>
-      <input class="form-input" type="text" name="tag" placeholder="machine-learning" required>
-    </label>
-    <div class="form-actions"><button type="submit" class="btn btn-secondary">Add</button></div>
-  </form>
+  ${renderTagPicker({
+    allTags: input.allTags,
+    runName: input.runName,
+    label: "Add tags",
+    placeholder: "Search or create article tags…",
+  })}
 </div>
 ${TAG_FORMS_SCRIPT}`
 }
@@ -47,6 +83,7 @@ ${TAG_FORMS_SCRIPT}`
 export function renderNoteTagsEditor(input: {
   noteId: string
   tags: NoteTagRecord[]
+  allTags: TagPickerOption[]
 }): string {
   const chips = input.tags.length
     ? input.tags.map((tag) => renderTagChip(
@@ -59,12 +96,12 @@ export function renderNoteTagsEditor(input: {
 
   return `<div class="note-tags-editor" data-note-tags data-note-id="${escapeHtml(input.noteId)}">
   <div class="tag-chip-list">${chips}</div>
-  <form class="config-form tag-add-form" data-tag-add-form data-note-id="${escapeHtml(input.noteId)}">
-    <label class="form-field"><span>Tag</span>
-      <input class="form-input" type="text" name="tag" placeholder="important" required>
-    </label>
-    <button type="submit" class="btn btn-secondary">Add</button>
-  </form>
+  ${renderTagPicker({
+    allTags: input.allTags,
+    noteId: input.noteId,
+    label: "Tags",
+    placeholder: "Search or create tags…",
+  })}
 </div>`
 }
 
@@ -104,33 +141,147 @@ export const TAG_FORMS_SCRIPT = `<script>
     });
   }
 
-  document.querySelectorAll("[data-tag-add-form]").forEach(function(form) {
-    if (!(form instanceof HTMLFormElement)) return;
-    form.addEventListener("submit", function(event) {
-      var noteId = form.getAttribute("data-note-id");
-      var articleRoot = form.closest("[data-article-tags]");
-      if (!noteId && !articleRoot) return;
-      event.preventDefault();
-      var input = form.querySelector("input[name='tag']");
-      if (!(input instanceof HTMLInputElement)) return;
-      var tag = input.value.trim();
-      if (!tag) return;
-      var url = noteId
-        ? "/api/library/notes/" + encodeURIComponent(noteId) + "/tags"
-        : "/api/runs/" + encodeURIComponent(articleRoot.getAttribute("data-run-name") || "") + "/tags";
-      postJson(url, "POST", { tag: tag }).then(function() { window.location.reload(); }).catch(function() { window.location.reload(); });
-    });
-  });
+  function normalizeTagQuery(value) {
+    return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
 
-  document.querySelectorAll(".tag-chip-remove").forEach(function(button) {
-    if (!(button instanceof HTMLButtonElement)) return;
-    var chip = button.closest(".tag-chip");
-    var articleRoot = button.closest("[data-article-tags]");
-    var noteRoot = button.closest("[data-note-tags]");
-    button.addEventListener("click", function(event) {
+  function readAllTags(picker) {
+    try { return JSON.parse(picker.getAttribute("data-all-tags") || "[]"); } catch { return []; }
+  }
+
+  function existingSlugs(editor) {
+  if (!editor) return [];
+    return Array.from(editor.querySelectorAll(".tag-chip[data-tag-slug]")).map(function(chip) {
+      return chip.getAttribute("data-tag-slug") || "";
+    }).filter(Boolean);
+  }
+
+  function closeMenu(menu, input) {
+    if (!(menu instanceof HTMLElement)) return;
+    menu.hidden = true;
+    if (input instanceof HTMLInputElement) input.setAttribute("aria-expanded", "false");
+  }
+
+  function openMenu(menu, input) {
+    if (!(menu instanceof HTMLElement)) return;
+    menu.hidden = false;
+    if (input instanceof HTMLInputElement) input.setAttribute("aria-expanded", "true");
+  }
+
+  function renderTagMenu(picker, query) {
+    var input = picker.querySelector(".tag-picker-input");
+    var menu = picker.querySelector(".tag-picker-menu");
+    if (!(input instanceof HTMLInputElement) || !(menu instanceof HTMLElement)) return;
+    var editor = picker.closest("[data-note-tags], [data-article-tags]");
+    var allTags = readAllTags(picker);
+    var slugs = new Set(existingSlugs(editor));
+    var q = String(query || "").trim().toLowerCase();
+    var matches = allTags.filter(function(tag) {
+      if (slugs.has(tag.slug)) return false;
+      if (!q) return true;
+      return tag.label.toLowerCase().indexOf(q) !== -1 || tag.slug.indexOf(q) !== -1;
+    }).slice(0, 20);
+    var normalized = normalizeTagQuery(q);
+    var canCreate = !!q && !slugs.has(normalized) && !allTags.some(function(tag) { return tag.slug === normalized; });
+    var html = "";
+    for (var i = 0; i < matches.length; i++) {
+      var tag = matches[i];
+      html += '<button type="button" class="tag-picker-option" role="option" data-tag-value="' + tag.slug.replace(/"/g, "&quot;") + '">' +
+        tag.label.replace(/</g, "&lt;") + '</button>';
+    }
+    if (canCreate) {
+      html += '<button type="button" class="tag-picker-option tag-picker-option-create" role="option" data-tag-value="' + q.replace(/"/g, "&quot;") + '">Create "' + q.replace(/</g, "&lt;") + '"</button>';
+    }
+    if (!html) {
+      html = '<div class="tag-picker-empty muted-text">No matching tags</div>';
+    }
+    menu.innerHTML = html;
+    openMenu(menu, input);
+  }
+
+  function addTagFromPicker(picker, tagValue, onSuccess) {
+    var noteId = picker.getAttribute("data-note-id");
+    var runName = picker.getAttribute("data-run-name");
+    var tag = String(tagValue || "").trim();
+    if (!tag) return Promise.resolve();
+    var url = noteId
+      ? "/api/library/notes/" + encodeURIComponent(noteId) + "/tags"
+      : "/api/runs/" + encodeURIComponent(runName || "") + "/tags";
+    return postJson(url, "POST", { tag: tag }).then(function(data) {
+      if (picker.getAttribute("data-tag-refresh") === "event") {
+        picker.dispatchEvent(new CustomEvent("quorum-tag-added", { bubbles: true, detail: data }));
+        return data;
+      }
+      if (typeof onSuccess === "function") onSuccess();
+      else window.location.reload();
+      return data;
+    }).catch(function() {
+      window.location.reload();
+    });
+  }
+
+  function initTagPickers(scope) {
+    var root = scope || document;
+    root.querySelectorAll("[data-tag-picker]:not([data-tag-picker-ready])").forEach(function(picker) {
+      if (!(picker instanceof HTMLElement)) return;
+      picker.setAttribute("data-tag-picker-ready", "true");
+      var input = picker.querySelector(".tag-picker-input");
+      var menu = picker.querySelector(".tag-picker-menu");
+      if (!(input instanceof HTMLInputElement) || !(menu instanceof HTMLElement)) return;
+
+      input.addEventListener("focus", function() {
+        renderTagMenu(picker, input.value);
+      });
+      input.addEventListener("input", function() {
+        renderTagMenu(picker, input.value);
+      });
+      input.addEventListener("keydown", function(event) {
+        if (event.key === "Escape") {
+          closeMenu(menu, input);
+          return;
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          var first = menu.querySelector(".tag-picker-option");
+          if (first instanceof HTMLButtonElement) {
+            addTagFromPicker(picker, first.getAttribute("data-tag-value"));
+          } else if (input.value.trim()) {
+            addTagFromPicker(picker, input.value);
+          }
+        }
+      });
+
+      menu.addEventListener("mousedown", function(event) {
+        event.preventDefault();
+      });
+      menu.addEventListener("click", function(event) {
+        var option = event.target instanceof Element ? event.target.closest(".tag-picker-option") : null;
+        if (!(option instanceof HTMLButtonElement)) return;
+        var value = option.getAttribute("data-tag-value");
+        addTagFromPicker(picker, value).then(function() {
+          input.value = "";
+          renderTagMenu(picker, "");
+          input.focus();
+        });
+      });
+
+      document.addEventListener("click", function(event) {
+        if (!(event.target instanceof Node) || !picker.contains(event.target)) {
+          closeMenu(menu, input);
+        }
+      });
+    });
+  }
+
+  document.querySelectorAll("[data-note-tags], [data-article-tags]").forEach(function(editor) {
+    editor.addEventListener("click", function(event) {
+      var button = event.target instanceof Element ? event.target.closest(".tag-chip-remove") : null;
+      if (!(button instanceof HTMLButtonElement)) return;
       event.preventDefault();
-      var slug = button.value;
+      var slug = button.getAttribute("data-tag-slug");
       if (!slug) return;
+      var noteRoot = button.closest("[data-note-tags]");
+      var articleRoot = button.closest("[data-article-tags]");
       var url;
       if (noteRoot) {
         url = "/api/library/notes/" + encodeURIComponent(noteRoot.getAttribute("data-note-id") || "") + "/tags/" + encodeURIComponent(slug);
@@ -144,5 +295,8 @@ export const TAG_FORMS_SCRIPT = `<script>
         .catch(function() { window.location.reload(); });
     });
   });
+
+  window.quorumInitTagPickers = initTagPickers;
+  initTagPickers();
 })();
 </script>`

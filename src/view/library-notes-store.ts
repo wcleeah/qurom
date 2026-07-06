@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises"
 import { basename } from "node:path"
 
+import { inheritArticleTagsToNote } from "../tags-store"
 import { nowIso, validateHtmlReaderTarget, withHtmlReaderDb } from "./html-reader-db"
 import {
   isHighlightColor,
@@ -207,6 +208,7 @@ export async function createHighlight(input: {
        VALUES (?, 'highlight', ?, ?, '', ?, ?, ?, ?, ?, ?)`,
     ).run(id, input.runName, input.filePath, quote, prefix, suffix, input.color, now, now)
   })
+  await inheritArticleTagsToNote(input.runName, id)
   return {
     id,
     runName: input.runName,
@@ -272,6 +274,7 @@ export async function setPageNotes(
 ): Promise<{ updatedAt: string }> {
   validateHtmlReaderTarget(runName, filePath)
   const updatedAt = nowIso()
+  let createdNoteId: string | null = null
   await withHtmlReaderDb((db) => {
     if (!notes.trim()) {
       db.query(
@@ -291,12 +294,16 @@ export async function setPageNotes(
       return
     }
 
+    createdNoteId = crypto.randomUUID()
     db.query(
       `INSERT INTO library_notes
        (id, kind, run_name, file_path, body, quote, prefix, suffix, color, created_at, updated_at)
        VALUES (?, 'page', ?, ?, ?, NULL, '', '', NULL, ?, ?)`,
-    ).run(crypto.randomUUID(), runName, filePath, notes, updatedAt, updatedAt)
+    ).run(createdNoteId, runName, filePath, notes, updatedAt, updatedAt)
   })
+  if (createdNoteId) {
+    await inheritArticleTagsToNote(runName, createdNoteId)
+  }
   return { updatedAt }
 }
 

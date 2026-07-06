@@ -2735,11 +2735,38 @@ body.html-viewer-body {
   display: flex;
   align-items: stretch;
   gap: 0.25rem;
+  border-radius: var(--radius-sm);
+}
+
+.html-viewer-ask-chat-row-active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+  padding-left: 0.15rem;
 }
 
 .html-viewer-ask-chat-row-active .html-viewer-ask-chat-open {
   border-color: var(--accent);
-  background: var(--accent-bg, rgba(59, 130, 246, 0.08));
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.html-viewer-ask-chat-selected {
+  display: inline-block;
+  margin-bottom: 0.2rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.html-viewer-ask-chat-row-active .html-viewer-ask-chat-title {
+  font-weight: 600;
+  color: var(--fg);
 }
 
 .html-viewer-ask-chat-open {
@@ -3127,6 +3154,55 @@ body.html-viewer-body {
 
 .tag-add-form {
   margin-top: 0.35rem;
+}
+
+.tag-picker {
+  margin-top: 0.35rem;
+}
+
+.tag-picker-control {
+  position: relative;
+}
+
+.tag-picker-menu {
+  position: absolute;
+  top: calc(100% + 0.2rem);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 12rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.tag-picker-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.tag-picker-option:hover,
+.tag-picker-option:focus-visible {
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+}
+
+.tag-picker-option-create {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.tag-picker-empty {
+  padding: 0.45rem 0.55rem;
+  font-size: 0.75rem;
 }
 
 .library-tag-filters {

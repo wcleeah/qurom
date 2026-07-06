@@ -228,39 +228,22 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     const tags = Array.isArray(item.tags) ? item.tags : []
     const chips = tags.length
       ? tags.map((tag) =>
-        '<span class="tag-chip" data-tag-source="' + escapeHtml(tag.noteSource ?? "") + '">' +
+        '<span class="tag-chip" data-tag-slug="' + escapeHtml(tag.slug) + '" data-tag-source="' + escapeHtml(tag.noteSource ?? "") + '">' +
         '<span class="tag-chip-label">' + escapeHtml(tag.label) + '</span>' +
         '<button type="button" class="tag-chip-remove" data-highlight-tag-remove="' + escapeHtml(item.id) + '" data-tag-slug="' + escapeHtml(tag.slug) + '" aria-label="Remove tag ' + escapeHtml(tag.label) + '">×</button>' +
         '</span>',
       ).join("")
       : '<span class="muted-text tiny-text">No tags</span>'
+    const allTags = root.dataset.allTags ?? "[]"
     return '<div class="html-viewer-highlight-tags note-tags-editor" data-note-tags data-note-id="' + escapeHtml(item.id) + '">' +
       '<div class="tag-chip-list">' + chips + '</div>' +
-      '<form class="config-form tag-add-form" data-highlight-tag-form="' + escapeHtml(item.id) + '">' +
-      '<label class="form-field"><span>Tag</span>' +
-      '<input class="form-input" type="text" name="tag" placeholder="important" required>' +
-      '</label>' +
-      '<button type="submit" class="btn btn-secondary">Add</button>' +
-      '</form>' +
+      '<div class="tag-picker" data-tag-picker data-tag-refresh="event" data-note-id="' + escapeHtml(item.id) + '" data-all-tags="' + escapeHtml(allTags) + '">' +
+      '<label class="form-field tag-picker-field"><span>Tags</span>' +
+      '<div class="tag-picker-control">' +
+      '<input class="form-input tag-picker-input" type="text" placeholder="Search or create tags…" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">' +
+      '<div class="tag-picker-menu" hidden role="listbox"></div>' +
+      '</div></label></div>' +
       '</div>'
-  }
-
-  async function addHighlightTag(id, tag) {
-    const resp = await fetch("/api/library/notes/" + encodeURIComponent(id) + "/tags", {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ tag }),
-    })
-    if (!resp.ok) throw new Error("add tag failed")
-    const data = await resp.json()
-    const tags = Array.isArray(data.tags)
-      ? data.tags.map((entry) => ({
-        slug: entry.slug,
-        label: entry.label,
-        noteSource: entry.noteSource,
-      }))
-      : []
-    highlights = highlights.map((entry) => entry.id === id ? { ...entry, tags } : entry)
   }
 
   async function removeHighlightTag(id, slug) {
@@ -318,6 +301,9 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     }).join("")
     for (const item of highlights) {
       noteLastSaved.set(item.id, item.note ?? "")
+    }
+    if (typeof window.quorumInitTagPickers === "function") {
+      window.quorumInitTagPickers(listEl)
     }
   }
 
@@ -563,21 +549,21 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     if (id) void deleteHighlight(id)
   })
 
-  listEl?.addEventListener("submit", (event) => {
-    const form = event.target
-    if (!(form instanceof HTMLFormElement)) return
-    const id = form.dataset.highlightTagForm
-    if (!id) return
-    event.preventDefault()
-    const input = form.querySelector("input[name='tag']")
-    if (!(input instanceof HTMLInputElement)) return
-    const tag = input.value.trim()
-    if (!tag) return
-    void addHighlightTag(id, tag).then(() => {
-      input.value = ""
-      const doc = iframe.contentDocument
-      renderList(doc)
-    }).catch(() => {})
+  listEl?.addEventListener("quorum-tag-added", (event) => {
+    const custom = event instanceof CustomEvent ? event : null
+    const picker = custom?.target
+    if (!(picker instanceof HTMLElement)) return
+    const id = picker.getAttribute("data-note-id")
+    const data = custom?.detail
+    if (!id || !data || !Array.isArray(data.tags)) return
+    const tags = data.tags.map((entry) => ({
+      slug: entry.slug,
+      label: entry.label,
+      noteSource: entry.noteSource,
+    }))
+    highlights = highlights.map((entry) => entry.id === id ? { ...entry, tags } : entry)
+    const doc = iframe.contentDocument
+    renderList(doc)
   })
 
   listEl?.addEventListener("input", (event) => {

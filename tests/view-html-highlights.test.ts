@@ -179,6 +179,8 @@ describe("html viewer highlights UI", () => {
     expect(html).toContain('data-html-tab="highlights"')
     expect(html).toContain('data-html-panel="highlights"')
     expect(html).toContain("data-html-highlight-list")
+    expect(html).toContain("data-all-tags")
+    expect(html).toContain("data-tag-picker")
     expect(html).toContain("data-html-highlight-selection")
     expect(html).toContain("data-highlight-open")
     expect(html).toContain("data-highlight-note")

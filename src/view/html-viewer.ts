@@ -10,7 +10,7 @@ import type { HtmlReaderAskThread } from "./html-ask-store"
 import { highlightsToJson, HTML_HIGHLIGHTS_SCRIPT } from "./html-viewer-highlights"
 import { appNavbarAction, appNavbarButton, renderAppNavbar } from "./app-nav"
 import { layoutHtmlViewer } from "./layout"
-import { TAG_FORMS_SCRIPT } from "./tag-ui"
+import { TAG_FORMS_SCRIPT, type TagPickerOption } from "./tag-ui"
 import { escapeHtml } from "./utils"
 
 export const HTML_VIEWER_SCRIPT = /* html */ `
@@ -161,6 +161,7 @@ export function renderHtmlViewerPage(
   askThreads: HtmlReaderAskThread[] = [],
   pageNoteTagsHtml = "",
   highlightTagsById: Record<string, Array<{ slug: string; label: string; noteSource: string }>> = {},
+  allTags: TagPickerOption[] = [],
 ): string {
   const baseName = basename(filePath)
   const runHref = `/runs/${encodeURIComponent(runName)}`
@@ -172,6 +173,7 @@ export function renderHtmlViewerPage(
   const initialSaveLabel = notes.trim().length > 0 ? "All changes saved" : "Notes auto-save"
   const highlightsJson = highlightsToJson(highlights, highlightTagsById)
   const askThreadsJson = askThreadsToJson(askThreads)
+  const allTagsJson = escapeHtml(JSON.stringify(allTags))
   const navbarActions = [
     appNavbarButton("Hide panel", 'class="app-navbar-action html-viewer-sidebar-toggle" data-html-sidebar-toggle aria-expanded="true"'),
     appNavbarAction(`${rawHref}?source=1`, "View raw"),
@@ -185,7 +187,7 @@ export function renderHtmlViewerPage(
   })
 
   const body = `<div class="html-viewer-shell">
-  <div data-html-highlights-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-highlights="${highlightsJson}"></div>
+  <div data-html-highlights-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-highlights="${highlightsJson}" data-all-tags="${allTagsJson}"></div>
   <div data-html-ask-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-threads="${askThreadsJson}" data-highlights="${highlightsJson}"></div>
   ${navbar}
   <div class="html-viewer-main">

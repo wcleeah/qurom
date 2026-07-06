@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { POLLING_SCRIPT, NODE_REFRESH_SCRIPT, FILES_REFRESH_SCRIPT, INDEX_REFRESH_SCRIPT, ROUND_TABS_SCRIPT } from "./client-script"
-import { listArticleTags, listNoteTags } from "../tags-store"
+import { listArticleTags, listAllTags, listNoteTags } from "../tags-store"
 import { renderArticleTagsSection, TAG_FORMS_SCRIPT } from "./tag-ui"
 import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
 import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
@@ -603,9 +603,11 @@ export async function renderRun(name: string): Promise<Response> {
   let articleTagsSection = ""
   if (hasFinalMd) {
     const articleTags = await listArticleTags(name)
+    const allTags = (await listAllTags()).map((tag) => ({ slug: tag.slug, label: tag.label }))
     articleTagsSection = renderArticleTagsSection({
       runName: name,
       tags: articleTags,
+      allTags,
       canRetag: true,
     })
   }
@@ -729,11 +731,12 @@ export async function serveRawFile(
     const notes = await getHtmlReaderNotes(runName, filePath)
     const highlights = await listHtmlReaderHighlights(runName, filePath)
     const askThreads = await listHtmlReaderAskThreads(runName, filePath)
+    const allTags = (await listAllTags()).map((tag) => ({ slug: tag.slug, label: tag.label }))
     let pageNoteTagsHtml = ""
     const pageNoteId = await getPageNoteLibraryId(runName, filePath)
     if (pageNoteId) {
       const pageTags = await listNoteTags(pageNoteId)
-      pageNoteTagsHtml = `<div class="html-viewer-page-tags"><p class="html-viewer-sidebar-hint muted-text">Page tags</p>${renderNoteTagsEditor({ noteId: pageNoteId, tags: pageTags })}</div>`
+      pageNoteTagsHtml = `<div class="html-viewer-page-tags"><p class="html-viewer-sidebar-hint muted-text">Page tags</p>${renderNoteTagsEditor({ noteId: pageNoteId, tags: pageTags, allTags })}</div>`
     }
     const highlightTagsById: Record<string, Array<{ slug: string; label: string; noteSource: string }>> = {}
     await Promise.all(highlights.map(async (highlight) => {
@@ -752,6 +755,7 @@ export async function serveRawFile(
       askThreads,
       pageNoteTagsHtml,
       highlightTagsById,
+      allTags,
     )
     return new Response(html, {
       headers: { "content-type": "text/html; charset=utf-8" },

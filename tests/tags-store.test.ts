@@ -7,6 +7,7 @@ import { createHighlight, setPageNotes } from "../src/view/library-notes-store.t
 import {
   addArticleTag,
   addNoteTag,
+  inheritArticleTagsToNote,
   listArticleTags,
   listNoteTags,
   normalizeTagSlug,
@@ -69,6 +70,31 @@ describe("tags store", () => {
     expect(await removeArticleTag("alpha-run", "agent-only")).toBe(false)
     expect(await removeArticleTag("alpha-run", "manual")).toBe(true)
     expect((await listArticleTags("alpha-run")).map((tag) => tag.slug)).toEqual(["agent-only"])
+  })
+
+  test("new notes inherit article tags on create", async () => {
+    await replaceAgentArticleTags("alpha-run", [
+      { slug: "systems", label: "Systems", matchedPredefined: false },
+      { slug: "runtime", label: "Runtime", matchedPredefined: false },
+    ])
+
+    const highlight = await createHighlight({
+      runName: "alpha-run",
+      filePath: "final.html",
+      color: "yellow",
+      quote: "Important quote",
+    })
+
+    const highlightTags = await listNoteTags(highlight.id)
+    expect(highlightTags.map((tag) => tag.slug).sort()).toEqual(["runtime", "systems"])
+    expect(highlightTags.every((tag) => tag.noteSource === "propagated")).toBe(true)
+
+    await setPageNotes("alpha-run", "final.html", "Page thoughts")
+    const { getPageNoteLibraryId } = await import("../src/view/library-notes-store.ts")
+    const pageNoteId = await getPageNoteLibraryId("alpha-run", "final.html")
+    expect(pageNoteId).toBeTruthy()
+    const pageTags = await listNoteTags(pageNoteId!)
+    expect(pageTags.map((tag) => tag.slug).sort()).toEqual(["runtime", "systems"])
   })
 
   test("propagateArticleTagsToNotes replaces propagated tags and keeps user tags", async () => {

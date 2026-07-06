@@ -241,6 +241,24 @@ export async function removeNoteTag(noteId: string, slug: string, source?: "user
   })
 }
 
+export async function inheritArticleTagsToNote(runName: string, noteId: string): Promise<void> {
+  const articleTags = await listArticleTags(runName)
+  if (articleTags.length === 0) return
+  const now = nowIso()
+  await withHtmlReaderDb((db) => {
+    for (const tag of articleTags) {
+      const exists = db.query<{ count: number }, [string, string]>(
+        "SELECT COUNT(*) AS count FROM note_tags WHERE note_id = ? AND tag_slug = ?",
+      ).get(noteId, tag.slug)
+      if ((exists?.count ?? 0) > 0) continue
+      db.query(
+        `INSERT INTO note_tags (note_id, tag_slug, source, created_at)
+         VALUES (?, ?, 'propagated', ?)`,
+      ).run(noteId, tag.slug, now)
+    }
+  })
+}
+
 export async function propagateArticleTagsToNotes(runName: string): Promise<{ notesUpdated: number }> {
   const articleTags = await listArticleTags(runName)
   if (articleTags.length === 0) {
