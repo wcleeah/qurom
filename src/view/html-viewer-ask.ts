@@ -196,10 +196,15 @@ export const HTML_ASK_SCRIPT = /* html */ `
     shell?.classList.toggle("html-viewer-ask-sheet-open", show)
   }
 
-  askTab?.addEventListener("click", () => {
-    startNewChat()
-    setTimeout(() => syncAskSheet(true), 0)
-  })
+  askTab?.addEventListener(
+    "click",
+    () => {
+      const openingAsk = askPanel instanceof HTMLElement && askPanel.hidden
+      if (openingAsk) startNewChat()
+      setTimeout(() => syncAskSheet(true), 0)
+    },
+    true,
+  )
 
   window.addEventListener("resize", () => {
     syncAskSheet(askPanel instanceof HTMLElement && !askPanel.hidden)

@@ -2828,6 +2828,11 @@ body.html-viewer-body {
   flex-shrink: 0;
 }
 
+.html-viewer-ask-bootstrap[hidden],
+.html-viewer-ask-context[hidden] {
+  display: none !important;
+}
+
 .html-viewer-ask-bootstrap-label {
   font-size: 0.72rem;
   color: var(--muted);
