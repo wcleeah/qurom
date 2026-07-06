@@ -9,6 +9,7 @@ import {
   resolveLibrarySource,
   setPageNotes,
 } from "../src/view/library-notes-store.ts"
+import { addNoteTag } from "../src/tags-store.ts"
 
 let dir: string
 let originalDataDir: string | undefined
@@ -82,5 +83,30 @@ describe("library page", () => {
 
     const dead = await resolveLibrarySource("alpha-run", "missing.html")
     expect(dead.alive).toBe(false)
+  })
+
+  test("filters library items by note tags", async () => {
+    const tagged = await createHighlight({
+      runName: "alpha-run",
+      filePath: "final.html",
+      color: "yellow",
+      quote: "Tagged quote",
+    })
+    await createHighlight({
+      runName: "alpha-run",
+      filePath: "final.html",
+      color: "blue",
+      quote: "Untagged quote",
+    })
+    await addNoteTag(tagged.id, "important", 8)
+
+    const filtered = await renderLibraryPage(new URLSearchParams({ tags: "important" }))
+    const html = await filtered.text()
+
+    expect(html).toContain("Tagged quote")
+    expect(html).not.toContain("Untagged quote")
+    expect(html).toContain("library-tag-filter-active")
+    expect(html).toContain("Important")
+    expect(html).toContain("Clear filters")
   })
 })

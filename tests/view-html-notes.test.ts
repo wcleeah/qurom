@@ -7,6 +7,7 @@ import {
   getHtmlReaderNotes,
   setHtmlReaderNotes,
 } from "../src/view/html-notes-store.ts"
+import { addNoteTag } from "../src/tags-store.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 import { serveRawFile } from "../src/view/pages.ts"
 
@@ -89,6 +90,24 @@ describe("serveRawFile html handling", () => {
     expect(resp.headers.get("content-type")).toContain("text/html")
     expect(html).toContain('class="html-viewer-frame"')
     expect(html).toContain("← Back to run")
+  })
+
+  test("renders page note tags in viewer when notes exist", async () => {
+    await setHtmlReaderNotes("alpha-run", "final.html", "Saved note")
+    const resp = await serveRawFile("alpha-run", "final.html", new URLSearchParams())
+    const html = await resp.text()
+
+    const pageNoteIdMatch = html.match(/data-note-id="([^"]+)"/)
+    expect(pageNoteIdMatch).not.toBeNull()
+    const pageNoteId = pageNoteIdMatch![1]!
+    await addNoteTag(pageNoteId, "reading", 8)
+
+    const tagged = await serveRawFile("alpha-run", "final.html", new URLSearchParams())
+    const taggedHtml = await tagged.text()
+
+    expect(taggedHtml).toContain("Page tags")
+    expect(taggedHtml).toContain("Reading")
+    expect(taggedHtml).toContain(`data-note-id="${pageNoteId}"`)
   })
 
   test("returns raw html with ?source=1", async () => {

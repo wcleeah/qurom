@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   aggregatedFindingsSchema,
   auditResultSchema,
+  createArticleTagsResultSchema,
   graphInputSchema,
   researchStateSchema,
 } from "../src/schema.ts"
@@ -101,5 +102,46 @@ describe("schema validation", () => {
     })
 
     expect(result.success).toBe(false)
+  })
+
+  test("createArticleTagsResultSchema enforces predefined slug rules", () => {
+    const schema = createArticleTagsResultSchema({
+      predefinedTags: ["machine-learning"],
+      maxArticleTags: 8,
+    })
+
+    expect(schema.safeParse({
+      tags: [{ slug: "machine-learning", label: "Machine Learning", matchedPredefined: true }],
+    }).success).toBe(true)
+
+    expect(schema.safeParse({
+      tags: [{ slug: "machine-learning", label: "Machine Learning", matchedPredefined: false }],
+    }).success).toBe(false)
+
+    expect(schema.safeParse({
+      tags: [{ slug: "unknown", label: "Unknown", matchedPredefined: true }],
+    }).success).toBe(false)
+  })
+
+  test("createArticleTagsResultSchema enforces max tag count", () => {
+    const schema = createArticleTagsResultSchema({
+      predefinedTags: [],
+      maxArticleTags: 2,
+    })
+
+    expect(schema.safeParse({
+      tags: [
+        { slug: "one", label: "One", matchedPredefined: false },
+        { slug: "two", label: "Two", matchedPredefined: false },
+      ],
+    }).success).toBe(true)
+
+    expect(schema.safeParse({
+      tags: [
+        { slug: "one", label: "One", matchedPredefined: false },
+        { slug: "two", label: "Two", matchedPredefined: false },
+        { slug: "three", label: "Three", matchedPredefined: false },
+      ],
+    }).success).toBe(false)
   })
 })

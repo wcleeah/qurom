@@ -6,6 +6,7 @@ import {
   DRAFTER_ROLE,
   requiredOpenCodeAgentRoles,
   SUMMARIZER_ROLE,
+  TAGGER_ROLE,
 } from "../src/role-registry"
 import { testRuntimeConfig } from "./test-env"
 
@@ -33,9 +34,10 @@ describe("role registry", () => {
     expect(configuredAgentRoles(withoutDesign)).not.toContain("html-designer")
     expect(configuredAgentRoles(withDesign)).toContain(DRAFTER_ROLE)
     expect(configuredAgentRoles(withDesign)).toContain(SUMMARIZER_ROLE)
+    expect(configuredAgentRoles(withDesign)).toContain(TAGGER_ROLE)
   })
 
-  test("requiredOpenCodeAgentRoles includes designer when design quorum enabled", () => {
+  test("requiredOpenCodeAgentRoles includes tagger and designer when design quorum enabled", () => {
     const config = testRuntimeConfig({
       dataDir: "/tmp/qurom-role-registry-opencode",
       quorumOverrides: { designQuorum: { enabled: true } },
@@ -44,7 +46,21 @@ describe("role registry", () => {
       DRAFTER_ROLE,
       ...AUDITOR_ROLES,
       SUMMARIZER_ROLE,
+      TAGGER_ROLE,
       "html-designer",
+    ])
+  })
+
+  test("requiredOpenCodeAgentRoles includes tagger when design quorum disabled", () => {
+    const config = testRuntimeConfig({
+      dataDir: "/tmp/qurom-role-registry-opencode-no-design",
+      quorumOverrides: { designQuorum: undefined },
+    })
+    expect(requiredOpenCodeAgentRoles(config)).toEqual([
+      DRAFTER_ROLE,
+      ...AUDITOR_ROLES,
+      SUMMARIZER_ROLE,
+      TAGGER_ROLE,
     ])
   })
 })
