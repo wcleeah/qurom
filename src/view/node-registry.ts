@@ -1,4 +1,4 @@
-import { indexRunArtifacts, maxRebuttalTurn, roundHasRebuttals, type RoundArtifacts, type RunArtifactIndex } from "./run-artifacts"
+import { indexRunArtifacts, roundHasRebuttals, type RoundArtifacts, type RunArtifactIndex } from "./run-artifacts"
 import type { LiveStatus, RunStatus } from "./types"
 
 export type NodePhase = "setup" | "research" | "design"

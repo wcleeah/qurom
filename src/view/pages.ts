@@ -28,6 +28,7 @@ import { renderDebugLogHtml, type DebugLogEntry } from "./debug-log-viewer"
 import { appNavbarAction } from "./app-nav"
 import { badge, formatRelative, layout, phaseBadge, designPhaseBadge, designStatusLabel } from "./layout"
 import { getRunsDir, resolveRunName, safeFilePath, safeRunPath } from "./paths"
+import { renderRefreshControls } from "./refresh-controls"
 import { STAR_SCRIPT } from "./star-script"
 import { isRunStarred } from "./starred-store"
 import { contentType, escapeHtml, formatBytes, formatElapsed, formatUsagePair, renderMarkdown, statusDot } from "./utils"
@@ -463,7 +464,7 @@ export async function renderRun(name: string): Promise<Response> {
 
   let researchStatus: RunStatus = "running"
   if (hasFinalMd) researchStatus = "approved"
-  else if (hasLatestDraft) researchStatus = "failed"
+  else if (hasLatestDraft || hasFailureJson) researchStatus = "failed"
 
   // Design status
   const design = await readDesignSummary(name, files)

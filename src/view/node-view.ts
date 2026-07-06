@@ -17,7 +17,6 @@ import {
   renderNodeTelemetryMeta,
   sessionTotalsForLiveNode,
   sessionTotalsForNode,
-  sessionTotalsForNodeRound,
   sessionUsageForHistoryEntry,
 } from "./telemetry-view"
 import { tableWrap } from "./html"
@@ -270,7 +269,7 @@ async function loadRebuttalTurnData(
 async function renderNodeScopeBody(
   scope: NodeScope,
   runName: string,
-  nodeName: string,
+  _nodeName: string,
   resolvedId: string,
   files: string[],
   fileSizes: Map<string, number>,
@@ -300,8 +299,8 @@ ${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, true)}
 </div>`
       }
     } else {
-      const roundArt = index.rounds.find((r) => r.round === round) ?? emptyRoundArtifacts(round)
-      content += `<div class="section"><h2>Round ${round} audits</h2>
+      const roundArt = index.rounds.find((r) => r.round === scope) ?? emptyRoundArtifacts(scope)
+      content += `<div class="section"><h2>Round ${scope} audits</h2>
 ${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, isCurrentRound)}
 </div>`
     }

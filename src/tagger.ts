@@ -158,7 +158,7 @@ export async function tagOutputArtifact(
     ? state.topic
     : state.documentText ?? state.topic
 
-  const runName = basename(input.outputPath)
+  const runName = basename(state.outputPath)
 
   try {
     const result = await tagArticle({

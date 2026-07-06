@@ -217,6 +217,8 @@ export type RunResult = {
     inputSummary?: unknown
     artifactSummary?: unknown
     outputPath?: string
+    requestId?: string
+    status?: string
   }
 }
 

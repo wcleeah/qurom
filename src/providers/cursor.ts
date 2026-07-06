@@ -498,12 +498,6 @@ function cursorRawUsageFromRun(run: CursorRunHandle, result: unknown) {
   }
 }
 
-function cursorUsageFromRun(run: CursorRunHandle, result: unknown) {
-  const raw = cursorRawUsageFromRun(run, result)
-  if (!raw) return undefined
-  return foldCursorUsage(raw)
-}
-
 function cursorUsageTotalsFromRun(
   run: CursorRunHandle,
   result: unknown,

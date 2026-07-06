@@ -221,7 +221,7 @@ export function renderAuditRound(filename: string, data: unknown, isDesign?: boo
 
 // ── aggregated-findings-round-N.json ──
 
-function renderConsensusBody(d: AggregatedFindings, isDesign?: boolean): string {
+function renderConsensusBody(d: AggregatedFindings, _isDesign?: boolean): string {
   let html = `<div class="outcome-banner ${outcomeClass(d.outcome)}">${outcomeLabel(d.outcome)}</div>`
 
   const rows: string[] = []
@@ -337,28 +337,6 @@ export function renderTargetedRebuttalsRound(
   }
 
   html += `</div></div>`
-  return html
-}
-
-export function renderRebuttalsInputFile(filename: string, data: unknown): string {
-  if (!Array.isArray(data)) return renderJsonCard(data, { defaultOpen: true })
-  const roundMatch = filename.match(/round-(\d+)/)
-  const agent = agentFromRebuttalsFile(filename)
-  const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
-  const rebuttals = data as RebuttalEntry[]
-
-  let html = `<div class="section"><h2>Rebuttals — ${escapeHtml(agent)}${roundLabel ? `, ${roundLabel}` : ""}</h2>
-<div class="structured-card">
-<div class="review-section">
-  <h4>${escapeHtml(agent)} (${rebuttals.length} finding${rebuttals.length !== 1 ? "s" : ""})</h4>`
-  if (rebuttals.length > 0) {
-    for (const r of rebuttals) {
-      html += renderRebuttalEntryBlock(r, "Drafter rebuttal")
-    }
-  } else {
-    html += `<div class="empty-inline">None</div>`
-  }
-  html += `</div></div></div>`
   return html
 }
 
