@@ -3069,6 +3069,99 @@ body.html-viewer-body {
   align-items: flex-start;
 }
 
+/* ── Tags ── */
+.tags-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.tags-section-header h2 {
+  margin: 0;
+}
+
+.tags-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.tag-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 0.72rem;
+}
+
+.tag-chip-label {
+  color: var(--fg);
+}
+
+.tag-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.tag-chip-remove:hover {
+  color: var(--red);
+}
+
+.tag-add-form {
+  margin-top: 0.35rem;
+}
+
+.library-tag-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+
+.library-tag-filter,
+.library-tag-filter-clear {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.72rem;
+  text-decoration: none;
+  color: var(--muted);
+}
+
+.library-tag-filter-active {
+  border-color: var(--accent);
+  color: var(--fg);
+  background: var(--accent-dim);
+}
+
+.library-item-tags {
+  margin-top: 0.15rem;
+}
+
+.note-tags-editor {
+  margin-top: 0.5rem;
+}
+
 /* ── Mobile fixes ── */
 @media (max-width: 400px) {
   .run-card-top { flex-direction: column; }

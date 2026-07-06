@@ -10,6 +10,7 @@ import type { HtmlReaderAskThread } from "./html-ask-store"
 import { highlightsToJson, HTML_HIGHLIGHTS_SCRIPT } from "./html-viewer-highlights"
 import { appNavbarAction, appNavbarButton, renderAppNavbar } from "./app-nav"
 import { layoutHtmlViewer } from "./layout"
+import { TAG_FORMS_SCRIPT } from "./tag-ui"
 import { escapeHtml } from "./utils"
 
 export const HTML_VIEWER_SCRIPT = /* html */ `
@@ -158,6 +159,8 @@ export function renderHtmlViewerPage(
   notes: string,
   highlights: HtmlReaderHighlight[],
   askThreads: HtmlReaderAskThread[] = [],
+  pageNoteTagsHtml = "",
+  highlightTagsById: Record<string, Array<{ slug: string; label: string; noteSource: string }>> = {},
 ): string {
   const baseName = basename(filePath)
   const runHref = `/runs/${encodeURIComponent(runName)}`
@@ -167,7 +170,7 @@ export function renderHtmlViewerPage(
   const notesAction = `/runs/${encodeURIComponent(runName)}/html-notes`
   const initialSaveState = notes.trim().length > 0 ? "saved" : "idle"
   const initialSaveLabel = notes.trim().length > 0 ? "All changes saved" : "Notes auto-save"
-  const highlightsJson = highlightsToJson(highlights)
+  const highlightsJson = highlightsToJson(highlights, highlightTagsById)
   const askThreadsJson = askThreadsToJson(askThreads)
   const navbarActions = [
     appNavbarButton("Hide panel", 'class="app-navbar-action html-viewer-sidebar-toggle" data-html-sidebar-toggle aria-expanded="true"'),
@@ -218,6 +221,7 @@ export function renderHtmlViewerPage(
             placeholder="Write your notes here..."
           >${escapeHtml(notes)}</textarea>
         </form>
+        ${pageNoteTagsHtml}
       </div>
       <div class="html-viewer-panel" data-html-panel="highlights" role="tabpanel" hidden>
         <p class="html-viewer-highlight-unsupported muted-text" data-html-highlight-unsupported hidden>
@@ -264,7 +268,8 @@ export function renderHtmlViewerPage(
 ${HTML_VIEWER_SCRIPT}
 ${HTML_HIGHLIGHTS_SCRIPT}
 ${HTML_VIEWER_MARKDOWN_SCRIPT}
-${HTML_ASK_SCRIPT}`
+${HTML_ASK_SCRIPT}
+${TAG_FORMS_SCRIPT}`
 
   return layoutHtmlViewer(`${baseName} — ${escapeHtml(runName)}`, body)
 }

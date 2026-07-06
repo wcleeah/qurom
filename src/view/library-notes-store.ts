@@ -92,12 +92,53 @@ export async function resolveLibrarySource(runName: string, filePath: string): P
   return { runName, filePath, topic, alive }
 }
 
-export async function listAllLibraryNotes(): Promise<LibraryNote[]> {
+export async function getPageNoteLibraryId(runName: string, filePath: string): Promise<string | null> {
+  validateHtmlReaderTarget(runName, filePath)
   return withHtmlReaderDb((db) => {
-    const rows = db.query<LibraryNoteRow, []>(
+    const row = db.query<{ id: string }, [string, string]>(
+      "SELECT id FROM library_notes WHERE run_name = ? AND file_path = ? AND kind = 'page' LIMIT 1",
+    ).get(runName, filePath)
+    return row?.id ?? null
+  })
+}
+
+export async function getHighlightLibraryId(
+  runName: string,
+  filePath: string,
+  highlightId: string,
+): Promise<string | null> {
+  validateHtmlReaderTarget(runName, filePath)
+  return withHtmlReaderDb((db) => {
+    const row = db.query<{ id: string }, [string, string, string]>(
+      `SELECT id FROM library_notes
+       WHERE run_name = ? AND file_path = ? AND id = ? AND kind = 'highlight'
+       LIMIT 1`,
+    ).get(runName, filePath, highlightId)
+    return row?.id ?? null
+  })
+}
+
+export async function listAllLibraryNotes(options?: { tagSlugs?: string[] }): Promise<LibraryNote[]> {
+  return withHtmlReaderDb((db) => {
+    const tagSlugs = (options?.tagSlugs ?? []).filter(Boolean)
+    if (tagSlugs.length === 0) {
+      const rows = db.query<LibraryNoteRow, []>(
+        `${LIBRARY_NOTE_SELECT}
+         ORDER BY updated_at DESC`,
+      ).all()
+      return rows.map(rowToLibraryNote)
+    }
+
+    const placeholders = tagSlugs.map(() => "?").join(", ")
+    const rows = db.query<LibraryNoteRow, string[]>(
       `${LIBRARY_NOTE_SELECT}
+       WHERE EXISTS (
+         SELECT 1 FROM note_tags nt
+         WHERE nt.note_id = library_notes.id
+           AND nt.tag_slug IN (${placeholders})
+       )
        ORDER BY updated_at DESC`,
-    ).all()
+    ).all(...tagSlugs)
     return rows.map(rowToLibraryNote)
   })
 }

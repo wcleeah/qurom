@@ -25,6 +25,7 @@ import { renderLibraryPage } from "./library-page"
 import { renderIndex, renderNodePage, renderFilesPage, renderRun, serveRawFile } from "./pages"
 import { handleOpencodeBootstrapPost } from "./opencode-bootstrap-view"
 import { handleRunApi } from "./run-api"
+import { handleTagsApi } from "./tags-api"
 import { resolveRunName, safeFilePath, HOST, PORT, safeRunPath } from "./paths"
 import { setRunStarred } from "./starred-store"
 import { viewServerAdminEnabled } from "./server-options"
@@ -80,12 +81,15 @@ export function startViewServer(): void {
 
       if (path === "/library") {
         try {
-          return await renderLibraryPage()
+          return await renderLibraryPage(url.searchParams)
         } catch (e) {
           console.error("GET /library error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }
+
+      const tagsApiResponse = await handleTagsApi(req, path)
+      if (tagsApiResponse) return tagsApiResponse
 
       if (path === "/config") {
         try {

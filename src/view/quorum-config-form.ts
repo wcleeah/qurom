@@ -43,6 +43,8 @@ export function renderQuorumConfigForm(options: QuorumConfigFormOptions): string
     : ""
   const designEnabled = config.designQuorum?.enabled ?? false
   const readerEnabled = config.readerDiscovery?.enabled ?? true
+  const taggingEnabled = config.tagging?.enabled ?? true
+  const predefinedTags = (config.tagging?.predefinedTags ?? []).join(", ")
 
   return `${errorBanner}<form class="config-form" method="POST" action="${escapeHtml(options.action)}">
   <p class="tiny-text muted-text">Run policy settings. Agent roles and providers are configured on the <a href="/config/roles">Roles</a> tab.</p>
@@ -63,6 +65,15 @@ export function renderQuorumConfigForm(options: QuorumConfigFormOptions): string
     ${checkbox("readerDiscovery.enabled", "Enable reader discovery", readerEnabled)}
     <div data-reader-discovery-fields${readerEnabled ? "" : " hidden"}>
       ${field("Max turns", "readerDiscovery.maxTurns", config.readerDiscovery?.maxTurns ?? 6, "number")}
+    </div>
+  </div>
+  <div class="form-section" data-tagging-config>
+    <h3>Tagging</h3>
+    ${checkbox("tagging.enabled", "Enable article tagging", taggingEnabled)}
+    <div data-tagging-fields${taggingEnabled ? "" : " hidden"}>
+      ${field("Max article tags", "tagging.maxArticleTags", config.tagging?.maxArticleTags ?? 8, "number")}
+      ${field("Max note tags", "tagging.maxNoteTags", config.tagging?.maxNoteTags ?? 8, "number")}
+      ${field("Predefined tag slugs", "tagging.predefinedTags", predefinedTags, "text", "Comma-separated lowercase slugs, e.g. machine-learning, systems")}
     </div>
   </div>
   ${researchToolsSection(config)}
@@ -119,6 +130,21 @@ export function parseQuorumConfigForm(params: URLSearchParams): QuorumConfig {
       enabled: parseBoolean(params, "readerDiscovery.enabled"),
       maxTurns: parsePositiveInt(params, "readerDiscovery.maxTurns", 6),
     },
+    tagging: {
+      enabled: parseBoolean(params, "tagging.enabled"),
+      maxArticleTags: parsePositiveInt(params, "tagging.maxArticleTags", 8),
+      maxNoteTags: parsePositiveInt(params, "tagging.maxNoteTags", 8),
+      predefinedTags: (params.get("tagging.predefinedTags") ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((slug) => {
+          if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+            throw new Error(`Invalid predefined tag slug: ${slug}`)
+          }
+          return slug
+        }),
+    },
   }
 }
 
@@ -128,6 +154,19 @@ export const quorumConfigFormScript = `<script>
     document.querySelectorAll("[data-reader-discovery]").forEach(function(section){
       var enabled = section.querySelector("input[name='readerDiscovery.enabled']");
       var fields = section.querySelector("[data-reader-discovery-fields]");
+      if (!enabled || !fields) return;
+      function sync(){
+        fields.hidden = !enabled.checked;
+        fields.querySelectorAll("input,select,textarea").forEach(function(input){
+          input.disabled = fields.hidden;
+        });
+      }
+      enabled.addEventListener("change", sync);
+      sync();
+    });
+    document.querySelectorAll("[data-tagging-config]").forEach(function(section){
+      var enabled = section.querySelector("input[name='tagging.enabled']");
+      var fields = section.querySelector("[data-tagging-fields]");
       if (!enabled || !fields) return;
       function sync(){
         fields.hidden = !enabled.checked;

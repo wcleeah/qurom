@@ -1,7 +1,8 @@
 import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { POLLING_SCRIPT, NODE_REFRESH_SCRIPT, FILES_REFRESH_SCRIPT, INDEX_REFRESH_SCRIPT, ROUND_TABS_SCRIPT } from "./client-script"
-import { renderRefreshControls } from "./refresh-controls"
+import { listArticleTags, listNoteTags } from "../tags-store"
+import { renderArticleTagsSection, TAG_FORMS_SCRIPT } from "./tag-ui"
 import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
 import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
 import { renderRunControlsSection, renderNodeControlsSection, resolveRunResumeActions } from "./run-controls"
@@ -19,7 +20,9 @@ import { renderFileBrowser } from "./file-browser"
 import { listHtmlReaderAskThreads } from "./html-ask-store"
 import { listHtmlReaderHighlights } from "./html-highlights-store"
 import { getHtmlReaderNotes } from "./html-notes-store"
+import { getPageNoteLibraryId } from "./library-notes-store"
 import { renderHtmlViewerPage } from "./html-viewer"
+import { renderNoteTagsEditor } from "./tag-ui"
 import { tableWrap } from "./html"
 import { renderDebugLogHtml, type DebugLogEntry } from "./debug-log-viewer"
 import { appNavbarAction } from "./app-nav"
@@ -596,6 +599,16 @@ export async function renderRun(name: string): Promise<Response> {
   const interviewChatSection = `<div id="interview-chat-section">${interviewChatHtml}</div>`
   const markdownSection = ""
   const finalOutputSection = `<div id="final-output-section">${finalOutputHtml}</div>`
+
+  let articleTagsSection = ""
+  if (hasFinalMd) {
+    const articleTags = await listArticleTags(name)
+    articleTagsSection = renderArticleTagsSection({
+      runName: name,
+      tags: articleTags,
+      canRetag: true,
+    })
+  }
   const designSummarySection = `<div id="design-summary-section">${designSummaryHtml}</div>`
   const filesSection = `<div id="files-section">${filesLinkSection}</div>`
 
@@ -635,6 +648,7 @@ ${interviewChatSection}
 ${failureBannerSection}
 ${telemetrySection}
 ${finalOutputSection}
+${articleTagsSection}
 ${designSummarySection}
 ${roundStripSection}
 ${agentActivitySection}
@@ -645,7 +659,8 @@ ${markdownSection}
 ${filesSection}
 ${STAR_SCRIPT}
 ${hasResearchRounds ? ROUND_TABS_SCRIPT : ""}
-${isRunning ? POLLING_SCRIPT : ""}`
+${isRunning ? POLLING_SCRIPT : ""}
+${articleTagsSection ? TAG_FORMS_SCRIPT : ""}`
 
   const html = layout(`${escapeHtml(topic)} — quorum run`, body, {
     extraHead,
@@ -714,7 +729,30 @@ export async function serveRawFile(
     const notes = await getHtmlReaderNotes(runName, filePath)
     const highlights = await listHtmlReaderHighlights(runName, filePath)
     const askThreads = await listHtmlReaderAskThreads(runName, filePath)
-    const html = renderHtmlViewerPage(runName, filePath, notes, highlights, askThreads)
+    let pageNoteTagsHtml = ""
+    const pageNoteId = await getPageNoteLibraryId(runName, filePath)
+    if (pageNoteId) {
+      const pageTags = await listNoteTags(pageNoteId)
+      pageNoteTagsHtml = `<div class="html-viewer-page-tags"><p class="html-viewer-sidebar-hint muted-text">Page tags</p>${renderNoteTagsEditor({ noteId: pageNoteId, tags: pageTags })}</div>`
+    }
+    const highlightTagsById: Record<string, Array<{ slug: string; label: string; noteSource: string }>> = {}
+    await Promise.all(highlights.map(async (highlight) => {
+      const tags = await listNoteTags(highlight.id)
+      highlightTagsById[highlight.id] = tags.map((tag) => ({
+        slug: tag.slug,
+        label: tag.label,
+        noteSource: tag.noteSource,
+      }))
+    }))
+    const html = renderHtmlViewerPage(
+      runName,
+      filePath,
+      notes,
+      highlights,
+      askThreads,
+      pageNoteTagsHtml,
+      highlightTagsById,
+    )
     return new Response(html, {
       headers: { "content-type": "text/html; charset=utf-8" },
     })

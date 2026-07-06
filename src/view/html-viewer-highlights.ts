@@ -3,7 +3,10 @@ import { escapeHtml } from "./utils"
 
 export { HIGHLIGHT_COLOR_RGBA }
 
-export function highlightsToJson(highlights: HtmlReaderHighlight[]): string {
+export function highlightsToJson(
+  highlights: HtmlReaderHighlight[],
+  tagsByHighlightId: Record<string, Array<{ slug: string; label: string; noteSource: string }>> = {},
+): string {
   return escapeHtml(JSON.stringify(highlights.map((h) => ({
     id: h.id,
     color: h.color,
@@ -12,6 +15,7 @@ export function highlightsToJson(highlights: HtmlReaderHighlight[]): string {
     suffix: h.suffix,
     note: h.note,
     createdAt: h.createdAt,
+    tags: tagsByHighlightId[h.id] ?? [],
   }))))
 }
 
@@ -216,6 +220,62 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     }
   }
 
+  function renderHighlightTags(item) {
+    const tags = Array.isArray(item.tags) ? item.tags : []
+    const chips = tags.length
+      ? tags.map((tag) =>
+        '<span class="tag-chip" data-tag-source="' + escapeHtml(tag.noteSource ?? "") + '">' +
+        '<span class="tag-chip-label">' + escapeHtml(tag.label) + '</span>' +
+        '<button type="button" class="tag-chip-remove" data-highlight-tag-remove="' + escapeHtml(item.id) + '" data-tag-slug="' + escapeHtml(tag.slug) + '" aria-label="Remove tag ' + escapeHtml(tag.label) + '">×</button>' +
+        '</span>',
+      ).join("")
+      : '<span class="muted-text tiny-text">No tags</span>'
+    return '<div class="html-viewer-highlight-tags note-tags-editor" data-note-tags data-note-id="' + escapeHtml(item.id) + '">' +
+      '<div class="tag-chip-list">' + chips + '</div>' +
+      '<form class="config-form tag-add-form" data-highlight-tag-form="' + escapeHtml(item.id) + '">' +
+      '<label class="form-field"><span>Tag</span>' +
+      '<input class="form-input" type="text" name="tag" placeholder="important" required>' +
+      '</label>' +
+      '<button type="submit" class="btn btn-secondary">Add</button>' +
+      '</form>' +
+      '</div>'
+  }
+
+  async function addHighlightTag(id, tag) {
+    const resp = await fetch("/api/library/notes/" + encodeURIComponent(id) + "/tags", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ tag }),
+    })
+    if (!resp.ok) throw new Error("add tag failed")
+    const data = await resp.json()
+    const tags = Array.isArray(data.tags)
+      ? data.tags.map((entry) => ({
+        slug: entry.slug,
+        label: entry.label,
+        noteSource: entry.noteSource,
+      }))
+      : []
+    highlights = highlights.map((entry) => entry.id === id ? { ...entry, tags } : entry)
+  }
+
+  async function removeHighlightTag(id, slug) {
+    const resp = await fetch("/api/library/notes/" + encodeURIComponent(id) + "/tags/" + encodeURIComponent(slug), {
+      method: "DELETE",
+      headers: { accept: "application/json" },
+    })
+    if (!resp.ok) throw new Error("remove tag failed")
+    const data = await resp.json()
+    const tags = Array.isArray(data.tags)
+      ? data.tags.map((entry) => ({
+        slug: entry.slug,
+        label: entry.label,
+        noteSource: entry.noteSource,
+      }))
+      : []
+    highlights = highlights.map((entry) => entry.id === id ? { ...entry, tags } : entry)
+  }
+
   function renderList(doc) {
     if (!(listEl instanceof HTMLElement)) return
     if (highlights.length === 0) {
@@ -234,7 +294,8 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
           '<label class="html-viewer-highlight-note-label" for="html-highlight-note-' + escapeHtml(item.id) + '">Note</label>' +
           '<textarea id="html-highlight-note-' + escapeHtml(item.id) + '" class="html-viewer-highlight-note-input" data-highlight-note="' + escapeHtml(item.id) + '" rows="3" placeholder="Add a note for this highlight...">' + escapeHtml(item.note ?? "") + '</textarea>' +
           '<span class="html-viewer-highlight-note-status muted-text" data-highlight-note-status="' + escapeHtml(item.id) + '"></span>' +
-          '</div>'
+          '</div>' +
+          renderHighlightTags(item)
         : ""
       return '<div class="html-viewer-highlight-item' + (expanded ? " html-viewer-highlight-item-expanded" : "") + '" data-highlight-id="' + escapeHtml(item.id) + '">' +
         '<div class="html-viewer-highlight-item-row">' +
@@ -474,10 +535,39 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
       if (id) toggleHighlightOpen(id)
       return
     }
+    const removeTagBtn = target.closest("[data-highlight-tag-remove]")
+    if (removeTagBtn instanceof HTMLElement) {
+      const id = removeTagBtn.dataset.highlightTagRemove
+      const slug = removeTagBtn.dataset.tagSlug
+      if (id && slug) {
+        void removeHighlightTag(id, slug).then(() => {
+          const doc = iframe.contentDocument
+          renderList(doc)
+        }).catch(() => {})
+      }
+      return
+    }
     const btn = target.closest("[data-highlight-delete]")
     if (!(btn instanceof HTMLElement)) return
     const id = btn.dataset.highlightDelete
     if (id) void deleteHighlight(id)
+  })
+
+  listEl?.addEventListener("submit", (event) => {
+    const form = event.target
+    if (!(form instanceof HTMLFormElement)) return
+    const id = form.dataset.highlightTagForm
+    if (!id) return
+    event.preventDefault()
+    const input = form.querySelector("input[name='tag']")
+    if (!(input instanceof HTMLInputElement)) return
+    const tag = input.value.trim()
+    if (!tag) return
+    void addHighlightTag(id, tag).then(() => {
+      input.value = ""
+      const doc = iframe.contentDocument
+      renderList(doc)
+    }).catch(() => {})
   })
 
   listEl?.addEventListener("input", (event) => {
