@@ -385,6 +385,18 @@ describe("reader profile threaded to prompt-contract functions", () => {
     expect(prompt).not.toContain("Reader goal")
   })
 
+  test("fullDraftPrompt includes pasted document text for document-mode runs", () => {
+    const state = profileState({
+      inputMode: "document" as const,
+      topic: undefined,
+      documentPath: "/runs/example/input.md",
+      documentText: "# My pasted notes\n\nContent about MLX.",
+    })
+    const prompt = fullDraftPrompt(testConfig, promptBundle, state)
+    expect(prompt).toContain("My pasted notes")
+    expect(prompt).toContain("Content about MLX.")
+  })
+
   test("auditPrompt includes the reader context block when a profile is set", () => {
     const prompt = auditPrompt(testConfig, promptBundle, "source-auditor", profileState(), "audit.json")
     expect(prompt).toContain("Include a Prerequisites section covering: autograd, Swift")

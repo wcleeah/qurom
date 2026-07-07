@@ -5,6 +5,7 @@ import {
   auditResultSchema,
   createArticleTagsResultSchema,
   graphInputSchema,
+  inputRequestSchema,
   researchStateSchema,
 } from "../src/schema.ts"
 
@@ -82,6 +83,23 @@ describe("schema validation", () => {
     })
 
     expect(result.success).toBe(true)
+  })
+
+  test("accepts input request with documentText only", () => {
+    const result = inputRequestSchema.safeParse({
+      inputMode: "document",
+      documentText: "# Inline notes\n\nBody.",
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  test("rejects document input without path or text", () => {
+    const result = inputRequestSchema.safeParse({
+      inputMode: "document",
+    })
+
+    expect(result.success).toBe(false)
   })
 
   test("requires topic for topic-mode research state", () => {

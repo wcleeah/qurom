@@ -17,10 +17,12 @@ describe("resolveRunResumeActions", () => {
       isRunning: false,
       hasFinalMd: false,
       hasFinalHtml: false,
+      hasInputMd: false,
       designStatus: null,
     })
     expect(actions.showResumeResearch).toBe(true)
     expect(actions.showResumeDesign).toBe(false)
+    expect(actions.showRestartFromSource).toBe(false)
   })
 
   test("offers design resume when research approved without final html", () => {
@@ -28,10 +30,12 @@ describe("resolveRunResumeActions", () => {
       isRunning: false,
       hasFinalMd: true,
       hasFinalHtml: false,
+      hasInputMd: true,
       designStatus: "failed",
     })
     expect(actions.showResumeResearch).toBe(false)
     expect(actions.showResumeDesign).toBe(true)
+    expect(actions.showRestartFromSource).toBe(true)
   })
 
   test("hides actions while running", () => {
@@ -39,10 +43,12 @@ describe("resolveRunResumeActions", () => {
       isRunning: true,
       hasFinalMd: false,
       hasFinalHtml: false,
+      hasInputMd: true,
       designStatus: null,
     })
     expect(actions.showResumeResearch).toBe(false)
     expect(actions.showResumeDesign).toBe(false)
+    expect(actions.showRestartFromSource).toBe(false)
   })
 })
 
@@ -51,9 +57,20 @@ describe("renderRunActionStrip", () => {
     const html = renderRunActionStrip("my-run-abc", {
       showResumeResearch: true,
       showResumeDesign: false,
+      showRestartFromSource: false,
     })
     expect(html).toContain("/api/runs/my-run-abc/resume")
     expect(html).toContain("Resume research")
+  })
+
+  test("renders restart-from-source button", () => {
+    const html = renderRunActionStrip("my-run-abc", {
+      showResumeResearch: false,
+      showResumeDesign: false,
+      showRestartFromSource: true,
+    })
+    expect(html).toContain("/api/runs/my-run-abc/restart-from-source")
+    expect(html).toContain("New run from source document")
   })
 })
 
@@ -77,6 +94,13 @@ describe("renderNewRunForm", () => {
     expect(html).toContain("disabled")
     expect(html).toContain("new-run-card")
     expect(html).toContain("form-input new-run-textarea")
+  })
+
+  test("renders document compose textarea and file picker", () => {
+    const html = renderNewRunForm({ runActive: false })
+    expect(html).toContain('name="documentText"')
+    expect(html).toContain("document-file-input")
+    expect(html).toContain("Advanced: server path")
   })
 })
 
