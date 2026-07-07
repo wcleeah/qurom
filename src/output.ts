@@ -1,6 +1,8 @@
 import { mkdir, readdir, rmdir } from "node:fs/promises"
 import { basename, extname, join } from "node:path"
 
+export const RUN_INPUT_DOCUMENT = "input.md"
+
 type RunDirInput = {
   requestId: string
   inputMode: "topic" | "document"

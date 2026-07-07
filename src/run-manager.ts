@@ -1,5 +1,7 @@
 import type { RuntimeConfig } from "./config"
+import { normalizeDocumentRequest, DocumentInputError } from "./document-input"
 import { loadPromptBundle, type PromptBundle } from "./prompt-assets"
+import { ZodError } from "zod"
 import { getProviderLifecycle, type ProviderLifecycle, type ProviderLifecycleStatus } from "./providers/lifecycle"
 import { configuredAgentRoles, validateProviderPrerequisites } from "./providers/registry"
 import { DESIGN_QUORUM_ROLES } from "./role-registry"
@@ -182,6 +184,8 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     async startResearch(request) {
       const runId = crypto.randomUUID()
       const cfg = await config()
+
+      let pipelineRequest = request
       const runDirInput = {
         requestId: runId,
         inputMode: request.inputMode,
@@ -191,11 +195,19 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
       }
       const runPath = buildRunDirName(runDirInput)
       const runDir = await ensureRunDir(cfg.env.QUORUM_RUNS_DIR, runDirInput)
+
+      if (request.inputMode === "document") {
+        pipelineRequest = await normalizeDocumentRequest(request, runDir)
+      }
+
       await writeRunJsonArtifact(runDir, "request.json", {
         requestId: runId,
-        inputMode: request.inputMode,
-        topic: request.inputMode === "topic" ? request.topic : undefined,
-        documentPath: request.inputMode === "document" ? request.documentPath : undefined,
+        inputMode: pipelineRequest.inputMode,
+        topic: pipelineRequest.inputMode === "topic" ? pipelineRequest.topic : undefined,
+        documentPath: pipelineRequest.inputMode === "document" ? pipelineRequest.documentPath : undefined,
+        documentSource: pipelineRequest.inputMode === "document" ? pipelineRequest.documentSource : undefined,
+        originalDocumentPath:
+          pipelineRequest.inputMode === "document" ? pipelineRequest.originalDocumentPath : undefined,
       })
 
       const roles = configuredAgentRoles(cfg)
@@ -208,7 +220,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
             config: pipelineCfg,
             prerequisites: prereqs,
             promptBundle: bundle,
-            request,
+            request: pipelineRequest,
             requestId: runId,
             bus,
             signal,
@@ -285,6 +297,17 @@ export class RunManagerError extends Error {
     super(message)
     this.name = "RunManagerError"
   }
+}
+
+export function toRunManagerError(error: unknown): RunManagerError {
+  if (error instanceof RunManagerError) return error
+  if (error instanceof DocumentInputError) return new RunManagerError(error.message, 400)
+  if (error instanceof ZodError) {
+    const message = error.issues[0]?.message ?? "Invalid request"
+    return new RunManagerError(message, 400)
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return new RunManagerError(message, 500)
 }
 
 let defaultManager: RunManager | undefined

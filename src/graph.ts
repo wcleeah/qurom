@@ -270,6 +270,8 @@ async function persistRequestArtifact(state: ResearchState) {
     inputMode: state.inputMode,
     topic: state.topic,
     documentPath: state.documentPath,
+    documentSource: state.documentSource,
+    originalDocumentPath: state.originalDocumentPath,
     inputSummary: state.inputSummary,
   })
 }
@@ -614,7 +616,9 @@ export async function ingestRequest(input: GraphInput) {
     ...baseState,
     inputMode: "document",
     documentPath: parsed.documentPath,
-    documentText: parsed.documentText ?? (await Bun.file(parsed.documentPath).text()),
+    documentText: parsed.documentText ?? (parsed.documentPath ? await Bun.file(parsed.documentPath).text() : undefined),
+    documentSource: parsed.documentSource,
+    originalDocumentPath: parsed.originalDocumentPath,
   })
 }
 

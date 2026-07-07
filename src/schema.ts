@@ -35,19 +35,39 @@ const topicInputSchema = z.object({
   topic: nonEmptyStringSchema,
 })
 
-const documentInputSchema = z.object({
+const documentSourceSchema = z.enum(["inline", "path", "copied"])
+
+const documentInputObjectSchema = z.object({
   inputMode: z.literal("document"),
-  documentPath: nonEmptyStringSchema,
+  documentPath: nonEmptyStringSchema.optional(),
   documentText: nonEmptyStringSchema.optional(),
+  documentSource: documentSourceSchema.optional(),
+  originalDocumentPath: nonEmptyStringSchema.optional(),
 })
 
-export const inputRequestSchema = z.discriminatedUnion("inputMode", [topicInputSchema, documentInputSchema])
+export const inputRequestSchema = z
+  .discriminatedUnion("inputMode", [topicInputSchema, documentInputObjectSchema])
+  .superRefine((value, ctx) => {
+    if (value.inputMode !== "document") return
+
+    const hasPath = Boolean(value.documentPath?.trim())
+    const hasText = Boolean(value.documentText?.trim())
+    if (!hasPath && !hasText) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Document input requires documentPath or documentText",
+        path: ["documentPath"],
+      })
+    }
+  })
 
 export const graphInputSchema = z.object({
   inputMode: inputModeSchema,
   topic: nonEmptyStringSchema.optional(),
   documentPath: nonEmptyStringSchema.optional(),
   documentText: nonEmptyStringSchema.optional(),
+  documentSource: documentSourceSchema.optional(),
+  originalDocumentPath: nonEmptyStringSchema.optional(),
   requestId: nonEmptyStringSchema.optional(),
 })
 
@@ -379,6 +399,8 @@ export const researchStateObjectSchema = z.object({
   topic: nonEmptyStringSchema.optional(),
   documentPath: nonEmptyStringSchema.optional(),
   documentText: nonEmptyStringSchema.optional(),
+  documentSource: documentSourceSchema.optional(),
+  originalDocumentPath: nonEmptyStringSchema.optional(),
   inputSummary: runDisplaySummarySchema.optional(),
   artifactSummary: runDisplaySummarySchema.optional(),
   round: z.number().int().nonnegative(),
