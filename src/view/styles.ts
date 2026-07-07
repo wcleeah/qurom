@@ -403,6 +403,60 @@ a:hover { text-decoration: underline; }
   color: var(--red);
   font-size: 0.82rem;
 }
+.document-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.document-compose-field {
+  margin-bottom: 0;
+}
+.document-compose-textarea {
+  min-height: 14rem;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.82rem;
+}
+.document-compose-meta {
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+.document-compose-meta-overlimit {
+  color: var(--red);
+}
+.document-compose-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.document-file-button {
+  position: relative;
+  cursor: pointer;
+}
+.document-compose-dragover .document-compose-textarea {
+  outline: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+.document-advanced {
+  margin-top: 0.15rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+.document-advanced summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--muted);
+  user-select: none;
+}
+.document-advanced .form-field {
+  margin-top: 0.65rem;
+}
+.document-advanced-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.74rem;
+}
 .run-cancel-form {
   margin-bottom: 0.75rem;
 }

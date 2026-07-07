@@ -55,7 +55,16 @@ export function renderRequestCard(data: unknown): string {
   if (d.requestId) rows.push(`<tr><td>Request ID</td><td><code>${escapeHtml(String(d.requestId))}</code></td></tr>`)
   if (d.inputMode) rows.push(`<tr><td>Input mode</td><td>${escapeHtml(String(d.inputMode))}</td></tr>`)
   if (d.topic) rows.push(`<tr><td>Topic</td><td>${escapeHtml(String(d.topic))}</td></tr>`)
-  if (d.documentPath) rows.push(`<tr><td>Document</td><td><code>${escapeHtml(String(d.documentPath))}</code></td></tr>`)
+  if (d.documentPath) {
+    const pathLabel = String(d.documentPath).endsWith("/input.md") || String(d.documentPath).endsWith("\\input.md")
+      ? "Source document"
+      : "Document path"
+    rows.push(`<tr><td>${pathLabel}</td><td><code>${escapeHtml(String(d.documentPath))}</code></td></tr>`)
+  }
+  if (d.documentSource) rows.push(`<tr><td>Document source</td><td>${escapeHtml(String(d.documentSource))}</td></tr>`)
+  if (d.originalDocumentPath) {
+    rows.push(`<tr><td>Original path</td><td><code>${escapeHtml(String(d.originalDocumentPath))}</code></td></tr>`)
+  }
   if (d.inputSummary && typeof d.inputSummary === "object") {
     const s = d.inputSummary as Record<string, unknown>
     if (s.title) rows.push(`<tr><td>Title</td><td>${escapeHtml(String(s.title))}</td></tr>`)

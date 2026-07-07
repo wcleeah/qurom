@@ -1,5 +1,7 @@
 import { inputRequestSchema } from "../schema"
-import { RunManagerError, getRunManager } from "../run-manager"
+import { readRunSourceDocument } from "../document-input"
+import { RunManagerError, getRunManager, toRunManagerError } from "../run-manager"
+import { resolveRunName, safeRunPath } from "./paths"
 
 function wantsJson(req: Request, url: URL): boolean {
   return url.searchParams.get("json") === "1"
@@ -22,14 +24,15 @@ function redirectOrJson(
 }
 
 function errorResponse(error: unknown, req?: Request, url?: URL): Response {
-  if (error instanceof RunManagerError) {
+  const mapped = toRunManagerError(error)
+  if (mapped instanceof RunManagerError) {
     if (req && url && !wantsJson(req, url)) {
       return new Response(null, {
         status: 303,
-        headers: { Location: `/?error=${encodeURIComponent(error.message)}` },
+        headers: { Location: `/?error=${encodeURIComponent(mapped.message)}` },
       })
     }
-    return Response.json({ error: error.message }, { status: error.status })
+    return Response.json({ error: mapped.message }, { status: mapped.status })
   }
   const message = error instanceof Error ? error.message : String(error)
   if (req && url && !wantsJson(req, url)) {
@@ -63,6 +66,29 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
       }
       const request = inputRequestSchema.parse(body)
       const { runId, runPath } = await getRunManager().startResearch(request)
+      return redirectOrJson(req, url, `/runs/${encodeURIComponent(runPath)}`, { ok: true, runId, runPath })
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
+  const restartMatch = path.match(/^\/api\/runs\/(.+?)\/restart-from-source$/)
+  if (restartMatch && req.method === "POST") {
+    try {
+      const runRef = decodeURIComponent(restartMatch[1])
+      const runName = await resolveRunName(runRef)
+      if (!runName) {
+        throw new RunManagerError(`Run not found: ${runRef}`, 404)
+      }
+      const runDir = safeRunPath(runName)
+      const documentText = await readRunSourceDocument(runDir)
+      if (!documentText?.trim()) {
+        throw new RunManagerError("This run has no saved source document (input.md).", 404)
+      }
+      const { runId, runPath } = await getRunManager().startResearch({
+        inputMode: "document",
+        documentText,
+      })
       return redirectOrJson(req, url, `/runs/${encodeURIComponent(runPath)}`, { ok: true, runId, runPath })
     } catch (error) {
       return errorResponse(error, req, url)

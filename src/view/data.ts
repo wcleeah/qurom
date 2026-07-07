@@ -218,6 +218,7 @@ export function classifyFile(filename: string): FileClass {
   const round = roundFrom(filename)
   const readerTurn = readerProfileTurn(filename)
   if (filename === "request.json") return { group: "Run Metadata", subGroup: "Request", label: "Request", description: "Original topic/input and request id" }
+  if (filename === "input.md") return { group: "Run Metadata", subGroup: "Request", label: "Source document", description: "Original markdown submitted for this document-mode run" }
   if (filename === "reader-profile.json" || readerTurn) {
     return {
       group: "Run Metadata",

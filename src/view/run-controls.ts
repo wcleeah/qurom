@@ -4,21 +4,24 @@ import type { RunStatus } from "./types"
 export type RunResumeActions = {
   showResumeResearch: boolean
   showResumeDesign: boolean
+  showRestartFromSource: boolean
 }
 
 export function resolveRunResumeActions(input: {
   isRunning: boolean
   hasFinalMd: boolean
   hasFinalHtml: boolean
+  hasInputMd: boolean
   designStatus?: RunStatus | "running" | null
 }): RunResumeActions {
   if (input.isRunning) {
-    return { showResumeResearch: false, showResumeDesign: false }
+    return { showResumeResearch: false, showResumeDesign: false, showRestartFromSource: false }
   }
 
   return {
     showResumeResearch: !input.hasFinalMd,
     showResumeDesign: input.hasFinalMd && !input.hasFinalHtml && input.designStatus !== "approved",
+    showRestartFromSource: input.hasInputMd,
   }
 }
 
@@ -40,6 +43,12 @@ function renderResumeDesignForm(runName: string, disabled: boolean): string {
 </form>`
 }
 
+function renderRestartFromSourceForm(runName: string, disabled: boolean): string {
+  return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/restart-from-source">
+  <button type="submit" class="btn btn-secondary"${disabled ? " disabled" : ""}>New run from source document</button>
+</form>`
+}
+
 export function renderNodeRetryButton(runName: string, nodeName: string, disabled: boolean): string {
   return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/resume">
   <input type="hidden" name="node" value="${escapeHtml(nodeName)}" />
@@ -52,7 +61,7 @@ export function renderRunActionStrip(
   actions: RunResumeActions,
   options?: { runActiveGlobally?: boolean },
 ): string {
-  if (!actions.showResumeResearch && !actions.showResumeDesign) return ""
+  if (!actions.showResumeResearch && !actions.showResumeDesign && !actions.showRestartFromSource) return ""
 
   const disabled = options?.runActiveGlobally === true
   const busyNote = disabled
@@ -62,6 +71,7 @@ export function renderRunActionStrip(
   const buttons = [
     actions.showResumeResearch ? renderResumeResearchForm(runName, disabled) : "",
     actions.showResumeDesign ? renderResumeDesignForm(runName, disabled) : "",
+    actions.showRestartFromSource ? renderRestartFromSourceForm(runName, disabled) : "",
   ].filter(Boolean).join("\n")
 
   return `<div class="run-actions">
