@@ -6,7 +6,7 @@ https://github.com/user-attachments/assets/488d9741-d4ad-454f-bb34-422627048370
 
 ## What It Does
 
-- Accepts either a topic prompt or a document path.
+- Accepts either a topic prompt or a document (paste in the browser, load a local file, or provide a server path).
 - Runs an optional **reader discovery** interview to learn what the reader already knows before drafting.
 - Writes a full draft from the request and evidence, then runs revision rounds when needed.
 - Runs three auditors in parallel to review the draft from different perspectives.
@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/488d9741-d4ad-454f-bb34-422627048370
 ## The Big Picture
 
 1. `bun run dev` starts the web dashboard (default `http://localhost:3000`).
-2. Start a research run from the index page (topic, document path, resume, or design).
+2. Start a research run from the index page (topic, pasted document, resume, or design).
 3. The run manager creates an event bus and starts `runResearchPipeline` or `runDesignPipeline`.
 4. Each role's provider is started lazily when that role is first needed (`opencode` or `cursor`).
 5. Live status is written to `live-status.json` and polled by the dashboard.
@@ -153,7 +153,8 @@ bun run view:admin   # same, with shipped-defaults editor routes enabled
 
 Start runs from the index page, or via HTTP API:
 
-- `POST /api/runs` — new research run (`inputMode`, `topic` or `documentPath`)
+- `POST /api/runs` — new research run (`inputMode`, `topic` or `documentText` / `documentPath`)
+- `POST /api/runs/:id/restart-from-source` — new document run from a prior run's `input.md`
 - `POST /api/runs/:id/resume` — resume research (`node` optional)
 - `POST /api/runs/:id/design` — resume design quorum
 - `POST /api/runs/:id/cancel` — cancel active run
@@ -177,7 +178,7 @@ Start runs from the index page, or via HTTP API:
 ## Notes
 
 - Shipped defaults live under `defaults/`. User data (runs, SQLite DBs) lives under `~/.local/share/qurom/` by default.
-- Document-mode runs read the file from the path you provide on the server.
+- Document-mode runs accept pasted markdown in the browser (saved as `input.md` in the run directory), a local file loaded into the compose area, or a path on the server.
 - Run artifacts include the request, per-round drafts, audits, rebuttal reviews, aggregated findings, reader profile/transcript, and final or failure outputs.
 - Run cancellation aborts the pipeline; OpenCode sessions opened during the run are explicitly aborted.
 - Failed runs attempt to recover the latest checkpointed state and write failure artifacts when possible.
