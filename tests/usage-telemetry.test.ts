@@ -18,6 +18,7 @@ import {
   renderSessionTelemetryTable,
   resolveRunTelemetry,
   resolveRunUsage,
+  sessionTotalsForNode,
   sessionTotalsForNodeRound,
   sessionsForNodeScope,
 } from "../src/view/telemetry-view.ts"
@@ -561,5 +562,54 @@ describe("telemetry view", () => {
     expect(html).toContain("Agent token usage")
     expect(html).toContain("source-auditor")
     expect(html).toContain("98.3k in")
+  })
+
+  test("matches csv-imported design sessions by session.node without node history", () => {
+    const sessionTelemetry = {
+      version: 1 as const,
+      sessions: [{
+        sessionId: "bc-designer",
+        role: "html-designer",
+        provider: "cursor",
+        node: "runDesignHtml",
+        round: 0,
+        calls: [{
+          completedAt: "2026-07-04T06:05:52.293Z",
+          usage: {
+            tokensIn: 5_371_098,
+            tokensOut: 59_973,
+            costUsd: 3.31,
+            costAvailable: true,
+            costEstimated: true,
+          },
+          usageSource: "csv-import" as const,
+        }],
+      }, {
+        sessionId: "bc-enhancer",
+        role: "interactive-enhancer",
+        provider: "cursor",
+        node: "interactiveEnhance",
+        round: 0,
+        calls: [{
+          completedAt: "2026-07-04T06:34:37.685Z",
+          usage: {
+            tokensIn: 2_628_133,
+            tokensOut: 63_570,
+            costUsd: 4.05,
+            costAvailable: true,
+            costEstimated: true,
+          },
+          usageSource: "csv-import" as const,
+        }],
+      }],
+    }
+
+    const designTotals = sessionTotalsForNode(sessionTelemetry, [], "runDesignHtml")
+    expect(designTotals.usageAvailable).toBe(true)
+    expect(designTotals.usage.tokensIn).toBe(5_371_098)
+
+    const enhanceTotals = sessionTotalsForNode(sessionTelemetry, [], "interactiveEnhance")
+    expect(enhanceTotals.usageAvailable).toBe(true)
+    expect(enhanceTotals.usage.tokensIn).toBe(2_628_133)
   })
 })

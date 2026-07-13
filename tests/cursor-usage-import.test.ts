@@ -115,6 +115,7 @@ describe("applyCursorUsageImport", () => {
       runId: "run-abc",
       role: "reader-interviewer",
       callIndex: 1,
+      requestedArtifact: "reader-profile-0.json",
     }))
     await writeFile(join(runDir, "cursor-reader-interviewer-call-1-attempt-1-run-abc-result.json"), JSON.stringify({
       durationMs: 2000,
@@ -139,5 +140,40 @@ describe("applyCursorUsageImport", () => {
     expect(sessionTelemetry.sessions[0]?.calls[0]?.usage?.costEstimated).toBe(true)
     expect(sessionTelemetry.sessions[0]?.calls[0]?.usage?.costAvailable).toBe(true)
     expect(sessionTelemetry.sessions[0]?.calls[0]?.usageSource).toBe("csv-import")
+    expect(sessionTelemetry.sessions[0]?.node).toBe("discoverReader")
+    expect(sessionTelemetry.sessions[0]?.round).toBe(0)
+  })
+
+  test("reimport updates node and round on existing sessions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "quorum-import-"))
+    const runDir = join(root, "design-run")
+    await mkdir(runDir, { recursive: true })
+
+    await writeFile(join(runDir, "cursor-html-designer-call-1-attempt-1-run-abc-metadata.json"), JSON.stringify({
+      agentId: "bc-designer",
+      runId: "run-abc",
+      role: "html-designer",
+      callIndex: 1,
+      requestedArtifact: "design-html-round-0.html",
+    }))
+    await writeFile(join(runDir, "cursor-html-designer-call-1-attempt-1-run-abc-result.json"), JSON.stringify({
+      durationMs: 1000,
+    }))
+
+    const csv = `Date,Cloud Agent ID,Automation ID,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens,Cost
+2026-07-04T09:10:00.000Z,bc-designer,,Included,auto,No,1000,2000,3000,400,6400,$1.23
+`
+    const rows = parseCursorUsageCsv(csv)
+
+    await applyCursorUsageImport({ runsDir: root, rows, sourceFile: "usage.csv" })
+    const first = await readSessionTelemetry(runDir)
+    expect(first.sessions[0]?.node).toBe("runDesignHtml")
+    expect(first.sessions[0]?.round).toBe(0)
+
+    await applyCursorUsageImport({ runsDir: root, rows, sourceFile: "usage-again.csv" })
+    const second = await readSessionTelemetry(runDir)
+    expect(second.sessions[0]?.node).toBe("runDesignHtml")
+    expect(second.sessions[0]?.round).toBe(0)
+    expect(second.sessions[0]?.calls[0]?.usage?.costUsd).toBeCloseTo(1.23)
   })
 })

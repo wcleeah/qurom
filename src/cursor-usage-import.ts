@@ -1,6 +1,7 @@
 import { readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
+import { inferCursorCallScope } from "./cursor-call-scope"
 import { estimateCursorCostUsd } from "./cursor-pricing"
 import {
   applySessionTelemetryEvent,
@@ -29,6 +30,8 @@ export type CursorUsageMatch = {
   agentId: string
   cursorRunId: string
   role: string
+  node?: string
+  round?: number
   callIndex: number
   durationMs: number
   csvClosedAt: string
@@ -157,6 +160,7 @@ type CursorMetadataCall = {
   agentId: string
   cursorRunId: string
   role: string
+  artifact?: string
   callIndex: number
   durationMs: number
 }
@@ -179,6 +183,8 @@ async function listCursorMetadataCalls(runsDir: string): Promise<CursorMetadataC
           runId: string
           role: string
           callIndex?: number
+          requestedArtifact?: string
+          outputFile?: string
         }
         const result = JSON.parse(await readFile(resultPath, "utf8")) as { durationMs?: number }
         const callMatch = file.match(/-call-(\d+)-/)
@@ -188,6 +194,7 @@ async function listCursorMetadataCalls(runsDir: string): Promise<CursorMetadataC
           agentId: metadata.agentId,
           cursorRunId: metadata.runId,
           role: metadata.role,
+          artifact: metadata.requestedArtifact ?? metadata.outputFile,
           callIndex: metadata.callIndex ?? (callMatch ? Number.parseInt(callMatch[1]!, 10) : 0),
           durationMs: result.durationMs ?? 0,
         })
@@ -285,12 +292,15 @@ export function matchCursorUsageRows(
       const call = agentCalls[i]!
       const row = csvRows[i]!
       const usage = usageFromCsvRow(row)
+      const scope = inferCursorCallScope({ role: call.role, artifact: call.artifact })
       matches.push({
         runDir: call.runDir,
         runName: call.runName,
         agentId: call.agentId,
         cursorRunId: call.cursorRunId,
         role: call.role,
+        node: scope.node,
+        round: scope.round,
         callIndex: call.callIndex,
         durationMs: call.durationMs,
         csvClosedAt: row.closedAt,
@@ -319,6 +329,8 @@ function mergeImportIntoSessionTelemetry(
       role: match.role,
       provider: "cursor",
       phase: "completed",
+      node: match.node,
+      round: match.round,
       cursorRunId: match.cursorRunId,
       callIndex: match.callIndex,
       resolvedModel: match.model,

@@ -106,10 +106,24 @@ export function nodeHistoryEntriesForNodeScope(
   return entries.filter((entry) => entry.round === round)
 }
 
+function sessionMatchesDraftScope(
+  session: SessionRecord,
+  entries: NodeHistoryEntry[],
+): boolean {
+  if (session.node !== "draftFullDraft" && session.node !== "reviseDraft") return false
+
+  const nodeEntries = entries.filter((entry) => entry.node === session.node)
+  if (nodeEntries.length === 0) return true
+  if (session.round === undefined) return true
+  return nodeEntries.some((entry) => entry.round === session.round)
+}
+
 function sessionMatchesNodeScopeEntries(
   session: SessionRecord,
   entries: NodeHistoryEntry[],
 ): boolean {
+  if (sessionMatchesDraftScope(session, entries)) return true
+
   for (const call of session.calls) {
     if (!call.usage) continue
     for (const entry of entries) {
@@ -214,7 +228,8 @@ export function sessionTotalsForNode(
     for (const call of session.calls) {
       if (!call.usage) continue
       if (nodeId === "draftFullDraft") {
-        const inScope = entries.some((entry) => callMatchesNodeEntry(call, entry))
+        const inScope = sessionMatchesDraftScope(session, entries)
+          || entries.some((entry) => callMatchesNodeEntry(call, entry))
         if (!inScope) continue
       }
       usageAvailable = true
@@ -439,7 +454,10 @@ export function sessionsForNodeScope(
     return sessionTelemetry.sessions
       .map((session) => {
         const calls = session.calls.filter((call) =>
-          call.usage && scopeEntries.some((entry) => callMatchesNodeEntry(call, entry)),
+          call.usage && (
+            sessionMatchesDraftScope(session, scopeEntries)
+            || scopeEntries.some((entry) => callMatchesNodeEntry(call, entry))
+          ),
         )
         if (calls.length === 0) return null
         return { ...session, calls }
