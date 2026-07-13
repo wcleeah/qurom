@@ -128,6 +128,8 @@ mock.module("@cursor/sdk", () => {
             options?.onDelta?.({ update: { type: "text-delta", text: "hello" } })
             return {
               id: `cursor-run-${sendCalls.length}`,
+              agentId: "bc-cursor-agent-1",
+              status: "running" as const,
               supports(op: string) {
                 return op === "cancel"
               },
@@ -148,6 +150,18 @@ mock.module("@cursor/sdk", () => {
           },
         }
       }),
+      getRun: mock(async () => ({
+        id: "cursor-run-attached",
+        agentId: "bc-cursor-agent-1",
+        status: "running" as const,
+        async wait() {
+          const error = waitErrors.shift()
+          if (error) throw error
+          const result = waitResults.shift()
+          if (result) return result
+          return waitResult
+        },
+      })),
     },
   }
 })

@@ -15,6 +15,7 @@ import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
+import { awaitCursorRunCompletion } from "./cursor-run-wait"
 import type { RuntimeConfig } from "../config"
 import type { EventBus } from "../runner"
 import { estimateCursorCostUsd, resolveCursorPricingModelId } from "../cursor-pricing"
@@ -278,6 +279,23 @@ async function cancelCursorRun(run: CursorRunHandle | undefined) {
   } catch {
     // Best-effort: a failed cancel should not mask the original prompt error.
   }
+}
+
+async function completeCursorRun(input: {
+  run: CursorRunHandle
+  config: RuntimeConfig
+  handleId: string
+  debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
+}) {
+  const apiKey = cursorApiKey(input.config)
+  if (!apiKey) throw new Error("Cursor provider requires CURSOR_API_KEY")
+  return awaitCursorRunCompletion({
+    run: input.run,
+    apiKey,
+    agentId: input.run.agentId,
+    isCloudAgent: input.handleId.startsWith("bc-"),
+    debugLog: input.debugLog,
+  })
 }
 
 async function sendCursorRun(input: {
@@ -741,8 +759,13 @@ export const cursorProvider: AgentProvider = {
             prompt: input.prompt,
             onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
           })
-          const result = await run.wait()
-          const status = (result as { status?: string }).status
+          const { result } = await completeCursorRun({
+            run,
+            config: input.config,
+            handleId: input.handle.id,
+            debugLog: input.telemetry?.debugLog,
+          })
+          const status = result.status
           const text = extractRunText(result)
           if (status && status !== "finished" && status !== "completed") {
             throw new CursorRunStatusError(run.id, status, result)
@@ -750,7 +773,7 @@ export const cursorProvider: AgentProvider = {
           const usage = cursorUsageTotalsFromRun(run, result, roleRuntime?.model)
           emitCursorRunUsage(input.bus, input.handle.id, run, result, roleRuntime?.model)
           const resolvedModel = cursorResolvedModel(result, roleRuntime?.model)
-          const durationMs = (result as { durationMs?: number }).durationMs
+          const durationMs = result.durationMs
           emitCursorSessionTelemetry({
             bus: input.bus,
             role: input.role,
@@ -846,8 +869,13 @@ export const cursorProvider: AgentProvider = {
               prompt,
               onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
             })
-            const result = await run.wait()
-            const status = (result as { status?: string }).status
+            const { result } = await completeCursorRun({
+              run,
+              config: input.config,
+              handleId: input.handle.id,
+              debugLog: input.telemetry?.debugLog,
+            })
+            const status = result.status
             const text = extractRunText(result)
             let artifacts: Awaited<ReturnType<CursorAgentHandle["listArtifacts"]>> = []
             let artifactsPayload: unknown = artifacts
@@ -866,7 +894,7 @@ export const cursorProvider: AgentProvider = {
               }
             }
             const resolvedModel = cursorResolvedModel(result, roleRuntime?.model)
-            const durationMs = (result as { durationMs?: number }).durationMs
+            const durationMs = result.durationMs
             const completedAt = new Date().toISOString()
             const debugPaths = await saveCursorDebugFiles({
               outputFile,
