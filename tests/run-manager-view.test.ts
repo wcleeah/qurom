@@ -12,7 +12,7 @@ describe("createNoOpBridge", () => {
 })
 
 describe("resolveRunResumeActions", () => {
-  test("offers research resume when failed and idle", () => {
+  test("offers resume when research failed and idle", () => {
     const actions = resolveRunResumeActions({
       isRunning: false,
       hasFinalMd: false,
@@ -20,12 +20,11 @@ describe("resolveRunResumeActions", () => {
       hasInputMd: false,
       designStatus: null,
     })
-    expect(actions.showResumeResearch).toBe(true)
-    expect(actions.showResumeDesign).toBe(false)
+    expect(actions.showResume).toBe(true)
     expect(actions.showRestartFromSource).toBe(false)
   })
 
-  test("offers design resume when research approved without final html", () => {
+  test("offers resume when research approved without final html", () => {
     const actions = resolveRunResumeActions({
       isRunning: false,
       hasFinalMd: true,
@@ -33,8 +32,7 @@ describe("resolveRunResumeActions", () => {
       hasInputMd: true,
       designStatus: "failed",
     })
-    expect(actions.showResumeResearch).toBe(false)
-    expect(actions.showResumeDesign).toBe(true)
+    expect(actions.showResume).toBe(true)
     expect(actions.showRestartFromSource).toBe(true)
   })
 
@@ -46,27 +44,35 @@ describe("resolveRunResumeActions", () => {
       hasInputMd: true,
       designStatus: null,
     })
-    expect(actions.showResumeResearch).toBe(false)
-    expect(actions.showResumeDesign).toBe(false)
+    expect(actions.showResume).toBe(false)
     expect(actions.showRestartFromSource).toBe(false)
+  })
+
+  test("hides resume when design is complete", () => {
+    const actions = resolveRunResumeActions({
+      isRunning: false,
+      hasFinalMd: true,
+      hasFinalHtml: true,
+      hasInputMd: true,
+      designStatus: "approved",
+    })
+    expect(actions.showResume).toBe(false)
   })
 })
 
 describe("renderRunActionStrip", () => {
-  test("renders resume research button", () => {
+  test("renders resume button", () => {
     const html = renderRunActionStrip("my-run-abc", {
-      showResumeResearch: true,
-      showResumeDesign: false,
+      showResume: true,
       showRestartFromSource: false,
     })
     expect(html).toContain("/api/runs/my-run-abc/resume")
-    expect(html).toContain("Resume research")
+    expect(html).toContain("Resume run")
   })
 
   test("renders restart-from-source button", () => {
     const html = renderRunActionStrip("my-run-abc", {
-      showResumeResearch: false,
-      showResumeDesign: false,
+      showResume: false,
       showRestartFromSource: true,
     })
     expect(html).toContain("/api/runs/my-run-abc/restart-from-source")
@@ -101,6 +107,14 @@ describe("renderNewRunForm", () => {
     expect(html).toContain('name="documentText"')
     expect(html).toContain("document-file-input")
     expect(html).toContain("Advanced: server path")
+    expect(html).toContain("data-new-run-submit-status")
+    expect(html).toContain("Starting run…")
+  })
+
+  test("does not render a separate design tab", () => {
+    const html = renderNewRunForm({ runActive: false })
+    expect(html).not.toContain('data-new-run-tab="design"')
+    expect(html).not.toContain("data-design-form")
   })
 })
 

@@ -120,22 +120,6 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
     }
   }
 
-  const designMatch = path.match(/^\/api\/runs\/(.+?)\/design$/)
-  if (designMatch && req.method === "POST") {
-    try {
-      const runId = decodeURIComponent(designMatch[1])
-      const result = await getRunManager().startDesign(runId)
-      return redirectOrJson(
-        req,
-        url,
-        `/runs/${encodeURIComponent(result.runId)}`,
-        { ok: true, runId: result.runId },
-      )
-    } catch (error) {
-      return errorResponse(error, req, url)
-    }
-  }
-
   const cancelMatch = path.match(/^\/api\/runs\/(.+?)\/cancel$/)
   if (cancelMatch && req.method === "POST") {
     try {

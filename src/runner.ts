@@ -4,7 +4,7 @@ import { createAgentRuntime } from "./agent-runtime/runtime"
 import { createLiveStatusWriter, type NodeHistoryEntry } from "./live-status"
 import { createDebugLog, type DebugLog } from "./debug-log"
 import { abortSession } from "./opencode"
-import { stat } from "node:fs/promises"
+import { stat, unlink } from "node:fs/promises"
 import { removeEmptyRunDir, resolveRunDir, writeFailedArtifacts } from "./output"
 import { createTelemetry, type TelemetryRun, type TraceObservation } from "./telemetry"
 import { Command, GraphRecursionError } from "@langchain/langgraph"
@@ -15,7 +15,7 @@ import { researchStateSchema, type GraphInput, type InputRequest, type ResearchS
 import { hasProviderWithEventBridge, providersForRoles } from "./providers/registry"
 import type { validateProviderPrerequisites } from "./providers/registry"
 import type { PromptBundle } from "./prompt-assets"
-import { answeredQuestionsFromTranscript } from "./reader-transcript"
+import { answeredQuestionsFromTranscript, readerInterviewStateFromRunDir, readerInterviewTurnFromTranscript, resolveReaderInterviewQuestions } from "./reader-transcript"
 import { resolveRunForResume } from "./run-resume"
 import { join } from "node:path"
 import { createSessionTelemetryWriter } from "./session-telemetry"
@@ -237,8 +237,8 @@ function permissionKey(input: { sessionID: string; messageID?: string; callID?: 
  * `Command({ resume: replyText })`. Loops until the graph completes.
  *
  * This is the repo's first human-in-the-loop: it extends the existing
- * checkpoint-resume pattern (used by design-resume at the bottom of this file)
- * with a resume value and a file-mediated reply handshake with the view-server.
+ * checkpoint-resume pattern with a resume value and a file-mediated reply
+ * handshake with the view-server.
  */
 async function runGraphWithInterviewResume<GraphT extends {
   invoke: (input: unknown, config: unknown) => Promise<Record<string, unknown>>
@@ -293,13 +293,27 @@ async function runGraphWithInterviewResume<GraphT extends {
     const pendingQuestions = Array.isArray(snapshot?.values?.pendingNewReaderQuestions)
       ? (snapshot!.values.pendingNewReaderQuestions as string[])
       : undefined
-    const newQuestions = pendingQuestions && pendingQuestions.length > 0
-      ? pendingQuestions
-      : Array.isArray(interruptValue) ? (interruptValue as string[]) : [String(interruptValue)]
-    const transcript = Array.isArray(snapshot?.values?.interviewTranscript)
+    let transcript = Array.isArray(snapshot?.values?.interviewTranscript)
       ? (snapshot!.values.interviewTranscript as { role: string; text: string }[])
       : []
-    const turn = Math.ceil(transcript.length / 2)
+    let newQuestions = resolveReaderInterviewQuestions({
+      interviewTranscript: transcript,
+      pendingNewReaderQuestions: pendingQuestions,
+      interruptValue,
+    })
+    let turn = readerInterviewTurnFromTranscript(transcript)
+    let partialProfile = snapshot?.values?.readerProfile
+
+    const runDir = opts.runDir()
+    if (runDir) {
+      const diskState = await readerInterviewStateFromRunDir(runDir)
+      if (diskState && diskState.turn >= turn) {
+        turn = diskState.turn
+        newQuestions = diskState.newQuestions
+        if (diskState.transcript.length >= transcript.length) transcript = diskState.transcript
+        if (diskState.partialProfile) partialProfile = diskState.partialProfile
+      }
+    }
 
     const answeredQuestions = answeredQuestionsFromTranscript(
       transcript.flatMap((entry) =>
@@ -310,7 +324,6 @@ async function runGraphWithInterviewResume<GraphT extends {
     )
 
     opts.debugLog?.write("reader.interview_suspend", { turn, answeredQuestions, newQuestions, attempt })
-    const partialProfile = snapshot?.values?.readerProfile
     opts.setAwaitingReaderReply({
       turn,
       answeredQuestions,
@@ -321,23 +334,33 @@ async function runGraphWithInterviewResume<GraphT extends {
         : {}),
     })
 
+    await discardStaleReaderReply(opts.runDir)
+
     // Wait for the view-server to write reader-reply.json (the user submitted
     // the chat form). Poll the run dir; honor the abort signal.
     const replyText = await waitForReaderReply(opts.runDir, signal, turn)
     opts.setAwaitingReaderReply(undefined)
     opts.debugLog?.write("reader.interview_resume", { turn, replyLen: replyText.length })
 
-    // Resume the graph from its checkpoint with the reply as the resume value.
-    // The checkpoint_id in the snapshot config pins the resume to the suspend point.
-    const checkpointId = snapshot?.config?.configurable?.checkpoint_id as string | undefined
-    const resumeConfig: { configurable: Record<string, unknown>; recursionLimit: number; signal: AbortSignal } = {
-      configurable: checkpointId ? { ...configurable, checkpoint_id: checkpointId } : configurable,
+    // Resume with Command({ resume }) only — do not pin checkpoint_id from the
+    // interrupt snapshot or LangGraph re-enters the same interrupt without applying the reply.
+    input = new Command({ resume: replyText })
+    currentConfig = {
+      configurable: { ...configurable },
       recursionLimit,
       signal,
     }
-    input = new Command({ resume: replyText })
-    currentConfig = resumeConfig
     // Re-enter the loop; the next invoke continues from the interrupt.
+  }
+}
+
+async function discardStaleReaderReply(runDir: () => string | undefined) {
+  const dir = runDir()
+  if (!dir) return
+  try {
+    await unlink(join(dir, "reader-reply.json"))
+  } catch {
+    // No stale reply file — expected on first suspend.
   }
 }
 
@@ -599,28 +622,6 @@ async function resolveGraphResumeConfig(
   const checkpointId = state?.config?.configurable?.checkpoint_id
   if (typeof checkpointId !== "string") throw new Error(`No checkpoint_id in state for thread ${requestId}`)
   return { configurable: { thread_id: requestId, checkpoint_id: checkpointId } }
-}
-
-function isDesignRelatedArtifact(filename: string) {
-  return filename.startsWith("design-")
-    || filename === "final.html"
-    || filename.startsWith("final.html.")
-    || /^cursor-(html-designer|interactive-enhancer)-/.test(filename)
-}
-
-async function archiveDesignArtifacts(runDir: string) {
-  const { mkdir, readdir, rename } = await import("node:fs/promises")
-  const { join } = await import("node:path")
-  const entries = await readdir(runDir, { withFileTypes: true })
-  const files = entries.filter((entry) => entry.isFile() && isDesignRelatedArtifact(entry.name))
-  if (files.length === 0) return undefined
-
-  const archiveDir = join(runDir, "design-archive", new Date().toISOString().replace(/[:.]/g, "-"))
-  await mkdir(archiveDir, { recursive: true })
-  for (const file of files) {
-    await rename(join(runDir, file.name), join(archiveDir, file.name))
-  }
-  return { archiveDir, files: files.map((file) => file.name) }
 }
 
 async function readNodeHistoryFromDisk(runDir: string): Promise<NodeHistoryEntry[]> {
@@ -938,6 +939,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   } catch (error) {
     if (isUserCancellation(signal, bridgeStreamError)) {
       debugLogRef.current?.write("pipeline.cancelled", { requestId, outputPath: runDir })
+      liveStatusWriter?.setAwaitingReaderReply(undefined)
       bus.emit({
         kind: "lifecycle",
         phase: "complete",
@@ -1122,142 +1124,5 @@ export function describeRunnerEvent(event: RunnerEvent): string {
       return `design.phase:${event.phase}:${event.round}`
     default:
       return assertNever(event)
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Design-only pipeline (resumed from checkpoint)
-// ---------------------------------------------------------------------------
-
-export async function runDesignPipeline(args: {
-  config: RuntimeConfig
-  promptBundle: RuntimePromptBundle
-  runId: string
-  bus: EventBus
-  signal?: AbortSignal
-  graphFactory?: GraphFactory
-  bridgeFactory?: BridgeFactory
-  telemetryFactory?: (
-    config: RuntimeConfig,
-    input: { requestId: string; inputMode: "topic" | "document"; topic?: string; documentPath?: string },
-  ) => Promise<TelemetryRun>
-}) {
-  const { config, promptBundle, runId, bus, signal } = args
-
-  const resolvedRun = await resolveRunForResume(runId, config.env.QUORUM_RUNS_DIR)
-  const runDir = resolvedRun.runDir
-  const requestId = resolvedRun.requestId
-
-  const graphFactory = args.graphFactory ?? createGraph
-  const bridgeFactory = args.bridgeFactory ?? createOpencodeEventBridge
-  const telemetryFactory = args.telemetryFactory ?? createTelemetry
-  const telemetry = await telemetryFactory(config, { requestId, inputMode: "topic" })
-  const actualAgentVariants = new Map<string, string>()
-  const trackAgentMetadata = (input: { agent: string; sessionID: string; model?: string; variant?: string }) => {
-    if (input.variant) actualAgentVariants.set(input.agent, input.variant)
-    bus.emit({ kind: "agent.metadata", ...input })
-    debugLog.write("agent.metadata", input)
-    bus.emit({
-      kind: "session.telemetry",
-      sessionID: input.sessionID,
-      provider: "opencode",
-      phase: "completed",
-      providerAgent: input.agent,
-      resolvedModel: input.model,
-      variant: input.variant,
-      completedAt: Date.now(),
-    })
-  }
-
-  const debugLog = createDebugLog(runDir)
-  const liveStatusWriter = createLiveStatusWriter(bus, () => runDir, {
-    maxRounds: config.quorumConfig.maxRounds,
-  }, debugLog)
-  const sessionTelemetryWriter = createSessionTelemetryWriter(() => runDir, bus)
-  const bridge = bridgeFactory(config, { bus, getRunDir: () => runDir })
-  const bridgeAbort = new AbortController()
-
-  if (signal) {
-    if (signal.aborted) bridgeAbort.abort(signal.reason)
-    else signal.addEventListener("abort", () => bridgeAbort.abort(signal.reason), { once: true })
-  }
-
-  bus.emit({ kind: "lifecycle", phase: "starting", requestId, traceId: telemetry.traceId, outputDir: runDir })
-
-  try {
-    await bridge.start()
-    bus.emit({ kind: "lifecycle", phase: "running", requestId, traceId: telemetry.traceId, outputDir: runDir })
-
-    const graph = graphFactory(config, promptBundle, {
-      observer: {
-        debugLog,
-        onNodeStart(node, state) {
-          bus.emit({ kind: "graph.node", node, phase: "start", state: structuredClone(state) })
-        },
-        onNodeEnd(node, state) {
-          bus.emit({ kind: "graph.node", node, phase: "end", state: structuredClone(state) })
-          if (node === "prepareOutputPath" && !debugLog) {
-            // debugLog already created above
-          }
-        },
-        onSessionCreated({ sessionID, role }) {
-          bus.emit({ kind: "session.created", sessionID, role })
-        },
-        onDesignPhase(phase, round) {
-          bus.emit({ kind: "design.phase", phase, round })
-        },
-      },
-      telemetry: {
-        run: telemetry,
-        trackAgentMetadata,
-      },
-    })
-
-    const resumeConfig = await resolveGraphResumeConfig(
-      graph as unknown as Parameters<typeof resolveGraphResumeConfig>[0],
-      requestId,
-      { runId, node: "runDesignHtml" },
-    )
-    const checkpointId = resumeConfig.configurable.checkpoint_id
-    const archived = await archiveDesignArtifacts(runDir)
-
-    debugLog.write("pipeline.design_resume", {
-      requestId,
-      checkpointId,
-      mode: "rerun_from_html_designer",
-      archiveDir: archived?.archiveDir,
-      archivedFiles: archived?.files,
-    })
-
-    const result = await graph.invoke(null, {
-      configurable: resumeConfig.configurable,
-      recursionLimit: config.quorumConfig.recursionLimit,
-      signal: bridgeAbort.signal,
-    })
-
-    bus.emit({ kind: "result", runResult: result })
-    bus.emit({
-      kind: "lifecycle",
-      phase: "complete",
-      requestId,
-      traceId: telemetry.traceId,
-      outputDir: (result as any).outputPath,
-    })
-
-    return result
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    debugLog.write("pipeline.error", { error: message, stack: error instanceof Error ? error.stack : undefined })
-    bus.emit({ kind: "lifecycle", phase: "error", requestId, traceId: telemetry.traceId, error })
-    throw error
-  } finally {
-    try { liveStatusWriter.dispose() } catch {}
-    try {
-      await sessionTelemetryWriter.flush()
-      sessionTelemetryWriter.dispose()
-    } catch {}
-    try { await debugLog.close() } catch {}
-    try { await bridge.stop() } catch {}
-    try { await telemetry.shutdown() } catch {}
   }
 }

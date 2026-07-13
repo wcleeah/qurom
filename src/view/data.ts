@@ -2,17 +2,52 @@ import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { readSessionTelemetry, SESSION_TELEMETRY_FILENAME, type SessionTelemetryFile } from "../session-telemetry"
 import { readCursorUsageImport, CURSOR_USAGE_IMPORT_FILENAME, type CursorUsageImportFile } from "../cursor-usage-import"
+import { reconcileAwaitingReaderReplyWithDisk, readerInterviewStateFromRunDir } from "../reader-transcript"
 import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
+import { isRunManagedActive } from "../run-manager"
 import { listStarredRunNames } from "./starred-store"
 import { isSqliteFile } from "./utils"
 import type { FileClass, LiveStatus, NodeHistoryEntry, RequestJson, RunMeta, RunStats, RunStatus } from "./types"
 
+function sanitizeLiveStatus(status: LiveStatus): LiveStatus {
+  if (status.phase === "complete" || status.phase === "error") {
+    return { ...status, awaitingReaderReply: undefined }
+  }
+  return status
+}
+
+async function enrichInterviewFromDisk(runName: string, status: LiveStatus): Promise<LiveStatus> {
+  const awaiting = status.awaitingReaderReply
+  if (!awaiting || status.phase !== "running") return status
+  try {
+    const disk = await readerInterviewStateFromRunDir(safeRunPath(runName))
+    if (!disk) return status
+    const reconciled = reconcileAwaitingReaderReplyWithDisk(awaiting, disk)
+    if (reconciled === awaiting) return status
+    return { ...status, awaitingReaderReply: reconciled }
+  } catch {
+    return status
+  }
+}
+
 export async function readLiveStatus(runName: string): Promise<LiveStatus | null> {
+  const runActiveInManager = isRunManagedActive(runName)
+
+  if (runActiveInManager) {
+    try {
+      const status = sanitizeLiveStatus(await Bun.file(safeFilePath(runName, "live-status.json")).json() as LiveStatus)
+      return enrichInterviewFromDisk(runName, status)
+    } catch {
+      return null
+    }
+  }
+
   try {
     const p = safeFilePath(runName, "live-status.json")
     const st = await stat(p)
     if (Date.now() - st.mtime.getTime() <= 30_000) {
-      return await Bun.file(p).json() as LiveStatus
+      const status = sanitizeLiveStatus(await Bun.file(p).json() as LiveStatus)
+      return enrichInterviewFromDisk(runName, status)
     }
   } catch {
     // fall through to run-status snapshot
@@ -20,7 +55,7 @@ export async function readLiveStatus(runName: string): Promise<LiveStatus | null
 
   try {
     const p = safeFilePath(runName, "run-status.json")
-    return await Bun.file(p).json() as LiveStatus
+    return sanitizeLiveStatus(await Bun.file(p).json() as LiveStatus)
   } catch {
     return null
   }

@@ -119,7 +119,8 @@ export function createLiveStatusWriter(
     const dir = resolveDir()
     if (!dir) return
     try {
-      const snapshot = { ...status, phase: status.phase, agents: {} }
+      const { awaitingReaderReply: _, ...rest } = status
+      const snapshot = { ...rest, phase: status.phase, agents: {} }
       await writeFile(join(dir, "run-status.json"), JSON.stringify(snapshot))
     } catch {
       // Silently ignore write failures
@@ -155,12 +156,14 @@ export function createLiveStatusWriter(
           if (!status.runStartedAt) status.runStartedAt = Date.now()
         } else if (event.phase === "complete") {
           status.phase = "complete"
+          status.awaitingReaderReply = undefined
           clearInterval(interval)
           void writeRunStatusSnapshot()
           void deleteStatus()
         } else if (event.phase === "error") {
           status.phase = "error"
           status.error = event.error instanceof Error ? event.error.message : String(event.error ?? "")
+          status.awaitingReaderReply = undefined
           clearInterval(interval)
           void writeRunStatusSnapshot()
           void deleteStatus()

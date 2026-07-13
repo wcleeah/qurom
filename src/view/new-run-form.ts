@@ -17,12 +17,8 @@ const TAB_COPY: Record<string, { hint: string; submit: string }> = {
     submit: "Start from document",
   },
   resume: {
-    hint: "Resume a prior run by directory name or request ID. Append #nodeName to retry from a checkpoint.",
-    submit: "Resume research",
-  },
-  design: {
-    hint: "Resume HTML generation for a research-complete run.",
-    submit: "Resume design",
+    hint: "Resume a prior run by directory name or request ID. Append #nodeName to retry from a checkpoint (research or design nodes).",
+    submit: "Resume run",
   },
 }
 
@@ -57,7 +53,6 @@ export function renderNewRunForm(options: NewRunFormOptions): string {
         ${tabButton("topic", "Topic", true)}
         ${tabButton("document", "Document", false)}
         ${tabButton("resume", "Resume", false)}
-        ${tabButton("design", "Design", false)}
       </div>
     </div>
     ${activeNote}
@@ -97,6 +92,7 @@ export function renderNewRunForm(options: NewRunFormOptions): string {
         </div>
         <input type="hidden" name="inputMode" value="document" />
         <div class="form-actions new-run-actions"><button type="submit" class="btn btn-primary"${disabled}>${TAB_COPY.document.submit}</button></div>
+        <p class="new-run-submit-status muted-note" data-new-run-submit-status hidden aria-live="polite">Starting run…</p>
       </form>
       <form class="new-run-panel config-form" data-new-run-panel="resume" method="POST" action="/api/runs/resume-placeholder" data-resume-form role="tabpanel">
         ${panelHint("resume")}
@@ -109,13 +105,7 @@ export function renderNewRunForm(options: NewRunFormOptions): string {
           </label>
         </div>
         <div class="form-actions new-run-actions"><button type="submit" class="btn btn-primary"${disabled}>${TAB_COPY.resume.submit}</button></div>
-      </form>
-      <form class="new-run-panel config-form" data-new-run-panel="design" method="POST" action="/api/runs/design-placeholder" data-design-form role="tabpanel">
-        ${panelHint("design")}
-        <label class="form-field"><span>Research run ID</span>
-          <input class="form-input" name="runId" placeholder="my-topic-abc123" required${disabled} />
-        </label>
-        <div class="form-actions new-run-actions"><button type="submit" class="btn btn-primary"${disabled}>${TAB_COPY.design.submit}</button></div>
+        <p class="new-run-submit-status muted-note" data-new-run-submit-status hidden aria-live="polite">Resuming run…</p>
       </form>
     </div>
   </div>
@@ -154,6 +144,25 @@ export const NEW_RUN_FORM_SCRIPT = /* html */ `
       if (name) showPanel(name)
     })
   })
+
+  function setFormSubmitting(form, submitting, message, busyLabel) {
+    const status = form.querySelector("[data-new-run-submit-status]")
+    const submit = form.querySelector('button[type="submit"]')
+    const pendingLabel = busyLabel || "Starting…"
+    if (submit instanceof HTMLButtonElement) {
+      if (!submit.dataset.defaultLabel) submit.dataset.defaultLabel = submit.textContent || ""
+      submit.disabled = submitting
+      submit.textContent = submitting ? pendingLabel : submit.dataset.defaultLabel
+      submit.classList.toggle("is-loading", submitting)
+      submit.setAttribute("aria-busy", submitting ? "true" : "false")
+    }
+    form.classList.toggle("new-run-form-busy", submitting)
+    form.setAttribute("aria-busy", submitting ? "true" : "false")
+    if (status instanceof HTMLElement) {
+      status.hidden = !submitting
+      if (message) status.textContent = message
+    }
+  }
 
   function firstMeaningfulLine(text) {
     const lines = text.split(/\\r?\\n/)
@@ -287,19 +296,28 @@ export const NEW_RUN_FORM_SCRIPT = /* html */ `
       const body = { inputMode: "document" }
       if (text) body.documentText = text
       if (path) body.documentPath = path
+      setFormSubmitting(
+        documentForm,
+        true,
+        "Starting run… providers may take a moment.",
+        "Starting…",
+      )
       fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(body),
-      }).then((resp) => resp.json().then((data) => {
-        if (data && data.runPath) {
+      }).then(async (resp) => {
+        const data = await resp.json().catch(() => null)
+        if (resp.ok && data && data.runPath) {
           localStorage.removeItem(DRAFT_KEY)
           window.location.href = "/runs/" + encodeURIComponent(data.runPath)
           return
         }
+        setFormSubmitting(documentForm, false)
         const message = data && data.error ? data.error : "Failed to start document run"
         window.location.href = "/?error=" + encodeURIComponent(message)
-      })).catch(() => {
+      }).catch(() => {
+        setFormSubmitting(documentForm, false)
         window.location.href = "/?error=" + encodeURIComponent("Failed to start document run")
       })
     })
@@ -316,35 +334,25 @@ export const NEW_RUN_FORM_SCRIPT = /* html */ `
       resumeForm.action = "/api/runs/" + encoded + "/resume"
       const body = new URLSearchParams()
       if (typeof node === "string" && node.trim()) body.set("node", node.trim())
+      setFormSubmitting(resumeForm, true, "Resuming run…", "Resuming…")
       fetch(resumeForm.action, { method: "POST", body }).then((resp) => {
-        if (resp.redirected) window.location.href = resp.url
-        else if (resp.status === 303) {
-          const loc = resp.headers.get("Location")
-          if (loc) window.location.href = loc
-        } else {
-          window.location.reload()
+        if (resp.redirected) {
+          window.location.href = resp.url
+          return
         }
-      }).catch(() => window.location.reload())
-    })
-  }
-
-  const designForm = document.querySelector("[data-design-form]")
-  if (designForm instanceof HTMLFormElement) {
-    designForm.addEventListener("submit", (event) => {
-      event.preventDefault()
-      const runId = new FormData(designForm).get("runId")
-      if (typeof runId !== "string" || !runId.trim()) return
-      const encoded = encodeURIComponent(runId.trim())
-      designForm.action = "/api/runs/" + encoded + "/design"
-      fetch(designForm.action, { method: "POST" }).then((resp) => {
-        if (resp.redirected) window.location.href = resp.url
-        else if (resp.status === 303) {
+        if (resp.status === 303) {
           const loc = resp.headers.get("Location")
-          if (loc) window.location.href = loc
-        } else {
-          window.location.reload()
+          if (loc) {
+            window.location.href = loc
+            return
+          }
         }
-      }).catch(() => window.location.reload())
+        setFormSubmitting(resumeForm, false)
+        window.location.reload()
+      }).catch(() => {
+        setFormSubmitting(resumeForm, false)
+        window.location.reload()
+      })
     })
   }
 })()

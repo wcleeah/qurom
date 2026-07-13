@@ -18,10 +18,9 @@ import type { PromptBundle } from "./prompt-assets"
 import { buildResearchToolHint } from "./research-tools"
 import { summarizeMarkdown } from "./summarizer"
 import { tagOutputArtifact } from "./tagger"
-import { designHtml } from "./design-quorum"
 import { formatReaderProfileForPrompt, readerContextBlock as buildReaderContextBlock } from "./reader-profile"
-import { AUDITOR_ROLES, DRAFTER_ROLE } from "./role-registry"
-import { formatReaderTranscriptForPrompt } from "./reader-transcript"
+import { AUDITOR_ROLES, DESIGNER_ROLE, DRAFTER_ROLE } from "./role-registry"
+import { formatReaderTranscriptForPrompt, resolveReaderInterviewQuestions } from "./reader-transcript"
 import {
   aggregatedFindingSchema,
   aggregatedFindingsSchema,
@@ -794,12 +793,10 @@ async function discoverReaderResume(
   state: ResearchState,
 ): Promise<ResearchState> {
   const transcript = [...(state.interviewTranscript ?? [])]
-  const lastEntry = transcript[transcript.length - 1]
-  const questions = state.pendingNewReaderQuestions && state.pendingNewReaderQuestions.length > 0
-    ? state.pendingNewReaderQuestions
-    : lastEntry && lastEntry.role === "interviewer"
-      ? lastEntry.text.split("\n")
-      : []
+  const questions = resolveReaderInterviewQuestions({
+    interviewTranscript: transcript,
+    pendingNewReaderQuestions: state.pendingNewReaderQuestions,
+  })
 
   // interrupt() suspends the graph on the first pass; on resume it returns
   // the value passed to Command({ resume }). The node then appends the reply
@@ -1838,8 +1835,18 @@ async function finalizeFailedRun(_config: RuntimeConfig, state: ResearchState) {
 }
 
 // ---------------------------------------------------------------------------
-// Design quorum nodes (flattened into the main graph)
+// Design nodes (part of the main graph when designQuorum.enabled)
 // ---------------------------------------------------------------------------
+
+async function ensureDesignTextArtifact(path: string, text: string | undefined, label: string) {
+  const file = Bun.file(path)
+  if (await file.exists()) return file.text()
+  if (text && text.trim() && text.trim() !== "OK") {
+    await Bun.write(path, text)
+    return text
+  }
+  throw new Error(`Missing ${label} artifact at ${path}; provider returned no inline content to persist`)
+}
 
 async function designHtmlNode(
   config: RuntimeConfig,
@@ -1870,11 +1877,35 @@ async function designHtmlNode(
   const htmlFile = `${state.outputPath}/design-html-round-${state.designRound ?? 0}.html`
 
   observer?.onDesignPhase?.("drafting", state.designRound ?? 0)
-  const html = await designHtml(config, promptBundle, draftPath, topic, htmlFile,
-    telemetry ? { run: telemetry.run, parentObservation: telemetry.currentNode, trackSessionObservation: telemetry.trackSessionObservation, trackAgentMetadata: telemetry.trackAgentMetadata } : undefined,
-    observer,
+  const handle = await createObservedHandle({
     runtime,
-  )
+    role: DESIGNER_ROLE,
+    title: "html-designer",
+    requestId: state.requestId,
+    observer,
+    displayRole: "html-designer",
+  })
+
+  const prompt = promptBundle.assets.designHtml.replace("{topic}", topic)
+  const response = await runtime.prompt({
+    role: DESIGNER_ROLE,
+    handle,
+    prompt,
+    outputFile: htmlFile,
+    inputFiles: [
+      { path: draftPath, mime: "text/plain", filename: "content.md" },
+    ],
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.designHtml",
+      agentName: DESIGNER_ROLE,
+      sessionId: handle.id,
+      input: { topic },
+    }),
+  })
+
+  const html = await ensureDesignTextArtifact(htmlFile, response.text, "design HTML")
 
   return researchStateSchema.parse({
     ...state,

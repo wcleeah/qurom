@@ -4,11 +4,9 @@ import { loadPromptBundle, type PromptBundle } from "./prompt-assets"
 import { ZodError } from "zod"
 import { getProviderLifecycle, type ProviderLifecycle, type ProviderLifecycleStatus } from "./providers/lifecycle"
 import { configuredAgentRoles, validateProviderPrerequisites } from "./providers/registry"
-import { DESIGN_QUORUM_ROLES } from "./role-registry"
 import {
   createBridgeForRoles,
   createEventBus,
-  runDesignPipeline,
   runResearchPipeline,
   type BridgeFactory,
   type RuntimePrerequisites,
@@ -16,18 +14,15 @@ import {
 import { buildRunDirName, ensureRunDir, writeRunJsonArtifact } from "./output"
 import type { InputRequest } from "./schema"
 
-export type RunKind = "research" | "design"
-
 export type ActiveRun = {
   runId: string
-  kind: RunKind
   abortController: AbortController
   promise: Promise<unknown>
   releaseProviders: () => Promise<void>
 }
 
 export type RunManagerStatus = {
-  active: { runId: string; kind: RunKind } | null
+  active: { runId: string } | null
   providers: Record<string, ProviderLifecycleStatus>
 }
 
@@ -35,7 +30,6 @@ export type RunManager = {
   status: () => RunManagerStatus
   startResearch: (request: InputRequest) => Promise<{ runId: string; runPath: string }>
   resumeResearch: (runId: string, node?: string) => Promise<{ runId: string }>
-  startDesign: (runId: string) => Promise<{ runId: string }>
   cancel: (runId?: string) => Promise<boolean>
   shutdown: () => Promise<void>
 }
@@ -44,10 +38,6 @@ export type RunManagerDeps = {
   getConfig: () => Promise<RuntimeConfig> | RuntimeConfig
   lifecycle?: ProviderLifecycle
   loadPromptBundleFn?: typeof loadPromptBundle
-}
-
-function designPipelineRoles(): string[] {
-  return [...DESIGN_QUORUM_ROLES, "json-fixer"]
 }
 
 function parseResumeRunId(raw: string): { runId: string; node?: string } {
@@ -107,7 +97,6 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
   }
 
   async function runPipeline(input: {
-    kind: RunKind
     runId: string
     roles: string[]
     execute: (args: {
@@ -161,7 +150,6 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
 
     active = {
       runId: input.runId,
-      kind: input.kind,
       abortController,
       promise: runPromise,
       releaseProviders,
@@ -173,7 +161,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
   return {
     status() {
       return {
-        active: active ? { runId: active.runId, kind: active.kind } : null,
+        active: active ? { runId: active.runId } : null,
         providers: {
           opencode: lifecycle.status("opencode"),
           cursor: lifecycle.status("cursor"),
@@ -212,7 +200,6 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
 
       const roles = configuredAgentRoles(cfg)
       await runPipeline({
-        kind: "research",
         runId,
         roles,
         execute: ({ bus, signal, bridgeFactory, prerequisites: prereqs, promptBundle: bundle, config: pipelineCfg }) =>
@@ -234,7 +221,6 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
       const parsed = parseResumeRunId(rawRunId)
       const roles = configuredAgentRoles(await config())
       return runPipeline({
-        kind: "research",
         runId: parsed.runId,
         roles,
         execute: ({ bus, signal, bridgeFactory, prerequisites: prereqs, promptBundle: bundle, config: cfg }) =>
@@ -243,25 +229,6 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
             prerequisites: prereqs,
             promptBundle: bundle,
             resume: { runId: parsed.runId, node: node ?? parsed.node },
-            bus,
-            signal,
-            bridgeFactory,
-          }),
-      })
-    },
-
-    async startDesign(runId) {
-      const trimmed = runId.trim()
-      const roles = designPipelineRoles()
-      return runPipeline({
-        kind: "design",
-        runId: trimmed,
-        roles,
-        execute: ({ bus, signal, bridgeFactory, promptBundle: bundle, config: cfg }) =>
-          runDesignPipeline({
-            config: cfg,
-            promptBundle: bundle,
-            runId: trimmed,
             bus,
             signal,
             bridgeFactory,
@@ -326,6 +293,13 @@ export function initRunManager(deps: RunManagerDeps): RunManager {
 
 export function tryGetRunManager(): RunManager | undefined {
   return defaultManager
+}
+
+/** True when the run manager is executing this run (by slug or request id). */
+export function isRunManagedActive(runRef: string): boolean {
+  const active = defaultManager?.status().active
+  if (!active) return false
+  return runRefsMatch(active.runId, runRef)
 }
 
 export function resetRunManagerForTests() {

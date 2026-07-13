@@ -90,7 +90,7 @@ export function renderNodeHistory(
 
 export function renderInterviewChatCard(runName: string, liveStatus: LiveStatus | null): string {
   const awaiting = liveStatus?.awaitingReaderReply
-  if (!awaiting) return ""
+  if (!awaiting || liveStatus?.phase !== "running") return ""
   const fullTranscript = awaiting.transcript ?? []
   const newQuestions = awaiting.newQuestions ?? []
   const answeredQuestions = awaiting.answeredQuestions ?? answeredQuestionsFromTranscript(

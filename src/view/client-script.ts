@@ -67,14 +67,26 @@ function buildRefreshScript(options: {
     if (dot) dot.classList.toggle("polling", !!polling)
   }
 
-  function sectionShouldSkipSwap(id, oldEl) {
+  function interviewSectionShouldSkipSwap(oldEl, newEl) {
+    if (!oldEl) return false
+    const newForm = newEl?.querySelector("form[data-interview-reply-form]")
+    const oldForm = oldEl.querySelector("form[data-interview-reply-form]")
+    if (oldForm && !newForm) return false
+    if (!newForm) return false
+    const oldTurn = oldEl.dataset.interviewTurn
+    const newTurn = newEl?.dataset?.interviewTurn
+    if (oldTurn !== newTurn) return false
+    const hasFocus = oldEl.contains(document.activeElement)
+    const hasContent = Array.from(oldEl.querySelectorAll("textarea, input")).some(
+      (el) => el.value && el.value.trim().length > 0,
+    )
+    return hasFocus || hasContent
+  }
+
+  function sectionShouldSkipSwap(id, oldEl, newEl) {
     if (!oldEl) return false
     if (id === "interview-chat-section") {
-      const hasFocus = oldEl.contains(document.activeElement)
-      const hasContent = Array.from(oldEl.querySelectorAll("textarea, input")).some(
-        (el) => el.value && el.value.trim().length > 0,
-      )
-      if (hasFocus || hasContent) return true
+      return interviewSectionShouldSkipSwap(oldEl, newEl)
     }
     if (id === "node-dashboard-section" && oldEl.querySelector("details[open]")) {
       return true
@@ -112,10 +124,10 @@ function buildRefreshScript(options: {
       for (const id of IDs) {
         const oldEl = document.getElementById(id)
         const newEl = doc.getElementById(id)
-        if (id === "interview-chat-section" && oldEl && sectionShouldSkipSwap(id, oldEl) && newEl) {
+        if (id === "interview-chat-section" && oldEl && sectionShouldSkipSwap(id, oldEl, newEl) && newEl) {
           continue
         }
-        if (sectionShouldSkipSwap(id, oldEl)) continue
+        if (sectionShouldSkipSwap(id, oldEl, newEl)) continue
         if (oldEl && newEl) {
           oldEl.innerHTML = newEl.innerHTML
           if (id === "round-strip-section" && typeof window.__quorumInitRoundTabs === "function") {

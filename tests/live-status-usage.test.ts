@@ -54,6 +54,35 @@ describe("live status without usage", () => {
     }
   })
 
+  test("does not persist awaitingReaderReply in run-status snapshot", async () => {
+    const bus = createEventBus()
+    const dir = await mkdtemp(join(tmpdir(), "qurom-run-status-interview-"))
+
+    const liveWriter = createLiveStatusWriter(bus, dir, { maxRounds: 3 })
+    try {
+      bus.emit({ kind: "lifecycle", phase: "running", requestId: "req-interview" })
+      liveWriter.setAwaitingReaderReply({
+        turn: 2,
+        answeredQuestions: [],
+        newQuestions: ["What do you know?"],
+        transcript: [{ role: "interviewer", text: "What do you know?" }],
+      })
+      await Bun.sleep(30)
+      bus.emit({ kind: "lifecycle", phase: "complete", requestId: "req-interview" })
+      await Bun.sleep(30)
+
+      const runStatus = JSON.parse(await readFile(join(dir, "run-status.json"), "utf8")) as {
+        phase: string
+        awaitingReaderReply?: unknown
+      }
+      expect(runStatus.phase).toBe("complete")
+      expect(runStatus.awaitingReaderReply).toBeUndefined()
+    } finally {
+      liveWriter.dispose()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   test("records cursor cumulative usage in session-telemetry only", async () => {
     const bus = createEventBus()
     const dir = await mkdtemp(join(tmpdir(), "qurom-live-status-"))

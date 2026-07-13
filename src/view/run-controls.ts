@@ -2,8 +2,7 @@ import { escapeHtml } from "./utils"
 import type { RunStatus } from "./types"
 
 export type RunResumeActions = {
-  showResumeResearch: boolean
-  showResumeDesign: boolean
+  showResume: boolean
   showRestartFromSource: boolean
 }
 
@@ -15,12 +14,15 @@ export function resolveRunResumeActions(input: {
   designStatus?: RunStatus | "running" | null
 }): RunResumeActions {
   if (input.isRunning) {
-    return { showResumeResearch: false, showResumeDesign: false, showRestartFromSource: false }
+    return { showResume: false, showRestartFromSource: false }
   }
 
+  const showResume =
+    !input.hasFinalMd
+    || (input.hasFinalMd && !input.hasFinalHtml && input.designStatus !== "approved")
+
   return {
-    showResumeResearch: !input.hasFinalMd,
-    showResumeDesign: input.hasFinalMd && !input.hasFinalHtml && input.designStatus !== "approved",
+    showResume,
     showRestartFromSource: input.hasInputMd,
   }
 }
@@ -31,15 +33,9 @@ export function renderRunCancelButton(runName: string): string {
 </form>`
 }
 
-function renderResumeResearchForm(runName: string, disabled: boolean): string {
+function renderResumeForm(runName: string, disabled: boolean): string {
   return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/resume">
-  <button type="submit" class="btn btn-primary"${disabled ? " disabled" : ""}>Resume research</button>
-</form>`
-}
-
-function renderResumeDesignForm(runName: string, disabled: boolean): string {
-  return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/design">
-  <button type="submit" class="btn btn-primary"${disabled ? " disabled" : ""}>Resume design</button>
+  <button type="submit" class="btn btn-primary"${disabled ? " disabled" : ""}>Resume run</button>
 </form>`
 }
 
@@ -61,7 +57,7 @@ export function renderRunActionStrip(
   actions: RunResumeActions,
   options?: { runActiveGlobally?: boolean },
 ): string {
-  if (!actions.showResumeResearch && !actions.showResumeDesign && !actions.showRestartFromSource) return ""
+  if (!actions.showResume && !actions.showRestartFromSource) return ""
 
   const disabled = options?.runActiveGlobally === true
   const busyNote = disabled
@@ -69,8 +65,7 @@ export function renderRunActionStrip(
     : ""
 
   const buttons = [
-    actions.showResumeResearch ? renderResumeResearchForm(runName, disabled) : "",
-    actions.showResumeDesign ? renderResumeDesignForm(runName, disabled) : "",
+    actions.showResume ? renderResumeForm(runName, disabled) : "",
     actions.showRestartFromSource ? renderRestartFromSourceForm(runName, disabled) : "",
   ].filter(Boolean).join("\n")
 

@@ -18,8 +18,8 @@ https://github.com/user-attachments/assets/488d9741-d4ad-454f-bb34-422627048370
 ## The Big Picture
 
 1. `bun run dev` starts the web dashboard (default `http://localhost:3000`).
-2. Start a research run from the index page (topic, pasted document, resume, or design).
-3. The run manager creates an event bus and starts `runResearchPipeline` or `runDesignPipeline`.
+2. Start a research run from the index page (topic, pasted document, or resume).
+3. The run manager creates an event bus and starts `runResearchPipeline`.
 4. Each role's provider is started lazily when that role is first needed (`opencode` or `cursor`).
 5. Live status is written to `live-status.json` and polled by the dashboard.
 6. Reader interview replies are submitted from the run page (`POST /runs/:name/reply`).
@@ -155,8 +155,7 @@ Start runs from the index page, or via HTTP API:
 
 - `POST /api/runs` — new research run (`inputMode`, `topic` or `documentText` / `documentPath`)
 - `POST /api/runs/:id/restart-from-source` — new document run from a prior run's `input.md`
-- `POST /api/runs/:id/resume` — resume research (`node` optional)
-- `POST /api/runs/:id/design` — resume design quorum
+- `POST /api/runs/:id/resume` — resume research or design from checkpoint (`node` optional)
 - `POST /api/runs/:id/cancel` — cancel active run
 - `GET /api/status` — active run + provider lifecycle status
 
@@ -164,7 +163,7 @@ Start runs from the index page, or via HTTP API:
 
 ### Index (`/`)
 
-- Start a topic or document run, resume research, or resume design
+- Start a topic or document run, or resume a prior run from checkpoint
 - One active pipeline run at a time
 - Live refresh for the active-run hero when a run is in progress
 - OpenCode agent bootstrap controls when local agents differ from defaults
@@ -206,10 +205,10 @@ Every recovery tier emits a standardized debug-log event. Grep `{dataDir}/runs/<
 
 When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The design phase is linear: `html-designer` drafts `design-html-round-0.html`, `interactive-enhancer` improves the representation layer, and `finalizeDesign` writes `final.html`.
 
-Resume design from the dashboard **Design** tab or:
+Resume design from the dashboard **Resume run** action or:
 
 ```bash
-curl -X POST http://localhost:3000/api/runs/my-topic-abc123/design
+curl -X POST http://localhost:3000/api/runs/my-topic-abc123/resume
 ```
 
 Output is written to `<run-directory>/final.html`.

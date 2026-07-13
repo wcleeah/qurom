@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test"
+import { Command } from "@langchain/langgraph"
 import { mkdir, mkdtemp, readdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -13,7 +14,6 @@ import {
   attachTelemetryListener,
   createEventBus,
   describeRunnerEvent,
-  runDesignPipeline,
   runResearchPipeline,
 } from "../src/runner.ts"
 import type { RuntimeConfig } from "../src/config.ts"
@@ -487,11 +487,10 @@ describe("runResearchPipeline", () => {
     })
   })
 
-  test("uses the interrupt checkpoint when resuming a reader interview", async () => {
+  test("resumes reader interview with Command resume without pinning interrupt checkpoint", async () => {
     const { config: configWithTempArtifacts, runsDir } = await makeConfigWithTempArtifacts()
     const runDir = join(runsDir, "interview-resume-req-1")
     await mkdir(runDir, { recursive: true })
-    await Bun.write(join(runDir, "reader-reply.json"), JSON.stringify({ reply: "I know checkpoints." }))
 
     const bus = createEventBus()
     const invokeInputs: unknown[] = []
@@ -540,23 +539,33 @@ describe("runResearchPipeline", () => {
       },
     })) as GraphFactory
 
-    await runResearchPipeline({
-      config: configWithTempArtifacts,
-      prerequisites,
-      promptBundle,
-      request: { inputMode: "topic", topic: "interview resume" },
-      bus,
-      bridgeFactory: () => ({ async start() {}, async stop() {} }),
-      telemetryFactory: async () => disabledTelemetry(),
-      graphFactory,
-    })
+    const writeReplyOnceSuspended = (async () => {
+      for (let i = 0; i < 80; i++) {
+        await Bun.sleep(25)
+        await Bun.write(join(runDir, "reader-reply.json"), JSON.stringify({ reply: "I know checkpoints." }))
+      }
+    })()
+
+    await Promise.all([
+      runResearchPipeline({
+        config: configWithTempArtifacts,
+        prerequisites,
+        promptBundle,
+        request: { inputMode: "topic", topic: "interview resume" },
+        bus,
+        bridgeFactory: () => ({ async start() {}, async stop() {} }),
+        telemetryFactory: async () => disabledTelemetry(),
+        graphFactory,
+      }),
+      writeReplyOnceSuspended,
+    ])
 
     expect(invokeInputs[0]).toMatchObject({ inputMode: "topic", topic: "interview resume" })
-    expect(invokeInputs[1]).toBeDefined()
-    expect(invokeInputs[1]).not.toBeNull()
+    expect(invokeInputs[1]).toBeInstanceOf(Command)
     expect(invokeConfigs[1]).toMatchObject({
-      configurable: { checkpoint_id: "interrupt-checkpoint" },
+      configurable: { thread_id: expect.any(String) },
     })
+    expect((invokeConfigs[1] as { configurable?: Record<string, unknown> }).configurable?.checkpoint_id).toBeUndefined()
   })
 
   test("adds actual used agent variants to trace metadata", async () => {
@@ -620,79 +629,6 @@ describe("runResearchPipeline", () => {
     expect(traceUpdates[0]?.metadata?.agentVariants).toEqual({
       "research-drafter": "high",
     })
-  })
-})
-
-describe("runDesignPipeline", () => {
-  test("archives previous design artifacts and reruns from the HTML designer checkpoint", async () => {
-    const { config: configWithTempArtifacts, runsDir } = await makeConfigWithTempArtifacts()
-    const runDir = join(runsDir, "design-rerun-req-design-1")
-    await mkdir(runDir, { recursive: true })
-    await Bun.write(join(runDir, "request.json"), JSON.stringify({
-      requestId: "req-design-1",
-      inputMode: "topic",
-      topic: "design rerun topic",
-    }))
-    await Bun.write(join(runDir, "design-html-round-0.html"), "<html>old</html>")
-    await Bun.write(join(runDir, "final.html"), "<html>final</html>")
-    await Bun.write(join(runDir, "final.html.truncation-warning.txt"), "warning")
-    await Bun.write(join(runDir, "cursor-html-designer-call-1-attempt-1-run-response.txt"), "debug")
-    await Bun.write(join(runDir, "draft-round-0.md"), "keep me")
-
-    const bus = createEventBus()
-    const invokeConfigs: unknown[] = []
-    const graphFactory: GraphFactory = (() => ({
-      getStateHistory: async function* () {
-        yield {
-          next: ["finalizeDesign"],
-          config: { configurable: { thread_id: "req-design-1", checkpoint_id: "after-design" } },
-        }
-        yield {
-          next: ["runDesignHtml"],
-          config: { configurable: { thread_id: "req-design-1", checkpoint_id: "before-design" } },
-        }
-      },
-      invoke: async (_input: unknown, invokeConfig: unknown) => {
-        invokeConfigs.push(invokeConfig)
-        return {
-          requestId: "req-design-1",
-          status: "approved",
-          round: 0,
-          approvedAgents: ["source-auditor"],
-          unresolvedFindings: [],
-          outputPath: runDir,
-          designStatus: "approved",
-          designRound: 0,
-        }
-      },
-    })) as GraphFactory
-
-    await runDesignPipeline({
-      config: configWithTempArtifacts,
-      promptBundle,
-      runId: "req-design-1",
-      bus,
-      graphFactory,
-      bridgeFactory: () => ({ async start() {}, async stop() {} }),
-      telemetryFactory: async () => disabledTelemetry(),
-    })
-
-    expect(invokeConfigs[0]).toMatchObject({
-      configurable: { thread_id: "req-design-1", checkpoint_id: "before-design" },
-    })
-    expect(await Bun.file(join(runDir, "draft-round-0.md")).text()).toBe("keep me")
-    expect(await Bun.file(join(runDir, "final.html")).exists()).toBe(false)
-    expect(await Bun.file(join(runDir, "design-html-round-0.html")).exists()).toBe(false)
-
-    const archiveRoots = await readdir(join(runDir, "design-archive"))
-    expect(archiveRoots).toHaveLength(1)
-    const archivedFiles = await readdir(join(runDir, "design-archive", archiveRoots[0]!))
-    expect(archivedFiles.sort()).toEqual([
-      "cursor-html-designer-call-1-attempt-1-run-response.txt",
-      "design-html-round-0.html",
-      "final.html",
-      "final.html.truncation-warning.txt",
-    ])
   })
 })
 
