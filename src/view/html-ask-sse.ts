@@ -52,6 +52,9 @@ export async function streamAskMessage(input: StreamAskMessageInput): Promise<Re
 
       let prepared: Awaited<ReturnType<typeof input.prepare>> | undefined
       try {
+        const config = await loadRuntimeConfig()
+        releaseProvider = await getProviderLifecycle().acquireForRoles(config, [HTML_READING_COMPANION_ROLE])
+
         prepared = await input.prepare({
           runName: input.runName,
           htmlFile: input.htmlFile,
@@ -70,11 +73,9 @@ export async function streamAskMessage(input: StreamAskMessageInput): Promise<Re
         })
         send("status", { phase: "running" })
 
-        const config = await loadRuntimeConfig()
         const promptBundle = await loadPromptBundle(config)
         const bus = createEventBus()
         const provider = providerForRole(config, HTML_READING_COMPANION_ROLE)
-        releaseProvider = await getProviderLifecycle().acquireForRoles(config, [HTML_READING_COMPANION_ROLE])
         if (provider.createEventBridge) {
           bridge = provider.createEventBridge({
             config,

@@ -51,23 +51,11 @@ export class HighlightNotFoundError extends Error {
 
 const handleCache = new Map<string, AgentRunHandle>()
 const runningThreads = new Set<string>()
-let preparedCleanup: (() => Promise<void>) | undefined
-let runtimeConfig: RuntimeConfig | undefined
-let runtimePromptBundle: Awaited<ReturnType<typeof loadPromptBundle>> | undefined
 
 async function ensureAskRuntime() {
-  if (!runtimeConfig) {
-    runtimeConfig = await loadRuntimeConfig()
-    runtimePromptBundle = await loadPromptBundle(runtimeConfig)
-    const provider = providerForRole(runtimeConfig, HTML_READING_COMPANION_ROLE)
-    const prepared = await provider.prepare?.({ config: runtimeConfig })
-    const previousCleanup = preparedCleanup
-    preparedCleanup = async () => {
-      await prepared?.cleanup?.()
-      await previousCleanup?.()
-    }
-  }
-  return { config: runtimeConfig, promptBundle: runtimePromptBundle! }
+  const config = await loadRuntimeConfig()
+  const promptBundle = await loadPromptBundle(config)
+  return { config, promptBundle }
 }
 
 function threadTitle(threadId: string) {
