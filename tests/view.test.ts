@@ -4,7 +4,7 @@ import { renderDebugLogHtml } from "../src/view/debug-log-viewer.ts"
 import { renderStructuredJson, renderConsensusRound, renderRebuttalsRound, renderRebuttalReviewRound, renderTargetedRebuttalsRound } from "../src/view/artifact-renderers.ts"
 import { POLLING_SCRIPT } from "../src/view/client-script.ts"
 import { renderInterviewChatCard } from "../src/view/components.ts"
-import { renderNodeGrid, renderGlobalResearchRoundStrip, researchRoundNumbers } from "../src/view/node-view.ts"
+import { renderNodeGrid, renderGlobalResearchRoundStrip, renderNodeMiniPipeline, researchRoundNumbers } from "../src/view/node-view.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 import { classifyFile } from "../src/view/file-browser.ts"
 import { card, section, summaryRow, summaryTable } from "../src/view/html.ts"
@@ -402,6 +402,37 @@ describe("view components", () => {
     expect(html).toContain("How familiar are you with ML?")
     expect(html).toContain("Answer 2")
     expect(html).toContain("Quite new.")
+  })
+
+  test("does not render interview reply form when run phase is complete", () => {
+    const liveStatus: LiveStatus = {
+      phase: "complete",
+      node: "finalizeDesign",
+      round: 0,
+      maxRounds: 2,
+      agents: {},
+      nodeHistory: [],
+      awaitingReaderReply: {
+        turn: 3,
+        answeredQuestions: [],
+        newQuestions: ["Stale question after complete?"],
+        transcript: [{ role: "interviewer", text: "Stale question after complete?" }],
+      },
+    }
+
+    const html = renderInterviewChatCard("example-run", liveStatus)
+
+    expect(html).toBe("")
+  })
+
+  test("node mini pipeline is one continuous graph strip", () => {
+    const html = renderNodeMiniPipeline("example-run", "runDesignHtml", ["design-html-round-0.html"])
+    expect(html).toContain("/runs/example-run/node/discoverReader")
+    expect(html).toContain("/runs/example-run/node/draftFullDraft")
+    expect(html).toContain("/runs/example-run/node/runParallelAudits")
+    expect(html).toContain("/runs/example-run/node/runDesignHtml")
+    expect(html).toContain("/runs/example-run/node/interactiveEnhance")
+    expect(html).toContain("/runs/example-run/node/finalizeDesign")
   })
 })
 

@@ -23,16 +23,18 @@ export const GRAPH_NODES: NodeDefinition[] = [
   {
     id: "discoverReader",
     label: "Discover reader",
+    miniLabel: "Reader",
     order: 4,
     phase: "setup",
     pipelineLabel: "discoverReader",
     liveNodeAliases: ["discoverReaderPrompt", "discoverReaderResume"],
-    filePatterns: [/^reader-profile(?:-\d+)?\.json$/],
+    filePatterns: [/^reader-profile(?:-\d+)?\.json$/, /^reader-reply-turn-\d+\.json$/],
     roundScoped: false,
   },
   {
     id: "draftFullDraft",
     label: "Draft",
+    miniLabel: "Draft",
     order: 5,
     phase: "research",
     filePatterns: [/^draft-round-\d+\.md$/],
@@ -124,6 +126,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
   {
     id: "runDesignHtml",
     label: "Design HTML",
+    miniLabel: "Design",
     order: 15,
     phase: "design",
     filePatterns: [/^design-html-round-\d+\.html$/],
@@ -132,9 +135,10 @@ export const GRAPH_NODES: NodeDefinition[] = [
   {
     id: "interactiveEnhance",
     label: "Interactive enhance",
+    miniLabel: "Enhance",
     order: 16,
     phase: "design",
-    filePatterns: [],
+    filePatterns: [/^design-html-round-\d+\.html$/],
     roundScoped: false,
   },
   {
@@ -273,9 +277,18 @@ export function filesForNodeRound(
     }
     if (nodeId === "aggregateConsensus" && roundArt.consensus) roundFiles.push(roundArt.consensus)
     if (nodeId === "reviseDraft" && roundArt.unresolved) roundFiles.push(roundArt.unresolved)
+    if (nodeId === "runDesignHtml") {
+      roundFiles.push(...files.filter((f) => {
+        const match = f.match(/^design-html-round-(\d+)\.html$/)
+        return match?.[1] !== undefined && parseInt(match[1], 10) === round
+      }))
+    }
   }
 
   const matched = files.filter((f) => {
+    if (nodeId === "runDesignHtml" && /^design-html-round-(\d+)\.html$/.test(f)) {
+      return parseInt(f.match(/round-(\d+)/)?.[1] ?? "-1", 10) === round
+    }
     if (!def.filePatterns.some((p) => p.test(f))) return false
     const fileRound = roundFromFilename(f)
     return fileRound === undefined || fileRound === round

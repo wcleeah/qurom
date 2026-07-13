@@ -12,7 +12,7 @@ import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard } from "./components"
 import { computeStats, filterRunsForIndex, getRunFiles, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry } from "./data"
 import { getNodeDefinition, isRebuttalsViewerNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
-import { renderNodeDashboard, renderGlobalResearchRoundStrip, renderNodeGrid, renderNodeMiniPipeline } from "./node-view"
+import { renderNodeDashboard, renderGlobalResearchRoundStrip, renderNodeGrid, renderNodeMiniPipeline, nodePageRoundNumbers } from "./node-view"
 import { renderLiveStatusMeta, renderRoundStrip } from "./round-view"
 import { indexRunArtifacts } from "./run-artifacts"
 import { renderRunTelemetryStrip, renderSessionTelemetryTable, resolveRunTelemetry, runElapsedMs } from "./telemetry-view"
@@ -101,9 +101,11 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
   const displayName = isRebuttalsViewerNode(resolvedViewerId)
     ? "Rebuttals"
     : (def?.label ?? nodeName)
-  const isResearchNode = def?.phase === "research"
-  const globalRoundStrip = isResearchNode
-    ? renderGlobalResearchRoundStrip(runName, files, liveStatus, nodeHistory)
+  const showRoundStrip = def?.phase === "research" || def?.roundScoped === true
+  const globalRoundStrip = showRoundStrip
+    ? renderGlobalResearchRoundStrip(runName, files, liveStatus, nodeHistory, {
+      rounds: nodePageRoundNumbers(resolvedViewerId, files, liveStatus, nodeHistory),
+    })
     : ""
   const { body: dashboardBody, live: dashboardLive } = await renderNodeDashboard(
     runName,
@@ -136,7 +138,7 @@ ${globalRoundStrip ? `<div id="node-round-strip-section">${globalRoundStrip}</di
 ${miniPipeline}
 <div id="node-live-section">${dashboardLive}</div>
 <div id="node-dashboard-section">${dashboardBody}</div>
-${showLiveRefresh ? NODE_REFRESH_SCRIPT : ""}${isResearchNode ? ROUND_TABS_SCRIPT : ""}`
+${showLiveRefresh ? NODE_REFRESH_SCRIPT : ""}${showRoundStrip ? ROUND_TABS_SCRIPT : ""}`
 
   const fullHtml = layout(`Node: ${displayName} — ${escapeHtml(runName)}`, html, {
     navbar: {
@@ -598,7 +600,10 @@ export async function renderRun(name: string): Promise<Response> {
   const nodeGridSection = `<div id="node-grid-section">${nodeGridHtml}</div>`
   const debugLogSection = `<div id="debug-log-section">${debugLogHtml}</div>`
   const failureBannerSection = `<div id="failure-banner-section">${failureBannerHtml}</div>`
-  const interviewChatSection = `<div id="interview-chat-section">${interviewChatHtml}</div>`
+  const interviewTurn = liveStatus?.awaitingReaderReply?.turn
+  const interviewChatSection = interviewTurn
+    ? `<div id="interview-chat-section" data-interview-turn="${interviewTurn}">${interviewChatHtml}</div>`
+    : `<div id="interview-chat-section">${interviewChatHtml}</div>`
   const markdownSection = ""
   const finalOutputSection = `<div id="final-output-section">${finalOutputHtml}</div>`
 

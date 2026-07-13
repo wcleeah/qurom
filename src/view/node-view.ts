@@ -1,3 +1,11 @@
+import {
+  designRoundNumbers,
+  renderDesignHtmlScope,
+  renderDiscoverReaderScope,
+  readerInterviewArtifactFiles,
+  renderDraftFullDraftScope,
+  renderInteractiveEnhanceScope,
+} from "./node-content-view"
 import { renderFileBrowser } from "./file-browser"
 import { GRAPH_NODES, filesForNode, filesForNodeRound, filesForRebuttalsViewer, getNodeDefinition, isNodeActive, isNodeComplete, isRebuttalsViewerNode, nodeKpis, rebuttalsTelemetryNodeId, resolveLiveNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
 import { indexRunArtifacts, roundHasRebuttalActivity, type RoundArtifacts } from "./run-artifacts"
@@ -19,7 +27,6 @@ import {
   sessionTotalsForNode,
   sessionUsageForHistoryEntry,
 } from "./telemetry-view"
-import { tableWrap } from "./html"
 import { safeFilePath } from "./paths"
 import type { SessionTelemetryFile } from "../session-telemetry"
 import { escapeHtml, formatDurationMs, formatElapsed, formatUsagePair } from "./utils"
@@ -47,8 +54,9 @@ export function renderGlobalResearchRoundStrip(
   files: string[],
   liveStatus: LiveStatus | null,
   nodeHistory: NodeHistoryEntry[] = [],
+  options?: { rounds?: number[]; ariaLabel?: string },
 ): string {
-  const rounds = researchRoundNumbers(files, liveStatus, nodeHistory)
+  const rounds = options?.rounds ?? researchRoundNumbers(files, liveStatus, nodeHistory)
   if (rounds.length === 0) return ""
 
   const currentRound = liveStatus?.phase === "running" ? liveStatus.round : undefined
@@ -68,7 +76,7 @@ export function renderGlobalResearchRoundStrip(
   }
 
   return `<div class="global-round-nav">
-  <div class="round-strip global-round-strip" data-round-tablist data-run-round-tabs="${escapeHtml(runName)}" role="tablist" aria-label="Research round scope">${tabs}</div>
+  <div class="round-strip global-round-strip" data-round-tablist data-run-round-tabs="${escapeHtml(runName)}" role="tablist" aria-label="${escapeHtml(options?.ariaLabel ?? "Round scope")}">${tabs}</div>
 </div>`
 }
 
@@ -162,12 +170,6 @@ function formatSummary(summary: Record<string, unknown>): string {
 
 function emptyRoundArtifacts(round: number): RoundArtifacts {
   return { round, perAgentAudits: [], rebuttalTurns: [], perAgentRebuttalInputs: [] }
-}
-
-function renderSummarySection(kpis: ReturnType<typeof nodeKpis>): string {
-  if (kpis.length === 0) return ""
-  const kpiRows = kpis.map((k) => `<tr><td>${escapeHtml(k.label)}</td><td>${escapeHtml(k.value)}</td></tr>`).join("")
-  return `<div class="section"><h2>Summary</h2><div class="card">${tableWrap(`<table class="summary-table">${kpiRows}</table>`)}</div></div>`
 }
 
 function renderArtifactsSection(
@@ -285,6 +287,24 @@ async function renderNodeScopeBody(
     && liveStatus.round === round
   let content = ""
 
+  if (resolvedId === "discoverReader") {
+    content += await renderDiscoverReaderScope(runName, files, liveStatus)
+  }
+
+  if (resolvedId === "draftFullDraft") {
+    content += await renderDraftFullDraftScope(runName, files, scope, liveStatus)
+  }
+
+  if (resolvedId === "runDesignHtml") {
+    content += await renderDesignHtmlScope(runName, files, scope, liveStatus)
+  }
+
+  if (resolvedId === "interactiveEnhance") {
+    if (scope === "total") {
+      content += await renderInteractiveEnhanceScope(runName, files, liveStatus)
+    }
+  }
+
   if (resolvedId === "runParallelAudits") {
     if (scope === "total") {
       const roundsWithAudits = index.rounds.filter((r) => r.audits)
@@ -366,7 +386,7 @@ ${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, isCurrentRound)
     }
   }
 
-  if (scope !== "total" && !roundScoped && !content) {
+  if (scope !== "total" && !roundScoped && !content && resolvedId !== "interactiveEnhance") {
     content += `<p class="muted-note dim-text">This step applies to the full run.</p>`
   }
 
@@ -376,16 +396,13 @@ ${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, isCurrentRound)
   body += content
   body += renderNodeSessionUsageTable(sessionTelemetry, nodeHistory, telemetryNode, round, liveStatus)
 
-  const kpis = nodeKpis(resolvedId, files, index)
-  if (kpis.length > 0 && scope === "total") {
-    body += renderSummarySection(kpis)
-  }
-
-  const nodeFiles = isRebuttalsViewerNode(resolvedId)
-    ? filesForRebuttalsViewer(files, index, round)
-    : round !== undefined
-      ? filesForNodeRound(resolvedId, files, index, round)
-      : filesForNode(resolvedId, files, index)
+  const nodeFiles = resolvedId === "discoverReader"
+    ? await readerInterviewArtifactFiles(runName, files)
+    : isRebuttalsViewerNode(resolvedId)
+      ? filesForRebuttalsViewer(files, index, round)
+      : round !== undefined
+        ? filesForNodeRound(resolvedId, files, index, round)
+        : filesForNode(resolvedId, files, index)
   body += renderArtifactsSection(runName, nodeFiles, fileSizes)
 
   return body
@@ -405,13 +422,15 @@ export async function renderNodeDashboard(
   const active = isRebuttalsViewerNode(resolvedId)
     ? isNodeActive(liveStatus, "runTargetedRebuttals") || isNodeActive(liveStatus, REBUTTALS_VIEWER_NODE_ID)
     : isNodeActive(liveStatus, resolvedId)
-  const isResearch = def?.phase === "research"
-  const rounds = isResearch ? researchRoundNumbers(files, liveStatus, nodeHistory) : []
+  const showRoundPanels = def?.phase === "research" || def?.roundScoped === true
+  const rounds = showRoundPanels
+    ? nodePageRoundNumbers(resolvedId, files, liveStatus, nodeHistory)
+    : []
 
   let body = ""
   let live = ""
 
-  if (isResearch && rounds.length > 0) {
+  if (rounds.length > 0 && showRoundPanels) {
     let panels = `<div class="node-scope-panel" data-round-panel="total" role="tabpanel">${await renderNodeScopeBody(
       "total",
       runName,
@@ -472,17 +491,30 @@ export async function renderNodeDashboard(
   return { body, live }
 }
 
+const MINI_PIPELINE_NODE_IDS = [
+  "discoverReader",
+  "draftFullDraft",
+  "runParallelAudits",
+  "reviewFindingsByDrafter",
+  REBUTTALS_VIEWER_NODE_ID,
+  "aggregateConsensus",
+  "computeConfidence",
+  "runDesignHtml",
+  "interactiveEnhance",
+  "finalizeDesign",
+] as const
+
+function miniPipelineNodeDone(nodeId: string, files: string[], index: ReturnType<typeof indexRunArtifacts>): boolean {
+  if (nodeId === REBUTTALS_VIEWER_NODE_ID) {
+    return filesForRebuttalsViewer(files, index).length > 0
+  }
+  if (nodeId === "finalizeDesign") {
+    return files.includes("final.html") || filesForNode(nodeId, files, index).length > 0
+  }
+  return filesForNode(nodeId, files, index).length > 0
+}
+
 export function renderNodeMiniPipeline(runName: string, currentNode: string, files: string[]): string {
-  const miniPipelineIds = new Set([
-    "draftFullDraft",
-    "runParallelAudits",
-    "reviewFindingsByDrafter",
-    REBUTTALS_VIEWER_NODE_ID,
-    "aggregateConsensus",
-    "computeConfidence",
-  ])
-  const researchNodes = GRAPH_NODES.filter((n) => miniPipelineIds.has(n.id))
-  const index = indexRunArtifacts(files)
   const currentDef = getNodeDefinition(currentNode)
   const currentId = currentDef?.id ?? currentNode
   const highlightedId = currentId === "reviseDraft"
@@ -491,11 +523,14 @@ export function renderNodeMiniPipeline(runName: string, currentNode: string, fil
       ? REBUTTALS_VIEWER_NODE_ID
       : currentId
 
+  const pipelineNodes = MINI_PIPELINE_NODE_IDS
+    .map((id) => GRAPH_NODES.find((n) => n.id === id))
+    .filter((n): n is NonNullable<typeof n> => Boolean(n))
+  const index = indexRunArtifacts(files)
+
   let html = `<div class="round-nav">`
-  for (const node of researchNodes) {
-    const done = node.id === REBUTTALS_VIEWER_NODE_ID
-      ? filesForRebuttalsViewer(files, index).length > 0
-      : filesForNode(node.id, files, index).length > 0
+  for (const node of pipelineNodes) {
+    const done = miniPipelineNodeDone(node.id, files, index)
     const cls = node.id === highlightedId ? "round-nav-chip active" : done ? "round-nav-chip done" : "round-nav-chip"
     const linkId = node.pipelineLabel ?? node.id
     const navLabel = node.miniLabel ?? node.label.split(" ")[0]
@@ -503,4 +538,16 @@ export function renderNodeMiniPipeline(runName: string, currentNode: string, fil
   }
   html += `</div>`
   return html
+}
+
+export function nodePageRoundNumbers(
+  nodeId: string,
+  files: string[],
+  liveStatus: LiveStatus | null,
+  nodeHistory: NodeHistoryEntry[] = [],
+): number[] {
+  if (nodeId === "runDesignHtml") {
+    return designRoundNumbers(files, liveStatus)
+  }
+  return researchRoundNumbers(files, liveStatus, nodeHistory)
 }
