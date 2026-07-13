@@ -4,6 +4,7 @@ import { loadPromptBundle, type PromptBundle } from "./prompt-assets"
 import { ZodError } from "zod"
 import { getProviderLifecycle, type ProviderLifecycle, type ProviderLifecycleStatus } from "./providers/lifecycle"
 import { configuredAgentRoles, validateProviderPrerequisites } from "./providers/registry"
+import type { AgentRole } from "./providers/types"
 import {
   createBridgeForRoles,
   createEventBus,
@@ -11,7 +12,9 @@ import {
   type BridgeFactory,
   type RuntimePrerequisites,
 } from "./runner"
-import { buildRunDirName, ensureRunDir, writeRunJsonArtifact } from "./output"
+import { buildRunDirName, ensureRunDir, writeFailedArtifacts, writeRunJsonArtifact } from "./output"
+import type { LiveStatus } from "./live-status"
+import { resolveRunDirectory } from "./run-resume"
 import type { InputRequest } from "./schema"
 
 export type ActiveRun = {
@@ -38,6 +41,8 @@ export type RunManagerDeps = {
   getConfig: () => Promise<RuntimeConfig> | RuntimeConfig
   lifecycle?: ProviderLifecycle
   loadPromptBundleFn?: typeof loadPromptBundle
+  validatePrerequisitesFn?: typeof validateProviderPrerequisites
+  runResearchPipelineFn?: typeof runResearchPipeline
 }
 
 function parseResumeRunId(raw: string): { runId: string; node?: string } {
@@ -76,9 +81,43 @@ export const __runRefMatching = {
   runRefsMatch,
 }
 
+async function writeBootstrapLiveStatus(runDir: string, maxRounds: number) {
+  const status: LiveStatus = {
+    phase: "running",
+    node: "starting",
+    runStartedAt: Date.now(),
+    round: 0,
+    maxRounds,
+    agents: {},
+    nodeHistory: [],
+  }
+  await writeRunJsonArtifact(runDir, "live-status.json", status)
+}
+
+async function writeStartupFailureStatus(runDir: string, error: unknown, maxRounds: number) {
+  const message = error instanceof Error ? error.message : String(error)
+  await writeFailedArtifacts(runDir, {
+    draft: "",
+    summary: { error: message, phase: "startup" },
+  })
+  const status: LiveStatus = {
+    phase: "error",
+    node: "starting",
+    runStartedAt: Date.now(),
+    round: 0,
+    maxRounds,
+    agents: {},
+    nodeHistory: [],
+    error: message,
+  }
+  await writeRunJsonArtifact(runDir, "live-status.json", status)
+}
+
 export function createRunManager(deps: RunManagerDeps): RunManager {
   const lifecycle = deps.lifecycle ?? getProviderLifecycle()
   const loadBundle = deps.loadPromptBundleFn ?? loadPromptBundle
+  const validatePrereqs = deps.validatePrerequisitesFn ?? validateProviderPrerequisites
+  const runPipelineFn = deps.runResearchPipelineFn ?? runResearchPipeline
 
   let active: ActiveRun | undefined
 
@@ -98,7 +137,9 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
 
   async function runPipeline(input: {
     runId: string
-    roles: string[]
+    roles: AgentRole[]
+    runDir?: string
+    maxRounds: number
     execute: (args: {
       bus: ReturnType<typeof createEventBus>
       signal: AbortSignal
@@ -110,49 +151,78 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
   }): Promise<{ runId: string }> {
     assertNotActive()
 
-    const cfg = await config()
-    const bundle = await promptBundle(cfg)
-    const releaseProviders = await lifecycle.acquireForRoles(cfg, input.roles)
+    const abortController = new AbortController()
+    const signal = abortController.signal
 
-    let prereqs: RuntimePrerequisites
-    try {
-      prereqs = await validateProviderPrerequisites(cfg)
-    } catch (error) {
-      await releaseProviders()
-      throw error
+    if (input.runDir) {
+      await writeBootstrapLiveStatus(input.runDir, input.maxRounds)
     }
 
-    const bus = createEventBus()
-    const abortController = new AbortController()
-
-    const bridgeFactory = (
-      config: RuntimeConfig,
-      opts: Parameters<typeof createBridgeForRoles>[2],
-    ) => createBridgeForRoles(config, input.roles, opts)
+    let releaseProviders: (() => Promise<void>) | undefined
 
     let runPromise!: Promise<unknown>
-    runPromise = input
-      .execute({
-        bus,
-        signal: abortController.signal,
-        bridgeFactory,
-        prerequisites: prereqs,
-        promptBundle: bundle,
-        config: cfg,
-      })
-      .catch(() => {})
-      .finally(async () => {
+    runPromise = (async () => {
+      try {
+        if (signal.aborted) return
+
+        const cfg = await config()
+        const bundle = await promptBundle(cfg)
+        if (signal.aborted) return
+
+        releaseProviders = await lifecycle.acquireForRoles(cfg, input.roles)
+        if (signal.aborted) return
+
+        let prereqs: RuntimePrerequisites
+        try {
+          prereqs = await validatePrereqs(cfg)
+        } catch (error) {
+          if (!signal.aborted && input.runDir) {
+            await writeStartupFailureStatus(input.runDir, error, input.maxRounds)
+          }
+          return
+        }
+
+        const bus = createEventBus()
+        const bridgeFactory = (
+          pipelineConfig: RuntimeConfig,
+          opts: Parameters<typeof createBridgeForRoles>[2],
+        ) => createBridgeForRoles(pipelineConfig, input.roles, opts)
+
+        await input
+          .execute({
+            bus,
+            signal,
+            bridgeFactory,
+            prerequisites: prereqs,
+            promptBundle: bundle,
+            config: cfg,
+          })
+          .catch(() => {})
+      } catch (error) {
+        if (!signal.aborted && input.runDir) {
+          await writeStartupFailureStatus(input.runDir, error, input.maxRounds)
+        }
+      } finally {
         if (active?.promise === runPromise) {
           active = undefined
         }
-        await releaseProviders()
-      })
+        if (releaseProviders) {
+          await releaseProviders().catch(() => {})
+          releaseProviders = undefined
+        }
+      }
+    })()
 
     active = {
       runId: input.runId,
       abortController,
       promise: runPromise,
-      releaseProviders,
+      releaseProviders: async () => {
+        if (releaseProviders) {
+          await releaseProviders()
+          releaseProviders = undefined
+        }
+      },
     }
 
     return { runId: input.runId }
@@ -202,8 +272,10 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
       await runPipeline({
         runId,
         roles,
+        runDir,
+        maxRounds: cfg.quorumConfig.maxRounds,
         execute: ({ bus, signal, bridgeFactory, prerequisites: prereqs, promptBundle: bundle, config: pipelineCfg }) =>
-          runResearchPipeline({
+          runPipelineFn({
             config: pipelineCfg,
             prerequisites: prereqs,
             promptBundle: bundle,
@@ -219,13 +291,22 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
 
     async resumeResearch(rawRunId, node) {
       const parsed = parseResumeRunId(rawRunId)
-      const roles = configuredAgentRoles(await config())
+      const cfg = await config()
+      const roles = configuredAgentRoles(cfg)
+      let runDir: string | undefined
+      try {
+        runDir = await resolveRunDirectory(parsed.runId, cfg.env.QUORUM_RUNS_DIR)
+      } catch {
+        // Pipeline will surface the missing-run error after return.
+      }
       return runPipeline({
         runId: parsed.runId,
         roles,
-        execute: ({ bus, signal, bridgeFactory, prerequisites: prereqs, promptBundle: bundle, config: cfg }) =>
-          runResearchPipeline({
-            config: cfg,
+        runDir,
+        maxRounds: cfg.quorumConfig.maxRounds,
+        execute: ({ bus, signal, bridgeFactory, prerequisites: prereqs, promptBundle: bundle, config: pipelineCfg }) =>
+          runPipelineFn({
+            config: pipelineCfg,
             prerequisites: prereqs,
             promptBundle: bundle,
             resume: { runId: parsed.runId, node: node ?? parsed.node },

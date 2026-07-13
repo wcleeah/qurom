@@ -299,7 +299,7 @@ export const NEW_RUN_FORM_SCRIPT = /* html */ `
       setFormSubmitting(
         documentForm,
         true,
-        "Starting run… providers may take a moment.",
+        "Starting run…",
         "Starting…",
       )
       fetch("/api/runs", {
