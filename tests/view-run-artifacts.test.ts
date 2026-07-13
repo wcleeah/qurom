@@ -151,7 +151,7 @@ describe("node-registry completion", () => {
       agents: {},
       nodeHistory: [],
     }
-    const files = ["request.json", "reader-profile-1.json"]
+    const files = ["request.json", "reader-profile.json"]
 
     expect(isNodeComplete("summarizeInputDocument", files, "running", liveStatus)).toBe(true)
     expect(isNodeComplete("prepareOutputPath", files, "running", liveStatus)).toBe(true)

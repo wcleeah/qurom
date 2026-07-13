@@ -196,7 +196,7 @@ export type RunResearchPipelineArgs = {
   promptBundle: RuntimePromptBundle
   request?: InputRequest
   requestId?: string
-  resume?: { runId: string; node?: string; checkpointId?: string }
+  resume?: { runId: string }
   bus: EventBus
   signal?: AbortSignal
   graphFactory?: GraphFactory
@@ -233,8 +233,8 @@ function permissionKey(input: { sessionID: string; messageID?: string; callID?: 
 /**
  * Run a graph that may suspend on `interrupt()` inside the `discoverReader` node.
  * On suspend: write the current newQuestions to live-status.json (awaitingReaderReply),
- * poll for a reader-reply.json file in the run dir, then resume with
- * `Command({ resume: replyText })`. Loops until the graph completes.
+ * poll for reply-N.json in the run dir (or use it immediately if already present),
+ * then resume with `Command({ resume: replyText })`. Loops until the graph completes.
  *
  * This is the repo's first human-in-the-loop: it extends the existing
  * checkpoint-resume pattern with a resume value and a file-mediated reply
@@ -257,18 +257,19 @@ async function runGraphWithInterviewResume<GraphT extends {
       turn: number
       answeredQuestions: Array<{ question: string; answer: string }>
       newQuestions: string[]
-      transcript: { role: string; text: string }[]
+      transcript: Array<{ role: "interviewer" | "reader"; text: string }>
+      partialProfile?: Record<string, unknown>
     } | undefined) => void
     debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
   },
 ): Promise<Record<string, unknown>> {
-  const { configurable, recursionLimit, signal } = baseConfig
+  const threadId = String(baseConfig.configurable.thread_id)
+  const recursionLimit = baseConfig.recursionLimit
+  const signal = baseConfig.signal
+  // Always thread_id only — never pin checkpoint_id (latest head / Command resume).
+  const threadConfig = { configurable: { thread_id: threadId }, recursionLimit, signal }
   let input: unknown = initialInput
-  let currentConfig: { configurable: Record<string, unknown>; recursionLimit: number; signal: AbortSignal } = {
-    configurable,
-    recursionLimit,
-    signal,
-  }
+  let currentConfig = threadConfig
   let attempt = 0
 
   // eslint-disable-next-line no-constant-condition
@@ -283,7 +284,7 @@ async function runGraphWithInterviewResume<GraphT extends {
     if (typeof graph.getState !== "function") {
       return result
     }
-    const snapshot = await graph.getState({ configurable }).catch(() => undefined)
+    const snapshot = await graph.getState({ configurable: { thread_id: threadId } }).catch(() => undefined)
     const interruptTask = snapshot?.tasks?.find((t) => t.interrupts && t.interrupts.length > 0)
     if (!interruptTask || !interruptTask.interrupts || interruptTask.interrupts.length === 0) {
       return result
@@ -293,8 +294,8 @@ async function runGraphWithInterviewResume<GraphT extends {
     const pendingQuestions = Array.isArray(snapshot?.values?.pendingNewReaderQuestions)
       ? (snapshot!.values.pendingNewReaderQuestions as string[])
       : undefined
-    let transcript = Array.isArray(snapshot?.values?.interviewTranscript)
-      ? (snapshot!.values.interviewTranscript as { role: string; text: string }[])
+    let transcript: Array<{ role: "interviewer" | "reader"; text: string }> = Array.isArray(snapshot?.values?.interviewTranscript)
+      ? (snapshot!.values.interviewTranscript as Array<{ role: "interviewer" | "reader"; text: string }>)
       : []
     let newQuestions = resolveReaderInterviewQuestions({
       interviewTranscript: transcript,
@@ -328,58 +329,54 @@ async function runGraphWithInterviewResume<GraphT extends {
       turn,
       answeredQuestions,
       newQuestions,
-      transcript,
+      transcript: transcript.flatMap((entry) =>
+        entry.role === "interviewer" || entry.role === "reader"
+          ? [{ role: entry.role, text: entry.text }]
+          : []
+      ),
       ...(partialProfile && typeof partialProfile === "object"
         ? { partialProfile: partialProfile as Record<string, unknown> }
         : {}),
     })
 
-    await discardStaleReaderReply(opts.runDir)
+    await discardStaleLiveReplyInbox(opts.runDir)
 
-    // Wait for the view-server to write reader-reply.json (the user submitted
-    // the chat form). Poll the run dir; honor the abort signal.
+    // Prefer an existing reply-N.json (resume after cancel); otherwise wait for one.
     const replyText = await waitForReaderReply(opts.runDir, signal, turn)
     opts.setAwaitingReaderReply(undefined)
     opts.debugLog?.write("reader.interview_resume", { turn, replyLen: replyText.length })
 
-    // Resume with Command({ resume }) only — do not pin checkpoint_id from the
-    // interrupt snapshot or LangGraph re-enters the same interrupt without applying the reply.
+    // Command resume with thread_id only — never pin checkpoint_id.
     input = new Command({ resume: replyText })
-    currentConfig = {
-      configurable: { ...configurable },
-      recursionLimit,
-      signal,
-    }
+    currentConfig = threadConfig
     // Re-enter the loop; the next invoke continues from the interrupt.
   }
 }
 
-async function discardStaleReaderReply(runDir: () => string | undefined) {
+async function discardStaleLiveReplyInbox(runDir: () => string | undefined) {
   const dir = runDir()
   if (!dir) return
+  // Legacy inbox name from older runs — ignore if present.
   try {
     await unlink(join(dir, "reader-reply.json"))
   } catch {
-    // No stale reply file — expected on first suspend.
+    // expected when absent
   }
 }
 
 async function waitForReaderReply(runDir: () => string | undefined, signal: AbortSignal, turn: number): Promise<string> {
-  const { exists, readFile, rename } = await import("node:fs/promises")
+  const { exists, readFile } = await import("node:fs/promises")
   const { join } = await import("node:path")
   const pollIntervalMs = 400
+  const replyPathFor = (dir: string) => join(dir, `reply-${turn}.json`)
+
   while (!signal.aborted) {
     const dir = runDir()
     if (dir) {
-      const replyPath = join(dir, "reader-reply.json")
+      const replyPath = replyPathFor(dir)
       if (await exists(replyPath)) {
         try {
           const raw = await readFile(replyPath, "utf8")
-          // Preserve the reply for triage: rename reader-reply.json →
-          // reader-reply-turn-N.json instead of deleting it. The run dir
-          // keeps the full reply trail alongside reader-profile-N.json.
-          try { await rename(replyPath, join(dir, `reader-reply-turn-${turn}.json`)) } catch { /* best effort */ }
-          // The view-server writes the reply body as JSON { reply: string } or raw text.
           try {
             const parsed = JSON.parse(raw) as { reply?: string }
             if (typeof parsed.reply === "string") return parsed.reply
@@ -569,59 +566,22 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
   return { trackSessionObservation, dispose }
 }
 
-function parseResumeTarget(resume: NonNullable<RunResearchPipelineArgs["resume"]>) {
-  const hashIndex = resume.runId.indexOf("#")
-  if (hashIndex < 0) return resume
-  return {
-    ...resume,
-    runId: resume.runId.slice(0, hashIndex),
-    node: resume.node ?? resume.runId.slice(hashIndex + 1),
-  }
-}
-
+/** Continue from the latest checkpoint for this thread (thread_id only — no historical pin). */
 async function resolveGraphResumeConfig(
   graph: {
     getState?: (config: unknown) => Promise<{
       config: Record<string, unknown> & { configurable?: Record<string, unknown> }
     }>
-    getStateHistory?: (config: unknown) => AsyncIterable<{
-      next?: string[]
-      config: Record<string, unknown> & { configurable?: Record<string, unknown> }
-      metadata?: Record<string, unknown>
-    }>
   },
   requestId: string,
-  resume: NonNullable<RunResearchPipelineArgs["resume"]>,
 ) {
   const baseConfig = { configurable: { thread_id: requestId } }
-
-  if (resume.checkpointId) {
-    return { configurable: { thread_id: requestId, checkpoint_id: resume.checkpointId } }
-  }
-
-  if (resume.node) {
-    if (typeof graph.getStateHistory !== "function") {
-      throw new Error("Graph does not support checkpoint history for node retry")
-    }
-    for await (const snapshot of graph.getStateHistory(baseConfig)) {
-      if (snapshot.next?.includes(resume.node)) {
-        const configurable = snapshot.config.configurable
-        const checkpointId = configurable?.checkpoint_id
-        if (typeof checkpointId !== "string") {
-          throw new Error(`Checkpoint before node ${resume.node} is missing checkpoint_id`)
-        }
-        return { configurable: { ...configurable, thread_id: requestId, checkpoint_id: checkpointId } }
-      }
-    }
-    throw new Error(`No checkpoint found before node "${resume.node}" for thread ${requestId}`)
-  }
-
   const state = typeof graph.getState === "function"
     ? await graph.getState(baseConfig)
     : undefined
   const checkpointId = state?.config?.configurable?.checkpoint_id
-  if (typeof checkpointId !== "string") throw new Error(`No checkpoint_id in state for thread ${requestId}`)
-  return { configurable: { thread_id: requestId, checkpoint_id: checkpointId } }
+  if (typeof checkpointId !== "string") throw new Error(`No checkpoint found for thread ${requestId}`)
+  return { configurable: { thread_id: requestId } }
 }
 
 async function readNodeHistoryFromDisk(runDir: string): Promise<NodeHistoryEntry[]> {
@@ -671,8 +631,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
   const abortSessionFn = args.abortSessionFn ?? abortSession
   const telemetryFactory = args.telemetryFactory ?? createTelemetry
 
-  const parsedResume = args.resume ? parseResumeTarget(args.resume) : undefined
-  const resolvedResume = parsedResume ? await resolveRunForResume(parsedResume.runId, config.env.QUORUM_RUNS_DIR) : undefined
+  const resolvedResume = args.resume ? await resolveRunForResume(args.resume.runId, config.env.QUORUM_RUNS_DIR) : undefined
   const request = resolvedResume?.request ?? args.request
   if (!request) {
     throw new Error("runResearchPipeline requires either request or resume")
@@ -842,18 +801,14 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
         signal: bridgeAbort.signal,
       }
 
-      if (resolvedResume && parsedResume) {
+      if (resolvedResume) {
         const resumeConfig = await resolveGraphResumeConfig(
           graph as unknown as Parameters<typeof resolveGraphResumeConfig>[0],
           requestId,
-          parsedResume,
         )
-        const checkpointId = resumeConfig.configurable.checkpoint_id
         debugLogRef.current?.write("pipeline.resume", {
           requestId,
           runDir: resolvedResume.runDir,
-          checkpointId,
-          node: parsedResume.node,
         })
         initialInput = null
         initialConfig = {

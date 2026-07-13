@@ -35,25 +35,11 @@ describe("resolveReaderInterviewQuestions", () => {
 })
 
 describe("readerInterviewStateFromRunDir", () => {
-  test("returns pending turn from latest unanswered profile artifact", async () => {
+  test("returns pending turn from unanswered question artifact", async () => {
     const dir = await mkdtemp(join(tmpdir(), "reader-transcript-"))
-    await writeFile(
-      join(dir, "reader-profile-1.json"),
-      JSON.stringify({
-        newQuestions: ["Question one?"],
-        done: false,
-        profile: { intent: { goal: "learn" } },
-      }),
-    )
-    await writeFile(join(dir, "reader-reply-turn-1.json"), JSON.stringify({ reply: "Answer one." }))
-    await writeFile(
-      join(dir, "reader-profile-2.json"),
-      JSON.stringify({
-        newQuestions: ["Question two?"],
-        done: false,
-        profile: { intent: { goal: "learn more" } },
-      }),
-    )
+    await writeFile(join(dir, "question-1.json"), JSON.stringify({ questions: ["Question one?"] }))
+    await writeFile(join(dir, "reply-1.json"), JSON.stringify({ reply: "Answer one." }))
+    await writeFile(join(dir, "question-2.json"), JSON.stringify({ questions: ["Question two?"] }))
 
     const state = await readerInterviewStateFromRunDir(dir)
     expect(state?.turn).toBe(2)
@@ -63,6 +49,15 @@ describe("readerInterviewStateFromRunDir", () => {
       { role: "reader", text: "Answer one." },
       { role: "interviewer", text: "Question two?" },
     ])
+  })
+
+  test("includes accepted reader-profile when present", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "reader-transcript-profile-"))
+    await writeFile(join(dir, "question-1.json"), JSON.stringify({ questions: ["Question one?"] }))
+    await writeFile(join(dir, "reader-profile.json"), JSON.stringify({ intent: { goal: "learn more" } }))
+
+    const state = await readerInterviewStateFromRunDir(dir)
+    expect(state?.turn).toBe(1)
     expect(state?.partialProfile).toEqual({ intent: { goal: "learn more" } })
   })
 })

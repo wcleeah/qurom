@@ -53,7 +53,7 @@ export interface LiveStatus {
     turn: number
     answeredQuestions: Array<{ question: string; answer: string }>
     newQuestions: string[]
-    transcript: { role: string; text: string }[]
+    transcript: Array<{ role: "interviewer" | "reader"; text: string }>
     partialProfile?: Record<string, unknown>
   }
 }

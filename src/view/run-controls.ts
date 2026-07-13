@@ -45,13 +45,6 @@ function renderRestartFromSourceForm(runName: string, disabled: boolean): string
 </form>`
 }
 
-export function renderNodeRetryButton(runName: string, nodeName: string, disabled: boolean): string {
-  return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/resume">
-  <input type="hidden" name="node" value="${escapeHtml(nodeName)}" />
-  <button type="submit" class="btn btn-secondary"${disabled ? " disabled" : ""}>Retry from this node</button>
-</form>`
-}
-
 export function renderRunActionStrip(
   runName: string,
   actions: RunResumeActions,
@@ -98,30 +91,6 @@ export function renderRunControlsSection(input: {
   ${cancelHtml}
   ${actionsHtml}
   ${completionHtml}
-</div>`
-}
-
-export function renderNodeControlsSection(input: {
-  runName: string
-  nodeName: string
-  showRetry: boolean
-  runActiveGlobally: boolean
-}): string {
-  if (!input.showRetry) {
-    return `<div id="node-controls-section" class="run-controls-section"></div>`
-  }
-
-  const retryHtml = renderNodeRetryButton(input.runName, input.nodeName, input.runActiveGlobally)
-  const busyNote = input.runActiveGlobally
-    ? `<p class="muted-note dim-text run-actions-note">Another run is active — wait for it to finish first.</p>`
-    : ""
-
-  return `<div id="node-controls-section" class="run-controls-section">
-  <div class="run-actions">
-    <span class="run-actions-label">Checkpoint retry</span>
-    <div class="run-actions-buttons">${retryHtml}</div>
-    ${busyNote}
-  </div>
 </div>`
 }
 

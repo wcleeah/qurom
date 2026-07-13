@@ -6,10 +6,11 @@ import { safeFilePath, safeRunPath } from "./paths"
 import type { LiveStatus } from "./types"
 import { escapeHtml, renderMarkdown } from "./utils"
 
-const READER_PROFILE_PATTERN = /^reader-profile(?:-\d+)?\.json$/
-const READER_REPLY_PATTERN = /^reader-reply-turn-\d+\.json$/
+const READER_PROFILE_PATTERN = /^reader-profile\.json$/
+const QUESTION_PATTERN = /^question-\d+\.json$/
+const REPLY_PATTERN = /^reply-\d+\.json$/
 
-/** Profile + reply files for the interview UI (replies are omitted from getRunFiles listings). */
+/** Profile + question/reply files for the interview UI. */
 export async function readerInterviewArtifactFiles(runName: string, files: string[]): Promise<string[]> {
   let disk: string[] = []
   try {
@@ -17,8 +18,9 @@ export async function readerInterviewArtifactFiles(runName: string, files: strin
   } catch {
     // Run dir unreadable — fall back to caller-provided names only.
   }
-  const fromDisk = disk.filter((f) => READER_PROFILE_PATTERN.test(f) || READER_REPLY_PATTERN.test(f))
-  const fromList = files.filter((f) => READER_PROFILE_PATTERN.test(f) || READER_REPLY_PATTERN.test(f))
+  const match = (f: string) => READER_PROFILE_PATTERN.test(f) || QUESTION_PATTERN.test(f) || REPLY_PATTERN.test(f)
+  const fromDisk = disk.filter(match)
+  const fromList = files.filter(match)
   return [...new Set([...fromList, ...fromDisk])].sort()
 }
 
@@ -38,14 +40,13 @@ export function designRoundNumbers(files: string[], liveStatus: LiveStatus | nul
   return [...rounds].sort((a, b) => a - b)
 }
 
-function readerProfileTurn(filename: string): number {
-  const match = filename.match(/^reader-profile(?:-(\d+))?\.json$/)
-  if (!match) return 0
-  return match[1] ? parseInt(match[1], 10) : 999
+function questionTurn(filename: string): number {
+  const match = filename.match(/^question-(\d+)\.json$/)
+  return match?.[1] ? parseInt(match[1], 10) : 0
 }
 
-function readerReplyTurn(filename: string): number {
-  const match = filename.match(/^reader-reply-turn-(\d+)\.json$/)
+function replyTurn(filename: string): number {
+  const match = filename.match(/^reply-(\d+)\.json$/)
   return match?.[1] ? parseInt(match[1], 10) : 0
 }
 
@@ -97,31 +98,28 @@ export async function renderDiscoverReaderScope(
   liveStatus: LiveStatus | null,
 ): Promise<string> {
   const interviewFiles = await readerInterviewArtifactFiles(runName, files)
-  const profileFiles = interviewFiles
-    .filter((f) => READER_PROFILE_PATTERN.test(f))
-    .sort((a, b) => readerProfileTurn(a) - readerProfileTurn(b))
+  const questionFiles = interviewFiles
+    .filter((f) => QUESTION_PATTERN.test(f))
+    .sort((a, b) => questionTurn(a) - questionTurn(b))
   const replyFiles = interviewFiles
-    .filter((f) => READER_REPLY_PATTERN.test(f))
-    .sort((a, b) => readerReplyTurn(a) - readerReplyTurn(b))
+    .filter((f) => REPLY_PATTERN.test(f))
+    .sort((a, b) => replyTurn(a) - replyTurn(b))
 
   let panels = ""
 
-  const turns = new Map<number, { questions: string[]; answer?: string; profileFile?: string }>()
-  for (const profileFile of profileFiles) {
-    const turn = readerProfileTurn(profileFile)
-    if (turn === 999) continue
-    const data = await readJsonFile(runName, profileFile) as { newQuestions?: string[]; done?: boolean; profile?: unknown } | undefined
-    if (data?.done === true) continue
-    const questions = Array.isArray(data?.newQuestions) ? data.newQuestions.filter((q) => q.trim().length > 0) : []
+  const turns = new Map<number, { questions: string[]; answer?: string }>()
+  for (const questionFile of questionFiles) {
+    const turn = questionTurn(questionFile)
+    const data = await readJsonFile(runName, questionFile) as { questions?: string[] } | undefined
+    const questions = Array.isArray(data?.questions) ? data.questions.filter((q) => q.trim().length > 0) : []
     if (questions.length === 0) continue
     const entry = turns.get(turn) ?? { questions: [] }
     entry.questions = questions
-    entry.profileFile = profileFile
     turns.set(turn, entry)
   }
 
   for (const replyFile of replyFiles) {
-    const turn = readerReplyTurn(replyFile)
+    const turn = replyTurn(replyFile)
     const data = await readJsonFile(runName, replyFile) as { reply?: string } | undefined
     const entry = turns.get(turn) ?? { questions: [] }
     if (typeof data?.reply === "string") entry.answer = data.reply
@@ -132,22 +130,13 @@ export async function renderDiscoverReaderScope(
   if (sortedTurns.length > 0) {
     panels += `<div class="section"><h2>Interview turns</h2>`
     for (const [turn, entry] of sortedTurns) {
-      let profileHtml = ""
-      if (entry.profileFile) {
-        const profileData = await readJsonFile(runName, entry.profileFile)
-        profileHtml = renderReaderProfileSummary(profileData)
-      }
-      panels += renderInterviewTurnBlock(turn, entry.questions, entry.answer, profileHtml || undefined)
+      panels += renderInterviewTurnBlock(turn, entry.questions, entry.answer)
     }
     panels += `</div>`
   }
 
-  const finalProfile = profileFiles.find((f) => f === "reader-profile.json")
-    ?? [...profileFiles]
-      .filter((f) => f !== "reader-profile.json" && readerProfileTurn(f) !== 999)
-      .sort((a, b) => readerProfileTurn(b) - readerProfileTurn(a))[0]
-  if (finalProfile) {
-    const data = await readJsonFile(runName, finalProfile)
+  if (interviewFiles.includes("reader-profile.json")) {
+    const data = await readJsonFile(runName, "reader-profile.json")
     panels += `<div class="section"><h2>Reader profile</h2>${renderReaderProfileCard(data)}</div>`
   }
 

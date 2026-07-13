@@ -8,6 +8,7 @@ import { isRunManagedActive } from "../run-manager"
 import { listStarredRunNames } from "./starred-store"
 import { isSqliteFile } from "./utils"
 import type { FileClass, LiveStatus, NodeHistoryEntry, RequestJson, RunMeta, RunStats, RunStatus } from "./types"
+import type { ReaderTranscriptEntry } from "../reader-transcript"
 
 function sanitizeLiveStatus(status: LiveStatus): LiveStatus {
   if (status.phase === "complete" || status.phase === "error") {
@@ -24,8 +25,16 @@ async function enrichInterviewFromDisk(runName: string, status: LiveStatus): Pro
     if (!disk) return status
     const reconciled = reconcileAwaitingReaderReplyWithDisk(awaiting, disk)
     if (reconciled === awaiting) return status
-    return { ...status, awaitingReaderReply: reconciled }
-  } catch {
+    return {
+      ...status,
+      awaitingReaderReply: {
+        turn: reconciled.turn,
+        answeredQuestions: reconciled.answeredQuestions ?? [],
+        newQuestions: reconciled.newQuestions,
+        transcript: (reconciled.transcript ?? []) as ReaderTranscriptEntry[],
+        ...(reconciled.partialProfile ? { partialProfile: reconciled.partialProfile } : {}),
+      },
+    }  } catch {
     return status
   }
 }
@@ -98,7 +107,7 @@ export async function listRuns(): Promise<RunMeta[]> {
       mtime = dirStat.mtimeMs
 
       const files = await readdir(dirPath)
-      fileCount = files.filter((f) => !isSqliteFile(f) && f !== ".gitkeep" && !isReaderReplyArchive(f)).length
+      fileCount = files.filter((f) => !isSqliteFile(f) && f !== ".gitkeep" && !f.startsWith(".") && !isReaderReplyArchive(f)).length
 
       for (const file of files) {
         if (file === "request.json") {
@@ -216,12 +225,13 @@ export async function getRunFiles(runName: string): Promise<string[]> {
   const dirPath = safeRunPath(runName)
   const files = await readdir(dirPath)
   return files
-    .filter((f) => !isSqliteFile(f) && f !== ".gitkeep" && !isReaderReplyArchive(f))
+    .filter((f) => !isSqliteFile(f) && f !== ".gitkeep" && !f.startsWith(".") && !isReaderReplyArchive(f))
     .sort()
 }
 
-export function isReaderReplyArchive(name: string): boolean {
-  return /^reader-reply-turn-\d+\.json$/.test(name)
+export function isReaderReplyArchive(_name: string): boolean {
+  // No longer used as archives — replies are first-class reply-N.json files.
+  return false
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +255,7 @@ export function agentFrom(filename: string, prefix: string) {
 }
 
 export function readerProfileTurn(filename: string) {
+  // Legacy per-turn profiles are no longer written; keep matcher for old runs.
   const match = filename.match(/^reader-profile(?:-(\d+))?\.json$/)
   return match ? match[1] : undefined
 }
@@ -260,6 +271,24 @@ export function classifyFile(filename: string): FileClass {
       subGroup: "Reader",
       label: readerTurn ? `Reader profile turn ${readerTurn}` : "Reader profile",
       description: "Interview-derived audience model",
+    }
+  }
+  const questionTurn = filename.match(/^question-(\d+)\.json$/)?.[1]
+  if (questionTurn) {
+    return {
+      group: "Run Metadata",
+      subGroup: "Reader",
+      label: `Interview question ${questionTurn}`,
+      description: "Questions asked on this interview turn",
+    }
+  }
+  const replyTurn = filename.match(/^reply-(\d+)\.json$/)?.[1]
+  if (replyTurn) {
+    return {
+      group: "Run Metadata",
+      subGroup: "Reader",
+      label: `Interview reply ${replyTurn}`,
+      description: "Reader answer for this interview turn",
     }
   }
   if (filename === "summary.json") return { group: "Run Metadata", subGroup: "Summaries", label: "Summary", description: "Compact title/summary for the run" }

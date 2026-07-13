@@ -24,18 +24,15 @@ describe("view path helpers", () => {
 })
 
 describe("view artifact renderers", () => {
-  test("dispatches reader-profile-N.json to the reader profile card", () => {
-    const html = renderStructuredJson("reader-profile-2.json", {
-      done: true,
-      profile: {
-        intent: { goal: "Understand quorum reads", depth: "conceptual" },
-        background: { summary: "Backend engineer" },
-        competence: {
-          inTopic: { level: "intermediate", summary: "Knows replication basics", evidence: [] },
-          adjacent: { summary: "Strong distributed systems background", evidence: [] },
-        },
-        inferredGaps: [{ concept: "linearizability", treatment: "must-explain", rationale: "named it but could not define it" }],
+  test("dispatches reader-profile.json to the reader profile card", () => {
+    const html = renderStructuredJson("reader-profile.json", {
+      intent: { goal: "Understand quorum reads", depth: "conceptual" },
+      background: { summary: "Backend engineer" },
+      competence: {
+        inTopic: { level: "intermediate", summary: "Knows replication basics", evidence: [] },
+        adjacent: { summary: "Strong distributed systems background", evidence: [] },
       },
+      inferredGaps: [{ concept: "linearizability", treatment: "must-explain", rationale: "named it but could not define it" }],
     })
 
     expect(html).toContain("Reader profile")
@@ -203,10 +200,20 @@ describe("view assets and html helpers", () => {
 
 describe("view file browser classification", () => {
   test("classifies design and reader artifacts into stable groups", () => {
-    expect(classifyFile("reader-profile-2.json")).toMatchObject({
+    expect(classifyFile("reader-profile.json")).toMatchObject({
       group: "Run Metadata",
       subGroup: "Reader",
-      label: "Reader profile turn 2",
+      label: "Reader profile",
+    })
+    expect(classifyFile("question-1.json")).toMatchObject({
+      group: "Run Metadata",
+      subGroup: "Reader",
+      label: "Interview question 1",
+    })
+    expect(classifyFile("reply-1.json")).toMatchObject({
+      group: "Run Metadata",
+      subGroup: "Reader",
+      label: "Interview reply 1",
     })
     expect(classifyFile("cursor-reader-interviewer-call-1-attempt-1-run-123-artifacts.json")).toMatchObject({
       group: "Debug",
@@ -235,10 +242,10 @@ describe("view components", () => {
     expect(html).not.toContain('style="')
   })
 
-  test("marks discoverReader complete when numbered reader profile exists", () => {
+  test("marks discoverReader complete when reader profile exists", () => {
     const html = renderNodeGrid(
       "example-run",
-      ["request.json", "reader-profile-1.json"],
+      ["request.json", "reader-profile.json"],
       null,
       "running",
     )
@@ -336,6 +343,7 @@ describe("view components", () => {
     expect(html).toContain("Answered history")
     expect(html).toContain("What do you already know?")
     expect(html).toContain('method="POST"')
+    expect(html).toContain('name="turn" value="2"')
   })
 
   test("renders partial profile during the interview", () => {

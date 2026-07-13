@@ -138,6 +138,7 @@ export function renderInterviewChatCard(runName: string, liveStatus: LiveStatus 
   <div class="interview-current">
     <div class="chat-current-label">Answer this turn:</div>
     <form method="POST" action="/runs/${encodeURIComponent(runName)}/reply" class="chat-form" data-interview-reply-form>
+      <input type="hidden" name="turn" value="${currentTurn}" />
       ${inputsHtml}
       <button type="submit">Send reply</button>
     </form>

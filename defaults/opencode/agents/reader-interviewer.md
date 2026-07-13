@@ -16,6 +16,7 @@ permission:
   skill: deny
   edit:
     "runs/**/reader-profile.json": allow
+    "runs/**/.interview-scratch.json": allow
   bash: deny
   task: deny
   question: deny

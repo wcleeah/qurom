@@ -314,18 +314,14 @@ describe("createGraph wires the discoverReader node", () => {
   })
 })
 
-describe("reader-profile-N.json artifact shape", () => {
-  test("a profile written by the interviewer parses as readerCalibrationProfileSchema", async () => {
-    const profileFile = join(tempDir, "reader-profile-1.json")
+describe("reader-profile.json artifact shape", () => {
+  test("an accepted profile parses as readerCalibrationProfileSchema", async () => {
+    const profileFile = join(tempDir, "reader-profile.json")
     await mkdir(tempDir, { recursive: true })
-    const turn = {
-      newQuestions: ["What are you trying to get out of MLX?"],
-      done: false,
-      profile: sampleReaderProfile({ inferredGaps: [] }),
-    }
-    await writeFile(profileFile, JSON.stringify(turn, null, 2))
+    const profile = sampleReaderProfile({ inferredGaps: [] })
+    await writeFile(profileFile, JSON.stringify(profile, null, 2))
     const loaded = JSON.parse(await Bun.file(profileFile).text())
-    expect(readerCalibrationProfileSchema.safeParse(loaded.profile).success).toBe(true)
+    expect(readerCalibrationProfileSchema.safeParse(loaded).success).toBe(true)
   })
 })
 

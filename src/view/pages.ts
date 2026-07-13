@@ -5,7 +5,7 @@ import { listArticleTags, listAllTags, listNoteTags } from "../tags-store"
 import { renderArticleTagsSection, TAG_FORMS_SCRIPT } from "./tag-ui"
 import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
 import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
-import { renderRunControlsSection, renderNodeControlsSection, resolveRunResumeActions } from "./run-controls"
+import { renderRunControlsSection, resolveRunResumeActions } from "./run-controls"
 import { tryGetRunManager } from "../run-manager"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
@@ -118,18 +118,8 @@ export async function renderNodePage(runName: string, nodeName: string): Promise
   )
   const miniPipeline = renderNodeMiniPipeline(runName, nodeName, files)
   const showLiveRefresh = liveStatus?.phase === "running"
-  const hasFinalMd = files.includes("final.md")
-  const isRunning = liveStatus?.phase === "running"
-  const runActiveGlobally = Boolean(tryGetRunManager()?.status().active)
-  const nodeControlsHtml = renderNodeControlsSection({
-    runName,
-    nodeName,
-    showRetry: !isRunning && !hasFinalMd,
-    runActiveGlobally,
-  })
 
   const html = `${showLiveRefresh ? renderRefreshControls() : ""}
-${nodeControlsHtml}
 <div class="header-bar">
   <h1>${escapeHtml(displayName)}</h1>
   <p class="muted-note dim-text">Run: ${escapeHtml(runName)} · ${escapeHtml(nodeName)}</p>

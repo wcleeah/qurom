@@ -262,7 +262,12 @@ export function startViewServer(): void {
             : answers.length === 1
               ? answers[0]!
               : answers.map((answer, answerIndex) => `Answer ${answerIndex + 1}: ${answer}`).join("\n\n")
-          await Bun.write(`${runDir}/reader-reply.json`, JSON.stringify({ reply: replyText }))
+          const turnRaw = params.get("turn")
+          const turn = turnRaw ? Number.parseInt(turnRaw, 10) : NaN
+          if (!Number.isFinite(turn) || turn < 1) {
+            return new Response("Missing interview turn", { status: 400 })
+          }
+          await Bun.write(`${runDir}/reply-${turn}.json`, JSON.stringify({ reply: replyText }))
           return new Response(null, {
             status: 303,
             headers: { Location: `/runs/${encodeURIComponent(resolvedName)}` },

@@ -72,13 +72,11 @@ export function readerInterviewTurnFromTranscript(transcript: ReaderTranscriptEn
   return Math.max(1, Math.ceil(transcript.length / 2))
 }
 
-type ReaderProfileArtifact = {
-  newQuestions?: string[]
-  done?: boolean
-  profile?: Record<string, unknown>
+type QuestionArtifact = {
+  questions?: string[]
 }
 
-type ReaderReplyArtifact = {
+type ReplyArtifact = {
   reply?: string
 }
 
@@ -92,36 +90,43 @@ export async function readerInterviewStateFromRunDir(runDir: string): Promise<{
   const { join } = await import("node:path")
 
   const files = await readdir(runDir)
-  const profileTurns = new Map<number, ReaderProfileArtifact>()
+  const questionTurns = new Map<number, string[]>()
   const replyTurns = new Map<number, string>()
 
   for (const file of files) {
-    const profileMatch = file.match(/^reader-profile-(\d+)\.json$/)
-    if (profileMatch) {
-      const turn = Number.parseInt(profileMatch[1]!, 10)
-      const raw = JSON.parse(await readFile(join(runDir, file), "utf8")) as ReaderProfileArtifact
-      profileTurns.set(turn, raw)
+    const questionMatch = file.match(/^question-(\d+)\.json$/)
+    if (questionMatch) {
+      const turn = Number.parseInt(questionMatch[1]!, 10)
+      const raw = JSON.parse(await readFile(join(runDir, file), "utf8")) as QuestionArtifact
+      const questions = Array.isArray(raw.questions)
+        ? raw.questions.map((entry) => String(entry).trim()).filter(Boolean)
+        : []
+      if (questions.length > 0) questionTurns.set(turn, questions)
       continue
     }
-    const replyMatch = file.match(/^reader-reply-turn-(\d+)\.json$/)
+    const replyMatch = file.match(/^reply-(\d+)\.json$/)
     if (replyMatch) {
       const turn = Number.parseInt(replyMatch[1]!, 10)
-      const raw = JSON.parse(await readFile(join(runDir, file), "utf8")) as ReaderReplyArtifact
+      const raw = JSON.parse(await readFile(join(runDir, file), "utf8")) as ReplyArtifact
       if (typeof raw.reply === "string" && raw.reply.trim()) replyTurns.set(turn, raw.reply.trim())
     }
   }
 
-  if (profileTurns.size === 0) return undefined
+  if (questionTurns.size === 0) return undefined
 
   const transcript: ReaderTranscriptEntry[] = []
-  const maxProfileTurn = Math.max(...profileTurns.keys())
-  for (let turn = 1; turn <= maxProfileTurn; turn += 1) {
-    const profile = profileTurns.get(turn)
-    if (!profile) break
-    const questions = Array.isArray(profile.newQuestions)
-      ? profile.newQuestions.map((entry) => String(entry).trim()).filter(Boolean)
-      : []
-    if (questions.length === 0) break
+  const maxQuestionTurn = Math.max(...questionTurns.keys())
+  let partialProfile: Record<string, unknown> | undefined
+  try {
+    const profileRaw = JSON.parse(await readFile(join(runDir, "reader-profile.json"), "utf8")) as Record<string, unknown>
+    if (profileRaw && typeof profileRaw === "object") partialProfile = profileRaw
+  } catch {
+    // Final profile may not exist yet during the interview.
+  }
+
+  for (let turn = 1; turn <= maxQuestionTurn; turn += 1) {
+    const questions = questionTurns.get(turn)
+    if (!questions) break
     transcript.push({ role: "interviewer", text: questions.join("\n") })
 
     const reply = replyTurns.get(turn)
@@ -130,12 +135,11 @@ export async function readerInterviewStateFromRunDir(runDir: string): Promise<{
       continue
     }
 
-    if (profile.done === true) break
     return {
       turn,
       newQuestions: questions,
       transcript,
-      ...(profile.profile && typeof profile.profile === "object" ? { partialProfile: profile.profile } : {}),
+      ...(partialProfile ? { partialProfile } : {}),
     }
   }
 
@@ -150,7 +154,7 @@ export type AwaitingReaderReplyState = {
   partialProfile?: Record<string, unknown>
 }
 
-/** Prefer on-disk profile/reply artifacts when live-status lags the graph checkpoint. */
+/** Prefer on-disk question/reply artifacts when live-status lags the graph checkpoint. */
 export function reconcileAwaitingReaderReplyWithDisk(
   awaiting: AwaitingReaderReplyState,
   disk: {

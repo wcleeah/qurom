@@ -28,21 +28,24 @@ describe("node content view", () => {
   test("renderDiscoverReaderScope shows interview turns and profile", async () => {
     await setupRun()
     try {
-      await writeFile(join(runsRoot, runName, "reader-profile-1.json"), JSON.stringify({
-        newQuestions: ["What is your goal?"],
-        done: false,
-        profile: { intent: { goal: "Learn Go", depth: "overview" } },
+      await writeFile(join(runsRoot, runName, "question-1.json"), JSON.stringify({
+        questions: ["What is your goal?"],
       }))
-      await writeFile(join(runsRoot, runName, "reader-reply-turn-1.json"), JSON.stringify({ reply: "I want to understand select." }))
+      await writeFile(join(runsRoot, runName, "reply-1.json"), JSON.stringify({ reply: "I want to understand select." }))
+      await writeFile(join(runsRoot, runName, "reader-profile.json"), JSON.stringify({
+        intent: { goal: "Learn Go", depth: "overview" },
+      }))
 
       const html = await renderDiscoverReaderScope(runName, [
-        "reader-profile-1.json",
-        "reader-reply-turn-1.json",
+        "question-1.json",
+        "reply-1.json",
+        "reader-profile.json",
       ], null)
 
       expect(html).toContain("Interview turns")
       expect(html).toContain("What is your goal?")
       expect(html).toContain("understand select")
+      expect(html).toContain("Reader profile")
       expect(html).not.toContain("<h2>Summary</h2>")
     } finally {
       await rm(runsRoot, { recursive: true, force: true })
@@ -53,16 +56,14 @@ describe("node content view", () => {
   test("loads reader replies from disk when omitted from the run file list", async () => {
     await setupRun()
     try {
-      await writeFile(join(runsRoot, runName, "reader-profile-1.json"), JSON.stringify({
-        newQuestions: ["What is your goal?"],
-        done: false,
-        profile: { intent: { goal: "Learn Go", depth: "overview" } },
+      await writeFile(join(runsRoot, runName, "question-1.json"), JSON.stringify({
+        questions: ["What is your goal?"],
       }))
-      await writeFile(join(runsRoot, runName, "reader-reply-turn-1.json"), JSON.stringify({
+      await writeFile(join(runsRoot, runName, "reply-1.json"), JSON.stringify({
         reply: "Understand select internals.",
       }))
 
-      const html = await renderDiscoverReaderScope(runName, ["reader-profile-1.json"], null)
+      const html = await renderDiscoverReaderScope(runName, ["question-1.json"], null)
 
       expect(html).toContain("What is your goal?")
       expect(html).toContain("Understand select internals.")
@@ -89,33 +90,29 @@ describe("node content view", () => {
     }
   })
 
-  test("renderDiscoverReaderScope omits done profile turns and waiting text on completed runs", async () => {
+  test("renderDiscoverReaderScope shows completed interview without waiting text", async () => {
     await setupRun()
     try {
-      await writeFile(join(runsRoot, runName, "reader-profile-3.json"), JSON.stringify({
-        newQuestions: ["Third question?"],
-        done: false,
-        profile: { intent: { goal: "Learn Go", depth: "overview" } },
+      await writeFile(join(runsRoot, runName, "question-3.json"), JSON.stringify({
+        questions: ["Third question?"],
       }))
-      await writeFile(join(runsRoot, runName, "reader-reply-turn-3.json"), JSON.stringify({ reply: "Third answer." }))
-      await writeFile(join(runsRoot, runName, "reader-profile-4.json"), JSON.stringify({
-        newQuestions: [],
-        done: true,
-        profile: { intent: { goal: "Learn Go", depth: "implementation" } },
+      await writeFile(join(runsRoot, runName, "reply-3.json"), JSON.stringify({ reply: "Third answer." }))
+      await writeFile(join(runsRoot, runName, "reader-profile.json"), JSON.stringify({
+        intent: { goal: "Learn Go", depth: "implementation" },
       }))
       await writeFile(join(runsRoot, runName, "draft-round-0.md"), "# Draft")
 
       const html = await renderDiscoverReaderScope(runName, [
-        "reader-profile-3.json",
-        "reader-reply-turn-3.json",
-        "reader-profile-4.json",
+        "question-3.json",
+        "reply-3.json",
+        "reader-profile.json",
         "draft-round-0.md",
       ], { phase: "complete", round: 0, maxRounds: 2, agents: {}, nodeHistory: [] })
 
       expect(html).toContain("Third question?")
       expect(html).toContain("Third answer.")
+      expect(html).toContain("Reader profile")
       expect(html).not.toContain("Waiting for reader reply")
-      expect(html).not.toContain("Turn 4")
     } finally {
       await rm(runsRoot, { recursive: true, force: true })
       delete process.env.QUORUM_RUNS_DIR

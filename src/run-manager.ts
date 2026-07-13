@@ -32,7 +32,7 @@ export type RunManagerStatus = {
 export type RunManager = {
   status: () => RunManagerStatus
   startResearch: (request: InputRequest) => Promise<{ runId: string; runPath: string }>
-  resumeResearch: (runId: string, node?: string) => Promise<{ runId: string }>
+  resumeResearch: (runId: string) => Promise<{ runId: string }>
   cancel: (runId?: string) => Promise<boolean>
   shutdown: () => Promise<void>
 }
@@ -45,13 +45,11 @@ export type RunManagerDeps = {
   runResearchPipelineFn?: typeof runResearchPipeline
 }
 
-function parseResumeRunId(raw: string): { runId: string; node?: string } {
+function parseResumeRunId(raw: string): string {
   const hashIndex = raw.indexOf("#")
-  if (hashIndex < 0) return { runId: raw.trim() }
-  return {
-    runId: raw.slice(0, hashIndex).trim(),
-    node: raw.slice(hashIndex + 1).trim() || undefined,
-  }
+  if (hashIndex < 0) return raw.trim()
+  // Ignore legacy #nodeName suffix — resume is latest-only.
+  return raw.slice(0, hashIndex).trim()
 }
 
 const UUID_SUFFIX =
@@ -289,18 +287,18 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
       return { runId, runPath }
     },
 
-    async resumeResearch(rawRunId, node) {
-      const parsed = parseResumeRunId(rawRunId)
+    async resumeResearch(rawRunId) {
+      const runId = parseResumeRunId(rawRunId)
       const cfg = await config()
       const roles = configuredAgentRoles(cfg)
       let runDir: string | undefined
       try {
-        runDir = await resolveRunDirectory(parsed.runId, cfg.env.QUORUM_RUNS_DIR)
+        runDir = await resolveRunDirectory(runId, cfg.env.QUORUM_RUNS_DIR)
       } catch {
         // Pipeline will surface the missing-run error after return.
       }
       return runPipeline({
-        runId: parsed.runId,
+        runId,
         roles,
         runDir,
         maxRounds: cfg.quorumConfig.maxRounds,
@@ -309,7 +307,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
             config: pipelineCfg,
             prerequisites: prereqs,
             promptBundle: bundle,
-            resume: { runId: parsed.runId, node: node ?? parsed.node },
+            resume: { runId },
             bus,
             signal,
             bridgeFactory,

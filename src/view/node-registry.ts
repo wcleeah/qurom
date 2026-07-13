@@ -28,7 +28,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
     phase: "setup",
     pipelineLabel: "discoverReader",
     liveNodeAliases: ["discoverReaderPrompt", "discoverReaderResume"],
-    filePatterns: [/^reader-profile(?:-\d+)?\.json$/, /^reader-reply-turn-\d+\.json$/],
+    filePatterns: [/^reader-profile\.json$/, /^question-\d+\.json$/, /^reply-\d+\.json$/],
     roundScoped: false,
   },
   {
@@ -311,7 +311,7 @@ export function nodeKpis(nodeId: string, files: string[], index?: RunArtifactInd
 
   switch (nodeId) {
     case "discoverReader": {
-      const profiles = files.filter((f) => /^reader-profile(?:-\d+)?\.json$/.test(f))
+      const profiles = files.filter((f) => /^reader-profile\.json$/.test(f) || /^question-\d+\.json$/.test(f))
       kpis.push({ label: "Profiles", value: String(profiles.length) })
       break
     }
@@ -372,7 +372,7 @@ export function isNodeComplete(
   const currentRound = liveStatus?.phase === "running" ? liveStatus.round : artifactIndex.maxRound
   const hasAnyFile = files.length > 0
   const hasFile = (pattern: RegExp) => files.some((f) => pattern.test(f))
-  const hasReaderProfile = hasFile(/^reader-profile(?:-\d+)?\.json$/)
+  const hasReaderProfile = hasFile(/^reader-profile\.json$/)
   const researchDone = researchStatus === "approved" || researchStatus === "failed"
 
   switch (nodeId) {

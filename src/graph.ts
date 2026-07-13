@@ -693,6 +693,9 @@ async function discoverReaderPrompt(
   // Turn budget exhausted: proceed with any partial profile collected so far.
   if (turn > maxTurns) {
     await disposeReaderInterviewerSession(state.requestId)
+    if (state.readerProfile) {
+      await writeRunJsonArtifact(state.outputPath, "reader-profile.json", state.readerProfile)
+    }
     return researchStateSchema.parse({
       ...state,
       readerInterviewComplete: true,
@@ -700,7 +703,9 @@ async function discoverReaderPrompt(
     })
   }
 
-  const outputFile = `${state.outputPath}/reader-profile-${turn}.json`
+  // Agent writes structured turn JSON to a scratch file; public artifacts are
+  // question-N.json (questions only) and reader-profile.json (accepted only).
+  const scratchFile = `${state.outputPath}/.interview-scratch.json`
   // Reuse one durable session across all interview turns. This preserves
   // conversation state for Cursor cloud agents while still allowing normal
   // one-shot draft/audit handles to be disposed after each prompt.
@@ -737,7 +742,7 @@ async function discoverReaderPrompt(
         handle,
         prompt,
         schema: readerInterviewTurnSchema,
-        outputFile,
+        outputFile: scratchFile,
         telemetry: graphAgentTelemetry({
           telemetry,
           state,
@@ -758,10 +763,20 @@ async function discoverReaderPrompt(
     throw error
   }
 
-  await ensureJsonArtifact(outputFile, turnResult, "reader profile")
+  await ensureJsonArtifact(scratchFile, turnResult, "reader interview turn")
+  try {
+    const { unlink } = await import("node:fs/promises")
+    await unlink(scratchFile)
+  } catch {
+    // Scratch may already be gone.
+  }
+
   if (!turnResult || turnResult.done) {
     const profile = turnResult?.profile
     await disposeReaderInterviewerSession(state.requestId)
+    if (profile) {
+      await writeRunJsonArtifact(state.outputPath, "reader-profile.json", profile)
+    }
     return researchStateSchema.parse({
       ...state,
       readerProfile: profile,
@@ -770,8 +785,9 @@ async function discoverReaderPrompt(
     })
   }
 
-  // Not done: merge partial profile, append the question, route to resume.
+  // Not done: persist questions for this turn, merge partial profile, route to resume.
   const pendingQuestions = [...turnResult.newQuestions]
+  await writeRunJsonArtifact(state.outputPath, `question-${turn}.json`, { questions: pendingQuestions })
   transcript.push({ role: "interviewer", text: pendingQuestions.join("\n") })
   return researchStateSchema.parse({
     ...state,

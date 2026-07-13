@@ -99,16 +99,7 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
   if (resumeMatch && req.method === "POST") {
     try {
       const runId = decodeURIComponent(resumeMatch[1])
-      const raw = await req.text()
-      let node: string | undefined
-      if (raw.trim().startsWith("{")) {
-        const parsed = JSON.parse(raw) as { node?: unknown }
-        node = typeof parsed.node === "string" ? parsed.node : undefined
-      } else {
-        const params = new URLSearchParams(raw)
-        node = params.get("node") ?? undefined
-      }
-      const result = await getRunManager().resumeResearch(runId, node)
+      const result = await getRunManager().resumeResearch(runId)
       return redirectOrJson(
         req,
         url,

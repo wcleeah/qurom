@@ -31,7 +31,7 @@ function inferScopeFromArtifact(artifact: string, role: string): CursorCallScope
     return { node: "finalizeDesign", round: 0 }
   }
 
-  if (/^reader-profile(?:-\d+)?\.json$/.test(artifact)) {
+  if (/^reader-profile\.json$/.test(artifact) || /^\.interview-scratch\.json$/.test(artifact) || /^question-\d+\.json$/.test(artifact)) {
     return { node: "discoverReader", round: 0 }
   }
 

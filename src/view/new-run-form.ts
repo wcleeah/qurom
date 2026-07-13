@@ -17,7 +17,7 @@ const TAB_COPY: Record<string, { hint: string; submit: string }> = {
     submit: "Start from document",
   },
   resume: {
-    hint: "Resume a prior run by directory name or request ID. Append #nodeName to retry from a checkpoint (research or design nodes).",
+    hint: "Resume a prior run by directory name or request ID. Continues from the latest checkpoint.",
     submit: "Resume run",
   },
 }
