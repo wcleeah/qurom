@@ -48,6 +48,138 @@ export function answeredQuestionsFromTranscript(transcript: ReaderTranscriptEntr
   return answered
 }
 
+/** Prefer the latest interviewer turn in transcript over stale pending question state. */
+export function resolveReaderInterviewQuestions(input: {
+  interviewTranscript?: ReaderTranscriptEntry[]
+  pendingNewReaderQuestions?: string[]
+  interruptValue?: unknown
+}): string[] {
+  const transcript = input.interviewTranscript ?? []
+  const lastEntry = transcript[transcript.length - 1]
+  if (lastEntry?.role === "interviewer") {
+    const fromTranscript = splitQuestions(lastEntry.text)
+    if (fromTranscript.length > 0) return fromTranscript
+  }
+  if (input.pendingNewReaderQuestions?.length) return input.pendingNewReaderQuestions
+  if (Array.isArray(input.interruptValue)) {
+    return input.interruptValue.map((entry) => String(entry)).filter(Boolean)
+  }
+  if (input.interruptValue !== undefined) return [String(input.interruptValue)]
+  return []
+}
+
+export function readerInterviewTurnFromTranscript(transcript: ReaderTranscriptEntry[]): number {
+  return Math.max(1, Math.ceil(transcript.length / 2))
+}
+
+type ReaderProfileArtifact = {
+  newQuestions?: string[]
+  done?: boolean
+  profile?: Record<string, unknown>
+}
+
+type ReaderReplyArtifact = {
+  reply?: string
+}
+
+export async function readerInterviewStateFromRunDir(runDir: string): Promise<{
+  turn: number
+  newQuestions: string[]
+  transcript: ReaderTranscriptEntry[]
+  partialProfile?: Record<string, unknown>
+} | undefined> {
+  const { readdir, readFile } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+
+  const files = await readdir(runDir)
+  const profileTurns = new Map<number, ReaderProfileArtifact>()
+  const replyTurns = new Map<number, string>()
+
+  for (const file of files) {
+    const profileMatch = file.match(/^reader-profile-(\d+)\.json$/)
+    if (profileMatch) {
+      const turn = Number.parseInt(profileMatch[1]!, 10)
+      const raw = JSON.parse(await readFile(join(runDir, file), "utf8")) as ReaderProfileArtifact
+      profileTurns.set(turn, raw)
+      continue
+    }
+    const replyMatch = file.match(/^reader-reply-turn-(\d+)\.json$/)
+    if (replyMatch) {
+      const turn = Number.parseInt(replyMatch[1]!, 10)
+      const raw = JSON.parse(await readFile(join(runDir, file), "utf8")) as ReaderReplyArtifact
+      if (typeof raw.reply === "string" && raw.reply.trim()) replyTurns.set(turn, raw.reply.trim())
+    }
+  }
+
+  if (profileTurns.size === 0) return undefined
+
+  const transcript: ReaderTranscriptEntry[] = []
+  const maxProfileTurn = Math.max(...profileTurns.keys())
+  for (let turn = 1; turn <= maxProfileTurn; turn += 1) {
+    const profile = profileTurns.get(turn)
+    if (!profile) break
+    const questions = Array.isArray(profile.newQuestions)
+      ? profile.newQuestions.map((entry) => String(entry).trim()).filter(Boolean)
+      : []
+    if (questions.length === 0) break
+    transcript.push({ role: "interviewer", text: questions.join("\n") })
+
+    const reply = replyTurns.get(turn)
+    if (reply !== undefined) {
+      transcript.push({ role: "reader", text: reply })
+      continue
+    }
+
+    if (profile.done === true) break
+    return {
+      turn,
+      newQuestions: questions,
+      transcript,
+      ...(profile.profile && typeof profile.profile === "object" ? { partialProfile: profile.profile } : {}),
+    }
+  }
+
+  return undefined
+}
+
+export type AwaitingReaderReplyState = {
+  turn: number
+  answeredQuestions?: Array<{ question: string; answer: string }>
+  newQuestions: string[]
+  transcript?: ReaderTranscriptEntry[]
+  partialProfile?: Record<string, unknown>
+}
+
+/** Prefer on-disk profile/reply artifacts when live-status lags the graph checkpoint. */
+export function reconcileAwaitingReaderReplyWithDisk(
+  awaiting: AwaitingReaderReplyState,
+  disk: {
+    turn: number
+    newQuestions: string[]
+    transcript: ReaderTranscriptEntry[]
+    partialProfile?: Record<string, unknown>
+  },
+): AwaitingReaderReplyState {
+  const liveTranscript = awaiting.transcript ?? []
+  const useDisk =
+    disk.turn > awaiting.turn
+    || disk.transcript.length > liveTranscript.length
+    || (
+      disk.turn >= awaiting.turn
+      && disk.newQuestions.join("\0") !== awaiting.newQuestions.join("\0")
+    )
+
+  if (!useDisk) return awaiting
+
+  return {
+    turn: disk.turn,
+    newQuestions: disk.newQuestions,
+    transcript: disk.transcript,
+    answeredQuestions: answeredQuestionsFromTranscript(disk.transcript),
+    partialProfile: disk.partialProfile ?? awaiting.partialProfile,
+  }
+}
+
 export function formatReaderTranscriptForPrompt(transcript: ReaderTranscriptEntry[]) {
   if (transcript.length === 0) return "(none yet -- this is the first question)"
 
