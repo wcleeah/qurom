@@ -252,5 +252,8 @@ describe("html ask routes and ui", () => {
     expect(html).toContain('aria-current="true"')
     expect(html).toContain("html-viewer-ask-chat-selected")
     expect(html).toContain("startNewChat()")
+    expect(html).toMatch(
+      /data-html-ask-sheet hidden><\/div>\s*<div class="html-viewer-ask-layout">\s*<div class="html-viewer-ask-sheet-handle"/,
+    )
   })
 })

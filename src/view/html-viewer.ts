@@ -241,10 +241,9 @@ export function renderHtmlViewerPage(
         <div class="html-viewer-highlight-list" data-html-highlight-list></div>
       </div>
       <div class="html-viewer-panel" data-html-panel="ask" role="tabpanel" hidden>
-        <div class="html-viewer-ask-sheet" data-html-ask-sheet hidden>
-          <div class="html-viewer-ask-sheet-handle" aria-hidden="true"></div>
-        </div>
+        <div class="html-viewer-ask-sheet" data-html-ask-sheet hidden></div>
         <div class="html-viewer-ask-layout">
+          <div class="html-viewer-ask-sheet-handle" aria-hidden="true"></div>
           <div class="html-viewer-ask-chat-list" data-html-ask-chat-list></div>
           <div class="html-viewer-ask-bootstrap" data-html-ask-bootstrap hidden>
             <label class="html-viewer-ask-bootstrap-label" for="html-ask-bootstrap-select">Starting from</label>

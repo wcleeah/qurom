@@ -3127,6 +3127,10 @@ body.html-viewer-body {
   display: none;
 }
 
+.html-viewer-ask-sheet-handle {
+  display: none;
+}
+
 @media (max-width: 860px) {
   .html-viewer-panel[data-html-panel="ask"] {
     position: relative;
@@ -3136,7 +3140,7 @@ body.html-viewer-body {
     display: block;
     position: fixed;
     inset: 0;
-    z-index: 50;
+    z-index: 0;
     background: rgba(0, 0, 0, 0.35);
     pointer-events: none;
   }
@@ -3158,12 +3162,19 @@ body.html-viewer-body {
     flex-direction: column;
   }
 
-  .html-viewer-ask-sheet-handle {
+  .html-viewer-ask-sheet-open .html-viewer-ask-layout {
+    position: relative;
+    z-index: 1;
+  }
+
+  .html-viewer-ask-sheet-open .html-viewer-ask-sheet-handle {
+    display: block;
     width: 2.5rem;
     height: 0.25rem;
     border-radius: 999px;
     background: var(--border);
-    margin: 0.5rem auto 0;
+    margin: 0 auto 0.35rem;
+    flex-shrink: 0;
   }
 
   .html-viewer-ask-messages {

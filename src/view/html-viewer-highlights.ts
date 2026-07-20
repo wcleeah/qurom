@@ -62,6 +62,8 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   let selectedHighlightId = null
   let selectedColor = "yellow"
   let cssHighlightSupported = false
+  let selectionBoundDoc = null
+  let selectionTimer = null
   const painted = new Map()
   const noteSaveTimers = new Map()
   const noteLastSaved = new Map()
@@ -423,8 +425,14 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     }
   }
 
+  function onSelectionChange() {
+    clearTimeout(selectionTimer)
+    selectionTimer = setTimeout(() => captureSelection(), 120)
+  }
+
   function clearSelection() {
     pendingSelection = null
+    clearTimeout(selectionTimer)
     const doc = iframe.contentDocument
     doc?.getSelection()?.removeAllRanges()
     syncCompose()
@@ -437,7 +445,12 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     if (unsupportedEl instanceof HTMLElement) {
       unsupportedEl.hidden = cssHighlightSupported
     }
-    doc.addEventListener("mouseup", () => captureSelection())
+    if (selectionBoundDoc) {
+      selectionBoundDoc.removeEventListener("selectionchange", onSelectionChange)
+      selectionBoundDoc = null
+    }
+    doc.addEventListener("selectionchange", onSelectionChange)
+    selectionBoundDoc = doc
     repaintAll(doc)
     renderList(doc)
     syncCompose()

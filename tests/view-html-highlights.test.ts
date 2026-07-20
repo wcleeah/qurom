@@ -187,5 +187,7 @@ describe("html viewer highlights UI", () => {
     expect(html).not.toContain('data-highlights="[{"')
     expect(html).toContain("&quot;id&quot;")
     expect(html).toContain("Hide panel")
+    expect(html).toContain('addEventListener("selectionchange"')
+    expect(html).not.toContain('addEventListener("mouseup"')
   })
 })
