@@ -36,6 +36,9 @@ function buildRefreshScript(options: {
   let nextDelay = 8000
   let inFlight = false
   let autoRefresh = readAutoRefresh()
+  let interviewPause = false
+  /** After a successful reply, keep polling until the interview form leaves the page. */
+  let resumeAfterInterviewSubmit = false
   const refreshDot = () => document.getElementById("refresh-dot")
   const refreshStatus = () => document.getElementById("refresh-status")
   const refreshToggle = () => document.getElementById("refresh-auto-toggle")
@@ -58,6 +61,26 @@ function buildRefreshScript(options: {
 
   function offStatusText() {
     return "Live refresh off · click Refresh now to update"
+  }
+
+  function interviewPausedStatusText() {
+    return "Live refresh paused during interview"
+  }
+
+  function hasInterviewReplyForm() {
+    const interviewEl = document.getElementById("interview-chat-section")
+    return !!(interviewEl && interviewEl.querySelector("form[data-interview-reply-form]"))
+  }
+
+  function syncInterviewPause() {
+    const hasForm = hasInterviewReplyForm()
+    if (resumeAfterInterviewSubmit) {
+      if (!hasForm) resumeAfterInterviewSubmit = false
+      interviewPause = false
+      return false
+    }
+    interviewPause = hasForm
+    return interviewPause
   }
 
   function setStatus(text, polling) {
@@ -100,6 +123,10 @@ function buildRefreshScript(options: {
       setStatus(offStatusText(), false)
       return
     }
+    if (interviewPause || syncInterviewPause()) {
+      setStatus(interviewPausedStatusText(), false)
+      return
+    }
     timer = setTimeout(() => poll(false), nextDelay)
     const status = refreshStatus()
     if (status) {
@@ -110,8 +137,24 @@ function buildRefreshScript(options: {
     }
   }
 
+  function preserveInFlightStar(oldHeader, newHeaderRoot) {
+    const oldStar = oldHeader.querySelector("[data-star-toggle]")
+    const newStar = newHeaderRoot.querySelector("[data-star-toggle]")
+    if (!(oldStar instanceof HTMLButtonElement) || !(newStar instanceof HTMLButtonElement)) return
+    if (!oldStar.disabled) return
+    newStar.dataset.starred = oldStar.dataset.starred || "false"
+    newStar.setAttribute("aria-pressed", oldStar.getAttribute("aria-pressed") || "false")
+    newStar.setAttribute("aria-label", oldStar.getAttribute("aria-label") || "Star run")
+    newStar.classList.toggle("star-button-active", oldStar.classList.contains("star-button-active"))
+    newStar.disabled = true
+  }
+
   async function poll(manual) {
     if (inFlight) return
+    if (!manual && (interviewPause || syncInterviewPause())) {
+      setStatus(interviewPausedStatusText(), false)
+      return
+    }
     inFlight = true
     clearTimeout(timer)
     setStatus(manual ? "Refreshing..." : "Polling...", true)
@@ -144,6 +187,7 @@ function buildRefreshScript(options: {
       const oldHeader = document.querySelector(".header-bar")
       const newHeader = doc.querySelector(".header-bar")
       if (oldHeader && newHeader) {
+        preserveInFlightStar(oldHeader, newHeader)
         oldHeader.innerHTML = newHeader.innerHTML
       }
       setStatus("Updated " + new Date().toLocaleTimeString(), false)
@@ -152,9 +196,8 @@ function buildRefreshScript(options: {
     } finally {
       inFlight = false
     }
-    const interviewEl = document.getElementById("interview-chat-section")
-    const interviewPending = !!(interviewEl && interviewEl.querySelector("form"))
-    nextDelay = interviewPending ? 1500 : 8000
+    syncInterviewPause()
+    nextDelay = resumeAfterInterviewSubmit ? 1500 : 8000
     if (autoRefresh) {
       scheduleNextPoll()
     } else if (manual) {
@@ -171,6 +214,10 @@ function buildRefreshScript(options: {
     syncToggle()
     clearTimeout(timer)
     if (enabled) {
+      if (syncInterviewPause()) {
+        setStatus(interviewPausedStatusText(), false)
+        return
+      }
       void poll(false)
     } else {
       setStatus(offStatusText(), false)
@@ -209,6 +256,8 @@ function buildRefreshScript(options: {
       if (!resp.ok && resp.status !== 0 && resp.status !== 303) throw new Error("reply failed")
       form.reset()
       history.replaceState(history.state, "", window.location.pathname)
+      resumeAfterInterviewSubmit = true
+      interviewPause = false
       void poll(true)
     } catch {
       setStatus("Answer send failed", false)
@@ -218,7 +267,11 @@ function buildRefreshScript(options: {
 
   syncToggle()
   if (autoRefresh) {
-    void poll(false)
+    if (syncInterviewPause()) {
+      setStatus(interviewPausedStatusText(), false)
+    } else {
+      void poll(false)
+    }
   } else {
     setStatus(offStatusText(), false)
   }

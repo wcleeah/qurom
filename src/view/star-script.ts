@@ -10,6 +10,11 @@ export const STAR_SCRIPT = /* html */ `
     btn.setAttribute("aria-label", starred ? "Unstar run" : "Star run")
     btn.classList.toggle("star-button-active", starred)
   }
+  function liveStarButton(runName) {
+    return Array.from(document.querySelectorAll("[data-star-toggle]")).find(
+      (el) => el instanceof HTMLButtonElement && el.dataset.runName === runName,
+    )
+  }
   document.addEventListener("click", async (event) => {
     const target = event.target
     if (!(target instanceof Element)) return
@@ -28,8 +33,11 @@ export const STAR_SCRIPT = /* html */ `
       })
       if (!resp.ok) throw new Error("star failed")
       const data = await resp.json()
-      renderStarButton(btn, !!data.starred)
-      const card = btn.closest(".run-card")
+      const liveBtn = liveStarButton(runName)
+      const targetBtn = liveBtn instanceof HTMLButtonElement ? liveBtn : btn
+      renderStarButton(targetBtn, !!data.starred)
+      targetBtn.disabled = false
+      const card = targetBtn.closest(".run-card")
       if (card && new URLSearchParams(window.location.search).get("starred") === "1" && !data.starred) {
         card.remove()
         if (!document.querySelector(".run-card")) {
@@ -41,8 +49,9 @@ export const STAR_SCRIPT = /* html */ `
       }
     } catch {
       /* keep prior state */
-    } finally {
-      btn.disabled = false
+      const liveBtn = liveStarButton(runName)
+      if (liveBtn instanceof HTMLButtonElement) liveBtn.disabled = false
+      else btn.disabled = false
     }
   })
 })()

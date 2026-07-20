@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { renderDebugLogHtml } from "../src/view/debug-log-viewer.ts"
 import { renderStructuredJson, renderConsensusRound, renderRebuttalsRound, renderRebuttalReviewRound, renderTargetedRebuttalsRound } from "../src/view/artifact-renderers.ts"
 import { POLLING_SCRIPT } from "../src/view/client-script.ts"
-import { renderInterviewChatCard } from "../src/view/components.ts"
+import { renderFailureBanner, renderInterviewChatCard } from "../src/view/components.ts"
 import { renderNodeGrid, renderGlobalResearchRoundStrip, renderNodeMiniPipeline, researchRoundNumbers } from "../src/view/node-view.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 import { classifyFile } from "../src/view/file-browser.ts"
@@ -184,6 +184,9 @@ describe("view assets and html helpers", () => {
     expect(POLLING_SCRIPT).toContain("data-refresh-now")
     expect(POLLING_SCRIPT).toContain("data-refresh-toggle")
     expect(POLLING_SCRIPT).toContain("qurom-view-live-refresh")
+    expect(POLLING_SCRIPT).toContain("Live refresh paused during interview")
+    expect(POLLING_SCRIPT).toContain("preserveInFlightStar")
+    expect(POLLING_SCRIPT).toContain("data-interview-reply-form")
   })
 
   test("renders small reusable card, section, and summary table fragments", () => {
