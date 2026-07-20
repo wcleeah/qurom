@@ -151,6 +151,8 @@ export async function renderFailureBanner(
   files: string[],
   liveStatus: LiveStatus | null,
 ): Promise<string> {
+  if (liveStatus?.phase === "running") return ""
+
   const hasFinalMd = files.includes("final.md")
   const hasFailureJson = files.includes("failure.json")
   const hasLatestDraft = files.includes("latest-draft.md")

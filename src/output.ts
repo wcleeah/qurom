@@ -1,4 +1,4 @@
-import { mkdir, readdir, rmdir } from "node:fs/promises"
+import { mkdir, readdir, rename, rmdir } from "node:fs/promises"
 import { basename, extname, join } from "node:path"
 
 export const RUN_INPUT_DOCUMENT = "input.md"
@@ -176,6 +176,50 @@ export async function writeFailedArtifacts(
 ) {
   await writeRunTextArtifact(runDir, "latest-draft.md", input.draft)
   await writeRunJsonArtifact(runDir, "failure.json", input.summary)
+}
+
+function archiveTimestamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-")
+}
+
+async function renameIfExists(from: string, to: string): Promise<boolean> {
+  try {
+    await rename(from, to)
+    return true
+  } catch (error) {
+    if (hasErrorCode(error, "ENOENT")) return false
+    throw error
+  }
+}
+
+/** Move sticky failure artifacts aside so a resumed run is not haunted by the prior error UI. */
+export async function archiveFailureArtifactsOnResume(runDir: string): Promise<{
+  archivedFailure: boolean
+  archivedRunStatus: boolean
+}> {
+  const stamp = archiveTimestamp()
+  const archivedFailure = await renameIfExists(
+    join(runDir, "failure.json"),
+    join(runDir, `failure-archived-${stamp}.json`),
+  )
+
+  let archivedRunStatus = false
+  const runStatusPath = join(runDir, "run-status.json")
+  if (await Bun.file(runStatusPath).exists()) {
+    try {
+      const raw = await Bun.file(runStatusPath).json() as { phase?: unknown }
+      if (raw?.phase === "error") {
+        archivedRunStatus = await renameIfExists(
+          runStatusPath,
+          join(runDir, `run-status-archived-${stamp}.json`),
+        )
+      }
+    } catch {
+      // Unreadable run-status is left in place.
+    }
+  }
+
+  return { archivedFailure, archivedRunStatus }
 }
 
 export async function writeDesignHtmlArtifact(runDir: string, html: string) {

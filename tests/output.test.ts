@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  archiveFailureArtifactsOnResume,
   buildRunDirName,
   buildRunDirSlug,
   ensureRunDirPath,
@@ -101,5 +102,38 @@ describe("output helpers", () => {
       requestId: "req-1",
       inputMode: "topic",
     })
+  })
+
+  test("archiveFailureArtifactsOnResume renames failure.json and error run-status.json", async () => {
+    const root = await mkdtemp(join(tmpdir(), "qurom-output-"))
+    const runDir = join(root, "failed-run")
+    await writeRunJsonArtifact(runDir, "failure.json", { error: "boom", phase: "finalize" })
+    await writeRunJsonArtifact(runDir, "run-status.json", { phase: "error", error: "boom" })
+    await writeRunTextArtifact(runDir, "latest-draft.md", "draft body")
+
+    const result = await archiveFailureArtifactsOnResume(runDir)
+
+    expect(result.archivedFailure).toBe(true)
+    expect(result.archivedRunStatus).toBe(true)
+    expect(await Bun.file(join(runDir, "failure.json")).exists()).toBe(false)
+    expect(await Bun.file(join(runDir, "run-status.json")).exists()).toBe(false)
+    expect(await Bun.file(join(runDir, "latest-draft.md")).exists()).toBe(true)
+
+    const { readdir } = await import("node:fs/promises")
+    const files = await readdir(runDir)
+    expect(files.some((f) => f.startsWith("failure-archived-") && f.endsWith(".json"))).toBe(true)
+    expect(files.some((f) => f.startsWith("run-status-archived-") && f.endsWith(".json"))).toBe(true)
+  })
+
+  test("archiveFailureArtifactsOnResume leaves non-error run-status alone", async () => {
+    const root = await mkdtemp(join(tmpdir(), "qurom-output-"))
+    const runDir = join(root, "ok-run")
+    await writeRunJsonArtifact(runDir, "run-status.json", { phase: "complete" })
+
+    const result = await archiveFailureArtifactsOnResume(runDir)
+
+    expect(result.archivedFailure).toBe(false)
+    expect(result.archivedRunStatus).toBe(false)
+    expect(await Bun.file(join(runDir, "run-status.json")).json()).toEqual({ phase: "complete" })
   })
 })

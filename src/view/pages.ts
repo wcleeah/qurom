@@ -454,15 +454,16 @@ export async function renderRun(name: string): Promise<Response> {
   const hasLatestDraft = files.includes("latest-draft.md")
   const hasFailureJson = files.includes("failure.json")
 
-  let researchStatus: RunStatus = "running"
-  if (hasFinalMd) researchStatus = "approved"
-  else if (hasLatestDraft || hasFailureJson) researchStatus = "failed"
-
   // Design status
   const design = await readDesignSummary(name, files)
 
   // Live status (if run is active)
   const liveStatus = await readLiveStatus(name)
+
+  let researchStatus: RunStatus = "running"
+  if (hasFinalMd) researchStatus = "approved"
+  else if (liveStatus?.phase === "running") researchStatus = "running"
+  else if (hasLatestDraft || hasFailureJson) researchStatus = "failed"
 
   const topic =
     requestJson?.inputSummary?.title ??
@@ -501,7 +502,7 @@ export async function renderRun(name: string): Promise<Response> {
   const finalOutputLinks: string[] = []
 
   if (hasFinalHtml) {
-    finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.html" target="_blank" rel="noopener">
+    finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.html">
   Open final.html →
 </a>`)
   } else {

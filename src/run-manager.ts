@@ -12,7 +12,13 @@ import {
   type BridgeFactory,
   type RuntimePrerequisites,
 } from "./runner"
-import { buildRunDirName, ensureRunDir, writeFailedArtifacts, writeRunJsonArtifact } from "./output"
+import {
+  archiveFailureArtifactsOnResume,
+  buildRunDirName,
+  ensureRunDir,
+  writeFailedArtifacts,
+  writeRunJsonArtifact,
+} from "./output"
 import type { LiveStatus } from "./live-status"
 import { resolveRunDirectory } from "./run-resume"
 import type { InputRequest } from "./schema"
@@ -296,6 +302,9 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
         runDir = await resolveRunDirectory(runId, cfg.env.QUORUM_RUNS_DIR)
       } catch {
         // Pipeline will surface the missing-run error after return.
+      }
+      if (runDir) {
+        await archiveFailureArtifactsOnResume(runDir)
       }
       return runPipeline({
         runId,
