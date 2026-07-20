@@ -78,6 +78,16 @@ describe("renderRunActionStrip", () => {
     expect(html).toContain("/api/runs/my-run-abc/restart-from-source")
     expect(html).toContain("New run from source document")
   })
+
+  test("renders archive button when showArchive is set", () => {
+    const html = renderRunActionStrip(
+      "my-run-abc",
+      { showResume: false, showRestartFromSource: false },
+      { showArchive: true },
+    )
+    expect(html).toContain("/api/runs/my-run-abc/archive")
+    expect(html).toContain("Archive run")
+  })
 })
 
 describe("resolveRunVerdict", () => {

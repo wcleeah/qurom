@@ -45,27 +45,45 @@ function renderRestartFromSourceForm(runName: string, disabled: boolean): string
 </form>`
 }
 
+function renderArchiveForm(runName: string): string {
+  return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/archive">
+  <button type="submit" class="btn btn-secondary">Archive run</button>
+</form>`
+}
+
 export function renderRunActionStrip(
   runName: string,
   actions: RunResumeActions,
-  options?: { runActiveGlobally?: boolean },
+  options?: { runActiveGlobally?: boolean; showArchive?: boolean },
 ): string {
-  if (!actions.showResume && !actions.showRestartFromSource) return ""
+  const showArchive = options?.showArchive === true
+  if (!actions.showResume && !actions.showRestartFromSource && !showArchive) return ""
 
   const disabled = options?.runActiveGlobally === true
   const busyNote = disabled
     ? `<p class="muted-note dim-text run-actions-note">Another run is active — wait for it to finish first.</p>`
     : ""
 
-  const buttons = [
+  const continueButtons = [
     actions.showResume ? renderResumeForm(runName, disabled) : "",
     actions.showRestartFromSource ? renderRestartFromSourceForm(runName, disabled) : "",
   ].filter(Boolean).join("\n")
 
+  const archiveButtons = showArchive ? renderArchiveForm(runName) : ""
+
+  const sections: string[] = []
+  if (continueButtons) {
+    sections.push(`<span class="run-actions-label">Continue this run</span>
+  <div class="run-actions-buttons">${continueButtons}</div>
+  ${busyNote}`)
+  }
+  if (archiveButtons) {
+    sections.push(`<span class="run-actions-label">Manage</span>
+  <div class="run-actions-buttons">${archiveButtons}</div>`)
+  }
+
   return `<div class="run-actions">
-  <span class="run-actions-label">Continue this run</span>
-  <div class="run-actions-buttons">${buttons}</div>
-  ${busyNote}
+  ${sections.join("\n  ")}
 </div>`
 }
 
@@ -80,7 +98,10 @@ export function renderRunControlsSection(input: {
   const cancelHtml = input.isRunning ? renderRunCancelButton(input.runName) : ""
   const actionsHtml = input.isRunning
     ? ""
-    : renderRunActionStrip(input.runName, input.resumeActions, { runActiveGlobally: input.runActiveGlobally })
+    : renderRunActionStrip(input.runName, input.resumeActions, {
+      runActiveGlobally: input.runActiveGlobally,
+      showArchive: true,
+    })
   const completionHtml = input.showCompletion ? input.completionHtml : ""
 
   if (!cancelHtml && !actionsHtml && !completionHtml) {

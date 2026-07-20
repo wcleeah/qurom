@@ -1,5 +1,5 @@
-import { readdir, stat } from "node:fs/promises"
-import { basename, resolve } from "node:path"
+import { mkdir, readdir, rename, stat } from "node:fs/promises"
+import { basename, join, resolve } from "node:path"
 
 import { quorumDataPaths } from "../data-paths"
 import { isSqliteFile } from "./utils"
@@ -9,6 +9,17 @@ export function getRunsDir(): string {
     return resolve(process.env.QUORUM_RUNS_DIR)
   }
   return quorumDataPaths().runsDir
+}
+
+export function getArchiveDir(): string {
+  if (process.env.QUORUM_ARCHIVE_DIR) {
+    return resolve(process.env.QUORUM_ARCHIVE_DIR)
+  }
+  // When runs dir is overridden, keep archive as sibling of that override.
+  if (process.env.QUORUM_RUNS_DIR) {
+    return resolve(process.env.QUORUM_RUNS_DIR, "..", "archive")
+  }
+  return quorumDataPaths().archiveDir
 }
 
 /** @deprecated Prefer getRunsDir() — evaluated once at import for display-only use. */
@@ -62,4 +73,29 @@ export function safeFilePath(runName: string, filePath: string): string {
     throw new Error("Sqlite files blocked")
   }
   return resolved
+}
+
+/** Move a run directory from runs/ into archive/. Returns the destination path. */
+export async function archiveRunDirectory(runName: string): Promise<string> {
+  const source = safeRunPath(runName)
+  const archiveDir = getArchiveDir()
+  await mkdir(archiveDir, { recursive: true })
+
+  let destName = runName
+  let dest = join(archiveDir, destName)
+  try {
+    await stat(dest)
+    destName = `${runName}-archived-${Date.now()}`
+    dest = join(archiveDir, destName)
+  } catch {
+    // destination free
+  }
+
+  const resolvedDest = resolve(dest)
+  if (!resolvedDest.startsWith(archiveDir + "/") && resolvedDest !== archiveDir) {
+    throw new Error("Path traversal blocked")
+  }
+
+  await rename(source, resolvedDest)
+  return resolvedDest
 }

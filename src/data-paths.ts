@@ -6,6 +6,7 @@ export type QuorumDataPaths = {
   configDb: string
   checkpointDb: string
   runsDir: string
+  archiveDir: string
 }
 
 export function resolveQuorumDataDir(explicit?: string): string {
@@ -22,6 +23,7 @@ export function quorumDataPaths(explicitDataDir?: string): QuorumDataPaths {
     configDb: join(root, "quorum-config.sqlite"),
     checkpointDb: join(root, "checkpoints.sqlite"),
     runsDir: join(root, "runs"),
+    archiveDir: join(root, "archive"),
   }
 }
 
@@ -31,6 +33,7 @@ export async function ensureQuorumDataDirs(paths: QuorumDataPaths) {
   await mkdir(dirname(paths.configDb), { recursive: true })
   await mkdir(dirname(paths.checkpointDb), { recursive: true })
   await mkdir(paths.runsDir, { recursive: true })
+  await mkdir(paths.archiveDir, { recursive: true })
 }
 
 export function repoDefaultsDir(workspaceDir?: string): string {

@@ -1,7 +1,12 @@
 import { inputRequestSchema } from "../schema"
 import { readRunSourceDocument } from "../document-input"
-import { RunManagerError, getRunManager, toRunManagerError } from "../run-manager"
-import { resolveRunName, safeRunPath } from "./paths"
+import {
+  RunManagerError,
+  getRunManager,
+  isRunManagedActive,
+  toRunManagerError,
+} from "../run-manager"
+import { archiveRunDirectory, resolveRunName, safeRunPath } from "./paths"
 
 function wantsJson(req: Request, url: URL): boolean {
   return url.searchParams.get("json") === "1"
@@ -124,6 +129,24 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
         status: 303,
         headers: { Location: referer ?? `/runs/${encodeURIComponent(runId)}` },
       })
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
+  const archiveMatch = path.match(/^\/api\/runs\/(.+?)\/archive$/)
+  if (archiveMatch && req.method === "POST") {
+    try {
+      const runRef = decodeURIComponent(archiveMatch[1])
+      const runName = await resolveRunName(runRef)
+      if (!runName) {
+        throw new RunManagerError(`Run not found: ${runRef}`, 404)
+      }
+      if (isRunManagedActive(runName) || isRunManagedActive(runRef)) {
+        throw new RunManagerError("Cannot archive an active run", 409)
+      }
+      const archivedPath = await archiveRunDirectory(runName)
+      return redirectOrJson(req, url, "/", { ok: true, runName, archivedPath })
     } catch (error) {
       return errorResponse(error, req, url)
     }

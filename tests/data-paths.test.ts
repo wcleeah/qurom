@@ -28,6 +28,7 @@ describe("data paths", () => {
       configDb: "/tmp/custom-qurom/quorum-config.sqlite",
       checkpointDb: "/tmp/custom-qurom/checkpoints.sqlite",
       runsDir: "/tmp/custom-qurom/runs",
+      archiveDir: "/tmp/custom-qurom/archive",
     })
   })
 })

@@ -16,6 +16,7 @@ function ensureDataDirsSync(dataDir: string) {
   mkdirSync(dirname(paths.configDb), { recursive: true })
   mkdirSync(dirname(paths.checkpointDb), { recursive: true })
   mkdirSync(paths.runsDir, { recursive: true })
+  mkdirSync(paths.archiveDir, { recursive: true })
 }
 
 export function testRuntimeEnv(input: {
