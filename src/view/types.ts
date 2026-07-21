@@ -12,7 +12,7 @@ export interface RunMeta {
   fileCount: number
   designStatus: RunStatus | null
   designRoundCount: number
-  starred: boolean
+  unread: boolean
 }
 
 export interface RunStats {

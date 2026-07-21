@@ -5,7 +5,7 @@ import { readCursorUsageImport, CURSOR_USAGE_IMPORT_FILENAME, type CursorUsageIm
 import { reconcileAwaitingReaderReplyWithDisk, readerInterviewStateFromRunDir } from "../reader-transcript"
 import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
 import { isRunManagedActive } from "../run-manager"
-import { listStarredRunNames } from "./starred-store"
+import { listReadRunNames } from "./read-store"
 import { isSqliteFile } from "./utils"
 import type { FileClass, LiveStatus, NodeHistoryEntry, RequestJson, RunMeta, RunStats, RunStatus } from "./types"
 import type { ReaderTranscriptEntry } from "../reader-transcript"
@@ -176,17 +176,17 @@ export async function listRuns(): Promise<RunMeta[]> {
       fileCount,
       designStatus,
       designRoundCount,
-      starred: false,
+      unread: true,
     })
   }
 
-  const starred = await listStarredRunNames()
+  const read = await listReadRunNames()
   for (const meta of metas) {
-    meta.starred = starred.has(meta.name)
+    meta.unread = !read.has(meta.name)
   }
 
   metas.sort((a, b) => {
-    if (a.starred !== b.starred) return a.starred ? -1 : 1
+    if (a.unread !== b.unread) return a.unread ? -1 : 1
     return b.mtime - a.mtime
   })
   return metas
@@ -195,20 +195,27 @@ export async function listRuns(): Promise<RunMeta[]> {
 export function filterRunsForIndex(
   runs: RunMeta[],
   searchParams: URLSearchParams,
-): { runs: RunMeta[]; showStarredOnly: boolean; showAll: boolean } {
-  const showStarredOnly = searchParams.get("starred") === "1"
+): { runs: RunMeta[]; showUnreadOnly: boolean; showActive: boolean; showAll: boolean } {
   const showAll = searchParams.get("all") === "1"
+  const showActive = searchParams.get("active") === "1"
+  const showUnreadOnly = !showAll && !showActive
 
-  if (showStarredOnly) {
-    return { runs: runs.filter((run) => run.starred), showStarredOnly, showAll }
-  }
   if (showAll) {
-    return { runs, showStarredOnly, showAll }
+    return { runs, showUnreadOnly: false, showActive: false, showAll }
+  }
+  if (showActive) {
+    return {
+      runs: runs.filter((run) => run.status !== "failed" || run.unread),
+      showUnreadOnly: false,
+      showActive: true,
+      showAll: false,
+    }
   }
   return {
-    runs: runs.filter((run) => run.status !== "failed" || run.starred),
-    showStarredOnly,
-    showAll,
+    runs: runs.filter((run) => run.unread),
+    showUnreadOnly: true,
+    showActive: false,
+    showAll: false,
   }
 }
 
