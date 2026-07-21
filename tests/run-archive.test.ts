@@ -16,7 +16,7 @@ import {
   resetRunManagerForTests,
 } from "../src/run-manager.ts"
 import type { LiveStatus } from "../src/view/types.ts"
-import { STAR_SCRIPT } from "../src/view/star-script.ts"
+import { READ_SCRIPT } from "../src/view/read-script.ts"
 
 let dir: string
 let originalDataDir: string | undefined
@@ -139,9 +139,9 @@ describe("renderFailureBanner while running", () => {
   })
 })
 
-describe("star script live button re-query", () => {
-  test("re-queries the live star button after POST", () => {
-    expect(STAR_SCRIPT).toContain("liveStarButton")
-    expect(STAR_SCRIPT).toContain("querySelectorAll(\"[data-star-toggle]\")")
+describe("read script live button re-query", () => {
+  test("re-queries the live read button after POST", () => {
+    expect(READ_SCRIPT).toContain("liveReadButton")
+    expect(READ_SCRIPT).toContain("querySelectorAll(\"[data-read-toggle]\")")
   })
 })

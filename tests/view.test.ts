@@ -185,7 +185,7 @@ describe("view assets and html helpers", () => {
     expect(POLLING_SCRIPT).toContain("data-refresh-toggle")
     expect(POLLING_SCRIPT).toContain("qurom-view-live-refresh")
     expect(POLLING_SCRIPT).toContain("Live refresh paused during interview")
-    expect(POLLING_SCRIPT).toContain("preserveInFlightStar")
+    expect(POLLING_SCRIPT).toContain("preserveInFlightRead")
     expect(POLLING_SCRIPT).toContain("data-interview-reply-form")
   })
 
