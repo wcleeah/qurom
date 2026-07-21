@@ -27,7 +27,7 @@ import { handleOpencodeBootstrapPost } from "./opencode-bootstrap-view"
 import { handleRunApi } from "./run-api"
 import { handleTagsApi } from "./tags-api"
 import { resolveRunName, safeFilePath, HOST, PORT, safeRunPath } from "./paths"
-import { setRunStarred } from "./starred-store"
+import { setRunRead } from "./read-store"
 import { viewServerAdminEnabled } from "./server-options"
 import { MARKED_UMD_PATH, MARKED_UMD_URL } from "./html-viewer-markdown"
 
@@ -60,6 +60,12 @@ export function startViewServer(): void {
 
       if (path === "/") {
         try {
+          // Legacy starred filter bookmarks land on the unread (default) view.
+          if (url.searchParams.get("starred") === "1") {
+            const dest = new URL("/", url)
+            dest.search = ""
+            return Response.redirect(dest, 302)
+          }
           return await renderIndex(url.searchParams)
         } catch (e) {
           console.error("GET / error:", e)
@@ -204,9 +210,9 @@ export function startViewServer(): void {
         }
       }
 
-      const starMatch = path.match(/^\/runs\/(.+?)\/star$/)
-      if (starMatch && req.method === "POST") {
-        const runName = decodeURIComponent(starMatch[1])
+      const readMatch = path.match(/^\/runs\/(.+?)\/read$/)
+      if (readMatch && req.method === "POST") {
+        const runName = decodeURIComponent(readMatch[1])
         try {
           const { runName: resolvedName, runDir } = await resolveRunDir(runName)
           const runStat = await stat(runDir)
@@ -214,20 +220,21 @@ export function startViewServer(): void {
             return new Response("Not found", { status: 404 })
           }
           const raw = await req.text()
-          let starred = false
+          let read = false
           if (raw.trim().startsWith("{")) {
-            const parsed = JSON.parse(raw) as { starred?: unknown }
-            starred = parsed.starred === true
+            const parsed = JSON.parse(raw) as { read?: unknown }
+            read = parsed.read === true
           } else {
             const params = new URLSearchParams(raw)
-            starred = params.get("starred") === "true"
+            read = params.get("read") === "true"
           }
-          await setRunStarred(resolvedName, starred)
+          await setRunRead(resolvedName, read)
+          const unread = !read
           const wantsJson =
             url.searchParams.get("json") === "1"
             || (req.headers.get("accept") ?? "").includes("application/json")
           if (wantsJson) {
-            return Response.json({ ok: true, starred })
+            return Response.json({ ok: true, unread })
           }
           const referer = req.headers.get("referer")
           return new Response(null, {
@@ -238,7 +245,7 @@ export function startViewServer(): void {
           if (e instanceof Error && e.message === "Path traversal blocked") {
             return new Response("Not found", { status: 404 })
           }
-          console.error("POST /star error:", e)
+          console.error("POST /read error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

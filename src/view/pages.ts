@@ -29,15 +29,16 @@ import { appNavbarAction } from "./app-nav"
 import { badge, formatRelative, layout, phaseBadge, designPhaseBadge, designStatusLabel } from "./layout"
 import { getRunsDir, resolveRunName, safeFilePath, safeRunPath } from "./paths"
 import { renderRefreshControls } from "./refresh-controls"
-import { STAR_SCRIPT } from "./star-script"
-import { isRunStarred } from "./starred-store"
+import { READ_SCRIPT } from "./read-script"
+import { isRunUnread } from "./read-store"
 import { contentType, escapeHtml, formatBytes, formatElapsed, formatUsagePair, renderMarkdown, statusDot } from "./utils"
 import type { RequestJson, RunStatus } from "./types"
 
-function renderStarButton(runName: string, starred: boolean): string {
-  const activeClass = starred ? " star-button-active" : ""
-  const label = starred ? "Unstar run" : "Star run"
-  return `<button type="button" class="star-button${activeClass}" data-star-toggle data-run-name="${escapeHtml(runName)}" data-starred="${starred ? "true" : "false"}" aria-pressed="${starred ? "true" : "false"}" aria-label="${label}">★</button>`
+function renderReadButton(runName: string, unread: boolean): string {
+  const unreadClass = unread ? " read-button-unread" : ""
+  const label = unread ? "Mark as read" : "Mark as unread"
+  const glyph = unread ? "●" : "○"
+  return `<button type="button" class="read-button${unreadClass}" data-read-toggle data-run-name="${escapeHtml(runName)}" data-unread="${unread ? "true" : "false"}" aria-pressed="${unread ? "true" : "false"}" aria-label="${label}">${glyph}</button>`
 }
 
 async function canonicalRunResponse(
@@ -225,7 +226,7 @@ export async function renderDebugLog(runName: string, files: string[]): Promise<
 export async function renderIndex(searchParams = new URLSearchParams()): Promise<Response> {
   const runError = searchParams.get("error") ?? undefined
   const allRuns = await listRuns()
-  const { runs, showStarredOnly, showAll } = filterRunsForIndex(allRuns, searchParams)
+  const { runs, showUnreadOnly, showActive, showAll } = filterRunsForIndex(allRuns, searchParams)
   const stats = computeStats(allRuns)
 
   const manager = tryGetRunManager()
@@ -302,9 +303,9 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   // Run cards
   let runCards = ""
   if (runs.length === 0) {
-    runCards = showStarredOnly
-      ? `<div class="empty-state">No starred runs yet. <a href="/">Show active runs</a></div>`
-      : !showAll
+    runCards = showUnreadOnly
+      ? `<div class="empty-state">No unread runs. <a href="/?active=1">Show active runs</a></div>`
+      : showActive
         ? `<div class="empty-state">No active runs. <a href="/?all=1">Show all runs including failed</a></div>`
         : `<div class="empty-state">No runs found in <code>${escapeHtml(getRunsDir())}</code></div>`
   } else {
@@ -321,7 +322,7 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
 
       runCards += `<div class="run-card">
   <div class="run-card-top">
-    ${renderStarButton(run.name, run.starred)}
+    ${renderReadButton(run.name, run.unread)}
     <div class="run-card-title">
       <a href="/runs/${encodeURIComponent(run.name)}">${escapeHtml(run.topic)}${iconsStr}</a>
     </div>
@@ -339,9 +340,9 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   }
 
   const filterHtml = `<div class="run-filters">
-  <a href="/"${!showStarredOnly && !showAll ? ' class="active"' : ""}>Active</a>
+  <a href="/"${showUnreadOnly ? ' class="active"' : ""}>Unread</a>
+  <a href="/?active=1"${showActive ? ' class="active"' : ""}>Active</a>
   <a href="/?all=1"${showAll ? ' class="active"' : ""}>All</a>
-  <a href="/?starred=1"${showStarredOnly ? ' class="active"' : ""}>Starred</a>
 </div>`
 
   const body = `
@@ -353,7 +354,7 @@ ${statsHtml}
 ${hasActiveRun ? renderRefreshControls() : ""}
 <div id="index-active-section">${activeRunHtml}</div>
 <div id="run-card-list">${runCards}</div>
-${STAR_SCRIPT}
+${READ_SCRIPT}
 ${NEW_RUN_FORM_SCRIPT}
 ${hasActiveRun ? INDEX_REFRESH_SCRIPT : ""}`
 
@@ -470,7 +471,7 @@ export async function renderRun(name: string): Promise<Response> {
     requestJson?.topic ??
     name
 
-  const starred = await isRunStarred(name)
+  const unread = await isRunUnread(name)
 
   const totalBytes = [...fileSizes.values()].reduce((a, b) => a + b, 0)
 
@@ -633,7 +634,7 @@ ${interviewChatSection}
 <div class="header-bar">
   <div class="header-main">
     <div class="header-title-row">
-      ${renderStarButton(name, starred)}
+      ${renderReadButton(name, unread)}
       <h1>${escapeHtml(topic)}</h1>
     </div>
     <div class="meta-row">
@@ -657,7 +658,7 @@ ${sessionTelemetrySection}
 ${debugLogSection}
 ${markdownSection}
 ${filesSection}
-${STAR_SCRIPT}
+${READ_SCRIPT}
 ${hasResearchRounds ? ROUND_TABS_SCRIPT : ""}
 ${isRunning ? POLLING_SCRIPT : ""}
 ${articleTagsSection ? TAG_FORMS_SCRIPT : ""}`

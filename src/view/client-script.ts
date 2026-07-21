@@ -137,16 +137,17 @@ function buildRefreshScript(options: {
     }
   }
 
-  function preserveInFlightStar(oldHeader, newHeaderRoot) {
-    const oldStar = oldHeader.querySelector("[data-star-toggle]")
-    const newStar = newHeaderRoot.querySelector("[data-star-toggle]")
-    if (!(oldStar instanceof HTMLButtonElement) || !(newStar instanceof HTMLButtonElement)) return
-    if (!oldStar.disabled) return
-    newStar.dataset.starred = oldStar.dataset.starred || "false"
-    newStar.setAttribute("aria-pressed", oldStar.getAttribute("aria-pressed") || "false")
-    newStar.setAttribute("aria-label", oldStar.getAttribute("aria-label") || "Star run")
-    newStar.classList.toggle("star-button-active", oldStar.classList.contains("star-button-active"))
-    newStar.disabled = true
+  function preserveInFlightRead(oldHeader, newHeaderRoot) {
+    const oldRead = oldHeader.querySelector("[data-read-toggle]")
+    const newRead = newHeaderRoot.querySelector("[data-read-toggle]")
+    if (!(oldRead instanceof HTMLButtonElement) || !(newRead instanceof HTMLButtonElement)) return
+    if (!oldRead.disabled) return
+    newRead.dataset.unread = oldRead.dataset.unread || "false"
+    newRead.setAttribute("aria-pressed", oldRead.getAttribute("aria-pressed") || "false")
+    newRead.setAttribute("aria-label", oldRead.getAttribute("aria-label") || "Mark as unread")
+    newRead.classList.toggle("read-button-unread", oldRead.classList.contains("read-button-unread"))
+    newRead.textContent = oldRead.textContent || "○"
+    newRead.disabled = true
   }
 
   async function poll(manual) {
@@ -187,7 +188,7 @@ function buildRefreshScript(options: {
       const oldHeader = document.querySelector(".header-bar")
       const newHeader = doc.querySelector(".header-bar")
       if (oldHeader && newHeader) {
-        preserveInFlightStar(oldHeader, newHeader)
+        preserveInFlightRead(oldHeader, newHeader)
         oldHeader.innerHTML = newHeader.innerHTML
       }
       setStatus("Updated " + new Date().toLocaleTimeString(), false)

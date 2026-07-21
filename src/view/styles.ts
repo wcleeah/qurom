@@ -233,7 +233,7 @@ a:hover { text-decoration: underline; }
   align-items: flex-start;
   gap: 0.5rem;
 }
-.star-button {
+.read-button {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -250,17 +250,17 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
   transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
 }
-.star-button:hover {
-  color: var(--orange);
-  border-color: var(--orange);
+.read-button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
-.star-button-active,
-.star-button[aria-pressed="true"] {
-  color: var(--orange);
-  border-color: var(--orange);
-  background: var(--orange-bg);
+.read-button-unread,
+.read-button[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
 }
-.star-button:disabled {
+.read-button:disabled {
   opacity: 0.5;
   cursor: wait;
 }
