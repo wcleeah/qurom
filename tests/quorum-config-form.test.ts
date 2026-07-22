@@ -9,10 +9,12 @@ describe("quorum config form", () => {
       action: "/config/quorum",
       config: testQuorumConfig(),
       submitLabel: "Save quorum config",
+      researchToolIds: ["context7", "firecrawl"],
     })
 
     expect(html).toContain('name="maxRounds"')
     expect(html).toContain('name="researchTools.prefer"')
+    expect(html).toContain('value="firecrawl"')
     expect(html).not.toContain('<textarea name="content"')
   })
 

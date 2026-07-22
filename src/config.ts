@@ -95,17 +95,20 @@ export async function loadRuntimeConfig() {
     ensureConfigInitialized,
     loadQuorumConfigFromStore,
     loadRoleBindingsFromStore,
+    loadMcpRegistryFromStore,
   } = await import("./config-store")
   await ensureConfigInitialized(env)
-  const [quorumConfig, roleBindings] = await Promise.all([
+  const [quorumConfig, roleBindings, mcpRegistry] = await Promise.all([
     loadQuorumConfigFromStore(env),
     loadRoleBindingsFromStore(env),
+    loadMcpRegistryFromStore(env),
   ])
 
   return {
     env,
     quorumConfig,
     roleBindings,
+    mcpRegistry,
   }
 }
 

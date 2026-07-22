@@ -3,6 +3,8 @@ import { abortSession, createSession, listAgents, listModels, promptAgent } from
 import { ensureOpenCodeServer } from "../opencode-server"
 import { syncOpencodeAgentsFromStore } from "../config-store"
 import type { AgentProvider, AgentRunHandle, AgentRole, ProviderCapability } from "./types"
+import type { Config as OpenCodeConfig } from "@opencode-ai/sdk"
+import { toOpenCodeMcp } from "../mcp-config"
 
 const capabilities = new Set<ProviderCapability>([
   "streamingEvents",
@@ -23,6 +25,21 @@ function providerAgentForRole(config: Parameters<AgentProvider["createRunHandle"
   return roleConfig(config, role)?.providerAgent ?? role
 }
 
+export function managedOpenCodeConfig(
+  config: Parameters<AgentProvider["createRunHandle"]>[0]["config"],
+  existing = process.env.OPENCODE_CONFIG_CONTENT,
+): OpenCodeConfig {
+  let base: OpenCodeConfig = {}
+  if (existing?.trim()) {
+    try {
+      base = JSON.parse(existing) as OpenCodeConfig
+    } catch (error) {
+      throw new Error(`OPENCODE_CONFIG_CONTENT is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  return { ...base, mcp: toOpenCodeMcp(config.mcpRegistry, config.env) }
+}
+
 export const opencodeProvider: AgentProvider = {
   id: "opencode",
   capabilities,
@@ -32,6 +49,7 @@ export const opencodeProvider: AgentProvider = {
     const cleanup = await ensureOpenCodeServer({
       port: Number(opencodePort),
       directory: input.config.env.OPENCODE_DIRECTORY,
+      configContent: JSON.stringify(managedOpenCodeConfig(input.config)),
     })
     return { cleanup }
   },
@@ -76,6 +94,7 @@ export const opencodeProvider: AgentProvider = {
     })
   },
   async validate(input) {
+    toOpenCodeMcp(input.config.mcpRegistry, input.config.env)
     const agents = await listAgents(input.config)
     const names = new Set(agents.map((entry) => entry.name))
     const missing = input.roles

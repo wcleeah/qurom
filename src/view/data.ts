@@ -198,8 +198,6 @@ export function filterRunsForIndex(
 ): { runs: RunMeta[]; showUnreadOnly: boolean; showActive: boolean; showAll: boolean } {
   const showAll = searchParams.get("all") === "1"
   const showActive = searchParams.get("active") === "1"
-  const showUnreadOnly = !showAll && !showActive
-
   if (showAll) {
     return { runs, showUnreadOnly: false, showActive: false, showAll }
   }

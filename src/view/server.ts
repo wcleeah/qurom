@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises"
-import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "./config"
+import { handleConfigPost, renderConfigIndex, renderConfigMcp, renderConfigPrompts, renderConfigRoles } from "./config"
 import { handleConfigMigratePost, renderConfigMigrate } from "./config-migrate"
 import {
   handleConfigDefaultsPost,
@@ -22,7 +22,7 @@ import {
 } from "./html-ask-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
 import { renderLibraryPage } from "./library-page"
-import { renderIndex, renderNodePage, renderFilesPage, renderRun, serveRawFile } from "./pages"
+import { renderIndex, renderNodePage, renderFilesPage, renderRun, serveRawFile, serveSharedRun } from "./pages"
 import { handleOpencodeBootstrapPost } from "./opencode-bootstrap-view"
 import { handleRunApi } from "./run-api"
 import { handleTagsApi } from "./tags-api"
@@ -120,6 +120,15 @@ export function startViewServer(): void {
           return await renderConfigPrompts()
         } catch (e) {
           console.error("GET /config/prompts error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      if (path === "/config/mcp") {
+        try {
+          return await renderConfigMcp()
+        } catch (e) {
+          console.error("GET /config/mcp error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }
@@ -514,6 +523,16 @@ export function startViewServer(): void {
           return await renderNodePage(decodeURIComponent(nodeMatch[1]), decodeURIComponent(nodeMatch[2]))
         } catch (e) {
           console.error("Node page error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const shareMatch = path.match(/^\/runs\/(.+?)\/share\/?$/)
+      if (shareMatch) {
+        try {
+          return await serveSharedRun(decodeURIComponent(shareMatch[1]))
+        } catch (e) {
+          console.error("Shared run error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

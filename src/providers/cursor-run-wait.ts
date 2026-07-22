@@ -21,7 +21,7 @@ function buildRunResultFromHandle(run: Run): RunResult {
   return {
     id: run.id,
     requestId: run.requestId,
-    status,
+    status: status as RunResult["status"],
     result: run.result,
     model: run.model,
     durationMs: run.durationMs,
@@ -93,7 +93,7 @@ export async function awaitCursorRunCompletion(input: {
       throw error
     })
 
-  const pollOutcome = (async () => {
+  const pollOutcome: Promise<{ result: RunResult; source: CursorRunCompletionSource }> = (async () => {
     let intervalMs = POLL_INTERVAL_INITIAL_MS
     while (!settled) {
       if (isTerminalCursorRunStatus(input.run.status)) {
@@ -120,7 +120,7 @@ export async function awaitCursorRunCompletion(input: {
             apiKey: input.apiKey,
             agentId: input.agentId,
           })
-          if (settled) break
+          if (settled) return await new Promise<never>(() => {})
           if (isTerminalCursorRunStatus(remote.status)) {
             return resolveTerminalRun({
               run: remote,
@@ -143,7 +143,7 @@ export async function awaitCursorRunCompletion(input: {
       intervalMs = Math.min(Math.round(intervalMs * 1.5), POLL_INTERVAL_MAX_MS)
     }
 
-    await new Promise<void>(() => {})
+    return await new Promise<never>(() => {})
   })()
 
   return Promise.race([waitOutcome, pollOutcome])

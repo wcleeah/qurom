@@ -190,6 +190,7 @@ const config: RuntimeConfig = {
       options: { modelParams: [{ id: "fast", value: "true" }] },
     },
   },
+  mcpRegistry: { servers: [], enabled: [] },
 }
 
 beforeEach(() => {
@@ -320,7 +321,7 @@ describe("cursorProvider", () => {
     })
   })
 
-  test("copies configured MCP server definitions from Cursor mcp.json", async () => {
+  test("maps enabled MCP server definitions from the SQLite-backed runtime registry", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qurom-cursor-mcp-"))
     process.env.CURSOR_MCP_CONFIG_PATH = join(dir, "mcp.json")
     await writeFile(process.env.CURSOR_MCP_CONFIG_PATH, JSON.stringify({
@@ -332,6 +333,14 @@ describe("cursorProvider", () => {
     }))
     const mcpConfig: RuntimeConfig = {
       ...config,
+      mcpRegistry: {
+        servers: [
+          { name: "webfetch", type: "remote", url: "https://mcp.example/webfetch", headers: {} },
+          { name: "exa", type: "remote", url: "https://registry.example/exa", headers: {} },
+          { name: "unused", type: "remote", url: "https://mcp.example/unused", headers: {} },
+        ],
+        enabled: ["webfetch", "exa"],
+      },
       quorumConfig: {
         ...config.quorumConfig,
         researchTools: { prefer: ["webfetch", "exa"], webSearchProvider: "exa" },
@@ -359,7 +368,7 @@ describe("cursorProvider", () => {
     expect(createCalls[0]).toMatchObject({
       mcpServers: {
         webfetch: { url: "https://mcp.example/webfetch" },
-        exa: { url: "https://override.example/exa" },
+        exa: { url: "https://registry.example/exa" },
       },
     })
     expect(createCalls[0]).not.toMatchObject({
@@ -389,6 +398,13 @@ describe("cursorProvider", () => {
     }))
     const mcpConfig: RuntimeConfig = {
       ...config,
+      mcpRegistry: {
+        servers: [
+          { name: "context7", type: "local", command: "context7-mcp", args: [], env: { CONTEXT7_API_KEY: "${env:CONTEXT7_API_KEY}" } },
+          { name: "generic", type: "local", command: "generic-mcp", args: ["--token", "{ENV:GENERIC_MCP_TOKEN}"], env: { GENERIC_MCP_TOKEN: "{ENV:GENERIC_MCP_TOKEN}" } },
+        ],
+        enabled: ["context7", "generic"],
+      },
       quorumConfig: {
         ...config.quorumConfig,
         researchTools: { prefer: ["context7", "generic"], webSearchProvider: "exa" },
@@ -414,7 +430,7 @@ describe("cursorProvider", () => {
     })
   })
 
-  test("interpolates environment placeholders in role-level Cursor MCP overrides", async () => {
+  test("ignores legacy role-level Cursor MCP overrides", async () => {
     process.env.SEARCH_API_KEY = "role-search-secret"
     const mcpConfig: RuntimeConfig = {
       ...config,
@@ -442,15 +458,7 @@ describe("cursorProvider", () => {
       title: "draft",
     })
 
-    expect(createCalls[0]).toMatchObject({
-      mcpServers: {
-        search: {
-          url: "https://mcp.example/search?key=role-search-secret",
-          headers: { Authorization: "Bearer role-search-secret" },
-          env: { SEARCH_API_KEY: "role-search-secret" },
-        },
-      },
-    })
+    expect(createCalls[0]).not.toHaveProperty("mcpServers")
   })
 
   test("parses structured output through app-owned recovery", async () => {

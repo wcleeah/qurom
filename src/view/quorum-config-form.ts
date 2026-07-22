@@ -1,12 +1,11 @@
 import type { QuorumConfig } from "../config"
 import { escapeHtml } from "./utils"
 
-const RESEARCH_TOOL_IDS = ["context7", "exa", "grepapp"] as const
-
 type QuorumConfigFormOptions = {
   action: string
   config: QuorumConfig
   submitLabel: string
+  researchToolIds?: string[]
   error?: string | null
   extraActionsHtml?: string
 }
@@ -19,13 +18,18 @@ function checkbox(name: string, label: string, checked: boolean, help = "") {
   return `<label class="form-checkbox"><input type="checkbox" name="${escapeHtml(name)}" value="1"${checked ? " checked" : ""}><span>${escapeHtml(label)}</span>${help ? `<small>${escapeHtml(help)}</small>` : ""}</label>`
 }
 
-function researchToolsSection(config: QuorumConfig) {
+function researchToolsSection(config: QuorumConfig, configuredIds: string[] = []) {
   const prefer = new Set(config.researchTools.prefer)
-  const checkboxes = RESEARCH_TOOL_IDS.map((id) => {
+  const ids = [...new Set([
+    ...configuredIds,
+    ...config.researchTools.prefer,
+    config.researchTools.webSearchProvider,
+  ])].filter(Boolean)
+  const checkboxes = ids.map((id) => {
     const checked = prefer.has(id) ? " checked" : ""
     return `<label class="form-checkbox"><input type="checkbox" name="researchTools.prefer" value="${escapeHtml(id)}"${checked}><span>${escapeHtml(id)}</span></label>`
   }).join("\n")
-  const providerOptions = RESEARCH_TOOL_IDS.map((id) => {
+  const providerOptions = ids.map((id) => {
     const selected = config.researchTools.webSearchProvider === id ? " selected" : ""
     return `<option value="${escapeHtml(id)}"${selected}>${escapeHtml(id)}</option>`
   }).join("")
@@ -76,7 +80,7 @@ export function renderQuorumConfigForm(options: QuorumConfigFormOptions): string
       ${field("Predefined tag slugs", "tagging.predefinedTags", predefinedTags, "text", "Comma-separated lowercase slugs, e.g. machine-learning, systems")}
     </div>
   </div>
-  ${researchToolsSection(config)}
+  ${researchToolsSection(config, options.researchToolIds)}
   <div class="form-actions">
     <button type="submit" class="btn btn-primary">${escapeHtml(options.submitLabel)}</button>
     ${options.extraActionsHtml ?? ""}

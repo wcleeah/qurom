@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "deploy:railway": "bun run src/deploy-railway.ts",
     "dev": "bun run src/view-server.ts",
+    "export:static": "bun run src/export-static.ts",
     "start": "bun run src/view-server.ts",
     "test": "bun test ./tests",
     "typecheck": "bunx tsc --noEmit",

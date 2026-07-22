@@ -8,7 +8,7 @@ import {
 } from "../opencode-usage-import"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { listConfigSummary, normalizeQuorumConfig, updatePromptAsset, updateQuorumConfig, updateRoleBinding, updateRoleInstruction } from "../config-store"
+import { deleteMcpServer, listConfigSummary, loadMcpRegistryFromStore, normalizeQuorumConfig, saveMcpServer, setEnabledMcpServers, updatePromptAsset, updateQuorumConfig, updateRoleBinding, updateRoleInstruction } from "../config-store"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
 import { getProviderLifecycle } from "../providers/lifecycle"
 import { rolesUsingProvider, validateProviderPrerequisites } from "../providers/registry"
@@ -20,6 +20,7 @@ import { configNavbarOptions } from "./config-nav"
 import { readActiveOpencodeAgent, renderOpencodeAgentReadonly } from "./opencode-agent-display"
 import { parseQuorumConfigForm, quorumConfigFormScript, renderQuorumConfigForm } from "./quorum-config-form"
 import { escapeHtml } from "./utils"
+import { mcpServerSchema, type McpServer } from "../mcp-config"
 
 function parseOptionsJson(text: string | undefined) {
   if (!text) return {}
@@ -33,6 +34,75 @@ function parseOptionsJson(text: string | undefined) {
 let lastProviderValidation: { ok: boolean; message: string } | undefined
 let lastCursorUsageImport: CursorUsageImportSummary | undefined
 let lastOpenCodeUsageImport: OpenCodeUsageImportSummary | undefined
+let lastMcpError: string | undefined
+
+function parsePairs(value: string) {
+  return Object.fromEntries(value.split(/\r?\n/).filter((line) => line.trim()).map((line) => {
+    const index = line.indexOf("=")
+    if (index < 1) throw new Error(`Expected KEY=value, received ${JSON.stringify(line)}`)
+    return [line.slice(0, index).trim(), line.slice(index + 1)]
+  }))
+}
+
+export async function renderConfigMcp(error = lastMcpError): Promise<Response> {
+  const config = await loadRuntimeConfig()
+  const registry = await loadMcpRegistryFromStore(config.env)
+  const enabled = new Set(registry.enabled)
+  const serverCards = registry.servers.map((server) => {
+    const shared = `<input type="hidden" name="previousName" value="${escapeHtml(server.name)}">
+<label class="form-field"><span>Name</span><input class="form-input" name="name" required value="${escapeHtml(server.name)}"></label>`
+    const fields = server.type === "local"
+      ? `${shared}<input type="hidden" name="type" value="local">
+<label class="form-field"><span>Command</span><input class="form-input" name="command" required value="${escapeHtml(server.command)}"></label>
+<label class="form-field"><span>Arguments (one per line)</span><textarea name="args" rows="3">${escapeHtml(server.args.join("\n"))}</textarea></label>
+<label class="form-field"><span>Environment (KEY=value per line)</span><textarea name="environment" rows="3">${escapeHtml(Object.entries(server.env).map(([k, v]) => `${k}=${v}`).join("\n"))}</textarea></label>
+<label class="form-field"><span>Working directory</span><input class="form-input" name="cwd" value="${escapeHtml(server.cwd ?? "")}"></label>`
+      : `${shared}<input type="hidden" name="type" value="remote">
+<label class="form-field"><span>URL</span><input class="form-input" type="url" name="url" required value="${escapeHtml(server.url)}"></label>
+<label class="form-field"><span>Headers (KEY=value per line)</span><textarea name="headers" rows="3">${escapeHtml(Object.entries(server.headers).map(([k, v]) => `${k}=${v}`).join("\n"))}</textarea></label>
+<label class="form-field"><span>OAuth client ID</span><input class="form-input" name="clientId" value="${escapeHtml(server.oauth && typeof server.oauth === "object" ? server.oauth.clientId ?? "" : "")}"></label>
+<label class="form-field"><span>OAuth client secret</span><input class="form-input" name="clientSecret" value="${escapeHtml(server.oauth && typeof server.oauth === "object" ? server.oauth.clientSecret ?? "" : "")}"></label>
+<label class="form-field"><span>OAuth scopes (space-separated)</span><input class="form-input" name="scopes" value="${escapeHtml(server.oauth && typeof server.oauth === "object" ? server.oauth.scopes?.join(" ") ?? "" : "")}"></label>`
+    return card(`<h3>${escapeHtml(server.name)} <span class="tiny-text muted-text">${server.type}</span></h3>
+<form class="config-form" method="POST" action="/config/mcp/save">${fields}<div class="form-actions"><button class="btn btn-primary">Save</button></div></form>
+<form method="POST" action="/config/mcp/delete"><input type="hidden" name="name" value="${escapeHtml(server.name)}"><button class="btn" type="submit">Delete</button></form>`)
+  }).join("\n")
+  const enableRows = registry.servers.map((server) =>
+    `<label class="form-checkbox"><input type="checkbox" name="enabled" value="${escapeHtml(server.name)}"${enabled.has(server.name) ? " checked" : ""}><span>${escapeHtml(server.name)}</span></label>`).join("")
+  const create = (type: "local" | "remote") => `<form class="config-form" method="POST" action="/config/mcp/save">
+<input type="hidden" name="type" value="${type}"><label class="form-field"><span>Name</span><input class="form-input" name="name" required></label>
+${type === "local"
+  ? '<label class="form-field"><span>Command</span><input class="form-input" name="command" required></label><label class="form-field"><span>Arguments (one per line)</span><textarea name="args"></textarea></label><label class="form-field"><span>Environment (KEY=value per line)</span><textarea name="environment"></textarea></label><label class="form-field"><span>Working directory</span><input class="form-input" name="cwd"></label>'
+  : '<label class="form-field"><span>URL</span><input class="form-input" type="url" name="url" required></label><label class="form-field"><span>Headers (KEY=value per line)</span><textarea name="headers"></textarea></label><label class="form-field"><span>OAuth client ID</span><input class="form-input" name="clientId"></label><label class="form-field"><span>OAuth client secret</span><input class="form-input" name="clientSecret"></label><label class="form-field"><span>OAuth scopes</span><input class="form-input" name="scopes"></label>'}
+<div class="form-actions"><button class="btn btn-primary">Add ${type} server</button></div></form>`
+  const body = `<div class="header-bar"><div class="header-main"><h1>MCP Registry</h1></div></div>
+${error ? `<div class="outcome-banner failed">${escapeHtml(error)}</div>` : ""}
+${section("Globally enabled servers", `<form method="POST" action="/config/mcp/enabled">${enableRows || '<p class="muted-text">No servers registered.</p>'}<div class="form-actions"><button class="btn btn-primary">Save enabled servers</button></div></form>`)}
+${section("Registered servers", serverCards || '<p class="muted-text">No servers registered.</p>')}
+${section("Add local server", create("local"))}${section("Add remote server", create("remote"))}`
+  return new Response(layout("MCP Registry", body, { navbar: configNavbarOptions("MCP", "mcp") }), { headers: { "content-type": "text/html; charset=utf-8" } })
+}
+
+function mcpServerFromParams(params: URLSearchParams): McpServer {
+  const name = params.get("name") ?? ""
+  if (params.get("type") === "local") {
+    return mcpServerSchema.parse({
+      name, type: "local", command: params.get("command") ?? "",
+      args: (params.get("args") ?? "").split(/\r?\n/).filter(Boolean),
+      env: parsePairs(params.get("environment") ?? ""),
+      cwd: params.get("cwd")?.trim() || undefined,
+    })
+  }
+  const clientId = params.get("clientId")?.trim()
+  return mcpServerSchema.parse({
+    name, type: "remote", url: params.get("url") ?? "", headers: parsePairs(params.get("headers") ?? ""),
+    oauth: clientId ? {
+      clientId,
+      clientSecret: params.get("clientSecret")?.trim() || undefined,
+      scopes: params.get("scopes")?.split(/\s+/).filter(Boolean),
+    } : undefined,
+  })
+}
 
 function renderCursorUsageImportSection(importSummary?: CursorUsageImportSummary) {
   const summary = importSummary ?? lastCursorUsageImport
@@ -98,6 +168,7 @@ export async function renderConfigIndex(options?: {
     action: "/config/quorum",
     config: quorumConfig,
     submitLabel: "Save quorum config",
+    researchToolIds: config.mcpRegistry.enabled,
     error: options?.error,
   })
 
@@ -330,6 +401,22 @@ export async function renderConfigPrompts(): Promise<Response> {
 
 export async function handleConfigPost(req: Request, path: string): Promise<Response | undefined> {
   const config = await loadRuntimeConfig()
+
+  if (path.startsWith("/config/mcp/")) {
+    try {
+      const params = new URLSearchParams(await req.text())
+      if (path === "/config/mcp/save") await saveMcpServer(config.env, mcpServerFromParams(params), params.get("previousName") ?? undefined)
+      else if (path === "/config/mcp/delete") await deleteMcpServer(config.env, params.get("name") ?? "")
+      else if (path === "/config/mcp/enabled") await setEnabledMcpServers(config.env, params.getAll("enabled"))
+      else return undefined
+      await getProviderLifecycle().shutdown()
+      lastMcpError = undefined
+      return new Response(null, { status: 303, headers: { Location: "/config/mcp" } })
+    } catch (error) {
+      lastMcpError = error instanceof Error ? error.message : String(error)
+      return renderConfigMcp(lastMcpError)
+    }
+  }
 
   if (path === "/config/cursor-usage-import") {
     try {

@@ -9,7 +9,7 @@ import {
 } from "../src/view/html-notes-store.ts"
 import { addNoteTag } from "../src/tags-store.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
-import { serveRawFile } from "../src/view/pages.ts"
+import { renderRun, serveRawFile, serveSharedRun } from "../src/view/pages.ts"
 
 let dir: string
 let originalDataDir: string | undefined
@@ -127,5 +127,25 @@ describe("serveRawFile html handling", () => {
 
     expect(resp.headers.get("content-disposition")).toContain("attachment")
     expect(resp.headers.get("content-disposition")).toContain("final.html")
+  })
+})
+
+describe("published html sharing", () => {
+  test("returns exact html only for successful runs", async () => {
+    const incomplete = await serveSharedRun("alpha-run")
+    expect(incomplete.status).toBe(404)
+
+    await writeFile(join(dir, "runs", "alpha-run", "final.md"), "# Approved")
+    const shared = await serveSharedRun("alpha-run")
+    expect(shared.status).toBe(200)
+    expect(await shared.text()).toBe("<html><body>Hello</body></html>")
+  })
+
+  test("shows the share link on a successful run page", async () => {
+    await writeFile(join(dir, "runs", "alpha-run", "final.md"), "# Approved")
+    await writeFile(join(dir, "runs", "alpha-run", "request.json"), JSON.stringify({ topic: "Alpha" }))
+
+    const response = await renderRun("alpha-run")
+    expect(await response.text()).toContain('/runs/alpha-run/share')
   })
 })

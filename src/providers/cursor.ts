@@ -5,14 +5,12 @@ import {
   CursorAgentError,
   CursorSdkError,
   type CloudAgentOptions,
-  type McpServerConfig,
   type SettingSource,
 } from "@cursor/sdk"
 import { toJsonSchema } from "@langchain/core/utils/json_schema"
 import { createHash } from "node:crypto"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { basename, dirname, join } from "node:path"
+import { mkdir, writeFile } from "node:fs/promises"
+import { basename, dirname } from "node:path"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
 import { awaitCursorRunCompletion } from "./cursor-run-wait"
@@ -20,6 +18,7 @@ import type { RuntimeConfig } from "../config"
 import type { EventBus } from "../runner"
 import { estimateCursorCostUsd, resolveCursorPricingModelId } from "../cursor-pricing"
 import { foldCursorUsage, hasUsage, type UsageTotals } from "../usage"
+import { toCursorMcpServers } from "../mcp-config"
 import type {
   AgentProvider,
   AgentRunHandle,
@@ -84,7 +83,6 @@ function cursorOptionsForRole(config: RuntimeConfig, role: AgentRole) {
     | {
         runtime?: "local" | "cloud"
         settingSources?: string[]
-        mcpServers?: Record<string, McpServerConfig>
         modelParams?: Array<{ id: string; value: string }>
         cloud?: CloudAgentOptions
       }
@@ -127,64 +125,6 @@ function cursorModelParamsForRole(config: RuntimeConfig, role: AgentRole, model:
   }
   const valid = [...merged.entries()].map(([id, value]) => ({ id, value }))
   return valid.length > 0 ? valid : undefined
-}
-
-async function loadCursorMcpServers(): Promise<Record<string, McpServerConfig>> {
-  const path = process.env.CURSOR_MCP_CONFIG_PATH || join(homedir(), ".cursor", "mcp.json")
-  try {
-    const raw = await readFile(path, "utf8")
-    const parsed = JSON.parse(raw) as { mcpServers?: unknown }
-    if (!parsed.mcpServers || typeof parsed.mcpServers !== "object" || Array.isArray(parsed.mcpServers)) {
-      return {}
-    }
-    return parsed.mcpServers as Record<string, McpServerConfig>
-  } catch {
-    return {}
-  }
-}
-
-function interpolateEnvString(value: string, env: RuntimeConfig["env"]) {
-  const runtimeEnv = env as Record<string, string | undefined>
-  return value.replace(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}|\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, shellLowerEnvName: string | undefined, shellUpperEnvName: string | undefined, lowerEnvName: string | undefined, upperEnvName: string | undefined, shellName: string | undefined) => {
-    const envName = shellLowerEnvName ?? shellUpperEnvName ?? lowerEnvName ?? upperEnvName
-    const name = envName ?? shellName
-    if (!name) return _match
-    const resolved = runtimeEnv[name] ?? process.env[name]
-    if (resolved === undefined) {
-      throw new Error(`Cursor MCP config references missing environment variable ${name}`)
-    }
-    return resolved
-  })
-}
-
-export function interpolateMcpConfigEnv<T>(value: T, env: RuntimeConfig["env"]): T {
-  if (typeof value === "string") {
-    return interpolateEnvString(value, env) as T
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => interpolateMcpConfigEnv(item, env)) as T
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, interpolateMcpConfigEnv(item, env)]),
-    ) as T
-  }
-  return value
-}
-
-async function resolveMcpServers(
-  config: RuntimeConfig,
-  options: ReturnType<typeof cursorOptionsForRole>,
-): Promise<Record<string, McpServerConfig> | undefined> {
-  const configured = await loadCursorMcpServers()
-  const preferred = config.quorumConfig.researchTools.prefer
-  const selected = Object.fromEntries(
-    preferred
-      .filter((name) => configured[name])
-      .map((name) => [name, configured[name]!]),
-  ) as Record<string, McpServerConfig>
-  const merged = { ...selected, ...(options?.mcpServers ?? {}) }
-  return Object.keys(merged).length > 0 ? interpolateMcpConfigEnv(merged, config.env) : undefined
 }
 
 async function listCursorModels(apiKey: string, requiredModelId?: string) {
@@ -710,7 +650,7 @@ export const cursorProvider: AgentProvider = {
     const options = cursorOptionsForRole(input.config, input.role)
     const catalogModel = (await listCursorModels(apiKey, model)).find((entry) => entry.id === model)
     const modelParams = cursorModelParamsForRole(input.config, input.role, catalogModel)
-    const mcpServers = await resolveMcpServers(input.config, options)
+    const mcpServers = toCursorMcpServers(input.config.mcpRegistry, input.config.env)
     const agent = await Agent.create({
       apiKey,
       name: clampCursorAgentName(input.title),
@@ -767,7 +707,7 @@ export const cursorProvider: AgentProvider = {
           })
           const status = result.status
           const text = extractRunText(result)
-          if (status && status !== "finished" && status !== "completed") {
+          if (status && status !== "finished") {
             throw new CursorRunStatusError(run.id, status, result)
           }
           const usage = cursorUsageTotalsFromRun(run, result, roleRuntime?.model)
@@ -912,7 +852,7 @@ export const cursorProvider: AgentProvider = {
               resolvedModel,
               completedAt,
             })
-            if (status && status !== "finished" && status !== "completed") {
+            if (status && status !== "finished") {
               throw new CursorRunStatusError(run.id, status, result)
             }
             const usage = cursorUsageTotalsFromRun(run, result, roleRuntime?.model)
@@ -993,6 +933,7 @@ export const cursorProvider: AgentProvider = {
     if (missingModels.length > 0) {
       throw new Error(`Cursor roles require per-role model values: ${missingModels.join(", ")}`)
     }
+    toCursorMcpServers(input.config.mcpRegistry, input.config.env)
 
     const warnings: string[] = []
     try {

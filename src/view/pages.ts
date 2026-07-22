@@ -506,6 +506,11 @@ export async function renderRun(name: string): Promise<Response> {
     finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.html">
   Open final.html →
 </a>`)
+    if (hasFinalMd && !files.includes("design-failure.json")) {
+      finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/share">
+  Share published HTML →
+</a>`)
+    }
   } else {
     if (hasFinalMd) {
       const sz = fileSizes.get("final.md") ?? 0
@@ -675,6 +680,36 @@ ${articleTagsSection ? TAG_FORMS_SCRIPT : ""}`
   return new Response(html, {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
+}
+
+// ---------------------------------------------------------------------------
+// Route: GET /runs/:name/share
+// ---------------------------------------------------------------------------
+
+export async function serveSharedRun(name: string): Promise<Response> {
+  const canonical = await canonicalRunResponse(name, "/share")
+  if (canonical.early) return canonical.early
+  name = canonical.runName
+
+  let files: string[]
+  try {
+    files = await getRunFiles(name)
+  } catch {
+    return new Response("Not found", { status: 404 })
+  }
+  if (!files.includes("final.md") || !files.includes("final.html") || files.includes("design-failure.json")) {
+    return new Response("Not found", { status: 404 })
+  }
+
+  try {
+    const file = Bun.file(safeFilePath(name, "final.html"))
+    if (!(await file.exists())) return new Response("Not found", { status: 404 })
+    return new Response(file, {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    })
+  } catch {
+    return new Response("Not found", { status: 404 })
+  }
 }
 
 // ---------------------------------------------------------------------------

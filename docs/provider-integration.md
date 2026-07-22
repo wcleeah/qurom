@@ -17,6 +17,10 @@ The most important rule: **declare only the capabilities the provider actually s
 
 Roles resolve to a provider through SQLite role bindings (`/config` in the dashboard, seeded from `defaults/quorum-config.sqlite`). A single run may use **both** providers if different roles are bound differently.
 
+MCP configuration is profile-scoped in the same SQLite database and managed at `/config/mcp`. One canonical registry and global enabled list feeds both providers. Cursor receives local `{command,args,env,cwd}` or remote `{url,headers,auth}` entries through `Agent.create({ mcpServers })`. OpenCode receives local command arrays/environment or remote URL/headers/OAuth through the authoritative `Config.mcp` in `OPENCODE_CONFIG_CONTENT`.
+
+Environment interpolation is provider-neutral and occurs only at runtime. Provider validation resolves all enabled entries so missing variables fail before a run. OpenCode is always launched by Qurom; an occupied configured port is rejected because an external server cannot be guaranteed to use the authoritative registry. Unrelated existing `OPENCODE_CONFIG_CONTENT` fields are preserved, but its `mcp` field is replaced.
+
 Provider processes/servers are acquired lazily through `getProviderLifecycle()` in `src/providers/lifecycle.ts` — reference-counted per run, torn down after idle timeout.
 
 ---
@@ -210,7 +214,7 @@ Good config forms:
 
 OpenCode is special: its model, tool permissions, and role instructions are file-backed in `.opencode/agents/*.md`. The config UI shows those files as read-only and directs users to edit them directly.
 
-Cursor is different: role instructions come from SQLite (`defaults/roles/` seed content) and are injected when `roleInstructions` capability is set. Model and MCP settings are provider-owned form fields.
+Cursor is different: role instructions come from SQLite (`defaults/roles/` seed content) and are injected when `roleInstructions` capability is set. Models remain role settings; MCP is global and configured only on `/config/mcp`.
 
 ---
 

@@ -8,6 +8,7 @@ import { quorumConfigSchema } from "./config"
 import { ensureQuorumDataDirs, quorumDataPaths, repoDefaultsDir } from "./data-paths"
 import { copyPreserveTimes } from "./migrate-copy"
 import { promptAssetFiles, type PromptAssetKey } from "./prompt-asset-defs"
+import { mcpServerSchema, validateMcpRegistry, type McpRegistry, type McpServer } from "./mcp-config"
 
 type ConfigProfileRow = {
   id: number
@@ -147,6 +148,24 @@ CREATE TABLE IF NOT EXISTS role_instructions (
   FOREIGN KEY (profile_id) REFERENCES config_profiles(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS mcp_servers (
+  profile_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  config_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (profile_id, name),
+  FOREIGN KEY (profile_id) REFERENCES config_profiles(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS mcp_enabled (
+  profile_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (profile_id, name),
+  FOREIGN KEY (profile_id, name) REFERENCES mcp_servers(profile_id, name) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS config_audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   profile_id INTEGER,
@@ -234,13 +253,15 @@ function stripLegacyQuorumFields(config: Record<string, unknown>) {
 }
 
 export function bindingRowToRoleBinding(row: Pick<RoleProviderBindingRow, "provider" | "provider_agent" | "model" | "variant" | "output_mode" | "options_json">) {
+  const options = parseJson<Record<string, unknown>>(row.options_json, {})
+  delete options.mcpServers
   return {
     provider: row.provider ?? undefined,
     providerAgent: row.provider_agent ?? undefined,
     model: row.model ?? undefined,
     variant: row.variant ?? undefined,
     outputMode: row.output_mode ?? undefined,
-    options: parseJson<Record<string, unknown>>(row.options_json, {}),
+    options,
   }
 }
 
@@ -273,6 +294,16 @@ function pruneLegacyBrowserQaRows(store: ConfigStore, profileId: number) {
   }
 
   store.db.query("DELETE FROM role_provider_bindings WHERE profile_id = ? AND role = ?").run(profileId, LEGACY_BROWSER_QA_ROLE)
+  const rows = store.db.query<{ role: string; options_json: string }, [number]>(
+    "SELECT role, options_json FROM role_provider_bindings WHERE profile_id = ?",
+  ).all(profileId)
+  for (const row of rows) {
+    const options = parseJson<Record<string, unknown>>(row.options_json, {})
+    if (!("mcpServers" in options)) continue
+    delete options.mcpServers
+    store.db.query("UPDATE role_provider_bindings SET options_json = ?, updated_at = ? WHERE profile_id = ? AND role = ?")
+      .run(JSON.stringify(options), nowIso(), profileId, row.role)
+  }
 }
 
 async function readDefaultsPrompts(workspaceDir: string): Promise<Array<{ key: PromptAssetKey; content: string }>> {
@@ -565,6 +596,95 @@ WHERE profile_id = ?
       bindings[row.role] = bindingRowToRoleBinding(row)
     }
     return bindings
+  } finally {
+    store.close()
+  }
+}
+
+export async function loadMcpRegistryFromStore(env: RuntimeEnv): Promise<McpRegistry> {
+  const store = getConfigStore(env)
+  try {
+    const profile = await ensureActiveProfile(store, env)
+    const servers = store.db.query<{ config_json: string }, [number]>(
+      "SELECT config_json FROM mcp_servers WHERE profile_id = ? ORDER BY name",
+    ).all(profile.id).map((row) => mcpServerSchema.parse(JSON.parse(row.config_json)))
+    const enabled = store.db.query<{ name: string }, [number]>(
+      "SELECT name FROM mcp_enabled WHERE profile_id = ? ORDER BY position, name",
+    ).all(profile.id).map((row) => row.name)
+    return validateMcpRegistry({ servers, enabled })
+  } finally {
+    store.close()
+  }
+}
+
+export async function saveMcpServer(env: RuntimeEnv, input: McpServer, previousName?: string) {
+  const server = mcpServerSchema.parse(input)
+  const store = getConfigStore(env)
+  try {
+    const profile = await ensureActiveProfile(store, env)
+    const oldName = previousName?.trim() || server.name
+    const duplicate = store.db.query<{ name: string }, [number, string]>(
+      "SELECT name FROM mcp_servers WHERE profile_id = ? AND name = ?",
+    ).get(profile.id, server.name)
+    if (duplicate && oldName !== server.name) throw new Error(`MCP server ${JSON.stringify(server.name)} already exists`)
+    const ts = nowIso()
+    store.db.transaction(() => {
+      if (oldName !== server.name) {
+        const enabled = store.db.query<{ position: number }, [number, string]>(
+          "SELECT position FROM mcp_enabled WHERE profile_id = ? AND name = ?",
+        ).get(profile.id, oldName)
+        store.db.query("DELETE FROM mcp_enabled WHERE profile_id = ? AND name = ?").run(profile.id, oldName)
+        store.db.query("DELETE FROM mcp_servers WHERE profile_id = ? AND name = ?").run(profile.id, oldName)
+        store.db.query(`
+INSERT INTO mcp_servers (profile_id, name, config_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+        `).run(profile.id, server.name, JSON.stringify(server), ts, ts)
+        if (enabled) {
+          store.db.query("INSERT INTO mcp_enabled (profile_id, name, position) VALUES (?, ?, ?)")
+            .run(profile.id, server.name, enabled.position)
+        }
+        return
+      }
+      store.db.query(`
+INSERT INTO mcp_servers (profile_id, name, config_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(profile_id, name) DO UPDATE SET config_json = excluded.config_json, updated_at = excluded.updated_at
+      `).run(profile.id, server.name, JSON.stringify(server), ts, ts)
+    })()
+  } finally {
+    store.close()
+  }
+}
+
+export async function deleteMcpServer(env: RuntimeEnv, name: string) {
+  const store = getConfigStore(env)
+  try {
+    const profile = await ensureActiveProfile(store, env)
+    store.db.transaction(() => {
+      store.db.query("DELETE FROM mcp_enabled WHERE profile_id = ? AND name = ?").run(profile.id, name)
+      store.db.query("DELETE FROM mcp_servers WHERE profile_id = ? AND name = ?").run(profile.id, name)
+    })()
+  } finally {
+    store.close()
+  }
+}
+
+export async function setEnabledMcpServers(env: RuntimeEnv, names: string[]) {
+  const store = getConfigStore(env)
+  try {
+    const profile = await ensureActiveProfile(store, env)
+    const unique = [...new Set(names)]
+    const known = new Set(store.db.query<{ name: string }, [number]>(
+      "SELECT name FROM mcp_servers WHERE profile_id = ?",
+    ).all(profile.id).map((row) => row.name))
+    for (const name of unique) {
+      if (!known.has(name)) throw new Error(`Enabled MCP server ${JSON.stringify(name)} does not exist`)
+    }
+    store.db.transaction(() => {
+      store.db.query("DELETE FROM mcp_enabled WHERE profile_id = ?").run(profile.id)
+      unique.forEach((name, position) => {
+        store.db.query("INSERT INTO mcp_enabled (profile_id, name, position) VALUES (?, ?, ?)")
+          .run(profile.id, name, position)
+      })
+    })()
   } finally {
     store.close()
   }

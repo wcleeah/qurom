@@ -62,6 +62,7 @@ export function testRuntimeConfig(input: {
     env,
     quorumConfig: testQuorumConfig(input.quorumOverrides),
     roleBindings: input.roleBindings ?? {},
+    mcpRegistry: { servers: [], enabled: [] },
   }
 }
 

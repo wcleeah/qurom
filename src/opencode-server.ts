@@ -2,6 +2,7 @@ import { spawn, type Subprocess } from "bun"
 import { mkdir } from "node:fs/promises"
 import { createWriteStream } from "node:fs"
 import { join } from "node:path"
+import { connect } from "node:net"
 
 let child: Subprocess | undefined
 let stopping = false
@@ -13,6 +14,21 @@ async function isServerReady(baseUrl: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+async function isPortOccupied(hostname: string, port: number): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const socket = connect({ host: hostname, port })
+    socket.once("connect", () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once("error", () => resolve(false))
+    socket.setTimeout(1000, () => {
+      socket.destroy()
+      resolve(false)
+    })
+  })
 }
 
 async function waitForServer(baseUrl: string, timeoutMs: number): Promise<void> {
@@ -32,6 +48,7 @@ export async function ensureOpenCodeServer(input: {
   opencodeBin?: string
   directory?: string
   startupTimeoutMs?: number
+  configContent: string
 }): Promise<() => Promise<void>> {
   const hostname = input.hostname ?? "127.0.0.1"
   const port = input.port
@@ -41,9 +58,8 @@ export async function ensureOpenCodeServer(input: {
 
   const baseUrl = `http://${hostname}:${port}`
 
-  // If already running, just return a no-op cleanup
-  if (await isServerReady(baseUrl)) {
-    return async () => {}
+  if (await isPortOccupied(hostname, port)) {
+    throw new Error(`OpenCode port ${hostname}:${port} is already occupied; Qurom requires the OpenCode server it launches and configures`)
   }
 
   // Capture stderr to runs/opencode-stderr.log so server stack traces
@@ -57,6 +73,7 @@ export async function ensureOpenCodeServer(input: {
     cwd: directory,
     stdout: "inherit",
     stderr: "pipe",
+    env: { ...process.env, OPENCODE_CONFIG_CONTENT: input.configContent },
   })
 
   // Pipe child's stderr to the log file (and discard so it doesn't fill memory)

@@ -60,7 +60,7 @@ These roles are configured in the active SQLite config profile. Each role is bou
 
 - **Bun** (runtime + test runner)
 - **At least one agent provider** configured for the roles you plan to run:
-  - **OpenCode** (default) — `opencode` on your `PATH`, plus `.opencode/agents/` seeded from `defaults/opencode/agents/`. The app spawns `opencode serve` when a role needs OpenCode and nothing is reachable at `OPENCODE_BASE_URL`, or reuses an existing server.
+  - **OpenCode** (default) — `opencode` on your `PATH`, plus `.opencode/agents/` seeded from `defaults/opencode/agents/`. Qurom always launches and owns `opencode serve`; startup fails if the configured port is already occupied.
   - **Cursor** (optional) — `CURSOR_API_KEY` and role bindings set to the `cursor` provider in `/config`. No local OpenCode server or agent files required for Cursor-only roles.
 
 Prompt contracts and role instructions live in SQLite. Shipped starters are under `defaults/prompts/`, `defaults/roles/`, and default role provider bindings in `defaults/quorum-config.sqlite`.
@@ -72,6 +72,10 @@ Optional:
 ## Configuration
 
 Runtime config is stored in SQLite under the Qurom data directory. Shipped defaults live in `defaults/` and are seeded on first run.
+
+The `/config/mcp` dashboard page is the sole MCP registry for both Cursor and OpenCode. Add a structured local server (`command`, arguments, environment, optional working directory) or remote server (`url`, headers, optional OAuth), then select the globally enabled servers. This enabled list is independent of `researchTools.prefer`. Values may reference environment variables as `${NAME}`, `${env:NAME}`, or `{ENV:NAME}`; placeholders remain stored and are resolved immediately before provider startup.
+
+Qurom does not read `~/.cursor/mcp.json`, role-level `mcpServers`, or external OpenCode MCP configuration. It preserves unrelated JSON from `OPENCODE_CONFIG_CONTENT`, replaces its `mcp` section with the enabled registry, and passes the result to the OpenCode process it launches.
 
 Data directory resolution:
 
@@ -159,6 +163,38 @@ Start runs from the index page, or via HTTP API:
 - `POST /api/runs/:id/cancel` — cancel active run
 - `GET /api/status` — active run + provider lifecycle status
 
+## Static export
+
+Export every successful run as a read-only site that needs no build step or
+server at deployment time:
+
+```bash
+bun run export:static
+# or choose a destination
+bun run export:static --output ./public
+```
+
+The default destination is `dist/static`. Upload that directory directly to a
+static host such as Cloudflare Pages, Railway, or S3 website hosting. The
+export contains a catalog at `/`, a stripped detail page for each successful
+run, and the exact generated artifact at `/runs/<id>/share/`. Links are
+relative, so the directory can also be hosted below a URL prefix.
+
+Only runs with approved research and a completed `final.html` are included.
+Regenerating the export replaces the destination, removing stale runs.
+Generated HTML may reference CDN resources of its own; the exporter preserves
+`final.html` byte-for-byte and does not download or rewrite those dependencies.
+
+For a repository already linked to a Railway service, export and deploy in one
+command:
+
+```bash
+bun run deploy:railway
+```
+
+This regenerates `dist/static` and uploads the complete directory with
+Railway's gitignore filtering disabled.
+
 ## Dashboard Flow
 
 ### Index (`/`)
@@ -171,6 +207,7 @@ Start runs from the index page, or via HTTP API:
 ### Run detail (`/runs/:name`)
 
 - Pipeline, telemetry, agent activity, reader interview, artifacts
+- Exact successful HTML artifact at `/runs/:name/share`
 - Cancel while running; completion banner when done
 - Configure quorum, roles, and prompts under `/config`
 
