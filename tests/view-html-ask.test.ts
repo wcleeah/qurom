@@ -110,6 +110,23 @@ describe("html ask context", () => {
     expect(followup.prompt).toBe("Tell me more")
     expect(followup.inputFiles).toBeUndefined()
   })
+
+  test("buildAskPrompt uses unsaved selection as passage context", async () => {
+    const source = await resolveSourceMarkdown("alpha-run")
+    const built = await buildAskPrompt({
+      scope: "selection",
+      message: "Why is this important?",
+      highlight: { quote: "Body text.", prefix: "Title ", suffix: "" },
+      bootstrap: true,
+      source,
+      config: askTestConfig(),
+      promptAssets: askPromptAssets,
+    })
+
+    expect(built.prompt).toContain('Quote: "Body text."')
+    expect(built.prompt).toContain("Why is this important?")
+    expect(built.inputFiles?.[0]?.filename).toBe("content.md")
+  })
 })
 
 describe("html ask store", () => {
@@ -173,6 +190,27 @@ describe("html ask store", () => {
     expect(await listHtmlReaderAskThreads("alpha-run", "final.html")).toHaveLength(0)
   })
 
+  test("stores unsaved selection context on its ask thread", async () => {
+    const thread = await createHtmlReaderAskThread({
+      runName: "alpha-run",
+      htmlFile: "final.html",
+      mdFile: "final.md",
+      mdMtimeMs: 1,
+      scope: "selection",
+      contextQuote: "Body text.",
+      contextPrefix: "Title ",
+      contextSuffix: " More",
+      provider: "cursor",
+    })
+
+    expect(thread.scope).toBe("selection")
+    expect(thread.highlightId).toBeNull()
+    expect(thread.contextQuote).toBe("Body text.")
+    await appendHtmlReaderAskMessage({ threadId: thread.id, role: "user", content: "Explain this" })
+    const listed = await listHtmlReaderAskThreads("alpha-run", "final.html")
+    expect(listed[0]?.contextQuote).toBe("Body text.")
+  })
+
   test("migrates legacy unique constraint schema", () => {
     const dbPath = join(dir, "runs", "legacy-config.sqlite")
     const legacy = new Database(dbPath, { create: true })
@@ -204,6 +242,8 @@ CREATE TABLE html_reader_ask_threads (
     reopened.close()
 
     expect(row?.sql ?? "").not.toContain("UNIQUE(run_name, html_file, scope, highlight_id)")
+    expect(row?.sql ?? "").toContain("'selection'")
+    expect(row?.sql ?? "").toContain("context_quote")
   })
 })
 
@@ -252,6 +292,8 @@ describe("html ask routes and ui", () => {
     expect(html).toContain('aria-current="true"')
     expect(html).toContain("html-viewer-ask-chat-selected")
     expect(html).toContain("startNewChat()")
+    expect(html).toContain('scope: detail.selection ? "selection" : "highlight"')
+    expect(html).toContain("payload.contextQuote = bootstrapSelection.quote")
     expect(html).toMatch(
       /data-html-ask-sheet hidden><\/div>\s*<div class="html-viewer-ask-layout">\s*<div class="html-viewer-ask-sheet-handle"/,
     )

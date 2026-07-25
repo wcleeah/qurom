@@ -110,6 +110,9 @@ export async function resolveOrCreateAskThread(input: {
   htmlFile: string
   scope: AskScope
   highlightId?: string | null
+  contextQuote?: string | null
+  contextPrefix?: string
+  contextSuffix?: string
   threadId?: string | null
 }): Promise<{ thread: HtmlReaderAskThread; created: boolean; source: ResolvedSourceMarkdown }> {
   const { config } = await ensureAskRuntime()
@@ -135,6 +138,9 @@ export async function resolveOrCreateAskThread(input: {
     mdMtimeMs: source.mtimeMs,
     scope: input.scope,
     highlightId: input.highlightId,
+    contextQuote: input.contextQuote,
+    contextPrefix: input.contextPrefix,
+    contextSuffix: input.contextSuffix,
     provider,
   })
   return { thread, created: true, source }
@@ -201,6 +207,9 @@ export async function prepareAskMessage(input: {
   htmlFile: string
   scope: AskScope
   highlightId?: string | null
+  contextQuote?: string | null
+  contextPrefix?: string
+  contextSuffix?: string
   threadId?: string | null
   message: string
 }): Promise<{
@@ -215,6 +224,9 @@ export async function prepareAskMessage(input: {
 }> {
   if (input.scope === "highlight" && !input.highlightId && !input.threadId) {
     throw new Error("highlightId is required for highlight bootstrap")
+  }
+  if (input.scope === "selection" && !input.contextQuote?.trim() && !input.threadId) {
+    throw new Error("contextQuote is required for selection bootstrap")
   }
 
   if (!input.threadId && input.scope === "highlight" && input.highlightId) {
@@ -255,6 +267,12 @@ export async function prepareAskMessage(input: {
     let highlight: HtmlReaderHighlight | null = null
     if (bootstrap && thread.scope === "highlight" && thread.highlightId) {
       highlight = await loadHighlightForBootstrap(input.runName, input.htmlFile, thread.highlightId)
+    } else if (bootstrap && thread.scope === "selection" && thread.contextQuote) {
+      highlight = {
+        quote: thread.contextQuote,
+        prefix: thread.contextPrefix,
+        suffix: thread.contextSuffix,
+      } as HtmlReaderHighlight
     }
 
     const built = await buildAskPrompt({
@@ -327,6 +345,7 @@ export async function preflightAskMessage(input: {
   htmlFile: string
   scope?: AskScope
   highlightId?: string | null
+  contextQuote?: string | null
   threadId?: string | null
 }): Promise<{ thread: HtmlReaderAskThread | null; source: ResolvedSourceMarkdown }> {
   if (!input.threadId) {
@@ -338,6 +357,9 @@ export async function preflightAskMessage(input: {
     }
     if (input.scope === "highlight" && input.highlightId) {
       await loadHighlightForBootstrap(input.runName, input.htmlFile, input.highlightId)
+    }
+    if (input.scope === "selection" && !input.contextQuote?.trim()) {
+      throw new Error("contextQuote is required for selection bootstrap")
     }
   }
 

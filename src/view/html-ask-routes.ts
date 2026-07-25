@@ -22,7 +22,7 @@ import { validateHtmlReaderTarget } from "./html-reader-db"
 import { safeFilePath, safeRunPath } from "./paths"
 
 function parseAskScope(value: unknown): AskScope | null {
-  return value === "page" || value === "highlight" ? value : null
+  return value === "page" || value === "highlight" || value === "selection" ? value : null
 }
 
 async function validateHtmlFile(runName: string, file: string): Promise<void> {
@@ -70,6 +70,9 @@ export async function handlePostAskMessage(req: Request, runName: string): Promi
   let file = ""
   let scope: AskScope | null = null
   let highlightId: string | null = null
+  let contextQuote: string | null = null
+  let contextPrefix = ""
+  let contextSuffix = ""
   let threadId: string | null = null
   let message = ""
 
@@ -78,12 +81,18 @@ export async function handlePostAskMessage(req: Request, runName: string): Promi
       file?: unknown
       scope?: unknown
       highlightId?: unknown
+      contextQuote?: unknown
+      contextPrefix?: unknown
+      contextSuffix?: unknown
       threadId?: unknown
       message?: unknown
     }
     file = typeof parsed.file === "string" ? parsed.file : ""
     scope = parseAskScope(parsed.scope)
     highlightId = typeof parsed.highlightId === "string" ? parsed.highlightId : null
+    contextQuote = typeof parsed.contextQuote === "string" ? parsed.contextQuote : null
+    contextPrefix = typeof parsed.contextPrefix === "string" ? parsed.contextPrefix : ""
+    contextSuffix = typeof parsed.contextSuffix === "string" ? parsed.contextSuffix : ""
     threadId = typeof parsed.threadId === "string" ? parsed.threadId : null
     message = typeof parsed.message === "string" ? parsed.message : ""
   } else {
@@ -91,6 +100,9 @@ export async function handlePostAskMessage(req: Request, runName: string): Promi
     file = params.get("file") ?? ""
     scope = parseAskScope(params.get("scope"))
     highlightId = params.get("highlightId")
+    contextQuote = params.get("contextQuote")
+    contextPrefix = params.get("contextPrefix") ?? ""
+    contextSuffix = params.get("contextSuffix") ?? ""
     threadId = params.get("threadId")
     message = params.get("message") ?? ""
   }
@@ -105,6 +117,9 @@ export async function handlePostAskMessage(req: Request, runName: string): Promi
     if (scope === "highlight" && !highlightId) {
       return new Response("Missing highlightId for highlight bootstrap", { status: 400 })
     }
+    if (scope === "selection" && !contextQuote?.trim()) {
+      return new Response("Missing contextQuote for selection bootstrap", { status: 400 })
+    }
   }
 
   try {
@@ -115,6 +130,7 @@ export async function handlePostAskMessage(req: Request, runName: string): Promi
       htmlFile: file,
       scope: scope ?? undefined,
       highlightId,
+      contextQuote,
       threadId,
     })
   } catch (error) {
@@ -154,6 +170,9 @@ export async function handlePostAskMessage(req: Request, runName: string): Promi
     htmlFile: file,
     scope: scope ?? "page",
     highlightId,
+    contextQuote,
+    contextPrefix,
+    contextSuffix,
     threadId,
     message: message.trim(),
     prepare: prepareAskMessage,

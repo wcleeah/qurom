@@ -154,8 +154,11 @@ CREATE TABLE IF NOT EXISTS html_reader_ask_threads (
   html_file TEXT NOT NULL,
   md_file TEXT NOT NULL,
   md_mtime_ms INTEGER NOT NULL,
-  scope TEXT NOT NULL CHECK(scope IN ('page', 'highlight')),
+  scope TEXT NOT NULL CHECK(scope IN ('page', 'highlight', 'selection')),
   highlight_id TEXT,
+  context_quote TEXT,
+  context_prefix TEXT NOT NULL DEFAULT '',
+  context_suffix TEXT NOT NULL DEFAULT '',
   provider TEXT NOT NULL,
   handle_id TEXT,
   status TEXT NOT NULL DEFAULT 'idle',
@@ -202,9 +205,20 @@ function migrateHtmlReaderAskThreads(db: Database): void {
   const row = db.query<{ sql: string }, []>(
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'html_reader_ask_threads'",
   ).get()
-  if (!row?.sql?.includes("UNIQUE(run_name, html_file, scope, highlight_id)")) {
+  const columns = db.query<{ name: string }, []>(
+    "PRAGMA table_info(html_reader_ask_threads)",
+  ).all()
+  const hasSelectionScope = row?.sql?.includes("'selection'") ?? false
+  const hasContextColumns = ["context_quote", "context_prefix", "context_suffix"]
+    .every((name) => columns.some((column) => column.name === name))
+  const hasLegacyUnique = row?.sql?.includes("UNIQUE(run_name, html_file, scope, highlight_id)") ?? false
+  if (hasSelectionScope && hasContextColumns && !hasLegacyUnique) {
     return
   }
+
+  const contextQuote = columns.some((column) => column.name === "context_quote") ? "context_quote" : "NULL"
+  const contextPrefix = columns.some((column) => column.name === "context_prefix") ? "context_prefix" : "''"
+  const contextSuffix = columns.some((column) => column.name === "context_suffix") ? "context_suffix" : "''"
 
   db.run("BEGIN")
   try {
@@ -215,8 +229,11 @@ CREATE TABLE html_reader_ask_threads_new (
   html_file TEXT NOT NULL,
   md_file TEXT NOT NULL,
   md_mtime_ms INTEGER NOT NULL,
-  scope TEXT NOT NULL CHECK(scope IN ('page', 'highlight')),
+  scope TEXT NOT NULL CHECK(scope IN ('page', 'highlight', 'selection')),
   highlight_id TEXT,
+  context_quote TEXT,
+  context_prefix TEXT NOT NULL DEFAULT '',
+  context_suffix TEXT NOT NULL DEFAULT '',
   provider TEXT NOT NULL,
   handle_id TEXT,
   status TEXT NOT NULL DEFAULT 'idle',
@@ -226,7 +243,9 @@ CREATE TABLE html_reader_ask_threads_new (
     `)
     db.run(`
 INSERT INTO html_reader_ask_threads_new
-SELECT id, run_name, html_file, md_file, md_mtime_ms, scope, highlight_id, provider, handle_id, status, created_at, updated_at
+SELECT id, run_name, html_file, md_file, md_mtime_ms, scope, highlight_id,
+       ${contextQuote}, ${contextPrefix}, ${contextSuffix},
+       provider, handle_id, status, created_at, updated_at
 FROM html_reader_ask_threads
     `)
     db.run("DROP TABLE html_reader_ask_threads")

@@ -1,6 +1,6 @@
 import { nowIso, validateHtmlReaderTarget, withHtmlReaderDb } from "./html-reader-db"
 
-export const ASK_SCOPES = ["page", "highlight"] as const
+export const ASK_SCOPES = ["page", "highlight", "selection"] as const
 export type AskScope = (typeof ASK_SCOPES)[number]
 
 export const ASK_THREAD_STATUSES = ["idle", "running", "stale"] as const
@@ -17,6 +17,9 @@ export interface HtmlReaderAskThread {
   mdMtimeMs: number
   scope: AskScope
   highlightId: string | null
+  contextQuote: string | null
+  contextPrefix: string
+  contextSuffix: string
   provider: string
   handleId: string | null
   status: AskThreadStatus
@@ -54,6 +57,9 @@ type ThreadRow = {
   md_mtime_ms: number
   scope: string
   highlight_id: string | null
+  context_quote: string | null
+  context_prefix: string
+  context_suffix: string
   provider: string
   handle_id: string | null
   status: string
@@ -72,6 +78,9 @@ function rowToThread(row: ThreadRow): HtmlReaderAskThread {
     mdMtimeMs: row.md_mtime_ms,
     scope: isAskScope(row.scope) ? row.scope : "page",
     highlightId: row.highlight_id && row.highlight_id.length > 0 ? row.highlight_id : null,
+    contextQuote: row.context_quote,
+    contextPrefix: row.context_prefix,
+    contextSuffix: row.context_suffix,
     provider: row.provider,
     handleId: row.handle_id,
     status: isAskThreadStatus(row.status) ? row.status : "idle",
@@ -106,6 +115,7 @@ export async function listHtmlReaderAskThreads(
   return withHtmlReaderDb((db) => {
     const rows = db.query<ThreadRow, [string, string]    >(
       `SELECT t.id, t.run_name, t.html_file, t.md_file, t.md_mtime_ms, t.scope, t.highlight_id,
+              t.context_quote, t.context_prefix, t.context_suffix,
               t.provider, t.handle_id, t.status, t.created_at, t.updated_at,
               (
                 SELECT m.content FROM html_reader_ask_messages m
@@ -139,6 +149,7 @@ export async function getHtmlReaderAskThread(
   return withHtmlReaderDb((db) => {
     const row = db.query<ThreadRow, [string, string, string]>(
       `SELECT id, run_name, html_file, md_file, md_mtime_ms, scope, highlight_id,
+              context_quote, context_prefix, context_suffix,
               provider, handle_id, status, created_at, updated_at
        FROM html_reader_ask_threads
        WHERE run_name = ? AND html_file = ? AND id = ?
@@ -155,6 +166,9 @@ export async function createHtmlReaderAskThread(input: {
   mdMtimeMs: number
   scope: AskScope
   highlightId?: string | null
+  contextQuote?: string | null
+  contextPrefix?: string
+  contextSuffix?: string
   provider: string
   handleId?: string | null
 }): Promise<HtmlReaderAskThread> {
@@ -162,14 +176,18 @@ export async function createHtmlReaderAskThread(input: {
   if (input.scope === "highlight" && !input.highlightId) {
     throw new Error("highlightId is required for highlight scope")
   }
+  if (input.scope === "selection" && !input.contextQuote?.trim()) {
+    throw new Error("contextQuote is required for selection scope")
+  }
   const id = crypto.randomUUID()
   const now = nowIso()
-  const highlightKey = input.scope === "page" ? "" : (input.highlightId ?? "")
+  const highlightKey = input.scope === "highlight" ? (input.highlightId ?? "") : ""
   await withHtmlReaderDb((db) => {
     db.query(
       `INSERT INTO html_reader_ask_threads
-       (id, run_name, html_file, md_file, md_mtime_ms, scope, highlight_id, provider, handle_id, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)`,
+       (id, run_name, html_file, md_file, md_mtime_ms, scope, highlight_id,
+        context_quote, context_prefix, context_suffix, provider, handle_id, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)`,
     ).run(
       id,
       input.runName,
@@ -178,6 +196,9 @@ export async function createHtmlReaderAskThread(input: {
       input.mdMtimeMs,
       input.scope,
       highlightKey,
+      input.scope === "selection" ? input.contextQuote!.trim() : null,
+      input.scope === "selection" ? (input.contextPrefix ?? "") : "",
+      input.scope === "selection" ? (input.contextSuffix ?? "") : "",
       input.provider,
       input.handleId ?? null,
       now,
@@ -191,7 +212,10 @@ export async function createHtmlReaderAskThread(input: {
     mdFile: input.mdFile,
     mdMtimeMs: input.mdMtimeMs,
     scope: input.scope,
-    highlightId: input.scope === "page" ? null : (input.highlightId ?? null),
+    highlightId: input.scope === "highlight" ? (input.highlightId ?? null) : null,
+    contextQuote: input.scope === "selection" ? input.contextQuote!.trim() : null,
+    contextPrefix: input.scope === "selection" ? (input.contextPrefix ?? "") : "",
+    contextSuffix: input.scope === "selection" ? (input.contextSuffix ?? "") : "",
     provider: input.provider,
     handleId: input.handleId ?? null,
     status: "idle",

@@ -42,6 +42,7 @@ export const HTML_ASK_SCRIPT = /* html */ `
   let activeThreadId = null
   let bootstrapScope = "page"
   let bootstrapHighlightId = null
+  let bootstrapSelection = null
   let messageCache = new Map()
   let streaming = false
 
@@ -119,6 +120,7 @@ export const HTML_ASK_SCRIPT = /* html */ `
 
   function bootstrapLabel(thread) {
     if (thread.scope === "page") return "Page"
+    if (thread.scope === "selection") return truncate(thread.contextQuote, 32)
     return truncate(highlightQuote(thread.highlightId), 32)
   }
 
@@ -126,31 +128,43 @@ export const HTML_ASK_SCRIPT = /* html */ `
     if (!thread) {
       bootstrapScope = "page"
       bootstrapHighlightId = null
+      bootstrapSelection = null
       return
     }
-    bootstrapScope = thread.scope === "highlight" ? "highlight" : "page"
+    bootstrapScope = thread.scope === "highlight" || thread.scope === "selection" ? thread.scope : "page"
     bootstrapHighlightId = thread.scope === "highlight" ? (thread.highlightId || null) : null
+    bootstrapSelection = thread.scope === "selection" && thread.contextQuote
+      ? {
+        quote: thread.contextQuote,
+        prefix: thread.contextPrefix || "",
+        suffix: thread.contextSuffix || "",
+      }
+      : null
   }
 
   function readBootstrapFromSelect() {
     if (!(bootstrapSelect instanceof HTMLSelectElement)) {
       bootstrapScope = "page"
       bootstrapHighlightId = null
+      bootstrapSelection = null
       return
     }
     const value = bootstrapSelect.value
     if (value === "page") {
       bootstrapScope = "page"
       bootstrapHighlightId = null
+      bootstrapSelection = null
       return
     }
     if (value.startsWith("highlight:")) {
       bootstrapScope = "highlight"
       bootstrapHighlightId = value.slice("highlight:".length) || null
+      bootstrapSelection = null
       return
     }
     bootstrapScope = "page"
     bootstrapHighlightId = null
+    bootstrapSelection = null
   }
 
   function syncBootstrapSelect() {
@@ -177,11 +191,22 @@ export const HTML_ASK_SCRIPT = /* html */ `
         if (thread) {
           contextChipEl.textContent = thread.scope === "page"
             ? "Started from whole page"
-            : 'Started from: "' + truncate(highlightQuote(thread.highlightId), 72) + '"'
+            : thread.scope === "selection"
+              ? 'Started from selection: "' + truncate(thread.contextQuote, 72) + '"'
+              : 'Started from: "' + truncate(highlightQuote(thread.highlightId), 72) + '"'
         }
       }
     }
-    if (isNewChat) syncBootstrapSelect()
+    if (isNewChat) {
+      syncBootstrapSelect()
+      if (bootstrapEl instanceof HTMLElement) {
+        bootstrapEl.hidden = bootstrapScope === "selection"
+      }
+      if (contextChipEl instanceof HTMLElement && bootstrapScope === "selection" && bootstrapSelection) {
+        contextChipEl.hidden = false
+        contextChipEl.textContent = 'Selected text: "' + truncate(bootstrapSelection.quote, 72) + '"'
+      }
+    }
   }
 
   function syncAskSheet(open) {
@@ -276,6 +301,7 @@ export const HTML_ASK_SCRIPT = /* html */ `
     activeThreadId = null
     bootstrapScope = options?.scope || "page"
     bootstrapHighlightId = options?.highlightId || null
+    bootstrapSelection = options?.selection || null
     renderChatList()
     renderBootstrapUi()
     renderMessages([])
@@ -364,6 +390,11 @@ export const HTML_ASK_SCRIPT = /* html */ `
     if (!activeThreadId) {
       payload.scope = bootstrapScope
       payload.highlightId = bootstrapHighlightId
+      if (bootstrapScope === "selection" && bootstrapSelection) {
+        payload.contextQuote = bootstrapSelection.quote
+        payload.contextPrefix = bootstrapSelection.prefix
+        payload.contextSuffix = bootstrapSelection.suffix
+      }
     }
 
     const savedMessage = message
@@ -434,6 +465,9 @@ export const HTML_ASK_SCRIPT = /* html */ `
                 id: data.threadId,
                 scope: data.scope,
                 highlightId: data.highlightId || null,
+                contextQuote: data.contextQuote || null,
+                contextPrefix: bootstrapSelection?.prefix || "",
+                contextSuffix: bootstrapSelection?.suffix || "",
                 firstUserPreview: savedMessage,
                 updatedAt: new Date().toISOString(),
               })
@@ -513,14 +547,22 @@ export const HTML_ASK_SCRIPT = /* html */ `
 
   window.addEventListener("html-ask-open", (event) => {
     const detail = event.detail || {}
-    if (activeThreadId) {
+    if (streaming) {
+      setStatus("Wait for the current reply before starting a new chat.", true)
+      return
+    }
+    if (activeThreadId && !detail.selection) {
       setStatus("Start a new chat before asking about a different highlight.", true)
       return
     }
     startNewChat({
-      scope: "highlight",
+      scope: detail.selection ? "selection" : "highlight",
       highlightId: detail.highlightId || null,
+      selection: detail.selection || null,
     })
+    if (input instanceof HTMLTextAreaElement) {
+      setTimeout(() => input.focus(), 0)
+    }
   })
 
   window.addEventListener("html-highlights-changed", (event) => {

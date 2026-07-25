@@ -5,7 +5,7 @@ import { getProviderLifecycle } from "../providers/lifecycle"
 import { providerForRole } from "../providers/registry"
 import { createEventBus, type Bridge, type RunnerEvent } from "../runner"
 import { HTML_READING_COMPANION_ROLE, markAskThreadIdle, markAskThreadStale } from "./html-ask-agent"
-import { appendHtmlReaderAskMessage } from "./html-ask-store"
+import { appendHtmlReaderAskMessage, type AskScope } from "./html-ask-store"
 
 export type SseEventName = "thread" | "status" | "delta" | "done" | "error"
 
@@ -16,8 +16,11 @@ export function formatSseEvent(event: SseEventName, data: unknown): string {
 export interface StreamAskMessageInput {
   runName: string
   htmlFile: string
-  scope: "page" | "highlight"
+  scope: AskScope
   highlightId?: string | null
+  contextQuote?: string | null
+  contextPrefix?: string
+  contextSuffix?: string
   threadId?: string | null
   message: string
   prepare: typeof import("./html-ask-agent").prepareAskMessage
@@ -60,6 +63,9 @@ export async function streamAskMessage(input: StreamAskMessageInput): Promise<Re
           htmlFile: input.htmlFile,
           scope: input.scope,
           highlightId: input.highlightId,
+          contextQuote: input.contextQuote,
+          contextPrefix: input.contextPrefix,
+          contextSuffix: input.contextSuffix,
           threadId: input.threadId,
           message: input.message,
         })
@@ -68,6 +74,7 @@ export async function streamAskMessage(input: StreamAskMessageInput): Promise<Re
           threadId: prepared.thread.id,
           scope: prepared.thread.scope,
           highlightId: prepared.thread.highlightId,
+          contextQuote: prepared.thread.contextQuote,
           created: prepared.created,
           bootstrap: prepared.bootstrap,
         })

@@ -48,6 +48,7 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   const listEl = document.querySelector("[data-html-highlight-list]")
   const unsupportedEl = document.querySelector("[data-html-highlight-unsupported]")
   const saveBtn = document.querySelector("[data-html-highlight-save]")
+  const askBtn = document.querySelector("[data-html-highlight-ask]")
   const clearBtn = document.querySelector("[data-html-highlight-clear]")
   const swatchRoot = document.querySelector("[data-html-highlight-colors]")
 
@@ -378,6 +379,9 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     if (saveBtn instanceof HTMLButtonElement) {
       saveBtn.disabled = !hasPending || !cssHighlightSupported
     }
+    if (askBtn instanceof HTMLButtonElement) {
+      askBtn.disabled = !hasPending
+    }
     if (clearBtn instanceof HTMLButtonElement) {
       clearBtn.disabled = !hasPending
     }
@@ -436,6 +440,19 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     const doc = iframe.contentDocument
     doc?.getSelection()?.removeAllRanges()
     syncCompose()
+  }
+
+  function askAboutSelection() {
+    if (!pendingSelection) return
+    window.dispatchEvent(new CustomEvent("html-ask-open", {
+      detail: {
+        selection: {
+          quote: pendingSelection.quote,
+          prefix: pendingSelection.prefix,
+          suffix: pendingSelection.suffix,
+        },
+      },
+    }))
   }
 
   function bindIframe() {
@@ -526,6 +543,7 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   askTab?.addEventListener("click", () => setActiveTab("ask"))
   window.addEventListener("html-ask-open", () => setActiveTab("ask"))
   saveBtn?.addEventListener("click", () => { void saveHighlight() })
+  askBtn?.addEventListener("click", askAboutSelection)
   clearBtn?.addEventListener("click", clearSelection)
   listEl?.addEventListener("click", (event) => {
     const target = event.target

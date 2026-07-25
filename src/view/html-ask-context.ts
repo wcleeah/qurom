@@ -69,17 +69,18 @@ export async function buildAskPrompt(input: AskPromptBuildInput): Promise<AskPro
     return { prompt: message }
   }
 
-  const template = input.scope === "highlight"
+  const passageScoped = input.scope === "highlight" || input.scope === "selection"
+  const template = passageScoped
     ? input.promptAssets.htmlAskHighlight
     : input.promptAssets.htmlAskPage
   const values: Record<string, string> = {
     question: message,
     researchToolHint: buildResearchToolHint(input.config),
   }
-  if (input.scope === "highlight") {
+  if (passageScoped) {
     const highlight = input.highlight
     if (!highlight) {
-      throw new Error("Highlight context is required for highlight scope bootstrap")
+      throw new Error("Passage context is required for passage scope bootstrap")
     }
     values.quote = displayHighlightQuote(highlight.quote)
     values.prefix = highlight.prefix

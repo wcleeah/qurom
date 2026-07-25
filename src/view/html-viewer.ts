@@ -234,6 +234,7 @@ export function renderHtmlViewerPage(
           <textarea id="html-highlight-selection" class="html-viewer-highlight-selection" data-html-highlight-selection rows="3" readonly placeholder="Select text in the page..."></textarea>
           <div class="html-viewer-highlight-colors" data-html-highlight-colors>${renderColorSwatches()}</div>
           <div class="html-viewer-highlight-actions">
+            <button type="button" class="html-viewer-action html-viewer-highlight-ask-selection" data-html-highlight-ask disabled>Ask agent</button>
             <button type="button" class="html-viewer-action html-viewer-highlight-save" data-html-highlight-save disabled>Save highlight</button>
             <button type="button" class="html-viewer-action" data-html-highlight-clear disabled>Clear selection</button>
           </div>
