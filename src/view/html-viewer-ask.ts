@@ -376,7 +376,12 @@ export const HTML_ASK_SCRIPT = /* html */ `
     const message = input.value.trim()
     if (!message || streaming) return
 
-    if (!activeThreadId) readBootstrapFromSelect()
+    // Selection-scoped chats are started from the highlight composer, not the
+    // bootstrap select. Reading the select here would reset scope to "page"
+    // and drop the selected passage from the first prompt.
+    if (!activeThreadId && bootstrapScope !== "selection") {
+      readBootstrapFromSelect()
+    }
 
     streaming = true
     sendBtn.disabled = true

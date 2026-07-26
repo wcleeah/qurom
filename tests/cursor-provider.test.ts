@@ -9,6 +9,7 @@ import { createEventBus, type RunnerEvent } from "../src/runner"
 import { testQuorumConfig, testRuntimeEnv, unitTestDataDir } from "./test-env"
 
 const createCalls: unknown[] = []
+const resumeCalls: unknown[] = []
 const sendCalls: string[] = []
 let waitResult: unknown = { status: "finished", result: "plain response" }
 let waitResults: unknown[] = []
@@ -97,58 +98,11 @@ mock.module("@cursor/sdk", () => {
     Agent: {
       create: mock(async (options: unknown) => {
         createCalls.push(options)
-        return {
-          agentId: "bc-cursor-agent-1",
-          async listArtifacts() {
-            return [{ path: artifactPath, sizeBytes: artifactBytes.byteLength, updatedAt: new Date().toISOString() }]
-          },
-          async downloadArtifact(path: string) {
-            if (path !== artifactPath) throw new Error(`Missing artifact ${path}`)
-            return artifactBytes
-          },
-          async send(prompt: string, options?: { onDelta?: (args: { update: unknown }) => void }) {
-            sendCalls.push(prompt)
-            const sendError = sendErrors.shift()
-            if (sendError) throw sendError
-            options?.onDelta?.({ update: { type: "thinking-delta", text: "thinking..." } })
-            options?.onDelta?.({
-              update: {
-                type: "tool-call-started",
-                callId: "call-1",
-                toolCall: { type: "shell", args: { command: "echo hi" } },
-              },
-            })
-            options?.onDelta?.({
-              update: {
-                type: "tool-call-completed",
-                callId: "call-1",
-                toolCall: { type: "shell", result: { status: "success", value: "hi" } },
-              },
-            })
-            options?.onDelta?.({ update: { type: "text-delta", text: "hello" } })
-            return {
-              id: `cursor-run-${sendCalls.length}`,
-              agentId: "bc-cursor-agent-1",
-              status: "running" as const,
-              supports(op: string) {
-                return op === "cancel"
-              },
-              async cancel() {
-                cancelCalled = true
-              },
-              async wait() {
-                const error = waitErrors.shift()
-                if (error) throw error
-                const result = waitResults.shift()
-                if (result) return result
-                return waitResult
-              },
-            }
-          },
-          async [Symbol.asyncDispose]() {
-            disposeCalled = true
-          },
-        }
+        return createMockAgent("bc-cursor-agent-1")
+      }),
+      resume: mock(async (agentId: string, options: unknown) => {
+        resumeCalls.push({ agentId, options })
+        return createMockAgent(agentId)
       }),
       getRun: mock(async () => ({
         id: "cursor-run-attached",
@@ -163,6 +117,61 @@ mock.module("@cursor/sdk", () => {
         },
       })),
     },
+  }
+
+  function createMockAgent(agentId: string) {
+    return {
+      agentId,
+      async listArtifacts() {
+        return [{ path: artifactPath, sizeBytes: artifactBytes.byteLength, updatedAt: new Date().toISOString() }]
+      },
+      async downloadArtifact(path: string) {
+        if (path !== artifactPath) throw new Error(`Missing artifact ${path}`)
+        return artifactBytes
+      },
+      async send(prompt: string, options?: { onDelta?: (args: { update: unknown }) => void }) {
+        sendCalls.push(prompt)
+        const sendError = sendErrors.shift()
+        if (sendError) throw sendError
+        options?.onDelta?.({ update: { type: "thinking-delta", text: "thinking..." } })
+        options?.onDelta?.({
+          update: {
+            type: "tool-call-started",
+            callId: "call-1",
+            toolCall: { type: "shell", args: { command: "echo hi" } },
+          },
+        })
+        options?.onDelta?.({
+          update: {
+            type: "tool-call-completed",
+            callId: "call-1",
+            toolCall: { type: "shell", result: { status: "success", value: "hi" } },
+          },
+        })
+        options?.onDelta?.({ update: { type: "text-delta", text: "hello" } })
+        return {
+          id: `cursor-run-${sendCalls.length}`,
+          agentId,
+          status: "running" as const,
+          supports(op: string) {
+            return op === "cancel"
+          },
+          async cancel() {
+            cancelCalled = true
+          },
+          async wait() {
+            const error = waitErrors.shift()
+            if (error) throw error
+            const result = waitResults.shift()
+            if (result) return result
+            return waitResult
+          },
+        }
+      },
+      async [Symbol.asyncDispose]() {
+        disposeCalled = true
+      },
+    }
   }
 })
 
@@ -195,6 +204,7 @@ const config: RuntimeConfig = {
 
 beforeEach(() => {
   createCalls.length = 0
+  resumeCalls.length = 0
   sendCalls.length = 0
   waitResult = { status: "finished", result: "plain response" }
   waitResults = []
@@ -238,6 +248,33 @@ describe("cursorProvider", () => {
       model: { id: "composer-2.5", params: [{ id: "fast", value: "true" }] },
       cloud: {},
     })
+  })
+
+  test("resumes a Cursor agent by id and can prompt again", async () => {
+    const handle = await cursorProvider.resumeRunHandle!({
+      config,
+      role: "research-drafter",
+      title: "html-ask:thread-1",
+      handleId: "bc-existing-agent",
+    })
+
+    expect(handle.id).toBe("bc-existing-agent")
+    expect(resumeCalls[0]).toMatchObject({
+      agentId: "bc-existing-agent",
+      options: {
+        apiKey: "cursor-test-key",
+        cloud: {},
+      },
+    })
+
+    const result = await cursorProvider.prompt({
+      config,
+      role: "research-drafter",
+      handle,
+      prompt: "follow up",
+    })
+    expect(result.text).toBe("plain response")
+    expect(sendCalls).toEqual(["follow up"])
   })
 
   test("clamps long agent titles before calling Cursor create", async () => {

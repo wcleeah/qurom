@@ -677,6 +677,54 @@ export const cursorProvider: AgentProvider = {
       dispose: () => disposeAgent(agentId),
     }
   },
+  async resumeRunHandle(input): Promise<AgentRunHandle> {
+    const apiKey = cursorApiKey(input.config)
+    if (!apiKey) throw new Error("Cursor provider requires CURSOR_API_KEY")
+
+    const existing = activeAgents.get(input.handleId)
+    if (existing) {
+      return {
+        id: input.handleId,
+        providerId: "cursor",
+        role: input.role,
+        title: input.title,
+        providerAgent: input.config.roleBindings[input.role]?.providerAgent,
+        sessionBootstrap: {
+          requestedModel: existing.requestedModel,
+          modelParams: existing.modelParams,
+          variant: input.config.roleBindings[input.role]?.variant,
+        },
+        dispose: () => disposeAgent(input.handleId),
+      }
+    }
+
+    const model = cursorModelForRole(input.config, input.role)
+    const options = cursorOptionsForRole(input.config, input.role)
+    const catalogModel = (await listCursorModels(apiKey, model)).find((entry) => entry.id === model)
+    const modelParams = cursorModelParamsForRole(input.config, input.role, catalogModel)
+    const mcpServers = toCursorMcpServers(input.config.mcpRegistry, input.config.env)
+    // Inline MCP servers are not persisted across resume; pass them again.
+    const agent = await Agent.resume(input.handleId, {
+      apiKey,
+      ...cursorRuntimeOptions(input.config, options),
+      ...(mcpServers ? { mcpServers } : {}),
+    })
+    const agentId = agent.agentId || input.handleId
+    activeAgents.set(agentId, { agent, requestedModel: model, modelParams })
+    return {
+      id: agentId,
+      providerId: "cursor",
+      role: input.role,
+      title: input.title,
+      providerAgent: input.config.roleBindings[input.role]?.providerAgent,
+      sessionBootstrap: {
+        requestedModel: model,
+        modelParams,
+        variant: input.config.roleBindings[input.role]?.variant,
+      },
+      dispose: () => disposeAgent(agentId),
+    }
+  },
   async prompt(input) {
     const active = activeAgents.get(input.handle.id)
     if (!active) {

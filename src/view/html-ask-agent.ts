@@ -80,16 +80,33 @@ function assertThreadAvailable(thread: HtmlReaderAskThread): void {
   }
 }
 
+async function createAskRuntime(config: RuntimeConfig) {
+  return createAgentRuntime(config, undefined, {
+    roleInstructions: (await loadPromptBundle(config)).roleInstructions,
+  })
+}
+
 async function createProviderHandle(input: {
   config: RuntimeConfig
   threadId: string
 }): Promise<AgentRunHandle> {
-  const runtime = createAgentRuntime(input.config, undefined, {
-    roleInstructions: (await loadPromptBundle(input.config)).roleInstructions,
-  })
+  const runtime = await createAskRuntime(input.config)
   return runtime.createHandle(
     HTML_READING_COMPANION_ROLE,
     threadTitle(input.threadId),
+  )
+}
+
+async function resumeProviderHandle(input: {
+  config: RuntimeConfig
+  threadId: string
+  handleId: string
+}): Promise<AgentRunHandle> {
+  const runtime = await createAskRuntime(input.config)
+  return runtime.resumeHandle(
+    HTML_READING_COMPANION_ROLE,
+    threadTitle(input.threadId),
+    input.handleId,
   )
 }
 
@@ -159,12 +176,38 @@ export async function ensureAskThreadHandle(input: {
   const cached = getCachedHandle(input.thread.id)
   if (cached) return cached
 
+  const { config } = await ensureAskRuntime()
+
   if (input.thread.handleId) {
-    await updateHtmlReaderAskThread({ threadId: input.thread.id, status: "stale" })
-    throw new AskThreadStaleError(input.thread.id)
+    try {
+      const resumed = await resumeProviderHandle({
+        config,
+        threadId: input.thread.id,
+        handleId: input.thread.handleId,
+      })
+      cacheHandle(input.thread.id, resumed)
+      await updateHtmlReaderAskThread({
+        threadId: input.thread.id,
+        handleId: resumed.id,
+        status: "idle",
+        mdMtimeMs: input.source.mtimeMs,
+      })
+      input.thread.handleId = resumed.id
+      input.thread.status = "idle"
+      return resumed
+    } catch (error) {
+      console.error("Failed to resume ask thread handle:", error)
+      await updateHtmlReaderAskThread({
+        threadId: input.thread.id,
+        status: "stale",
+        handleId: null,
+      })
+      input.thread.status = "stale"
+      input.thread.handleId = null
+      throw new AskThreadStaleError(input.thread.id)
+    }
   }
 
-  const { config } = await ensureAskRuntime()
   const handle = await createProviderHandle({
     config,
     threadId: input.thread.id,
@@ -383,11 +426,8 @@ export async function preflightAskMessage(input: {
   if (thread.status === "stale") {
     throw new AskThreadStaleError(thread.id)
   }
-  if (thread.handleId && !handleCache.has(thread.id)) {
-    await updateHtmlReaderAskThread({ threadId: thread.id, status: "stale", handleId: null })
-    thread.status = "stale"
-    throw new AskThreadStaleError(thread.id)
-  }
+  // Missing in-memory handles are recovered later via provider resume in
+  // ensureAskThreadHandle (Cursor Agent.resume). Do not expire them here.
 
   const messageCount = await countHtmlReaderAskMessages(thread.id)
   if (messageCount === 0 && thread.scope === "highlight" && thread.highlightId) {

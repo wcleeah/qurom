@@ -10,6 +10,7 @@ import {
   appendHtmlReaderAskMessage,
   countHtmlReaderAskMessages,
   createHtmlReaderAskThread,
+  getHtmlReaderAskThread,
   listHtmlReaderAskMessages,
   listHtmlReaderAskThreads,
   purgeEmptyHtmlReaderAskThreads,
@@ -19,7 +20,7 @@ import { HighlightNotFoundError, preflightAskMessage } from "../src/view/html-as
 import { handleListAskThreads } from "../src/view/html-ask-routes.ts"
 import { openHtmlReaderDb } from "../src/view/html-reader-db.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
-import { testQuorumConfig, testRuntimeEnv } from "./test-env"
+import { installDefaultsFixtures, testQuorumConfig, testRuntimeEnv } from "./test-env"
 
 let dir: string
 let originalDataDir: string | undefined
@@ -38,6 +39,7 @@ beforeEach(async () => {
     join(dir, "assets", "prompts", "html-ask-highlight.md"),
     'Quote: "{quote}"\n\n{question}\n',
   )
+  await installDefaultsFixtures(dir)
 
   originalDataDir = process.env.QUORUM_DATA_DIR
   originalWorkspace = process.env.QUORUM_WORKSPACE_DIRECTORY
@@ -278,6 +280,32 @@ describe("html ask routes and ui", () => {
     })).rejects.toBeInstanceOf(HighlightNotFoundError)
   })
 
+  test("preflightAskMessage keeps durable handles after process restart", async () => {
+    const thread = await createHtmlReaderAskThread({
+      runName: "alpha-run",
+      htmlFile: "final.html",
+      mdFile: "final.md",
+      mdMtimeMs: (await resolveSourceMarkdown("alpha-run")).mtimeMs,
+      scope: "page",
+      provider: "cursor",
+      handleId: "bc-persisted-agent",
+    })
+    await appendHtmlReaderAskMessage({ threadId: thread.id, role: "user", content: "Hello" })
+
+    const result = await preflightAskMessage({
+      runName: "alpha-run",
+      htmlFile: "final.html",
+      threadId: thread.id,
+    })
+
+    expect(result.thread?.id).toBe(thread.id)
+    expect(result.thread?.status).toBe("idle")
+    expect(result.thread?.handleId).toBe("bc-persisted-agent")
+    const stored = await getHtmlReaderAskThread("alpha-run", "final.html", thread.id)
+    expect(stored?.status).toBe("idle")
+    expect(stored?.handleId).toBe("bc-persisted-agent")
+  })
+
   test("renders Ask tab UI with flat chat list", () => {
     const html = renderHtmlViewerPage("alpha-run", "final.html", "", [], [])
     expect(html).toContain('data-html-tab="ask"')
@@ -294,6 +322,8 @@ describe("html ask routes and ui", () => {
     expect(html).toContain("startNewChat()")
     expect(html).toContain('scope: detail.selection ? "selection" : "highlight"')
     expect(html).toContain("payload.contextQuote = bootstrapSelection.quote")
+    expect(html).toContain('bootstrapScope !== "selection"')
+    expect(html).toContain("readBootstrapFromSelect()")
     expect(html).toMatch(
       /data-html-ask-sheet hidden><\/div>\s*<div class="html-viewer-ask-layout">\s*<div class="html-viewer-ask-sheet-handle"/,
     )

@@ -40,6 +40,7 @@ export type RuntimePromptInput<T> = {
 
 export type AgentRuntime = {
   createHandle: (role: AgentRole, title: string, parentId?: string) => Promise<AgentRunHandle>
+  resumeHandle: (role: AgentRole, title: string, handleId: string) => Promise<AgentRunHandle>
   prompt: <T>(input: RuntimePromptInput<T>) => Promise<ProviderPromptResult<T>>
   abort: (handle: AgentRunHandle) => Promise<void>
   providerForRole: (role: AgentRole) => AgentProvider
@@ -202,6 +203,13 @@ export function createAgentRuntime(
         }
       }
       return handle
+    },
+    async resumeHandle(role, title, handleId) {
+      const provider = resolveProvider(role)
+      if (!provider.resumeRunHandle) {
+        throw new Error(`Provider ${provider.id} does not support resuming run handles`)
+      }
+      return provider.resumeRunHandle({ config, role, title, handleId })
     },
     async prompt(input) {
       const provider = resolveProvider(input.role)

@@ -57,6 +57,14 @@ export type CreateRunHandleInput = {
   providerOptions?: Record<string, unknown>
 }
 
+export type ResumeRunHandleInput = {
+  config: RuntimeConfig
+  role: AgentRole
+  title: string
+  handleId: string
+  providerOptions?: Record<string, unknown>
+}
+
 export type ProviderPromptInput<T> = {
   config: RuntimeConfig
   bus?: EventBus
@@ -158,6 +166,8 @@ export interface AgentProvider {
   outputInstructions?: (input: ProviderOutputInstructionInput) => string | undefined
   prepare?: (input: ProviderPrepareInput) => Promise<ProviderRuntimeInfo>
   createRunHandle: (input: CreateRunHandleInput) => Promise<AgentRunHandle>
+  /** Reattach a durable provider session after process restart when supported. */
+  resumeRunHandle?: (input: ResumeRunHandleInput) => Promise<AgentRunHandle>
   prompt: <T>(input: ProviderPromptInput<T>) => Promise<ProviderPromptResult<T>>
   abort?: (config: RuntimeConfig, handleId: string) => Promise<void>
   createEventBridge?: (input: ProviderBridgeInput) => Bridge
