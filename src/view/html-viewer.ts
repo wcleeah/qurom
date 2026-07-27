@@ -174,6 +174,18 @@ export function renderHtmlViewerPage(
   const highlightsJson = highlightsToJson(highlights, highlightTagsById)
   const askThreadsJson = askThreadsToJson(askThreads)
   const allTagsJson = escapeHtml(JSON.stringify(allTags))
+  const highlightIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>`
+  const askIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>`
+  const primaryActions = [
+    `<button type="button" class="app-navbar-action app-navbar-action-has-icon html-viewer-nav-highlight" data-html-nav-highlight disabled aria-label="Highlight selection">
+      <span class="app-navbar-action-icon">${highlightIcon}</span>
+      <span class="app-navbar-action-label">Highlight</span>
+    </button>`,
+    `<button type="button" class="app-navbar-action app-navbar-action-has-icon html-viewer-nav-ask" data-html-nav-ask aria-label="Ask about selection">
+      <span class="app-navbar-action-icon">${askIcon}</span>
+      <span class="app-navbar-action-label">Ask</span>
+    </button>`,
+  ].join("")
   const navbarActions = [
     appNavbarButton("Hide panel", 'class="app-navbar-action html-viewer-sidebar-toggle" data-html-sidebar-toggle aria-expanded="true"'),
     appNavbarAction(`${rawHref}?source=1`, "View raw"),
@@ -183,6 +195,7 @@ export function renderHtmlViewerPage(
     section: "runs",
     back: { href: runHref, label: "← Back to run" },
     title: baseName,
+    primaryActionsHtml: primaryActions,
     actionsHtml: navbarActions,
   })
 

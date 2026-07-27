@@ -51,6 +51,8 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   const askBtn = document.querySelector("[data-html-highlight-ask]")
   const clearBtn = document.querySelector("[data-html-highlight-clear]")
   const swatchRoot = document.querySelector("[data-html-highlight-colors]")
+  const navHighlightBtn = document.querySelector("[data-html-nav-highlight]")
+  const navAskBtn = document.querySelector("[data-html-nav-ask]")
 
   let highlights = []
   try {
@@ -385,6 +387,35 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     if (clearBtn instanceof HTMLButtonElement) {
       clearBtn.disabled = !hasPending
     }
+    if (navHighlightBtn instanceof HTMLButtonElement) {
+      navHighlightBtn.disabled = !hasPending || !cssHighlightSupported
+    }
+  }
+
+  function askFromNavbar() {
+    if (pendingSelection) {
+      window.dispatchEvent(new CustomEvent("html-ask-open", {
+        detail: {
+          forceNew: true,
+          selection: {
+            quote: pendingSelection.quote,
+            prefix: pendingSelection.prefix,
+            suffix: pendingSelection.suffix,
+          },
+        },
+      }))
+      return
+    }
+    if (highlights.length > 0) {
+      const latest = highlights.slice().sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0]
+      if (latest?.id) {
+        window.dispatchEvent(new CustomEvent("html-ask-open", {
+          detail: { forceNew: true, highlightId: latest.id },
+        }))
+        return
+      }
+    }
+    window.dispatchEvent(new CustomEvent("html-ask-open", { detail: { forceNew: true } }))
   }
 
   function setActiveTab(tab) {
@@ -475,8 +506,8 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
 
   async function saveHighlight() {
     if (!pendingSelection || !cssHighlightSupported) return
-    if (!(saveBtn instanceof HTMLButtonElement)) return
-    saveBtn.disabled = true
+    if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true
+    if (navHighlightBtn instanceof HTMLButtonElement) navHighlightBtn.disabled = true
     try {
       const resp = await fetch(apiBase, {
         method: "POST",
@@ -509,7 +540,7 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     } catch {
       /* ignore */
     } finally {
-      if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = !pendingSelection || !cssHighlightSupported
+      syncCompose()
     }
   }
 
@@ -545,6 +576,8 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   saveBtn?.addEventListener("click", () => { void saveHighlight() })
   askBtn?.addEventListener("click", askAboutSelection)
   clearBtn?.addEventListener("click", clearSelection)
+  navHighlightBtn?.addEventListener("click", () => { void saveHighlight() })
+  navAskBtn?.addEventListener("click", askFromNavbar)
   listEl?.addEventListener("click", (event) => {
     const target = event.target
     if (!(target instanceof Element)) return

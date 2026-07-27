@@ -1,4 +1,4 @@
-import { renderAppNavbar, type AppNavbarOptions } from "./app-nav"
+import { NAV_DROPDOWNS_SCRIPT, renderAppNavbar, type AppNavbarOptions } from "./app-nav"
 import { CSS } from "./styles"
 import { escapeHtml } from "./utils"
 import type { RunStatus } from "./types"
@@ -70,6 +70,7 @@ ${body}
 <script>
 ${THEME_TOGGLE_SCRIPT}
 </script>
+${NAV_DROPDOWNS_SCRIPT}
 </body>
 </html>`
 }
@@ -94,6 +95,7 @@ ${body}
 <script>
 ${THEME_TOGGLE_SCRIPT}
 </script>
+${NAV_DROPDOWNS_SCRIPT}
 </body>
 </html>`
 }

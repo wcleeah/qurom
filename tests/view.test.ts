@@ -453,6 +453,10 @@ describe("html viewer renderer", () => {
 
     expect(html).toContain("app-navbar")
     expect(html).toContain("app-navbar-pill")
+    expect(html).toContain("app-navbar-section-menu")
+    expect(html).toContain("app-navbar-overflow")
+    expect(html).toContain("data-html-nav-highlight")
+    expect(html).toContain("data-html-nav-ask")
     expect(html).toContain("/runs/example-run/html-notes")
     expect(html).toContain('data-html-notes-form')
     expect(html).toContain("data-html-save-indicator")

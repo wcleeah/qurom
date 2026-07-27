@@ -79,6 +79,10 @@ describe("html viewer page", () => {
     expect(html).toContain("data-html-tab=\"highlights\"")
     expect(html).toContain("data-html-sidebar-toggle")
     expect(html).toContain("data-html-sidebar-close")
+    expect(html).toContain("data-html-nav-highlight")
+    expect(html).toContain("data-html-nav-ask")
+    expect(html).toContain("app-navbar-section-menu")
+    expect(html).toContain("app-navbar-overflow-toggle")
   })
 })
 

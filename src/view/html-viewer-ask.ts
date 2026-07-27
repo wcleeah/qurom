@@ -556,12 +556,17 @@ export const HTML_ASK_SCRIPT = /* html */ `
       setStatus("Wait for the current reply before starting a new chat.", true)
       return
     }
-    if (activeThreadId && !detail.selection) {
+    if (activeThreadId && !detail.selection && !detail.forceNew) {
       setStatus("Start a new chat before asking about a different highlight.", true)
       return
     }
+    const scope = detail.selection
+      ? "selection"
+      : detail.highlightId
+        ? "highlight"
+        : "page"
     startNewChat({
-      scope: detail.selection ? "selection" : "highlight",
+      scope,
       highlightId: detail.highlightId || null,
       selection: detail.selection || null,
     })
