@@ -139,6 +139,7 @@ export const HTML_VIEWER_SCRIPT = /* html */ `
   if (closeBtn instanceof HTMLButtonElement) {
     closeBtn.addEventListener("click", () => setSidebarOpen(false))
   }
+  window.addEventListener("html-sidebar-open", () => setSidebarOpen(true))
 
   restoreSidebarState()
   window.addEventListener("resize", syncSidebarUi)

@@ -718,7 +718,7 @@ a:hover { text-decoration: underline; }
   gap: 0.35rem;
 }
 .app-navbar-action-icon {
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
 }
@@ -765,22 +765,19 @@ a:hover { text-decoration: underline; }
   .app-navbar-overflow[data-nav-menu-open] .app-navbar-overflow-panel {
     display: flex;
   }
-  .app-navbar-overflow-panel .app-navbar-action,
-  .app-navbar-overflow-panel .theme-toggle {
+  .app-navbar-overflow-panel .app-navbar-action {
     width: 100%;
     justify-content: flex-start;
   }
   .app-navbar-action-has-icon {
-    width: 2rem;
-    height: 2rem;
-    padding: 0;
-    justify-content: center;
+    gap: 0.3rem;
+    padding: 0.28rem 0.55rem;
   }
   .app-navbar-action-has-icon .app-navbar-action-icon {
     display: inline-flex;
   }
   .app-navbar-action-has-icon .app-navbar-action-label {
-    display: none;
+    display: inline;
   }
 }
 .app-navbar-back,
@@ -3297,7 +3294,7 @@ body.html-viewer-body {
 
   .html-viewer-ask-sheet-open .html-viewer-ask-sheet {
     display: block;
-    position: fixed;
+    position: absolute;
     inset: 0;
     z-index: 0;
     background: rgba(0, 0, 0, 0.35);
@@ -3305,7 +3302,7 @@ body.html-viewer-body {
   }
 
   .html-viewer-ask-sheet-open .html-viewer-panel[data-html-panel="ask"]:not([hidden]) {
-    position: fixed;
+    position: absolute;
     left: 0;
     right: 0;
     bottom: 0;

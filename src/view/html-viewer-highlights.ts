@@ -431,8 +431,6 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     try { localStorage.setItem(tabStorageKey, tab) } catch {}
     if (tab !== "ask") {
       shell?.classList.remove("html-viewer-ask-sheet-open")
-    } else if (isMobile()) {
-      shell?.classList.add("html-viewer-ask-sheet-open")
     }
     if (tab === "highlights") syncCompose()
   }
@@ -444,6 +442,8 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
       if (stored === "notes" || stored === "highlights" || stored === "ask") tab = stored
     } catch {}
     setActiveTab(tab)
+    // Never auto-open the ask sheet overlay on load — only when the user asks.
+    shell?.classList.remove("html-viewer-ask-sheet-open")
   }
 
   function captureSelection() {

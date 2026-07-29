@@ -570,9 +570,11 @@ export const HTML_ASK_SCRIPT = /* html */ `
       highlightId: detail.highlightId || null,
       selection: detail.selection || null,
     })
-    if (input instanceof HTMLTextAreaElement) {
-      setTimeout(() => input.focus(), 0)
-    }
+    window.dispatchEvent(new CustomEvent("html-sidebar-open"))
+    setTimeout(() => {
+      syncAskSheet(true)
+      if (input instanceof HTMLTextAreaElement) input.focus()
+    }, 0)
   })
 
   window.addEventListener("html-highlights-changed", (event) => {
@@ -586,6 +588,7 @@ export const HTML_ASK_SCRIPT = /* html */ `
   startNewChat()
   void refreshThreadsFromServer()
 
-  syncAskSheet(askPanel instanceof HTMLElement && !askPanel.hidden)
+  // Keep the ask sheet closed on initial load; open it only from user actions.
+  syncAskSheet(false)
 })();
 </script>`

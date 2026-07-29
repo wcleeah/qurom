@@ -112,16 +112,20 @@ export function renderAppNavbar(options: AppNavbarOptions): string {
 
   const primary = options.primaryActionsHtml ?? ""
   const secondary = options.actionsHtml ?? ""
-  const actions = `<div class="app-navbar-actions">
-  ${primary}
-  <div class="app-navbar-overflow" data-nav-menu>
+  const overflow = secondary.trim()
+    ? `<div class="app-navbar-overflow" data-nav-menu>
     <button type="button" class="app-navbar-overflow-toggle" data-nav-menu-toggle aria-expanded="false" aria-haspopup="true" aria-label="More actions">
       <span aria-hidden="true">⋯</span>
     </button>
     <div class="app-navbar-overflow-panel" data-nav-menu-panel>
-      ${secondary}${appNavbarThemeToggle()}
+      ${secondary}
     </div>
-  </div>
+  </div>`
+    : ""
+  const actions = `<div class="app-navbar-actions">
+  ${primary}
+  ${overflow}
+  ${appNavbarThemeToggle()}
 </div>`
 
   const mainRow = `<header class="app-navbar">
