@@ -212,11 +212,16 @@ export function auditPrompt(
         ].join("\n\n")
       : "This is the first audit of this draft."
 
+  const missingReaderFallback =
+    agent === "clarity-auditor"
+      ? "(no reader profile provided — judge clarity against a competent practitioner default)"
+      : "(no reader profile provided — apply your scope against a competent practitioner default; do not loosen rigor)"
+
   return renderPromptTemplate(promptBundle.assets[auditorAuditPromptKey(agent)], {
     requestLabel: requestLabel(state),
     researchToolHint: buildResearchToolHint(config),
     deltaContext,
-    readerContext: readerContextBlock(state) || "(no reader profile provided — judge clarity against a competent practitioner default)",
+    readerContext: readerContextBlock(state) || missingReaderFallback,
   })
 }
 
@@ -262,6 +267,7 @@ export function rebuttalReviewPrompt(
 function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
   return renderPromptTemplate(promptBundle.assets.researchDrafterRevise, {
     researchToolHint: buildResearchToolHint(config),
+    readerContext: readerContextBlock(state),
     requestLabel: requestLabel(state),
   })
 }

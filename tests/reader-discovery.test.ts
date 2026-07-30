@@ -246,13 +246,13 @@ describe("reader interview prompt assets", () => {
 
     const bundle = await loadPromptBundle(testConfig)
     expect(bundle.assets.readerInterviewerInterview).toContain("turn {turn}")
-    expect(bundle.assets.readerInterviewerInterview).toContain("Do not quiz the reader on prerequisite terminology")
-    expect(bundle.assets.readerInterviewerFollowUp).toContain("continuing an existing reader interview")
+    expect(bundle.assets.readerInterviewerInterview).toContain("Do not quiz the reader on terminology")
+    expect(bundle.assets.readerInterviewerFollowUp).toContain("continuing an existing interview")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("{profileSoFar}")
     expect(bundle.assets.readerInterviewerDuplicateCorrection).toContain("previous response repeated")
-    expect(bundle.assets.readerInterviewerInterview).toContain("`newQuestions` array")
-    expect(bundle.assets.readerInterviewerFollowUp).toContain("`newQuestions` array")
-    expect(bundle.assets.readerInterviewerDuplicateCorrection).toContain("`newQuestions` array")
+    expect(bundle.assets.readerInterviewerInterview).toContain("`newQuestions`")
+    expect(bundle.assets.readerInterviewerFollowUp).toContain("`newQuestions`")
+    expect(bundle.assets.readerInterviewerDuplicateCorrection).toContain("`newQuestions`")
   })
 
   test("formats batched reader questions and answers as numbered pairs", () => {
@@ -385,10 +385,14 @@ describe("reader profile threaded to prompt-contract functions", () => {
     expect(prompt).toContain("Include a Prerequisites section covering: autograd, Swift")
   })
 
-  test("auditPrompt includes the explanation-depth-vs-factual-rigor instruction", () => {
-    const prompt = auditPrompt(testConfig, promptBundle, "source-auditor", profileState(), "audit.json")
-    expect(prompt).toContain("Judge clarity")
-    expect(prompt).toContain("factual rigor")
+  test("auditPrompt scopes reader calibration per auditor", () => {
+    const source = auditPrompt(testConfig, promptBundle, "source-auditor", profileState(), "audit.json")
+    expect(source).toContain("does not narrow source rigor")
+    expect(source).not.toContain("Judge clarity")
+
+    const clarity = auditPrompt(testConfig, promptBundle, "clarity-auditor", profileState(), "audit.json")
+    expect(clarity).toContain("Judge clarity")
+    expect(clarity).toContain("factual rigor")
   })
 
   test("auditPrompt omits reader context when no profile is set (and notes the default)", () => {

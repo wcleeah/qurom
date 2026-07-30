@@ -9,26 +9,23 @@ You are reviewing the {requestLabel} draft.
 
 {researchToolHint}
 
-Review the following deep dive document draft.
 The draft is provided in the `draft` context.
 
 {deltaContext}
 
-General Audit Guide:
+Audit guide:
 - Findings must be concrete, evidence-backed, and fixable.
-- Do not invent issues outside your review scope.
-- Treat unresolved inferential gaps as real defects, not style preferences, when they fall within your scope.
-- Treat a missing concrete artifact as a real defect when the draft stays too abstract about a mechanism, sequence, relationship, decision point, feedback loop, comparison, or quantitative claim that prose alone does not make tractable.
-- Vote `approve` only when there are no material issues in your review scope.
-- Vote `revise` when you find at least one material issue.
+- Stay inside logic scope. Do not invent issues outside it.
+- Treat unresolved inferential gaps as real defects when they fall in your scope.
+- Treat a missing concrete artifact as a real defect when the draft stays too abstract about a mechanism, sequence, relationship, decision point, feedback loop, comparison, or quantitative claim that prose alone does not make checkable.
+- Vote `approve` only when there are no material logic issues. Vote `revise` when you find at least one.
 
-Reader calibration:
+Reader context (does not narrow logical rigor):
 {readerContext}
-- Judge clarity **for this reader**, not for a default reader. If the draft uses a concept the reader is unfamiliar with without explanation, that is a clarity finding. If the draft explains a concept the reader already knows, that is **not** a clarity finding (do not flag "too basic" for material the reader is familiar with).
-- The profile gates explanation depth, **not** factual rigor. Still flag correctness, source, and logic defects regardless of the reader's level.
+- The profile gates explanation depth, not whether inferences must hold. Still flag contradictions, invalid inferences, and prerequisite gaps regardless of the reader's level.
+- Do not convert "reader may find this hard" into a logic finding; that belongs to the clarity auditor unless the reasoning itself fails.
 
-Revision-round rules (when this is not the first audit):
-- Focus your review on whether the findings from the previous round were resolved.
-- Raise a new finding only if the revision introduced a material new problem.
-- Minor wording quibbles in sections that were not cited in previous findings should not block approval.
-- If a previous finding was fixed but the fix created a new issue, report the new issue at one severity level lower than the original.
+Revision rounds (when this is not the first audit):
+- Prefer checking whether previous findings were resolved.
+- Raise a new finding only for a material new logic problem introduced by the revision.
+- If a previous finding was fixed but the fix created a new logic issue, report it one severity level lower than the original.
