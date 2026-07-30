@@ -13,7 +13,7 @@ The most important rule: **declare only the capabilities the provider actually s
 | Provider | Default? | Typical use |
 |---|---|---|
 | `opencode` | yes (`DEFAULT_PROVIDER` in `src/role-registry.ts`) | Local OpenCode sessions, streaming tool/permission events, native file attachments, provider-managed agents under `.opencode/agents/` |
-| `cursor` | no | Cursor cloud agents via `@cursor/sdk`; role instructions from SQLite; inline structured JSON and remote artifact download |
+| `cursor` | no | Cursor cloud agents via `@cursor/sdk`; full call-site prompts from SQLite; inline structured JSON and remote artifact download |
 
 Roles resolve to a provider through SQLite role bindings (`/config` in the dashboard, seeded from `defaults/quorum-config.sqlite`). A single run may use **both** providers if different roles are bound differently.
 
@@ -65,7 +65,6 @@ Capabilities are runtime promises. If a capability is set, shared code will rely
 | `fileOutput` | Provider can produce arbitrary text/file artifacts requested by the app. |
 | `inputFileAttachments` | Provider can receive local files as native prompt attachments. |
 | `inlineInputContext` | Provider can receive app-inlined file context inside the prompt text. |
-| `roleInstructions` | Provider should receive role instruction text from SQLite prepended/wrapped by `AgentRuntime` (Cursor). |
 | `streamingEvents` | Provider can emit live session/message/tool events. |
 | `toolEvents` | Provider event stream includes tool execution state. |
 | `permissionEvents` | Provider event stream includes permission ask/reply state. |
@@ -209,12 +208,12 @@ Good config forms:
 
 - expose model choices when available,
 - expose only runtime settings the provider owns,
-- keep prompt and role instruction text out of provider settings,
+- keep prompt text out of provider settings,
 - return clear warnings when credentials are missing.
 
-OpenCode is special: its model, tool permissions, and role instructions are file-backed in `.opencode/agents/*.md`. The config UI shows those files as read-only and directs users to edit them directly.
+OpenCode is special: its model and tool permissions are file-backed in `.opencode/agents/*.md` (frontmatter only). The config UI shows those files as read-only and directs users to edit them directly. Behavioral prompts for every provider live in SQLite prompt assets (`defaults/prompts/`, one full file per role×task).
 
-Cursor is different: role instructions come from SQLite (`defaults/roles/` seed content) and are injected when `roleInstructions` capability is set. Models remain role settings; MCP is global and configured only on `/config/mcp`.
+Cursor bindings keep models and output settings on `/config/roles`. MCP is global and configured only on `/config/mcp`.
 
 ---
 

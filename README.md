@@ -43,6 +43,7 @@ Design quorum (when `designQuorum.enabled` is true):
 
 - `html-designer`
 - `interactive-enhancer`
+- `reading-experience-enhancer`
 
 HTML viewer:
 
@@ -63,7 +64,7 @@ These roles are configured in the active SQLite config profile. Each role is bou
   - **OpenCode** (default) — `opencode` on your `PATH`, plus `.opencode/agents/` seeded from `defaults/opencode/agents/`. Qurom always launches and owns `opencode serve`; startup fails if the configured port is already occupied.
   - **Cursor** (optional) — `CURSOR_API_KEY` and role bindings set to the `cursor` provider in `/config`. No local OpenCode server or agent files required for Cursor-only roles.
 
-Prompt contracts and role instructions live in SQLite. Shipped starters are under `defaults/prompts/`, `defaults/roles/`, and default role provider bindings in `defaults/quorum-config.sqlite`.
+Full call-site prompts live in SQLite. Shipped starters are under `defaults/prompts/` (one file per role×task). OpenCode agent files under `defaults/opencode/agents/` hold model/permissions frontmatter only. Default role provider bindings live in `defaults/quorum-config.sqlite`.
 
 Optional:
 
@@ -240,7 +241,7 @@ Every recovery tier emits a standardized debug-log event. Grep `{dataDir}/runs/<
 
 ## Design Quorum
 
-When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The design phase is linear: `html-designer` drafts `design-html-round-0.html`, `interactive-enhancer` improves the representation layer, and `finalizeDesign` writes `final.html`.
+When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The design phase is linear: `html-designer` writes `design-html-html-designer.html`, `interactive-enhancer` writes comprehension-focused `design-html-interactive-enhancer.html`, `reading-experience-enhancer` writes screen-reading ergonomics to `design-html-reading-experience-enhancer.html`, and `finalizeDesign` publishes `final.html`.
 
 Resume design from the dashboard **Resume run** action or:
 

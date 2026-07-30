@@ -137,10 +137,7 @@ Important config sections:
 }
 ```
 
-The OpenCode role definitions live under `.opencode/agents/`. Prompt contracts live under `assets/prompts/`. That split matters:
-
-- Agent files define role identity, model, variant, and tool/file permissions.
-- Prompt assets define the task contract for drafting, auditing, rebuttal, revision, design, and reader discovery.
+OpenCode agent files live under `.opencode/agents/` (frontmatter only: model, variant, tool/file permissions). Behavioral prompts live under `defaults/prompts/` and the SQLite config store — one full file per role×task. The graph only fills template placeholders; provider-specific output wrappers are appended by code.
 
 ---
 
@@ -391,7 +388,8 @@ Common artifacts:
 | `debug-log.jsonl` | Structured diagnostic log. |
 | `reader-profile.json` | Reader discovery profile. |
 | `reader-reply-turn-N.json` | Archived human replies. |
-| `design-html-round-N.html` | Design quorum draft HTML. |
+| `design-html-<role>.html` | Role-staged design HTML (`html-designer`, `interactive-enhancer`, `reading-experience-enhancer`). |
+| `design-html-round-N.html` | Legacy design quorum draft HTML. |
 | `design-audit-{agent}-round-N.json` | Design audit result. |
 | `final.html` | Approved HTML output. |
 
@@ -411,7 +409,8 @@ Agents:
 | `visual-layout-auditor` | Reviews visual hierarchy, layout, typography, and aesthetic coherence. |
 | `technical-html-auditor` | Reviews HTML structure, accessibility, self-containedness, and technical correctness. |
 | `script-security-auditor` | Reviews inline scripts and security risks. |
-| `interactive-enhancer` | Adds lightweight interaction after approval. |
+| `interactive-enhancer` | Adds comprehension-focused interaction after drafting. |
+| `reading-experience-enhancer` | Improves on-screen reading ergonomics after interactive enhance. |
 
 The design loop mirrors the research loop:
 
@@ -451,25 +450,7 @@ This file-mediated separation is deliberate: the runner does not need to host HT
 
 ## Prompt Assets
 
-Prompt assets are loaded from `assets/prompts/` or the SQLite config store.
-
-Important assets:
-
-| Asset | Purpose |
-|---|---|
-| `deep-dive-contract.md` | Global contract for source-backed deep dives. |
-| `draft-full-draft.md` | Initial draft instruction. |
-| `revise-draft.md` | Surgical revision instruction. |
-| `audit.md` | General audit prompt. |
-| `review-findings.md` | Drafter review of auditor findings. |
-| `rebuttal.md` | Auditor response to rebuttals. |
-| `review-rebuttal-responses.md` | Drafter review of auditor rebuttal responses. |
-| `reader-interview.md` | Reader discovery interview prompt. |
-| `design-html.md` | Initial HTML design prompt. |
-| `audit-design.md` | General design audit prompt. |
-| `audit-script-security.md` | Script-specific security audit prompt. |
-| `revise-design.md` | HTML revision prompt. |
-| `enhance-design.md` | Final interactivity enhancement prompt. |
+Prompt assets are loaded from the SQLite config store (seeded from `defaults/prompts/`). Each asset is the full prompt for one call site, named `<role>.<task>.md` (for example `research-drafter.draft.md`, `source-auditor.audit.md`, `interactive-enhancer.enhance.md`).
 
 Structured JSON output instructions are appended by code instead of hardcoded into prompt assets. That keeps task prompts focused on behavior and lets providers choose file output or inline JSON based on capability.
 
@@ -499,9 +480,10 @@ Design agents:
 | `visual-layout-auditor` | Reviews visual design. |
 | `technical-html-auditor` | Reviews technical HTML quality. |
 | `script-security-auditor` | Reviews inline JavaScript/security behavior. |
-| `interactive-enhancer` | Adds lightweight interactivity. |
+| `interactive-enhancer` | Adds comprehension-focused interactivity. |
+| `reading-experience-enhancer` | Improves reading progress, overflow, and mobile ergonomics. |
 
-Agent files also define model, variant, tool permissions, and write permissions. Most agents are allowed to write only their expected artifact file under `runs/**`.
+Agent files define model, variant, tool permissions, and write permissions only (no behavioral prompt body). Most agents are allowed to write only their expected artifact file under `runs/**`.
 
 ---
 
