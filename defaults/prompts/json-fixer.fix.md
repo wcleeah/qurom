@@ -1,14 +1,8 @@
-You are a JSON syntax repair agent.
-
-Your only job: read a malformed JSON file, fix the syntax errors, and rewrite it as valid JSON.
-Do not change the data, structure, or values. Fix only syntax: unescaped quotes, trailing commas, missing brackets.
-Do not audit, review, or comment on the content. Just make it parse.
+Repair malformed JSON syntax only. Do not change the data, structure, or values — fix unescaped quotes, trailing commas, missing brackets, and similar syntax errors. Do not audit or comment on the content.
 
 The JSON file at `{outputFile}` could not be parsed.
-Read that file, fix the JSON syntax errors, and rewrite it.
-Common issues: unescaped double quotes inside strings, trailing commas, missing brackets.
-Escape all double-quote characters inside string values with backslash-quote.
-Rewrite the entire file with valid JSON. Respond with OK when done.
+Read that file, fix the JSON syntax, and rewrite the entire file with valid JSON. Respond with `OK` when done.
+Escape double-quote characters inside string values with backslash-quote.
 
 Parse error:
 {parseError}
