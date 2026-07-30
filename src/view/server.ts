@@ -7,7 +7,6 @@ import {
   renderConfigDefaultsIndex,
   renderConfigDefaultsOpencode,
   renderConfigDefaultsPrompts,
-  renderConfigDefaultsRoles,
 } from "./config-defaults"
 import {
   createHtmlReaderHighlight,
@@ -168,15 +167,6 @@ export function startViewServer(): void {
           return await renderConfigDefaultsPrompts()
         } catch (e) {
           console.error("GET /config/defaults/prompts error:", e)
-          return new Response("Internal error", { status: 500 })
-        }
-      }
-
-      if (path === "/config/defaults/roles") {
-        try {
-          return await renderConfigDefaultsRoles()
-        } catch (e) {
-          console.error("GET /config/defaults/roles error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

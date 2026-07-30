@@ -4,7 +4,6 @@ import {
   listDefaultsOpencodeAgents,
   listDefaultsPrompts,
   listDefaultsRoleBindings,
-  listDefaultsRoleInstructions,
   listDefaultsSummary,
   loadDefaultsQuorumConfig,
   readDefaultsQuorumConfig,
@@ -12,15 +11,14 @@ import {
   updateDefaultsPrompt,
   updateDefaultsQuorumConfig,
   updateDefaultsRoleBinding,
-  updateDefaultsRoleInstruction,
 } from "../defaults-store"
 import {
   normalizeQuorumConfig,
   updatePromptAsset,
   updateQuorumConfig,
   updateRoleBinding,
-  updateRoleInstruction,
 } from "../config-store"
+import { promptAssetDefs, type PromptAssetKey } from "../prompt-asset-defs"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
 import { DEFAULT_PROVIDER } from "../role-registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
@@ -57,10 +55,9 @@ export async function renderConfigDefaultsIndex(options?: { error?: string; draf
   })
 
   const overviewCards = [
-    card(`<h3>Prompts</h3><p class="tiny-text muted-text">${summary.prompts.length} shipped prompt templates.</p><a href="/config/defaults/prompts">Edit defaults prompts →</a>`),
-    card(`<h3>Role instructions</h3><p class="tiny-text muted-text">${summary.roles.length} provider-neutral role instruction files.</p><a href="/config/defaults/roles">Edit defaults roles →</a>`),
+    card(`<h3>Prompts</h3><p class="tiny-text muted-text">${summary.prompts.length} shipped full call-site prompts.</p><a href="/config/defaults/prompts">Edit defaults prompts →</a>`),
     card(`<h3>Role provider bindings</h3><p class="tiny-text muted-text">Default provider assignments stored in <code>defaults/quorum-config.sqlite</code>.</p><a href="/config/defaults/bindings">Edit defaults bindings →</a>`),
-    card(`<h3>OpenCode agents</h3><p class="tiny-text muted-text">${summary.opencodeAgents.length} shipped OpenCode agent definitions (bootstrap source for <code>.opencode/agents/</code>).</p><a href="/config/defaults/opencode">Edit defaults OpenCode agents →</a>`),
+    card(`<h3>OpenCode agents</h3><p class="tiny-text muted-text">${summary.opencodeAgents.length} shipped OpenCode agent frontmatter files (model/permissions; bootstrap source for <code>.opencode/agents/</code>).</p><a href="/config/defaults/opencode">Edit defaults OpenCode agents →</a>`),
   ].join("\n")
 
   const body = [
@@ -80,52 +77,34 @@ export async function renderConfigDefaultsIndex(options?: { error?: string; draf
 export async function renderConfigDefaultsPrompts(): Promise<Response> {
   const config = await loadRuntimeConfig()
   const prompts = await listDefaultsPrompts(config.env.QUORUM_WORKSPACE_DIRECTORY)
-  const cards = prompts.map((prompt) => {
-    const form = `<form class="config-form" method="POST" action="/config/defaults/prompts/${encodeURIComponent(prompt.key)}">
-  <p class="tiny-text muted-text"><code>defaults/prompts/${escapeHtml(prompt.filename)}</code></p>
-  <textarea name="content" rows="14">${escapeHtml(prompt.content)}</textarea>
+  const promptByKey = new Map(prompts.map((prompt) => [prompt.key, prompt]))
+  const roles = [...new Set(Object.values(promptAssetDefs).map((def) => def.role))].sort()
+  const sections = roles.map((role) => {
+    const cards = (Object.entries(promptAssetDefs) as Array<[PromptAssetKey, (typeof promptAssetDefs)[PromptAssetKey]]>)
+      .filter(([, def]) => def.role === role)
+      .map(([key, def]) => {
+        const prompt = promptByKey.get(key)
+        const content = prompt?.content ?? ""
+        const form = `<form class="config-form" method="POST" action="/config/defaults/prompts/${encodeURIComponent(key)}">
+  <p class="tiny-text muted-text"><code>defaults/prompts/${escapeHtml(def.file)}</code></p>
+  <textarea name="content" rows="14">${escapeHtml(content)}</textarea>
   <div class="form-actions">
     <button type="submit" class="btn btn-primary">Save default</button>
-    ${applyButton(`/config/defaults/apply/prompts/${encodeURIComponent(prompt.key)}`, "Apply to active")}
+    ${applyButton(`/config/defaults/apply/prompts/${encodeURIComponent(key)}`, "Apply to active")}
   </div>
 </form>`
-    return card(`<h3>${escapeHtml(prompt.key)}</h3>${form}`)
+        return card(`<h3>${escapeHtml(def.label)} <span class="tiny-text muted-text">${escapeHtml(key)}</span></h3>${form}`)
+      })
+    return section(role, cards.join("\n"))
   })
 
   const body = [
-    `<div class="header-bar"><div class="header-main"><h1>Default prompts</h1></div></div>`,
-    section("Shipped prompt templates", cards.join("\n")),
+    `<div class="header-bar"><div class="header-main"><h1>Default prompts</h1><p class="tiny-text muted-text">Full call-site prompts. Graph only fills template placeholders.</p></div></div>`,
+    ...sections,
   ].join("\n")
 
   return new Response(layout("Default prompts", body, {
     navbar: configNavbarOptions("Default prompts", "defaults"),
-  }), {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  })
-}
-
-export async function renderConfigDefaultsRoles(): Promise<Response> {
-  const config = await loadRuntimeConfig()
-  const roles = await listDefaultsRoleInstructions(config.env.QUORUM_WORKSPACE_DIRECTORY)
-  const cards = roles.map((role) => {
-    const form = `<form class="config-form" method="POST" action="/config/defaults/roles/${encodeURIComponent(role.role)}">
-  <p class="tiny-text muted-text"><code>defaults/roles/${escapeHtml(role.role)}.md</code></p>
-  <textarea name="content" rows="12">${escapeHtml(role.content)}</textarea>
-  <div class="form-actions">
-    <button type="submit" class="btn btn-primary">Save default</button>
-    ${applyButton(`/config/defaults/apply/roles/${encodeURIComponent(role.role)}`, "Apply to active")}
-  </div>
-</form>`
-    return card(`<h3>${escapeHtml(role.role)}</h3>${form}`)
-  })
-
-  const body = [
-    `<div class="header-bar"><div class="header-main"><h1>Default role instructions</h1></div></div>`,
-    section("Shipped role instructions", cards.join("\n")),
-  ].join("\n")
-
-  return new Response(layout("Default roles", body, {
-    navbar: configNavbarOptions("Default role instructions", "defaults"),
   }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
@@ -136,7 +115,7 @@ export async function renderConfigDefaultsOpencode(): Promise<Response> {
   const agents = await listDefaultsOpencodeAgents(config.env.QUORUM_WORKSPACE_DIRECTORY)
   const cards = agents.map((agent) => {
     const form = `<form class="config-form" method="POST" action="/config/defaults/opencode/${encodeURIComponent(agent.role)}">
-  <p class="tiny-text muted-text"><code>defaults/opencode/agents/${escapeHtml(agent.role)}.md</code> — bootstrap source only. Runtime copies go to <code>.opencode/agents/</code> on disk.</p>
+  <p class="tiny-text muted-text"><code>defaults/opencode/agents/${escapeHtml(agent.role)}.md</code> — frontmatter only (model/permissions). Behavioral prompts live under defaults/prompts/. Runtime copies go to <code>.opencode/agents/</code> on disk.</p>
   <textarea name="content" rows="16">${escapeHtml(agent.content)}</textarea>
   <div class="form-actions"><button type="submit" class="btn btn-primary">Save default</button></div>
 </form>`
@@ -251,7 +230,7 @@ export async function renderConfigDefaultsBindings(): Promise<Response> {
       ? `<div class="form-fields-grid">${parameterControls.join("\n")}</div>`
       : ""
 
-    const help = "Cursor binding defaults. Role instructions come from defaults/roles/<role>.md."
+    const help = "Cursor binding defaults. Behavioral prompts are edited under Defaults → Prompts."
 
     return `<div class="provider-fields"${active ? "" : " hidden"} data-provider-fields="${escapeHtml(descriptor.providerId)}">
   <p class="tiny-text muted-text">${escapeHtml(help)}</p>
@@ -376,21 +355,6 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
     return renderConfigDefaultsPrompts()
   }
 
-  const applyRoleMatch = path.match(/^\/config\/defaults\/apply\/roles\/(.+)$/)
-  if (applyRoleMatch) {
-    const role = decodeURIComponent(applyRoleMatch[1])
-    const params = new URLSearchParams(await req.text())
-    let content = params.get("content") ?? ""
-    if (!content.trim()) {
-      const roles = await listDefaultsRoleInstructions(workspaceDir)
-      const entry = roles.find((item) => item.role === role)
-      if (!entry) throw new Error(`Unknown defaults role ${JSON.stringify(role)}`)
-      content = entry.content
-    }
-    await updateRoleInstruction(config.env, role, content)
-    return renderConfigDefaultsRoles()
-  }
-
   const applyBindingMatch = path.match(/^\/config\/defaults\/apply\/bindings\/(.+)$/)
   if (applyBindingMatch) {
     const role = decodeURIComponent(applyBindingMatch[1])
@@ -439,13 +403,6 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
     const params = new URLSearchParams(await req.text())
     await updateDefaultsPrompt(workspaceDir, decodeURIComponent(promptMatch[1]), params.get("content") ?? "")
     return new Response(null, { status: 303, headers: { Location: "/config/defaults/prompts" } })
-  }
-
-  const roleMatch = path.match(/^\/config\/defaults\/roles\/(.+)$/)
-  if (roleMatch) {
-    const params = new URLSearchParams(await req.text())
-    await updateDefaultsRoleInstruction(workspaceDir, decodeURIComponent(roleMatch[1]), params.get("content") ?? "")
-    return new Response(null, { status: 303, headers: { Location: "/config/defaults/roles" } })
   }
 
   const bindingMatch = path.match(/^\/config\/defaults\/bindings\/(.+)$/)

@@ -8,7 +8,8 @@ import {
 } from "../opencode-usage-import"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { deleteMcpServer, listConfigSummary, loadMcpRegistryFromStore, normalizeQuorumConfig, saveMcpServer, setEnabledMcpServers, updatePromptAsset, updateQuorumConfig, updateRoleBinding, updateRoleInstruction } from "../config-store"
+import { deleteMcpServer, listConfigSummary, loadMcpRegistryFromStore, normalizeQuorumConfig, saveMcpServer, setEnabledMcpServers, updatePromptAsset, updateQuorumConfig, updateRoleBinding } from "../config-store"
+import { promptAssetDefs, type PromptAssetKey } from "../prompt-asset-defs"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
 import { getProviderLifecycle } from "../providers/lifecycle"
 import { rolesUsingProvider, validateProviderPrerequisites } from "../providers/registry"
@@ -192,7 +193,6 @@ export async function renderConfigIndex(options?: {
 export async function renderConfigRoles(): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
-  const roleInstructionsByName = new Map(summary.roleInstructions.map((role) => [role.role, role.content]))
   const bindingByRole = new Map(summary.bindings.map((b) => [b.role, b]))
   const providerIds = availableProviderIds()
   const roles = configuredAgentRoles(config)
@@ -223,10 +223,10 @@ export async function renderConfigRoles(): Promise<Response> {
 
   const providerHelp = (provider: string) => {
     if (provider === "cursor") {
-      return "Cursor runs this role through the Cursor Agent SDK. Role instructions below are stored in SQLite."
+      return "Cursor runs this role through the Cursor Agent SDK. Behavioral prompts are edited on the Prompts tab."
     }
     if (provider === "opencode") {
-      return "OpenCode runs this role through the named provider agent. Edit .opencode/agents/<role>.md on disk for OpenCode behavior and permissions."
+      return "OpenCode runs this role through the named provider agent. Edit .opencode/agents/<role>.md on disk for model and permissions. Behavioral prompts are on the Prompts tab."
     }
     return "This provider controls which runtime executes the role."
   }
@@ -309,20 +309,11 @@ export async function renderConfigRoles(): Promise<Response> {
       .map((id) => providerFields(role, binding, descriptors.get(id)!, id === currentProvider, opencodeAgentHtml))
       .join("\n")
     const opencodeActive = currentProvider === "opencode"
-    const instructionContent = roleInstructionsByName.get(role) ?? ""
-    const roleInstructions = `<details data-role-instructions${opencodeActive ? " hidden" : ""}>
-  <summary>Role instructions</summary>
-  <form class="config-form" method="POST" action="/config/role-instructions/${encodeURIComponent(role)}">
-    <textarea name="content" rows="12">${escapeHtml(instructionContent)}</textarea>
-    <div class="form-actions"><button type="submit" class="btn btn-primary">Save role instructions</button></div>
-  </form>
-</details>`
     const form = `<form class="config-form" method="POST" action="/config/roles/${encodeURIComponent(role)}">
   ${providerTabs(role, currentProvider)}
   ${providerFormBlocks}
   <div class="form-actions" data-save-actions${opencodeActive ? " hidden" : ""}><button type="submit" class="btn btn-primary">Save provider binding</button></div>
-</form>
-${roleInstructions}`
+</form>`
     return card(`<div data-role-card><h3>${escapeHtml(role)}</h3>${form}</div>`)
   }))
 
@@ -347,15 +338,9 @@ ${roleInstructions}`
           input.disabled = !active;
         });
       });
-      var card = form.closest("[data-role-card]");
       var isOpencode = provider === "opencode";
       var saveActions = form.querySelector("[data-save-actions]");
       if (saveActions) saveActions.hidden = isOpencode;
-      if (card) {
-        card.querySelectorAll("[data-role-instructions]").forEach(function(block){
-          block.hidden = isOpencode;
-        });
-      }
     }
     radios.forEach(function(radio){ radio.addEventListener("change", sync); });
     sync();
@@ -379,17 +364,28 @@ ${roleInstructions}`
 export async function renderConfigPrompts(): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
-  const cards = summary.prompts.map((prompt) => {
-    const form = `<form class="config-form" method="POST" action="/config/prompts/${encodeURIComponent(prompt.key)}">
-  <textarea name="content" rows="14">${escapeHtml(prompt.content)}</textarea>
+  const promptByKey = new Map(summary.prompts.map((prompt) => [prompt.key, prompt]))
+  const roles = [...new Set(Object.values(promptAssetDefs).map((def) => def.role))].sort()
+  const sections = roles.map((role) => {
+    const cards = (Object.entries(promptAssetDefs) as Array<[PromptAssetKey, (typeof promptAssetDefs)[PromptAssetKey]]>)
+      .filter(([, def]) => def.role === role)
+      .map(([key, def]) => {
+        const prompt = promptByKey.get(key)
+        const content = prompt?.content ?? ""
+        const version = prompt?.version ?? 0
+        const form = `<form class="config-form" method="POST" action="/config/prompts/${encodeURIComponent(key)}">
+  <p class="tiny-text muted-text"><code>${escapeHtml(def.file)}</code></p>
+  <textarea name="content" rows="14">${escapeHtml(content)}</textarea>
   <div class="form-actions"><button type="submit" class="btn btn-primary">Save prompt</button></div>
 </form>`
-    return card(`<h3>${escapeHtml(prompt.key)} <span class="tiny-text muted-text">v${prompt.version}</span></h3>${form}`)
+        return card(`<h3>${escapeHtml(def.label)} <span class="tiny-text muted-text">${escapeHtml(key)} v${version}</span></h3>${form}`)
+      })
+    return section(role, cards.join("\n"))
   })
 
   const body = [
-    `<div class="header-bar"><div class="header-main"><h1>Prompts</h1></div></div>`,
-    section("Prompt assets", cards.join("\n")),
+    `<div class="header-bar"><div class="header-main"><h1>Prompts</h1><p class="tiny-text muted-text">Each file is the full prompt for that call site. The graph only fills template placeholders.</p></div></div>`,
+    ...sections,
   ].join("\n")
 
   return new Response(layout("Config Prompts", body, {
@@ -521,13 +517,6 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
       outputMode: params.get("outputMode")?.trim() || undefined,
       options,
     })
-    return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
-  }
-
-  const roleInstructionMatch = path.match(/^\/config\/role-instructions\/(.+)$/)
-  if (roleInstructionMatch) {
-    const params = new URLSearchParams(await req.text())
-    await updateRoleInstruction(config.env, decodeURIComponent(roleInstructionMatch[1]), params.get("content") ?? "")
     return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
   }
 
