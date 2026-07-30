@@ -104,7 +104,7 @@ export type RunnerEvent =
   | { kind: "result"; runResult: unknown }
   | {
       kind: "design.phase"
-      phase: "drafting" | "enhancing" | "finalizing"
+      phase: "drafting" | "enhancing" | "reading" | "finalizing"
       round: number
     }
 
@@ -749,7 +749,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
       })
 
       const graph = graphFactory(config, promptBundle, {
-        runtime: createAgentRuntime(config, bus, { roleInstructions: promptBundle.roleInstructions }),
+        runtime: createAgentRuntime(config, bus),
         observer: {
           debugLog: { write(type, data) { debugLogRef.current?.write(type, data) } } as DebugLog,
           onNodeStart(node, state) {

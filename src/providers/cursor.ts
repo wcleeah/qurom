@@ -28,7 +28,7 @@ import type {
   ProviderConfigFormParameter,
 } from "./types"
 
-const capabilities = new Set<ProviderCapability>(["roleInstructions", "inlineInputContext", "fileOutput", "jsonFileOutput", "plainTextOutput"])
+const capabilities = new Set<ProviderCapability>(["inlineInputContext", "fileOutput", "jsonFileOutput", "plainTextOutput"])
 
 type CursorAgentHandle = Awaited<ReturnType<typeof Agent.create>>
 type CursorRunHandle = Awaited<ReturnType<CursorAgentHandle["send"]>>

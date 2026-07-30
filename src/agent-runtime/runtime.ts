@@ -48,7 +48,6 @@ export type AgentRuntime = {
 
 export type AgentRuntimeOptions = {
   providerForRole?: (role: AgentRole) => AgentProvider
-  roleInstructions?: Record<string, string>
 }
 
 async function inlineInputFiles(prompt: string, inputFiles: PromptFileInput[] | undefined) {
@@ -146,17 +145,6 @@ function renderPromptForOutputMode(input: {
   return [input.prompt.trim(), instructions].filter(Boolean).join("\n\n")
 }
 
-function renderRolePrompt(input: { prompt: string; instructions?: string }) {
-  const instructions = input.instructions?.trim()
-  if (!instructions) return input.prompt
-  return [
-    "## Role instructions",
-    instructions,
-    "## Task",
-    input.prompt.trim(),
-  ].join("\n\n")
-}
-
 async function renderPromptInputs(provider: AgentProvider, prompt: string, inputFiles: PromptFileInput[] | undefined) {
   if (provider.capabilities.has("inputFileAttachments")) {
     return { prompt, inputFiles }
@@ -214,14 +202,8 @@ export function createAgentRuntime(
     async prompt(input) {
       const provider = resolveProvider(input.role)
       const outputMode = outputModeFor(provider, input.schema, input.outputFile)
-      const rolePrompt = provider.capabilities.has("roleInstructions")
-        ? renderRolePrompt({
-            prompt: input.prompt,
-            instructions: options.roleInstructions?.[input.role],
-          })
-        : input.prompt
       const prompt = renderPromptForOutputMode({
-        prompt: rolePrompt,
+        prompt: input.prompt,
         outputFile: input.outputFile,
         schema: input.schema,
         mode: outputMode,

@@ -240,19 +240,19 @@ describe("readerDiscovery config", () => {
 
 describe("reader interview prompt assets", () => {
   test("keeps first, follow-up, and duplicate-correction guidance in prompt assets", async () => {
-    expect(promptAssetFiles.readerInterview).toBe("reader-interview.md")
-    expect(promptAssetFiles.readerInterviewFollowUp).toBe("reader-interview-follow-up.md")
-    expect(promptAssetFiles.readerInterviewDuplicateCorrection).toBe("reader-interview-duplicate-correction.md")
+    expect(promptAssetFiles.readerInterviewerInterview).toBe("reader-interviewer.interview.md")
+    expect(promptAssetFiles.readerInterviewerFollowUp).toBe("reader-interviewer.follow-up.md")
+    expect(promptAssetFiles.readerInterviewerDuplicateCorrection).toBe("reader-interviewer.duplicate-correction.md")
 
     const bundle = await loadPromptBundle(testConfig)
-    expect(bundle.assets.readerInterview).toContain("turn {turn}")
-    expect(bundle.assets.readerInterview).toContain("Do not quiz the reader on prerequisite terminology")
-    expect(bundle.assets.readerInterviewFollowUp).toContain("continuing an existing reader interview")
-    expect(bundle.assets.readerInterviewFollowUp).toContain("{profileSoFar}")
-    expect(bundle.assets.readerInterviewDuplicateCorrection).toContain("previous response repeated")
-    expect(bundle.assets.readerInterview).toContain("`newQuestions` array")
-    expect(bundle.assets.readerInterviewFollowUp).toContain("`newQuestions` array")
-    expect(bundle.assets.readerInterviewDuplicateCorrection).toContain("`newQuestions` array")
+    expect(bundle.assets.readerInterviewerInterview).toContain("turn {turn}")
+    expect(bundle.assets.readerInterviewerInterview).toContain("Do not quiz the reader on prerequisite terminology")
+    expect(bundle.assets.readerInterviewerFollowUp).toContain("continuing an existing reader interview")
+    expect(bundle.assets.readerInterviewerFollowUp).toContain("{profileSoFar}")
+    expect(bundle.assets.readerInterviewerDuplicateCorrection).toContain("previous response repeated")
+    expect(bundle.assets.readerInterviewerInterview).toContain("`newQuestions` array")
+    expect(bundle.assets.readerInterviewerFollowUp).toContain("`newQuestions` array")
+    expect(bundle.assets.readerInterviewerDuplicateCorrection).toContain("`newQuestions` array")
   })
 
   test("formats batched reader questions and answers as numbered pairs", () => {
@@ -287,27 +287,14 @@ describe("reader interview prompt assets", () => {
 })
 
 describe("createGraph wires the discoverReader node", () => {
-  test("the graph compiles with discoverReader between prepareOutputPath and draftFullDraft", () => {
-    const promptBundle = {
-      source: "sqlite" as const,
-      roleInstructions: {},
-      assets: {
-        deepDiveContract: "contract",
-        draftFullDraft: "draft {outputFile}",
-        reviseDraft: "revise",
-        audit: "audit",
-        reviewFindings: "review",
-        rebuttal: "rebuttal",
-        reviewRebuttalResponses: "review-rebuttals",
-        designHtml: "design",
-        readerInterview: "interview {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
-        readerInterviewFollowUp: "interview follow-up {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
-        readerInterviewDuplicateCorrection: "interview correction {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
-        enhanceDesign: "enhance",
-        htmlAskPage: "html-ask-page",
-        htmlAskHighlight: "html-ask-highlight",
-      },
-    }
+  test("the graph compiles with discoverReader between prepareOutputPath and draftFullDraft", async () => {
+    const { emptyPromptBundle } = await import("../src/prompt-assets")
+    const promptBundle = emptyPromptBundle({
+      researchDrafterDraft: "draft {outputFile}",
+      readerInterviewerInterview: "interview {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
+      readerInterviewerFollowUp: "interview follow-up {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
+      readerInterviewerDuplicateCorrection: "interview correction {requestContext} {profileSoFar} {transcript} {maxTurns} {turn}",
+    })
     const graph = createGraph(testConfig, promptBundle)
     expect(graph).toBeDefined()
     expect(typeof graph.getState).toBe("function")
@@ -411,17 +398,17 @@ describe("reader profile threaded to prompt-contract functions", () => {
   })
 
   test("rebuttalPrompt includes the reader context block when a profile is set", () => {
-    const prompt = rebuttalPrompt(testConfig, promptBundle, profileState(), "rebuttal.json")
+    const prompt = rebuttalPrompt(testConfig, promptBundle, "source-auditor", profileState())
     expect(prompt).toContain("Desired depth: evaluation")
   })
 
   test("rebuttalReviewPrompt includes the reader context block when a profile is set", () => {
-    const prompt = rebuttalReviewPrompt(testConfig, promptBundle, profileState(), "review.json", 2)
+    const prompt = rebuttalReviewPrompt(testConfig, promptBundle, profileState(), 2)
     expect(prompt).toContain("Desired depth: evaluation")
   })
 
   test("drafterReviewPrompt includes the reader context block when a profile is set", () => {
-    const prompt = drafterReviewPrompt(testConfig, promptBundle, profileState(), "review.json")
+    const prompt = drafterReviewPrompt(testConfig, promptBundle, profileState())
     expect(prompt).toContain("Desired depth: evaluation")
   })
 })

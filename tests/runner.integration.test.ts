@@ -32,26 +32,22 @@ const prerequisites = {
   agents: [],
 } as unknown as RunResearchPipelineArgs["prerequisites"]
 
-const promptBundle = {
-  source: "sqlite" as const,
-  roleInstructions: {},
-  assets: {
-    deepDiveContract: "contract",
-    draftFullDraft: "full-draft",
-    reviseDraft: "revise",
-    audit: "audit",
-    reviewFindings: "review-findings",
-    rebuttal: "rebuttal",
-    reviewRebuttalResponses: "review-rebuttal-responses",
-    designHtml: "design",
-    readerInterview: "reader-interview",
-    readerInterviewFollowUp: "reader-interview-follow-up",
-    readerInterviewDuplicateCorrection: "reader-interview-duplicate-correction",
-    enhanceDesign: "enhance",
-    htmlAskPage: "html-ask-page",
-    htmlAskHighlight: "html-ask-highlight",
-  },
-}
+import { emptyPromptBundle } from "../src/prompt-assets"
+
+const promptBundle = emptyPromptBundle({
+  researchDrafterDraft: "full-draft",
+  researchDrafterRevise: "revise",
+  sourceAuditorAudit: "audit",
+  researchDrafterReviewFindings: "review-findings",
+  sourceAuditorRebuttal: "rebuttal",
+  researchDrafterReviewRebuttals: "review-rebuttal-responses",
+  htmlDesignerDesign: "design",
+  readerInterviewerInterview: "reader-interview",
+  readerInterviewerFollowUp: "reader-interview-follow-up",
+  readerInterviewerDuplicateCorrection: "reader-interview-duplicate-correction",
+  interactiveEnhancerEnhance: "enhance",
+  readingExperienceEnhancerEnhance: "reading",
+})
 
 function disabledTelemetry(): TelemetryRun {
   return {

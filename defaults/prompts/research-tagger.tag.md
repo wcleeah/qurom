@@ -16,3 +16,19 @@ Rules:
 Output rules:
 - If the orchestrator requests structured output, return only valid JSON matching the requested schema.
 - Do not add commentary before or after the requested output.
+
+Analyze this approved research article and assign topic tags.
+Return at most {maxArticleTags} tags.
+
+{predefinedBlock}
+
+Generated tag rules:
+- slug must be lowercase hyphenated ASCII: /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+- label is a short human-readable name
+- matchedPredefined false means the tag is newly generated
+- No duplicate slugs
+
+{topicLine}
+
+Markdown article:
+{markdown}

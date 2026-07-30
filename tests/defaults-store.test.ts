@@ -41,11 +41,11 @@ afterEach(async () => {
 describe("defaults store", () => {
   test("reads and updates shipped defaults prompts", async () => {
     const prompts = await listDefaultsPrompts(dir)
-    expect(prompts.some((prompt) => prompt.key === "audit")).toBe(true)
+    expect(prompts.some((prompt) => prompt.key === "sourceAuditorAudit")).toBe(true)
 
-    await updateDefaultsPrompt(dir, "audit", "updated default audit prompt")
+    await updateDefaultsPrompt(dir, "sourceAuditorAudit", "updated default audit prompt")
     const updated = await listDefaultsPrompts(dir)
-    expect(updated.find((prompt) => prompt.key === "audit")?.content).toBe("updated default audit prompt")
+    expect(updated.find((prompt) => prompt.key === "sourceAuditorAudit")?.content).toBe("updated default audit prompt")
   })
 
   test("validates defaults quorum config before writing", async () => {
@@ -93,9 +93,10 @@ describe("defaults config UI", () => {
     expect(indexHtml).toContain("defaults/quorum-config.sqlite")
 
     const promptsHtml = await renderConfigDefaultsPrompts().then((r) => r.text())
-    expect(promptsHtml).toContain("audit")
+    expect(promptsHtml).toContain("source-auditor")
+    expect(promptsHtml).toContain("sourceAuditorAudit")
     expect(promptsHtml).toContain("Apply to active")
-    expect(promptsHtml).toContain('formaction="/config/defaults/apply/prompts/audit"')
+    expect(promptsHtml).toContain('formaction="/config/defaults/apply/prompts/sourceAuditorAudit"')
     expect(promptsHtml).not.toContain('class="config-form inline-form"')
 
     const bindingsHtml = await renderConfigDefaultsBindings().then((r) => r.text())
@@ -105,27 +106,27 @@ describe("defaults config UI", () => {
   })
 
   test("apply default prompt copies content into active sqlite profile", async () => {
-    await updateDefaultsPrompt(dir, "audit", "applied-from-defaults audit prompt")
+    await updateDefaultsPrompt(dir, "sourceAuditorAudit", "applied-from-defaults audit prompt")
     const response = await handleConfigDefaultsPost(
-      new Request("http://localhost/config/defaults/apply/prompts/audit", { method: "POST" }),
-      "/config/defaults/apply/prompts/audit",
+      new Request("http://localhost/config/defaults/apply/prompts/sourceAuditorAudit", { method: "POST" }),
+      "/config/defaults/apply/prompts/sourceAuditorAudit",
     )
     expect(response?.status).toBe(200)
-    expect((await loadPromptAssetsFromStore(testRuntimeEnv({ dataDir, workspaceDir: dir }))).audit)
+    expect((await loadPromptAssetsFromStore(testRuntimeEnv({ dataDir, workspaceDir: dir }))).sourceAuditorAudit)
       .toBe("applied-from-defaults audit prompt")
   })
 
   test("apply prompt uses posted textarea content when provided", async () => {
     const response = await handleConfigDefaultsPost(
-      new Request("http://localhost/config/defaults/apply/prompts/designHtml", {
+      new Request("http://localhost/config/defaults/apply/prompts/htmlDesignerDesign", {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ content: "applied-from-form design prompt" }).toString(),
       }),
-      "/config/defaults/apply/prompts/designHtml",
+      "/config/defaults/apply/prompts/htmlDesignerDesign",
     )
     expect(response?.status).toBe(200)
-    expect((await loadPromptAssetsFromStore(testRuntimeEnv({ dataDir, workspaceDir: dir }))).designHtml)
+    expect((await loadPromptAssetsFromStore(testRuntimeEnv({ dataDir, workspaceDir: dir }))).htmlDesignerDesign)
       .toBe("applied-from-form design prompt")
   })
 })

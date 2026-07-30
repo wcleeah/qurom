@@ -1,28 +1,9 @@
 import type { RuntimeConfig } from "./config"
+import { loadPromptAssetsFromStore } from "./config-store"
 import { SUMMARIZER_ROLE } from "./role-registry"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import { markdownSummarySchema, type MarkdownSummary } from "./schema"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
-
-function inputPrompt(markdown: string) {
-  return [
-    "Summarize this markdown document for run metadata.",
-    "Return a short title, a concise 1-2 sentence summary, and a short slug hint suitable for a folder name.",
-    "The slug hint should be plain words only, not a filesystem path.",
-    "Markdown:",
-    markdown,
-  ].join("\n\n")
-}
-
-function artifactPrompt(markdown: string) {
-  return [
-    "Summarize this markdown artifact for the run summary screen.",
-    "Return a short title and a concise 1-2 sentence summary.",
-    "You may include a slug hint, but it is optional.",
-    "Markdown:",
-    markdown,
-  ].join("\n\n")
-}
 
 export async function summarizeMarkdown(input: {
   config: RuntimeConfig
@@ -42,10 +23,15 @@ export async function summarizeMarkdown(input: {
   const runtime = input.runtime ?? createAgentRuntime(input.config)
   const role = SUMMARIZER_ROLE
   const handle = await runtime.createHandle(role, input.title)
+  const assets = await loadPromptAssetsFromStore(input.config.env)
+  const template = input.mode === "input"
+    ? assets.markdownSummarizerInput
+    : assets.markdownSummarizerArtifact
+  const prompt = template.replaceAll("{markdown}", input.markdown)
   const response = await runtime.prompt({
     role,
     handle,
-    prompt: input.mode === "input" ? inputPrompt(input.markdown) : artifactPrompt(input.markdown),
+    prompt,
     schema: markdownSummarySchema,
     telemetry: input.telemetry
       ? {

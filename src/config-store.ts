@@ -31,11 +31,6 @@ export type PromptAssetSummary = {
   version: number
 }
 
-export type RoleInstructionSummary = {
-  role: string
-  content: string
-}
-
 type RoleProviderBindingRow = {
   profile_id: number
   role: string
@@ -317,24 +312,6 @@ async function readDefaultsPrompts(workspaceDir: string): Promise<Array<{ key: P
   return prompts
 }
 
-async function readDefaultsRoleInstructions(workspaceDir: string): Promise<RoleInstructionSummary[]> {
-  const rolesDir = join(repoDefaultsDir(workspaceDir), "roles")
-  const roles: RoleInstructionSummary[] = []
-  try {
-    const entries = await readdir(rolesDir, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".md")) continue
-      const role = entry.name.replace(/\.md$/, "")
-      const content = await readTextIfExists(join(rolesDir, entry.name))
-      if (!content) continue
-      roles.push({ role, content })
-    }
-  } catch {
-    // Optional defaults.
-  }
-  return roles.sort((a, b) => a.role.localeCompare(b.role))
-}
-
 function insertPromptAsset(store: ConfigStore, profileId: number, key: PromptAssetKey, content: string, source: string) {
   const ts = nowIso()
   store.db
@@ -349,24 +326,6 @@ ON CONFLICT(profile_id, key) DO NOTHING
     source,
     action: "seed",
     subject: `prompt:${key}`,
-    after: content,
-  })
-}
-
-function insertRoleInstruction(store: ConfigStore, profileId: number, role: string, content: string, source: string) {
-  const ts = nowIso()
-  store.db
-    .query(`
-INSERT INTO role_instructions (profile_id, role, content, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(profile_id, role) DO NOTHING
-    `)
-    .run(profileId, role, content, ts, ts)
-  writeAudit(store, {
-    profileId,
-    source,
-    action: "seed",
-    subject: `role-instruction:${role}`,
     after: content,
   })
 }
@@ -434,9 +393,6 @@ async function seedProfileFromDefaults(store: ConfigStore, workspaceDir: string)
   for (const prompt of await readDefaultsPrompts(workspaceDir)) {
     insertPromptAsset(store, profile.id, prompt.key, prompt.content, "seed-defaults")
   }
-  for (const role of await readDefaultsRoleInstructions(workspaceDir)) {
-    insertRoleInstruction(store, profile.id, role.role, role.content, "seed-defaults")
-  }
   await seedBindingsFromDefaultsSqlite(store, profile.id, workspaceDir, "seed-defaults")
 
   pruneLegacyBrowserQaRows(store, profile.id)
@@ -450,11 +406,13 @@ async function lazyMigrateMissingDefaults(store: ConfigStore, profileId: number,
       .get(profileId, prompt.key)
     if (!existing) insertPromptAsset(store, profileId, prompt.key, prompt.content, "lazy-migrate")
   }
-  for (const role of await readDefaultsRoleInstructions(workspaceDir)) {
+  const { ensureDefaultsConfigDb, listDefaultsRoleBindings } = await import("./defaults-store")
+  await ensureDefaultsConfigDb(workspaceDir)
+  for (const binding of await listDefaultsRoleBindings(workspaceDir)) {
     const existing = store.db
-      .query<{ role: string }, [number, string]>("SELECT role FROM role_instructions WHERE profile_id = ? AND role = ?")
-      .get(profileId, role.role)
-    if (!existing) insertRoleInstruction(store, profileId, role.role, role.content, "lazy-migrate")
+      .query<{ role: string }, [number, string]>("SELECT role FROM role_provider_bindings WHERE profile_id = ? AND role = ?")
+      .get(profileId, binding.role)
+    if (!existing) insertRoleBindingFromRow(store, profileId, binding, "lazy-migrate")
   }
 }
 
@@ -471,27 +429,6 @@ async function importLegacyPromptFiles(store: ConfigStore, profileId: number, wo
         .query<{ key: string }, [number, string]>("SELECT key FROM prompt_assets WHERE profile_id = ? AND key = ?")
         .get(profileId, key)
       if (!existing) insertPromptAsset(store, profileId, key, content, "legacy-import")
-    }
-  }
-}
-
-async function importLegacyRoleFiles(store: ConfigStore, profileId: number, workspaceDir: string) {
-  const legacyDirs = [join(workspaceDir, "assets", "roles")]
-  for (const dir of legacyDirs) {
-    try {
-      const entries = await readdir(dir, { withFileTypes: true })
-      for (const entry of entries) {
-        if (!entry.isFile() || !entry.name.endsWith(".md")) continue
-        const role = entry.name.replace(/\.md$/, "")
-        const content = await readTextIfExists(join(dir, entry.name))
-        if (!content) continue
-        const existing = store.db
-          .query<{ role: string }, [number, string]>("SELECT role FROM role_instructions WHERE profile_id = ? AND role = ?")
-          .get(profileId, role)
-        if (!existing) insertRoleInstruction(store, profileId, role, content, "legacy-import")
-      }
-    } catch {
-      // Missing legacy dir.
     }
   }
 }
@@ -551,7 +488,6 @@ async function ensureActiveProfile(store: ConfigStore, env: RuntimeEnv): Promise
   pruneLegacyBrowserQaRows(store, profile.id)
   await lazyMigrateMissingDefaults(store, profile.id, workspaceDir)
   await importLegacyPromptFiles(store, profile.id, env.QUORUM_WORKSPACE_DIRECTORY)
-  await importLegacyRoleFiles(store, profile.id, env.QUORUM_WORKSPACE_DIRECTORY)
   return profile
 }
 
@@ -710,23 +646,6 @@ export async function loadPromptAssetsFromStore(env: RuntimeEnv): Promise<Record
   }
 }
 
-export async function loadRoleInstructionsFromStore(env: RuntimeEnv): Promise<Record<string, string>> {
-  const store = getConfigStore(env)
-  try {
-    const profile = await ensureActiveProfile(store, env)
-    const rows = store.db
-      .query<{ role: string; content: string }, [number]>("SELECT role, content FROM role_instructions WHERE profile_id = ? ORDER BY role")
-      .all(profile.id)
-    const roles: Record<string, string> = {}
-    for (const row of rows) {
-      if (row.content.trim()) roles[row.role] = row.content.trim()
-    }
-    return roles
-  } finally {
-    store.close()
-  }
-}
-
 export async function listConfigSummary(env: RuntimeEnv) {
   const store = getConfigStore(env)
   try {
@@ -744,9 +663,6 @@ SELECT key, content, version FROM prompt_assets WHERE profile_id = ? ORDER BY ke
         content: row.content,
         version: row.version,
       }))
-    const roleInstructions = store.db
-      .query<{ role: string; content: string }, [number]>("SELECT role, content FROM role_instructions WHERE profile_id = ? ORDER BY role")
-      .all(profile.id)
     const bindings = store.db
       .query<RoleProviderBindingRow, [number]>(`
 SELECT profile_id, role, provider, provider_agent, model, variant, output_mode, options_json
@@ -759,7 +675,6 @@ ORDER BY role
       profile,
       config: configRow ? normalizeQuorumConfig(JSON.parse(configRow.value_json)) : undefined,
       prompts,
-      roleInstructions,
       bindings,
     }
   } finally {
@@ -886,37 +801,6 @@ ON CONFLICT(profile_id, key) DO UPDATE SET
       source: "view",
       action: "update",
       subject: `prompt:${key}`,
-      before: before?.content,
-      after: content.trim(),
-    })
-  } finally {
-    store.close()
-  }
-}
-
-export async function updateRoleInstruction(env: RuntimeEnv, role: string, content: string) {
-  if (!content.trim()) throw new Error("Role instruction content cannot be empty")
-  const store = getConfigStore(env)
-  try {
-    const profile = await ensureActiveProfile(store, env)
-    const before = store.db
-      .query<{ content: string }, [number, string]>("SELECT content FROM role_instructions WHERE profile_id = ? AND role = ?")
-      .get(profile.id, role)
-    const ts = nowIso()
-    store.db
-      .query(`
-INSERT INTO role_instructions (profile_id, role, content, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(profile_id, role) DO UPDATE SET
-  content = excluded.content,
-  updated_at = excluded.updated_at
-      `)
-      .run(profile.id, role, content.trim(), ts, ts)
-    writeAudit(store, {
-      profileId: profile.id,
-      source: "view",
-      action: "update",
-      subject: `role-instruction:${role}`,
       before: before?.content,
       after: content.trim(),
     })

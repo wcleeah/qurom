@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { readdir } from "node:fs/promises"
 import { START, StateGraph, interrupt } from "@langchain/langgraph"
 
 import { BunSqliteSaver } from "./checkpointer"
@@ -15,10 +16,18 @@ import { auditWithRestart } from "./audit-restart"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import type { AgentRunHandle } from "./providers/types"
 import type { PromptBundle } from "./prompt-assets"
+import { auditorAuditPromptKey, auditorRebuttalPromptKey } from "./prompt-asset-defs"
 import { buildResearchToolHint } from "./research-tools"
 import { summarizeMarkdown } from "./summarizer"
 import { tagOutputArtifact } from "./tagger"
 import { formatReaderProfileForPrompt, readerContextBlock as buildReaderContextBlock } from "./reader-profile"
+import {
+  designHtmlArtifactName,
+  INTERACTIVE_ENHANCER_ROLE,
+  latestDesignHtmlArtifact,
+  previousDesignHtmlArtifact,
+  READING_EXPERIENCE_ENHANCER_ROLE,
+} from "./design-artifacts"
 import { AUDITOR_ROLES, DESIGNER_ROLE, DRAFTER_ROLE } from "./role-registry"
 import { formatReaderTranscriptForPrompt, resolveReaderInterviewQuestions } from "./reader-transcript"
 import {
@@ -49,12 +58,14 @@ import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 import type { DebugLog } from "./debug-log"
 
+export type DesignPhase = "drafting" | "enhancing" | "reading" | "finalizing"
+
 export type RunObserver = {
   debugLog?: DebugLog
   onNodeStart?: (node: string, state: ResearchState | GraphInput) => void
   onNodeEnd?: (node: string, state: ResearchState | GraphInput) => void
   onSessionCreated?: (input: { sessionID: string; role: string; requestId: string }) => void
-  onDesignPhase?: (phase: "drafting" | "enhancing" | "finalizing", round: number) => void
+  onDesignPhase?: (phase: DesignPhase, round: number) => void
 }
 
 type GraphTelemetry = {
@@ -161,16 +172,20 @@ async function ensureJsonArtifact(path: string, data: unknown, label: string) {
   throw new Error(`Missing ${label} artifact at ${path}; provider returned no structured content to persist`)
 }
 
+function renderPromptTemplate(template: string, values: Record<string, string>) {
+  let rendered = template
+  for (const [key, value] of Object.entries(values)) {
+    rendered = rendered.replaceAll(`{${key}}`, value)
+  }
+  return rendered
+}
+
 export function fullDraftPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
-  return [
-    promptBundle.assets.deepDiveContract,
-    buildResearchToolHint(config),
-    requestContextBlock(state),
-    readerContextBlock(state),
-    promptBundle.assets.draftFullDraft,
-  ]
-    .filter(Boolean)
-    .join("\n\n")
+  return renderPromptTemplate(promptBundle.assets.researchDrafterDraft, {
+    researchToolHint: buildResearchToolHint(config),
+    requestContext: requestContextBlock(state),
+    readerContext: readerContextBlock(state),
+  })
 }
 
 export function auditPrompt(
@@ -184,7 +199,6 @@ export function auditPrompt(
   const previousUnresolved = Array.isArray(outputFileOrPreviousUnresolved)
     ? outputFileOrPreviousUnresolved
     : previousUnresolvedInput
-  const request = requestLabel(state)
   const deltaContext =
     previousUnresolved && previousUnresolved.length > 0
       ? [
@@ -198,13 +212,12 @@ export function auditPrompt(
         ].join("\n\n")
       : "This is the first audit of this draft."
 
-  return [
-    `You are the ${agent}, user requested a review on the ${request} draft.`,
-    promptBundle.assets.audit
-      .replace("{deltaContext}", deltaContext)
-      .replace("{readerContext}", readerContextBlock(state) || "(no reader profile provided — judge clarity against a competent practitioner default)"),
-    buildResearchToolHint(config),
-  ].join("\n\n")
+  return renderPromptTemplate(promptBundle.assets[auditorAuditPromptKey(agent)], {
+    requestLabel: requestLabel(state),
+    researchToolHint: buildResearchToolHint(config),
+    deltaContext,
+    readerContext: readerContextBlock(state) || "(no reader profile provided — judge clarity against a competent practitioner default)",
+  })
 }
 
 export function drafterReviewPrompt(
@@ -212,26 +225,24 @@ export function drafterReviewPrompt(
   promptBundle: PromptBundle,
   state: ResearchState,
 ) {
-  const request = requestLabel(state)
-  return [
-    `You are the drafter-agent reviewing auditor findings for this ${request}.`,
-    promptBundle.assets.reviewFindings,
-    buildResearchToolHint(config),
-    readerContextBlock(state),
-  ].join("\n\n")
+  return renderPromptTemplate(promptBundle.assets.researchDrafterReviewFindings, {
+    researchToolHint: buildResearchToolHint(config),
+    readerContext: readerContextBlock(state),
+    requestLabel: requestLabel(state),
+  })
 }
 
-export function rebuttalPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
-  const request = requestLabel(state)
-  return [
-    promptBundle.assets.rebuttal,
-    buildResearchToolHint(config),
-    `Respond to the disputed findings for this ${request}.`,
-    readerContextBlock(state),
-    "Return only JSON that matches the requested schema.",
-    "Answer only for the findings in the rebuttal list.",
-    "Use uphold, soften, or withdraw for each response.",
-  ].join("\n\n")
+export function rebuttalPrompt(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  agent: string,
+  state: ResearchState,
+) {
+  return renderPromptTemplate(promptBundle.assets[auditorRebuttalPromptKey(agent)], {
+    researchToolHint: buildResearchToolHint(config),
+    readerContext: readerContextBlock(state),
+    requestLabel: requestLabel(state),
+  })
 }
 
 export function rebuttalReviewPrompt(
@@ -240,25 +251,19 @@ export function rebuttalReviewPrompt(
   state: ResearchState,
   maxRebuttalTurns: number,
 ) {
-  const request = requestLabel(state)
-  return [
-    promptBundle.assets.reviewRebuttalResponses,
-    buildResearchToolHint(config),
-    `Review the auditor rebuttal responses for this ${request}.`,
-    readerContextBlock(state),
-    "Return only JSON that matches the requested schema.",
-    "For each disputed finding, either accept the auditor response or issue one narrower rebuttal with stronger evidence.",
-    `Do not rebut a finding that has already hit the rebuttal cap of ${maxRebuttalTurns}.`,
-  ].join("\n\n")
+  return renderPromptTemplate(promptBundle.assets.researchDrafterReviewRebuttals, {
+    researchToolHint: buildResearchToolHint(config),
+    readerContext: readerContextBlock(state),
+    requestLabel: requestLabel(state),
+    maxRebuttalTurns: String(maxRebuttalTurns),
+  })
 }
 
 function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
-  return [
-    promptBundle.assets.deepDiveContract,
-    promptBundle.assets.reviseDraft,
-    buildResearchToolHint(config),
-    requestLabel(state),
-  ].join("\n\n")
+  return renderPromptTemplate(promptBundle.assets.researchDrafterRevise, {
+    researchToolHint: buildResearchToolHint(config),
+    requestLabel: requestLabel(state),
+  })
 }
 
 async function persistRequestArtifact(state: ResearchState) {
@@ -648,18 +653,19 @@ function renderReaderInterviewPrompt(input: {
   mode: "first" | "followUp" | "duplicateCorrection"
 }) {
   const asset = input.mode === "duplicateCorrection"
-    ? input.promptBundle.assets.readerInterviewDuplicateCorrection
+    ? input.promptBundle.assets.readerInterviewerDuplicateCorrection
     : input.mode === "followUp"
-      ? input.promptBundle.assets.readerInterviewFollowUp
-      : input.promptBundle.assets.readerInterview
+      ? input.promptBundle.assets.readerInterviewerFollowUp
+      : input.promptBundle.assets.readerInterviewerInterview
 
-  return asset
-    .replace("{requestContext}", requestContextBlock(input.state))
-    .replace("{researchToolHint}", buildResearchToolHint(input.config))
-    .replace("{transcript}", input.transcriptText)
-    .replace("{profileSoFar}", formatReaderProfileForPrompt(input.state.readerProfile))
-    .replace("{maxTurns}", String(input.maxTurns))
-    .replace("{turn}", String(input.turn))
+  return renderPromptTemplate(asset, {
+    requestContext: requestContextBlock(input.state),
+    researchToolHint: buildResearchToolHint(input.config),
+    transcript: input.transcriptText,
+    profileSoFar: formatReaderProfileForPrompt(input.state.readerProfile),
+    maxTurns: String(input.maxTurns),
+    turn: String(input.turn),
+  })
 }
 
 async function discoverReaderPrompt(
@@ -1247,7 +1253,7 @@ async function runTargetedRebuttals(
       const response = await runtime.prompt({
         role: agent,
         handle,
-        prompt: rebuttalPrompt(config, promptBundle, state),
+        prompt: rebuttalPrompt(config, promptBundle, agent, state),
         schema: rebuttalBatchResponseSchema,
         outputFile,
         inputFiles: [
@@ -1864,6 +1870,14 @@ async function ensureDesignTextArtifact(path: string, text: string | undefined, 
   throw new Error(`Missing ${label} artifact at ${path}; provider returned no inline content to persist`)
 }
 
+async function listRunBasenames(outputPath: string): Promise<string[]> {
+  try {
+    return await readdir(outputPath)
+  } catch {
+    return []
+  }
+}
+
 async function designHtmlNode(
   config: RuntimeConfig,
   runtime: AgentRuntime,
@@ -1890,7 +1904,8 @@ async function designHtmlNode(
     ? state.topic ?? ""
     : state.documentText ?? state.documentPath ?? ""
 
-  const htmlFile = `${state.outputPath}/design-html-round-${state.designRound ?? 0}.html`
+  const htmlBasename = designHtmlArtifactName(DESIGNER_ROLE)
+  const htmlFile = `${state.outputPath}/${htmlBasename}`
 
   observer?.onDesignPhase?.("drafting", state.designRound ?? 0)
   const handle = await createObservedHandle({
@@ -1902,7 +1917,7 @@ async function designHtmlNode(
     displayRole: "html-designer",
   })
 
-  const prompt = promptBundle.assets.designHtml.replace("{topic}", topic)
+  const prompt = renderPromptTemplate(promptBundle.assets.htmlDesignerDesign, { topic })
   const response = await runtime.prompt({
     role: DESIGNER_ROLE,
     handle,
@@ -1931,6 +1946,73 @@ async function designHtmlNode(
   })
 }
 
+async function runDesignHtmlTransformNode(input: {
+  config: RuntimeConfig
+  runtime: AgentRuntime
+  promptBundle: PromptBundle
+  state: ResearchState
+  telemetry?: GraphTelemetry
+  observer?: RunObserver
+  role: typeof INTERACTIVE_ENHANCER_ROLE | typeof READING_EXPERIENCE_ENHANCER_ROLE
+  phase: DesignPhase
+  nodeName: string
+  prompt: string
+}) {
+  const { config, runtime, promptBundle: _promptBundle, state, telemetry, observer, role, phase, nodeName, prompt } = input
+  if (!state.outputPath) throw new Error(`Missing outputPath during ${nodeName}`)
+  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  const files = await listRunBasenames(state.outputPath)
+  const inputBasename = previousDesignHtmlArtifact(role, files)
+  if (!inputBasename) {
+    throw new Error(`Missing upstream design HTML for ${role}`)
+  }
+  const inputFile = `${state.outputPath}/${inputBasename}`
+  const outputBasename = designHtmlArtifactName(role)
+  const outputFile = `${state.outputPath}/${outputBasename}`
+
+  // Seed the role artifact from the previous stage so "OK" / no-op still leaves a stage file.
+  if (!(await Bun.file(outputFile).exists())) {
+    await Bun.write(outputFile, await Bun.file(inputFile).text())
+  }
+
+  const round = state.designRound ?? 0
+  observer?.onDesignPhase?.(phase, round)
+  const handle = await createObservedHandle({
+    runtime,
+    role,
+    title: `${role}:${state.requestId}:round:${round}`,
+    requestId: state.requestId,
+    observer,
+  })
+
+  const response = await runtime.prompt({
+    role,
+    handle,
+    prompt,
+    outputFile,
+    inputFiles: [
+      { path: inputFile, mime: "text/plain", filename: "document.html" },
+    ],
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: `agent.${nodeName}`,
+      agentName: role,
+      sessionId: handle.id,
+    }),
+  })
+  if (response.text && response.text.trim() && response.text.trim() !== "OK") {
+    await Bun.write(outputFile, response.text)
+  }
+
+  const html = await Bun.file(outputFile).text()
+  return researchStateSchema.parse({
+    ...state,
+    designHtml: html,
+  })
+}
+
 async function interactiveEnhanceNode(
   config: RuntimeConfig,
   runtime: AgentRuntime,
@@ -1939,45 +2021,39 @@ async function interactiveEnhanceNode(
   telemetry?: GraphTelemetry,
   observer?: RunObserver,
 ) {
-  if (!state.outputPath) throw new Error("Missing outputPath during interactiveEnhance")
-  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
-
-  const round = state.designRound ?? 0
-  const htmlFile = `${state.outputPath}/design-html-round-${round}.html`
-
-  observer?.onDesignPhase?.("enhancing", round)
-  const handle = await createObservedHandle({
+  return runDesignHtmlTransformNode({
+    config,
     runtime,
-    role: "interactive-enhancer",
-    title: `interactive-enhancer:${state.requestId}:round:${round}`,
-    requestId: state.requestId,
+    promptBundle,
+    state,
+    telemetry,
     observer,
+    role: INTERACTIVE_ENHANCER_ROLE,
+    phase: "enhancing",
+    nodeName: "interactiveEnhance",
+    prompt: promptBundle.assets.interactiveEnhancerEnhance,
   })
+}
 
-  const response = await runtime.prompt({
-    role: "interactive-enhancer",
-    handle,
-    prompt: promptBundle.assets.enhanceDesign as string,
-    outputFile: htmlFile,
-    inputFiles: [
-      { path: htmlFile, mime: "text/plain", filename: "document.html" },
-    ],
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.interactiveEnhance",
-      agentName: "interactive-enhancer",
-      sessionId: handle.id,
-    }),
-  })
-  if (response.text && response.text.trim() && response.text.trim() !== "OK") {
-    await Bun.write(htmlFile, response.text)
-  }
-
-  const html = await Bun.file(htmlFile).text()
-  return researchStateSchema.parse({
-    ...state,
-    designHtml: html,
+async function readingExperienceEnhanceNode(
+  config: RuntimeConfig,
+  runtime: AgentRuntime,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
+  return runDesignHtmlTransformNode({
+    config,
+    runtime,
+    promptBundle,
+    state,
+    telemetry,
+    observer,
+    role: READING_EXPERIENCE_ENHANCER_ROLE,
+    phase: "reading",
+    nodeName: "readingExperienceEnhance",
+    prompt: promptBundle.assets.readingExperienceEnhancerEnhance,
   })
 }
 
@@ -1993,15 +2069,16 @@ async function finalizeDesignNode(
 
   _observer?.onDesignPhase?.("finalizing", state.designRound ?? 0)
 
-  // Write the approved (or best-effort) design HTML as final.html.
-  // state.designHtml holds the latest HTML the auditors reviewed; fall back to
-  // the on-disk round file if it's empty for any reason.
+  // Write the latest stage HTML as final.html.
   let html = state.designHtml ?? ""
   if (!html) {
-    const round = state.designRound ?? 0
-    const fallback = Bun.file(`${state.outputPath}/design-html-round-${round}.html`)
-    if (await fallback.exists()) {
-      html = await fallback.text()
+    const files = await listRunBasenames(state.outputPath)
+    const fallbackName = latestDesignHtmlArtifact(files)
+    if (fallbackName) {
+      const fallback = Bun.file(`${state.outputPath}/${fallbackName}`)
+      if (await fallback.exists()) {
+        html = await fallback.text()
+      }
     }
   }
 
@@ -2280,6 +2357,11 @@ export function createGraph(
         interactiveEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
+    .addNode("readingExperienceEnhance", async (state) =>
+      withNodeTelemetry("readingExperienceEnhance", state, () =>
+        readingExperienceEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addNode("finalizeDesign", async (state) =>
       withNodeTelemetry("finalizeDesign", state, () =>
         finalizeDesignNode(config, promptBundle, state, graphTelemetry, observer),
@@ -2323,7 +2405,8 @@ export function createGraph(
       "__end__",
     ])
     .addEdge("runDesignHtml", "interactiveEnhance")
-    .addEdge("interactiveEnhance", "finalizeDesign")
+    .addEdge("interactiveEnhance", "readingExperienceEnhance")
+    .addEdge("readingExperienceEnhance", "finalizeDesign")
     .addEdge("finalizeDesign", "__end__")
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),

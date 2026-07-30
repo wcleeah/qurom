@@ -144,34 +144,7 @@ describe("createAgentRuntime", () => {
     })).rejects.toThrow("does not support input files or inline input context")
   })
 
-  test("injects role instructions only for providers that request them", async () => {
-    const prompts: string[] = []
-    const provider: AgentProvider = {
-      id: "fake",
-      capabilities: new Set(["plainJsonOutput", "roleInstructions"]),
-      async createRunHandle(input) {
-        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
-      },
-      async prompt(input) {
-        prompts.push(input.prompt)
-        return { text: "ok" }
-      },
-    }
-    const runtime = createAgentRuntime(config, undefined, {
-      providerForRole: () => provider,
-      roleInstructions: { "source-auditor": "Only check source fidelity." },
-    })
-    const handle = await runtime.createHandle("source-auditor", "audit")
-
-    await runtime.prompt({ role: "source-auditor", handle, prompt: "Review draft." })
-
-    expect(prompts[0]).toContain("## Role instructions")
-    expect(prompts[0]).toContain("Only check source fidelity.")
-    expect(prompts[0]).toContain("## Task")
-    expect(prompts[0]).toContain("Review draft.")
-  })
-
-  test("does not inject role instructions for providers without the capability", async () => {
+  test("passes the task prompt through without role-instruction wrapping", async () => {
     let seenPrompt = ""
     const provider: AgentProvider = {
       id: "fake",
@@ -186,7 +159,6 @@ describe("createAgentRuntime", () => {
     }
     const runtime = createAgentRuntime(config, undefined, {
       providerForRole: () => provider,
-      roleInstructions: { "source-auditor": "Only check source fidelity." },
     })
     const handle = await runtime.createHandle("source-auditor", "audit")
 

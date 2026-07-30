@@ -90,7 +90,13 @@ export function buildStructuredRepairPrompt(input: {
 export function buildFileRepairPrompt(input: {
   outputFile: string
   parseError: string
+  template?: string
 }) {
+  if (input.template?.trim()) {
+    return input.template
+      .replaceAll("{outputFile}", input.outputFile)
+      .replaceAll("{parseError}", input.parseError)
+  }
   return [
     `The JSON file you wrote at \`${input.outputFile}\` could not be parsed.`,
     "Read that file, fix the JSON syntax errors, and rewrite it.",

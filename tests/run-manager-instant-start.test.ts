@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { mkdtemp, mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 
-import type { PromptBundle } from "../src/prompt-assets"
+import { emptyPromptBundle } from "../src/prompt-assets"
 import type { ProviderLifecycle, ProviderLifecycleStatus } from "../src/providers/lifecycle"
 import type { AgentProviderId } from "../src/providers/types"
 import {
@@ -12,26 +12,7 @@ import {
 } from "../src/run-manager"
 import { testRuntimeConfig, unitTestDataDir } from "./test-env"
 
-const emptyPromptBundle: PromptBundle = {
-  source: "sqlite",
-  roleInstructions: {},
-  assets: {
-    deepDiveContract: "",
-    draftFullDraft: "",
-    reviseDraft: "",
-    audit: "",
-    reviewFindings: "",
-    rebuttal: "",
-    reviewRebuttalResponses: "",
-    designHtml: "",
-    readerInterview: "",
-    readerInterviewFollowUp: "",
-    readerInterviewDuplicateCorrection: "",
-    enhanceDesign: "",
-    htmlAskPage: "",
-    htmlAskHighlight: "",
-  },
-}
+const promptBundle = emptyPromptBundle()
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -119,7 +100,7 @@ describe("run manager instant start", () => {
     const manager = createRunManager({
       getConfig: () => config,
       lifecycle,
-      loadPromptBundleFn: async () => emptyPromptBundle,
+      loadPromptBundleFn: async () => promptBundle,
       validatePrerequisitesFn: async () => ({ providers: [] }),
       runResearchPipelineFn: async () => {
         pipelineStarted = true
@@ -161,7 +142,7 @@ describe("run manager instant start", () => {
     const manager = createRunManager({
       getConfig: () => config,
       lifecycle,
-      loadPromptBundleFn: async () => emptyPromptBundle,
+      loadPromptBundleFn: async () => promptBundle,
       validatePrerequisitesFn: async () => ({ providers: [] }),
       runResearchPipelineFn: async () => {
         pipelineStarted = true
@@ -213,7 +194,7 @@ describe("run manager instant start", () => {
     const manager = createRunManager({
       getConfig: () => config,
       lifecycle,
-      loadPromptBundleFn: async () => emptyPromptBundle,
+      loadPromptBundleFn: async () => promptBundle,
       validatePrerequisitesFn: async () => ({ providers: [] }),
       runResearchPipelineFn: async () => {
         pipelineStarted = true

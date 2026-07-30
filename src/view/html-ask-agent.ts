@@ -81,9 +81,7 @@ function assertThreadAvailable(thread: HtmlReaderAskThread): void {
 }
 
 async function createAskRuntime(config: RuntimeConfig) {
-  return createAgentRuntime(config, undefined, {
-    roleInstructions: (await loadPromptBundle(config)).roleInstructions,
-  })
+  return createAgentRuntime(config)
 }
 
 async function createProviderHandle(input: {
@@ -326,8 +324,8 @@ export async function prepareAskMessage(input: {
       source,
       config,
       promptAssets: {
-        htmlAskPage: promptBundle.assets.htmlAskPage,
-        htmlAskHighlight: promptBundle.assets.htmlAskHighlight,
+        htmlReadingCompanionAskPage: promptBundle.assets.htmlReadingCompanionAskPage,
+        htmlReadingCompanionAskHighlight: promptBundle.assets.htmlReadingCompanionAskHighlight,
       },
     })
 

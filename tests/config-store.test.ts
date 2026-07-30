@@ -45,7 +45,7 @@ describe("config store", () => {
     expect(bindingCount).toBeGreaterThan(0)
     expect((await loadQuorumConfigFromStore(env())).maxRounds).toBeGreaterThan(0)
     expect((await loadRoleBindingsFromStore(env()))["source-auditor"]).toBeDefined()
-    expect((await loadPromptAssetsFromStore(env())).audit).toContain("audit")
+    expect((await loadPromptAssetsFromStore(env())).sourceAuditorAudit).toContain("source auditor")
   })
 
   test("role binding updates are stored separately from quorum policy", async () => {
@@ -105,10 +105,10 @@ describe("config store", () => {
 
   test("prompt updates are stored in sqlite", async () => {
     await ensureConfigInitialized(env())
-    await updatePromptAsset(env(), "audit", "updated audit prompt")
+    await updatePromptAsset(env(), "sourceAuditorAudit", "updated audit prompt")
 
     const assets = await loadPromptAssetsFromStore(env())
-    expect(assets.audit).toBe("updated audit prompt")
+    expect(assets.sourceAuditorAudit).toBe("updated audit prompt")
   })
 
   test("view config routes render and update sqlite-backed settings", async () => {
@@ -128,7 +128,8 @@ describe("config store", () => {
     expect(rolesHtml).not.toContain("edited file definition")
 
     const promptHtml = await renderConfigPrompts().then((r) => r.text())
-    expect(promptHtml).toContain("audit")
+    expect(promptHtml).toContain("source-auditor")
+    expect(promptHtml).toContain("sourceAuditorAudit")
 
     const req = new Request("http://localhost/config/roles/source-auditor", {
       method: "POST",

@@ -17,3 +17,11 @@ Rules:
 Output rules:
 - If the orchestrator requests structured output, return only valid JSON matching the requested schema.
 - Do not add commentary before or after the requested output.
+
+Summarize this markdown artifact for the run summary screen.
+Return a short title and a concise 1-2 sentence summary.
+You may include a slug hint, but it is optional.
+
+Markdown:
+
+{markdown}

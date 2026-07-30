@@ -34,9 +34,9 @@ beforeEach(async () => {
   await mkdir(join(dir, "assets", "prompts"), { recursive: true })
   await writeFile(join(dir, "runs", "alpha-run", "final.html"), "<html><body>Hello</body></html>")
   await writeFile(join(dir, "runs", "alpha-run", "final.md"), "# Title\n\nBody text.")
-  await writeFile(join(dir, "assets", "prompts", "html-ask-page.md"), "{researchToolHint}\n\n## Reader question\n\n{question}\n")
+  await writeFile(join(dir, "assets", "prompts", "html-reading-companion.ask-page.md"), "{researchToolHint}\n\n## Reader question\n\n{question}\n")
   await writeFile(
-    join(dir, "assets", "prompts", "html-ask-highlight.md"),
+    join(dir, "assets", "prompts", "html-reading-companion.ask-highlight.md"),
     'Quote: "{quote}"\n\n{question}\n',
   )
   await installDefaultsFixtures(dir)
@@ -63,8 +63,8 @@ function askTestConfig(): RuntimeConfig {
 }
 
 const askPromptAssets = {
-  htmlAskPage: "{researchToolHint}\n\n## Reader question\n\n{question}\n",
-  htmlAskHighlight: 'Quote: "{quote}"\n\n{question}\n',
+  htmlReadingCompanionAskPage: "{researchToolHint}\n\n## Reader question\n\n{question}\n",
+  htmlReadingCompanionAskHighlight: 'Quote: "{quote}"\n\n{question}\n',
 }
 
 afterEach(async () => {

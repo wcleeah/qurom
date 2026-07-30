@@ -11,11 +11,6 @@ export type DefaultsPromptSummary = {
   content: string
 }
 
-export type DefaultsRoleSummary = {
-  role: string
-  content: string
-}
-
 export type DefaultsOpencodeAgentSummary = {
   role: string
   content: string
@@ -171,21 +166,6 @@ export async function listDefaultsPrompts(workspaceDir: string): Promise<Default
   return prompts
 }
 
-export async function listDefaultsRoleInstructions(workspaceDir: string): Promise<DefaultsRoleSummary[]> {
-  const rolesDir = safeDefaultsPath(workspaceDir, "roles")
-  const roles: DefaultsRoleSummary[] = []
-  const entries = await readdir(rolesDir, { withFileTypes: true })
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".md")) continue
-    const role = entry.name.replace(/\.md$/, "")
-    roles.push({
-      role,
-      content: await readText(join(rolesDir, entry.name)),
-    })
-  }
-  return roles.sort((a, b) => a.role.localeCompare(b.role))
-}
-
 export async function listDefaultsOpencodeAgents(workspaceDir: string): Promise<DefaultsOpencodeAgentSummary[]> {
   const agentsDir = safeDefaultsPath(workspaceDir, join("opencode", "agents"))
   const agents: DefaultsOpencodeAgentSummary[] = []
@@ -235,12 +215,6 @@ export async function updateDefaultsPrompt(workspaceDir: string, key: string, co
   await writeFile(safeDefaultsPath(workspaceDir, join("prompts", filename)), content.trim() + "\n", "utf8")
 }
 
-export async function updateDefaultsRoleInstruction(workspaceDir: string, role: string, content: string) {
-  if (!/^[a-z0-9-]+$/.test(role)) throw new Error(`Invalid role name ${JSON.stringify(role)}`)
-  if (!content.trim()) throw new Error("Role instruction content cannot be empty")
-  await writeFile(safeDefaultsPath(workspaceDir, join("roles", `${role}.md`)), content.trim() + "\n", "utf8")
-}
-
 export async function updateDefaultsOpencodeAgent(workspaceDir: string, role: string, content: string) {
   if (!/^[a-z0-9-]+$/.test(role)) throw new Error(`Invalid role name ${JSON.stringify(role)}`)
   if (!content.trim()) throw new Error("OpenCode agent content cannot be empty")
@@ -248,9 +222,8 @@ export async function updateDefaultsOpencodeAgent(workspaceDir: string, role: st
 }
 
 export async function listDefaultsSummary(workspaceDir: string) {
-  const [prompts, roles, opencodeAgents, quorumConfig] = await Promise.all([
+  const [prompts, opencodeAgents, quorumConfig] = await Promise.all([
     listDefaultsPrompts(workspaceDir),
-    listDefaultsRoleInstructions(workspaceDir),
     listDefaultsOpencodeAgents(workspaceDir),
     readDefaultsQuorumConfig(workspaceDir),
   ])
@@ -258,7 +231,6 @@ export async function listDefaultsSummary(workspaceDir: string) {
     root: repoDefaultsDir(workspaceDir),
     quorumConfig,
     prompts,
-    roles,
     opencodeAgents,
   }
 }

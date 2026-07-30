@@ -17,7 +17,6 @@ export type ProviderCapability =
   | "inputFileAttachments"
   | "inlineInputContext"
   | "fileOutput"
-  | "roleInstructions"
   | "providerManagedAgents"
   | "plainTextOutput"
   | "jsonFileOutput"

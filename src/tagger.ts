@@ -2,12 +2,14 @@ import { basename } from "node:path"
 
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import type { RuntimeConfig } from "./config"
+import { loadPromptAssetsFromStore } from "./config-store"
 import { createArticleTagsResultSchema, type ArticleTagEntry, type ArticleTagsResult } from "./schema"
 import { TAGGER_ROLE } from "./role-registry"
 import { replaceAgentArticleTags, syncPredefinedTags, writeArticleTagsArtifact } from "./tags-store"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 function tagArticlePrompt(input: {
+  template: string
   markdown: string
   topic?: string
   predefinedTags: string[]
@@ -30,23 +32,11 @@ function tagArticlePrompt(input: {
         "Generate topic tags from the article (matchedPredefined must be false for every tag).",
       ].join("\n")
 
-  return [
-    "Analyze this approved research article and assign topic tags.",
-    `Return at most ${input.maxArticleTags} tags.`,
-    "",
-    predefinedBlock,
-    "",
-    "Generated tag rules:",
-    "- slug must be lowercase hyphenated ASCII: /^[a-z0-9]+(?:-[a-z0-9]+)*$/",
-    "- label is a short human-readable name",
-    "- matchedPredefined false means the tag is newly generated",
-    "- No duplicate slugs",
-    "",
-    input.topic ? `Article topic: ${input.topic}` : "",
-    "",
-    "Markdown article:",
-    input.markdown,
-  ].filter(Boolean).join("\n")
+  return input.template
+    .replaceAll("{maxArticleTags}", String(input.maxArticleTags))
+    .replaceAll("{predefinedBlock}", predefinedBlock)
+    .replaceAll("{topicLine}", input.topic ? `Article topic: ${input.topic}` : "")
+    .replaceAll("{markdown}", input.markdown)
 }
 
 export async function tagArticle(input: {
@@ -82,10 +72,12 @@ export async function tagArticle(input: {
     maxArticleTags: tagging.maxArticleTags ?? 8,
   })
 
+  const assets = await loadPromptAssetsFromStore(input.config.env)
   const response = await runtime.prompt({
     role,
     handle,
     prompt: tagArticlePrompt({
+      template: assets.researchTaggerTag,
       markdown: input.markdown,
       topic: input.topic,
       predefinedTags,

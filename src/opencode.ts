@@ -530,10 +530,13 @@ export async function promptAgent<T>(input: {
       activeSessionID = repairSession.id
       input.agent = "json-fixer"
       try {
+        const { loadPromptAssetsFromStore } = await import("./config-store")
+        const assets = await loadPromptAssetsFromStore(input.config.env)
         await sendPrompt(
           buildFileRepairPrompt({
             outputFile: target,
             parseError: formatStructuredError(parseErr),
+            template: assets.jsonFixerFix,
           }),
         )
       } finally {

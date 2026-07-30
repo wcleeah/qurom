@@ -49,8 +49,8 @@ export interface AskPromptBuildInput {
   source: ResolvedSourceMarkdown
   config: RuntimeConfig
   promptAssets: {
-    htmlAskPage: string
-    htmlAskHighlight: string
+    htmlReadingCompanionAskPage: string
+    htmlReadingCompanionAskHighlight: string
   }
 }
 
@@ -71,8 +71,8 @@ export async function buildAskPrompt(input: AskPromptBuildInput): Promise<AskPro
 
   const passageScoped = input.scope === "highlight" || input.scope === "selection"
   const template = passageScoped
-    ? input.promptAssets.htmlAskHighlight
-    : input.promptAssets.htmlAskPage
+    ? input.promptAssets.htmlReadingCompanionAskHighlight
+    : input.promptAssets.htmlReadingCompanionAskPage
   const values: Record<string, string> = {
     question: message,
     researchToolHint: buildResearchToolHint(input.config),

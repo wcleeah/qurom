@@ -110,9 +110,7 @@ export async function streamAskMessage(input: StreamAskMessageInput): Promise<Re
           }
         })
 
-        const runtime = createAgentRuntime(config, bus, {
-          roleInstructions: promptBundle.roleInstructions,
-        })
+        const runtime = createAgentRuntime(config, bus)
         prepared.handle.keepAlive = true
         const result = await runtime.prompt({
           role: HTML_READING_COMPANION_ROLE,
