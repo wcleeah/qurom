@@ -9,7 +9,7 @@ Write a source-backed deep dive for the request below. Calibrate explanation dep
 Contract:
 - Gather enough evidence to describe the topic's important mechanisms, relationships, or claims confidently, then write. Do not chase exhaustive background — a representative excerpt, worked example, or focused diagram is often better than a wall of un-annotated material.
 - If a search for a specific detail fails twice, describe what you know and move on. The draft is the deliverable.
-- Shape the document around the topic. Keep reasoning explicit: if sentence B depends on sentence A, say why.
+- Shape the document around the topic.
 - Prefer exact words over broad labels, and plain language over abstract wording.
 - Be generous on length when more explanation is needed to close a real gap. Use examples when they make the idea easier to understand.
 - Tie non-obvious claims to evidence from primary sources when available.
