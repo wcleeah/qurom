@@ -3,7 +3,24 @@ import { describe, expect, test } from "bun:test"
 import { inferCursorCallScope } from "../src/cursor-call-scope.ts"
 
 describe("inferCursorCallScope", () => {
-  test("maps design artifacts by role", () => {
+  test("maps design artifacts by role filename", () => {
+    expect(inferCursorCallScope({
+      role: "html-designer",
+      artifact: "design-html-html-designer.html",
+    })).toEqual({ node: "runDesignHtml", round: 0 })
+
+    expect(inferCursorCallScope({
+      role: "interactive-enhancer",
+      artifact: "design-html-interactive-enhancer.html",
+    })).toEqual({ node: "interactiveEnhance", round: 0 })
+
+    expect(inferCursorCallScope({
+      role: "reading-experience-enhancer",
+      artifact: "design-html-reading-experience-enhancer.html",
+    })).toEqual({ node: "readingExperienceEnhance", round: 0 })
+  })
+
+  test("maps legacy design-html-round artifacts by role", () => {
     expect(inferCursorCallScope({
       role: "html-designer",
       artifact: "design-html-round-0.html",
@@ -44,5 +61,7 @@ describe("inferCursorCallScope", () => {
       .toEqual({ node: "runDesignHtml", round: 0 })
     expect(inferCursorCallScope({ role: "interactive-enhancer" }))
       .toEqual({ node: "interactiveEnhance", round: 0 })
+    expect(inferCursorCallScope({ role: "reading-experience-enhancer" }))
+      .toEqual({ node: "readingExperienceEnhance", round: 0 })
   })
 })

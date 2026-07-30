@@ -1,5 +1,13 @@
 import { basename } from "node:path"
 
+import {
+  designHtmlRoleFromFilename,
+  INTERACTIVE_ENHANCER_ROLE,
+  LEGACY_DESIGN_HTML_ROUND_RE,
+  READING_EXPERIENCE_ENHANCER_ROLE,
+} from "./design-artifacts"
+import { DESIGNER_ROLE } from "./role-registry"
+
 export type CursorCallScope = {
   node?: string
   round?: number
@@ -18,13 +26,32 @@ export function inferCursorCallScope(input: {
   return inferScopeFromRole(input.role)
 }
 
+function designNodeForRole(role: string): string | undefined {
+  switch (role) {
+    case DESIGNER_ROLE:
+      return "runDesignHtml"
+    case INTERACTIVE_ENHANCER_ROLE:
+      return "interactiveEnhance"
+    case READING_EXPERIENCE_ENHANCER_ROLE:
+      return "readingExperienceEnhance"
+    default:
+      return undefined
+  }
+}
+
 function inferScopeFromArtifact(artifact: string, role: string): CursorCallScope {
   let match: RegExpMatchArray | null
 
-  if ((match = artifact.match(/^design-html-round-(\d+)\.html$/))) {
+  const designRole = designHtmlRoleFromFilename(artifact)
+  if (designRole) {
+    const node = designNodeForRole(designRole) ?? designNodeForRole(role)
+    if (node) return { node, round: 0 }
+  }
+
+  if ((match = artifact.match(LEGACY_DESIGN_HTML_ROUND_RE))) {
     const round = Number.parseInt(match[1]!, 10)
-    if (role === "interactive-enhancer") return { node: "interactiveEnhance", round }
-    return { node: "runDesignHtml", round }
+    const node = designNodeForRole(role) ?? "runDesignHtml"
+    return { node, round }
   }
 
   if (artifact === "final.html") {
@@ -68,10 +95,12 @@ function inferScopeFromRole(role: string): CursorCallScope {
   switch (role) {
     case "reader-interviewer":
       return { node: "discoverReader", round: 0 }
-    case "html-designer":
+    case DESIGNER_ROLE:
       return { node: "runDesignHtml", round: 0 }
-    case "interactive-enhancer":
+    case INTERACTIVE_ENHANCER_ROLE:
       return { node: "interactiveEnhance", round: 0 }
+    case READING_EXPERIENCE_ENHANCER_ROLE:
+      return { node: "readingExperienceEnhance", round: 0 }
     case "source-auditor":
     case "logic-auditor":
     case "clarity-auditor":

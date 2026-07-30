@@ -1,3 +1,11 @@
+import {
+  designHtmlArtifactName,
+  DESIGNER_ROLE,
+  INTERACTIVE_ENHANCER_ROLE,
+  isDesignHtmlArtifact,
+  LEGACY_DESIGN_HTML_ROUND_RE,
+  READING_EXPERIENCE_ENHANCER_ROLE,
+} from "../design-artifacts"
 import { indexRunArtifacts, roundHasRebuttals, type RoundArtifacts, type RunArtifactIndex } from "./run-artifacts"
 import type { LiveStatus, RunStatus } from "./types"
 
@@ -129,8 +137,11 @@ export const GRAPH_NODES: NodeDefinition[] = [
     miniLabel: "Design",
     order: 15,
     phase: "design",
-    filePatterns: [/^design-html-round-\d+\.html$/],
-    roundScoped: true,
+    filePatterns: [
+      new RegExp(`^${designHtmlArtifactName(DESIGNER_ROLE).replace(/\./g, "\\.")}$`),
+      LEGACY_DESIGN_HTML_ROUND_RE,
+    ],
+    roundScoped: false,
   },
   {
     id: "interactiveEnhance",
@@ -138,13 +149,22 @@ export const GRAPH_NODES: NodeDefinition[] = [
     miniLabel: "Enhance",
     order: 16,
     phase: "design",
-    filePatterns: [/^design-html-round-\d+\.html$/],
+    filePatterns: [new RegExp(`^${designHtmlArtifactName(INTERACTIVE_ENHANCER_ROLE).replace(/\./g, "\\.")}$`)],
+    roundScoped: false,
+  },
+  {
+    id: "readingExperienceEnhance",
+    label: "Reading experience",
+    miniLabel: "Reading",
+    order: 17,
+    phase: "design",
+    filePatterns: [new RegExp(`^${designHtmlArtifactName(READING_EXPERIENCE_ENHANCER_ROLE).replace(/\./g, "\\.")}$`)],
     roundScoped: false,
   },
   {
     id: "finalizeDesign",
     label: "Finalize design",
-    order: 17,
+    order: 18,
     phase: "design",
     filePatterns: [/^final\.html$/, /^design-failure\.json$/],
     roundScoped: false,
@@ -154,6 +174,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
 const DESIGN_PHASE_NODE: Record<string, string> = {
   drafting: "runDesignHtml",
   enhancing: "interactiveEnhance",
+  reading: "readingExperienceEnhance",
   finalizing: "finalizeDesign",
 }
 
@@ -180,6 +201,7 @@ export function resolveLiveNode(liveStatus: LiveStatus | null): string | undefin
     if (phase && DESIGN_PHASE_NODE[phase]) return DESIGN_PHASE_NODE[phase]
     if (raw.includes("drafting")) return "runDesignHtml"
     if (raw.includes("enhancing")) return "interactiveEnhance"
+    if (raw.includes("reading")) return "readingExperienceEnhance"
     if (raw.includes("finalizing")) return "finalizeDesign"
   }
   const def = getNodeDefinition(raw)
@@ -277,18 +299,9 @@ export function filesForNodeRound(
     }
     if (nodeId === "aggregateConsensus" && roundArt.consensus) roundFiles.push(roundArt.consensus)
     if (nodeId === "reviseDraft" && roundArt.unresolved) roundFiles.push(roundArt.unresolved)
-    if (nodeId === "runDesignHtml") {
-      roundFiles.push(...files.filter((f) => {
-        const match = f.match(/^design-html-round-(\d+)\.html$/)
-        return match?.[1] !== undefined && parseInt(match[1], 10) === round
-      }))
-    }
   }
 
   const matched = files.filter((f) => {
-    if (nodeId === "runDesignHtml" && /^design-html-round-(\d+)\.html$/.test(f)) {
-      return parseInt(f.match(/round-(\d+)/)?.[1] ?? "-1", 10) === round
-    }
     if (!def.filePatterns.some((p) => p.test(f))) return false
     const fileRound = roundFromFilename(f)
     return fileRound === undefined || fileRound === round
@@ -331,7 +344,7 @@ export function nodeKpis(nodeId: string, files: string[], index?: RunArtifactInd
     case "aggregateConsensus":
       return []
     case "runDesignHtml": {
-      const html = files.filter((f) => /^design-html-round-\d+\.html$/.test(f))
+      const html = files.filter((f) => isDesignHtmlArtifact(f))
       kpis.push({ label: "HTML drafts", value: String(html.length) })
       break
     }
@@ -417,9 +430,12 @@ export function isNodeComplete(
     case "summarizeOutputArtifact":
       return hasFile(/^final\.md$/) || hasFile(/^latest-draft\.md$/)
     case "runDesignHtml":
-      return hasFile(/^design-html-round-\d+\.html$/)
+      return files.some((f) => f === designHtmlArtifactName(DESIGNER_ROLE) || LEGACY_DESIGN_HTML_ROUND_RE.test(f))
     case "interactiveEnhance":
-      return hasFile(/^design-html-round-\d+\.html$/)
+      return files.includes(designHtmlArtifactName(INTERACTIVE_ENHANCER_ROLE))
+        || files.some((f) => LEGACY_DESIGN_HTML_ROUND_RE.test(f))
+    case "readingExperienceEnhance":
+      return files.includes(designHtmlArtifactName(READING_EXPERIENCE_ENHANCER_ROLE))
     case "finalizeDesign":
       return hasFile(/^final\.html$/)
     default:

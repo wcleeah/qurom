@@ -394,7 +394,7 @@ export async function readDesignSummary(_runName: string, files: string[]): Prom
   hasFailure: boolean
 } | null> {
   const designHtmlFiles = files
-    .filter((f) => /^design-html-round-\d+\.html$/.test(f))
+    .filter((f) => /^design-html-.+\.html$/.test(f))
     .sort()
 
   const hasFinalHtml = files.includes("final.html")
@@ -405,7 +405,7 @@ export async function readDesignSummary(_runName: string, files: string[]): Prom
 
   const latest = designHtmlFiles[designHtmlFiles.length - 1]
   const roundMatch = latest?.match(/round-(\d+)/)
-  const round = roundMatch ? parseInt(roundMatch[1]) : 0
+  const round = roundMatch ? parseInt(roundMatch[1]) : Math.max(0, designHtmlFiles.length - 1)
   return {
     status: hasFailure ? "failed" : hasFinalHtml ? "approved" : "running",
     round,
@@ -490,7 +490,7 @@ export async function renderRun(name: string): Promise<Response> {
   <div class="structured-card">
     <div class="outcome-banner ${escapeHtml(designOutcomeClass)}">${designOutcomeLabel}</div>
     ${tableWrap(`<table class="summary-table">
-      <tr><td>HTML drafts</td><td>${countByPattern(files, /^design-html-round-\d+\.html$/)}</td></tr>
+      <tr><td>HTML drafts</td><td>${countByPattern(files, /^design-html-.+\.html$/)}</td></tr>
       ${design.hasFinalHtml ? `<tr><td>Final HTML</td><td>final.html ready</td></tr>` : ""}
       ${design.hasFailure ? `<tr><td>Error</td><td class="danger-text">design-failure.json</td></tr>` : ""}
     </table>`)}
@@ -536,7 +536,7 @@ export async function renderRun(name: string): Promise<Response> {
     }
 
     const latestDesignHtml = files
-      .filter((f) => /^design-html-round-\d+\.html$/.test(f))
+      .filter((f) => /^design-html-.+\.html$/.test(f))
       .sort()
       .pop()
     if (latestDesignHtml) {

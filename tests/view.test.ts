@@ -227,6 +227,11 @@ describe("view file browser classification", () => {
       subGroup: "HTML Drafts",
       label: "HTML draft round 0",
     })
+    expect(classifyFile("design-html-interactive-enhancer.html")).toMatchObject({
+      group: "Design",
+      subGroup: "HTML Drafts",
+      label: "HTML · interactive-enhancer",
+    })
   })
 })
 
@@ -279,7 +284,7 @@ describe("view components", () => {
   test("renders finalizeDesign in the node grid", () => {
     const html = renderNodeGrid(
       "example-run",
-      ["final.md", "design-html-round-0.html", "final.html"],
+      ["final.md", "design-html-html-designer.html", "final.html"],
       {
         phase: "complete",
         node: "finalizeDesign",
@@ -294,6 +299,7 @@ describe("view components", () => {
     )
 
     expect(html).toContain("Finalize design")
+    expect(html).toContain("Reading experience")
     expect(html).toContain("/runs/example-run/node/finalizeDesign")
     expect(html).not.toContain("browserQaEnhance")
   })
@@ -301,7 +307,7 @@ describe("view components", () => {
   test("does not surface stale browser QA nodes in the node grid", () => {
     const html = renderNodeGrid(
       "example-run",
-      ["final.md", "design-html-round-0.html", "final.html"],
+      ["final.md", "design-html-html-designer.html", "final.html"],
       {
         phase: "complete",
         node: "finalizeDesign",
@@ -437,19 +443,21 @@ describe("view components", () => {
   })
 
   test("node mini pipeline is one continuous graph strip", () => {
-    const html = renderNodeMiniPipeline("example-run", "runDesignHtml", ["design-html-round-0.html"])
+    const html = renderNodeMiniPipeline("example-run", "runDesignHtml", ["design-html-html-designer.html"])
     expect(html).toContain("/runs/example-run/node/discoverReader")
     expect(html).toContain("/runs/example-run/node/draftFullDraft")
     expect(html).toContain("/runs/example-run/node/runParallelAudits")
     expect(html).toContain("/runs/example-run/node/runDesignHtml")
     expect(html).toContain("/runs/example-run/node/interactiveEnhance")
+    expect(html).toContain("/runs/example-run/node/readingExperienceEnhance")
     expect(html).toContain("/runs/example-run/node/finalizeDesign")
+    expect(html).toContain(">Reading<")
   })
 })
 
 describe("html viewer renderer", () => {
   test("includes sticky navbar controls and notes form action", () => {
-    const html = renderHtmlViewerPage("example-run", "design-html-round-0.html", "", [])
+    const html = renderHtmlViewerPage("example-run", "design-html-html-designer.html", "", [])
 
     expect(html).toContain("app-navbar")
     expect(html).toContain("app-navbar-pill")

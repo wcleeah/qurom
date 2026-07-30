@@ -122,11 +122,12 @@ describe("node content view", () => {
   test("renderDesignHtmlScope embeds html preview", async () => {
     await setupRun()
     try {
-      await writeFile(join(runsRoot, runName, "design-html-round-0.html"), "<html><body><h1>Design</h1></body></html>")
+      await writeFile(join(runsRoot, runName, "design-html-html-designer.html"), "<html><body><h1>Design</h1></body></html>")
 
-      const html = await renderDesignHtmlScope(runName, ["design-html-round-0.html"], 0, null)
+      const html = await renderDesignHtmlScope(runName, ["design-html-html-designer.html"], "total", null)
 
-      expect(html).toContain("Round 0 design HTML")
+      expect(html).toContain("Design HTML")
+      expect(html).toContain("design-html-html-designer.html")
       expect(html).toContain("design-preview-frame")
       expect(html).toContain("Open in viewer")
     } finally {

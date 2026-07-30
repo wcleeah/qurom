@@ -4,7 +4,7 @@
  * but Qurom never passed run.wait(). Uses the downloaded cloud artifact (or re-downloads).
  *
  * Usage:
- *   bun run scripts/recover-stranded-design-run.ts [runDir] [round]
+ *   bun run scripts/recover-stranded-design-run.ts [runDir] [round] [htmlBasename]
  */
 
 import { copyFile, rename, unlink, writeFile } from "node:fs/promises"
@@ -23,7 +23,7 @@ async function readJson<T>(path: string): Promise<T> {
 async function main() {
   const runDir = process.argv[2] ?? DEFAULT_RUN_DIR
   const round = Number(process.argv[3] ?? "0")
-  const htmlBasename = `design-html-round-${round}.html`
+  const htmlBasename = process.argv[4] ?? "design-html-interactive-enhancer.html"
   const htmlPath = join(runDir, htmlBasename)
   const downloadPath = join(runDir, `cursor-download-${htmlBasename}`)
 

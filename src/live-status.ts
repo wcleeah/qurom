@@ -217,6 +217,7 @@ export function createLiveStatusWriter(
         const nodeMap: Record<string, string> = {
           drafting: "runDesignHtml",
           enhancing: "interactiveEnhance",
+          reading: "readingExperienceEnhance",
           finalizing: "finalizeDesign",
         }
         status.node = nodeMap[event.phase] ?? "runDesignHtml"

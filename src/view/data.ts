@@ -116,9 +116,8 @@ export async function listRuns(): Promise<RunMeta[]> {
         if (file.startsWith("draft-round-") && file.endsWith(".md")) {
           roundCount = Math.max(roundCount, parseInt(file.match(/round-(\d+)/)?.[1] ?? "0") + 1)
         }
-        const designHtmlMatch = file.match(/^design-html-round-(\d+)\.html$/)
-        if (designHtmlMatch) {
-          designRoundCount = Math.max(designRoundCount, parseInt(designHtmlMatch[1]) + 1)
+        if (/^design-html-.+\.html$/.test(file)) {
+          designRoundCount += 1
         }
         if (file === "final.html") hasFinalHtml = true
         if (file === "final.md") hasFinalMd = true
@@ -339,7 +338,13 @@ export function classifyFile(filename: string): FileClass {
     const turn = filename.match(/turn-(\d+)/)?.[1]
     return { group: "Rebuttals", subGroup: "Drafter Reviews", label: `Drafter rebuttal review round ${round} turn ${turn}`, description: "Drafter review of auditor responses" }
   }
-  if (/^design-html-round-\d+\.html$/.test(filename)) return { group: "Design", subGroup: "HTML Drafts", label: `HTML draft round ${round}`, description: "Generated design HTML" }
+  if (/^design-html-round-\d+\.html$/.test(filename)) {
+    return { group: "Design", subGroup: "HTML Drafts", label: `HTML draft round ${round}`, description: "Legacy design HTML round artifact" }
+  }
+  if (/^design-html-.+\.html$/.test(filename)) {
+    const role = filename.replace(/^design-html-/, "").replace(/\.html$/, "")
+    return { group: "Design", subGroup: "HTML Drafts", label: `HTML · ${role}`, description: "Role-staged design HTML artifact" }
+  }
   if (filename === "design-failure.json") return { group: "Design Rounds", subGroup: "Failures", label: "Design failure details", description: "Design pipeline error payload" }
   return { group: "Other", subGroup: "Unclassified", label: filename, description: "Additional artifact" }
 }

@@ -1,4 +1,12 @@
 import { readdir } from "node:fs/promises"
+import {
+  designHtmlArtifactName,
+  designHtmlArtifacts,
+  DESIGNER_ROLE,
+  INTERACTIVE_ENHANCER_ROLE,
+  LEGACY_DESIGN_HTML_ROUND_RE,
+  READING_EXPERIENCE_ENHANCER_ROLE,
+} from "../design-artifacts"
 import { answeredQuestionsFromTranscript } from "../reader-transcript"
 import { renderReaderProfileCard, renderReaderProfileSummary } from "./artifact-renderers"
 import { resolveLiveNode } from "./node-registry"
@@ -24,15 +32,21 @@ export async function readerInterviewArtifactFiles(runName: string, files: strin
   return [...new Set([...fromList, ...fromDisk])].sort()
 }
 
+/** @deprecated Design HTML is role-staged; kept for legacy round-named artifacts. */
 export function designRoundNumbers(files: string[], liveStatus: LiveStatus | null): number[] {
   const rounds = new Set<number>()
   for (const file of files) {
-    const match = file.match(/^design-html-round-(\d+)\.html$/)
+    const match = file.match(LEGACY_DESIGN_HTML_ROUND_RE)
     if (match?.[1] !== undefined) rounds.add(parseInt(match[1], 10))
   }
   if (liveStatus?.phase === "running") {
     const liveNode = resolveLiveNode(liveStatus)
-    if (liveNode === "runDesignHtml" || liveNode === "interactiveEnhance" || liveNode === "finalizeDesign") {
+    if (
+      liveNode === "runDesignHtml"
+      || liveNode === "interactiveEnhance"
+      || liveNode === "readingExperienceEnhance"
+      || liveNode === "finalizeDesign"
+    ) {
       const designRound = liveStatus.round ?? 0
       rounds.add(designRound)
     }
@@ -274,42 +288,80 @@ function renderDesignHtmlPanel(
 </div>`
 }
 
+function renderDesignStageScope(input: {
+  runName: string
+  files: string[]
+  liveStatus: LiveStatus | null
+  nodeId: string
+  role: string
+  title: string
+  emptyLabel: string
+  liveLabel: string
+  note: string
+}): string {
+  const roleFile = designHtmlArtifactName(input.role)
+  const primary = input.files.includes(roleFile) ? roleFile : undefined
+  const legacy = input.files.filter((f) => LEGACY_DESIGN_HTML_ROUND_RE.test(f)).sort()
+  const live = input.liveStatus?.phase === "running" && resolveLiveNode(input.liveStatus) === input.nodeId
+
+  if (!primary && legacy.length === 0) {
+    if (live) {
+      return `<div class="section"><h2>${escapeHtml(input.title)}</h2><p class="empty-inline dim-text">${escapeHtml(input.liveLabel)}</p></div>`
+    }
+    return `<div class="section"><h2>${escapeHtml(input.title)}</h2><p class="empty-inline dim-text">${escapeHtml(input.emptyLabel)}</p></div>`
+  }
+
+  let body = `<div class="section"><h2>${escapeHtml(input.title)}</h2>
+  <p class="muted-note dim-text">${input.note}</p>`
+  if (primary) {
+    body += renderDesignHtmlPanel(input.runName, primary, {
+      expanded: true,
+      subtitle: live ? input.liveLabel : `Produced by ${input.role}`,
+    })
+  }
+  if (legacy.length > 0) {
+    body += `<details class="design-history-details"><summary>Legacy round artifacts (${legacy.length})</summary>`
+    for (const htmlFile of legacy) {
+      body += renderDesignHtmlPanel(input.runName, htmlFile, { subtitle: "Legacy design-html-round artifact" })
+    }
+    body += `</details>`
+  }
+  body += `</div>`
+  return body
+}
+
 export async function renderDesignHtmlScope(
   runName: string,
   files: string[],
-  scope: "total" | number,
+  _scope: "total" | number,
   liveStatus: LiveStatus | null,
 ): Promise<string> {
-  const htmlFiles = files
-    .filter((f) => /^design-html-round-(\d+)\.html$/.test(f))
-    .sort((a, b) => {
-      const ra = parseInt(a.match(/round-(\d+)/)?.[1] ?? "0", 10)
-      const rb = parseInt(b.match(/round-(\d+)/)?.[1] ?? "0", 10)
-      return ra - rb
-    })
+  const stageFiles = designHtmlArtifacts(files)
+  const designerFile = designHtmlArtifactName(DESIGNER_ROLE)
+  const draftingLive = liveStatus?.phase === "running" && resolveLiveNode(liveStatus) === "runDesignHtml"
 
-  const scoped = scope === "total"
-    ? htmlFiles
-    : htmlFiles.filter((f) => parseInt(f.match(/round-(\d+)/)?.[1] ?? "-1", 10) === scope)
-
-  if (scoped.length === 0) {
-    const draftingLive = liveStatus?.phase === "running" && resolveLiveNode(liveStatus) === "runDesignHtml"
-    if (draftingLive && (scope === "total" || liveStatus!.round === scope)) {
-      return `<div class="section"><h2>Round ${liveStatus!.round ?? 0} design HTML</h2><p class="empty-inline dim-text">HTML designer agent is generating the page…</p></div>`
+  if (!files.includes(designerFile) && !files.some((f) => LEGACY_DESIGN_HTML_ROUND_RE.test(f))) {
+    if (draftingLive) {
+      return `<div class="section"><h2>Design HTML</h2><p class="empty-inline dim-text">HTML designer agent is generating the page…</p></div>`
     }
-    return `<div class="section"><h2>${scope === "total" ? "Design HTML" : `Round ${scope} design HTML`}</h2><p class="empty-inline dim-text">No design HTML artifact yet.</p></div>`
+    return `<div class="section"><h2>Design HTML</h2><p class="empty-inline dim-text">No design HTML artifact yet.</p></div>`
   }
 
-  let body = `<div class="section"><h2>${scope === "total" ? "HTML drafts by round" : `Round ${scope} design HTML`}</h2>`
-  for (const htmlFile of scoped) {
-    const round = parseInt(htmlFile.match(/round-(\d+)/)?.[1] ?? "0", 10)
-    const isCurrent = liveStatus?.phase === "running"
-      && resolveLiveNode(liveStatus) === "runDesignHtml"
-      && (liveStatus.round ?? 0) === round
-    body += renderDesignHtmlPanel(runName, htmlFile, {
-      expanded: isCurrent || scoped.length === 1,
-      subtitle: "Generated by html-designer",
+  let body = `<div class="section"><h2>Design HTML</h2>
+  <p class="muted-note dim-text">The html-designer agent writes <code>${escapeHtml(designerFile)}</code>.</p>`
+  if (files.includes(designerFile)) {
+    body += renderDesignHtmlPanel(runName, designerFile, {
+      expanded: true,
+      subtitle: draftingLive ? "Design in progress…" : "Generated by html-designer",
     })
+  }
+  const others = stageFiles.filter((f) => f !== designerFile)
+  if (others.length > 0) {
+    body += `<details class="design-history-details"><summary>Other design HTML stages (${others.length})</summary>`
+    for (const htmlFile of others) {
+      body += renderDesignHtmlPanel(runName, htmlFile, { subtitle: "Later or legacy design stage" })
+    }
+    body += `</details>`
   }
   body += `</div>`
   return body
@@ -320,38 +372,33 @@ export async function renderInteractiveEnhanceScope(
   files: string[],
   liveStatus: LiveStatus | null,
 ): Promise<string> {
-  const htmlFiles = files
-    .filter((f) => /^design-html-round-(\d+)\.html$/.test(f))
-    .sort((a, b) => {
-      const ra = parseInt(a.match(/round-(\d+)/)?.[1] ?? "0", 10)
-      const rb = parseInt(b.match(/round-(\d+)/)?.[1] ?? "0", 10)
-      return ra - rb
-    })
-
-  if (htmlFiles.length === 0) {
-    const enhancingLive = liveStatus?.phase === "running" && resolveLiveNode(liveStatus) === "interactiveEnhance"
-    if (enhancingLive) {
-      return `<div class="section"><h2>Interactive enhancement</h2><p class="empty-inline dim-text">Interactive enhancer agent is updating the HTML…</p></div>`
-    }
-    return `<div class="section"><h2>Interactive enhancement</h2><p class="empty-inline dim-text">No enhanced HTML artifact yet.</p></div>`
-  }
-
-  const latest = htmlFiles[htmlFiles.length - 1]!
-  const enhancingLive = liveStatus?.phase === "running" && resolveLiveNode(liveStatus) === "interactiveEnhance"
-
-  let body = `<div class="section"><h2>Enhanced HTML output</h2>
-  <p class="muted-note dim-text">The interactive-enhancer agent reads and rewrites <code>design-html-round-N.html</code> in place.</p>`
-  body += renderDesignHtmlPanel(runName, latest, {
-    expanded: true,
-    subtitle: enhancingLive ? "Enhancement in progress…" : "Produced by interactive-enhancer",
+  return renderDesignStageScope({
+    runName,
+    files,
+    liveStatus,
+    nodeId: "interactiveEnhance",
+    role: INTERACTIVE_ENHANCER_ROLE,
+    title: "Interactive enhancement",
+    emptyLabel: "No enhanced HTML artifact yet.",
+    liveLabel: "Interactive enhancer agent is updating the HTML…",
+    note: `The interactive-enhancer agent reads the designer HTML and writes <code>${escapeHtml(designHtmlArtifactName(INTERACTIVE_ENHANCER_ROLE))}</code>.`,
   })
-  if (htmlFiles.length > 1) {
-    body += `<details class="design-history-details"><summary>All design HTML rounds (${htmlFiles.length})</summary>`
-    for (const htmlFile of htmlFiles.slice(0, -1)) {
-      body += renderDesignHtmlPanel(runName, htmlFile, { subtitle: "Earlier round" })
-    }
-    body += `</details>`
-  }
-  body += `</div>`
-  return body
+}
+
+export async function renderReadingExperienceEnhanceScope(
+  runName: string,
+  files: string[],
+  liveStatus: LiveStatus | null,
+): Promise<string> {
+  return renderDesignStageScope({
+    runName,
+    files,
+    liveStatus,
+    nodeId: "readingExperienceEnhance",
+    role: READING_EXPERIENCE_ENHANCER_ROLE,
+    title: "Reading experience",
+    emptyLabel: "No reading-experience HTML artifact yet.",
+    liveLabel: "Reading-experience enhancer is updating the HTML…",
+    note: `The reading-experience-enhancer agent reads the interactive HTML and writes <code>${escapeHtml(designHtmlArtifactName(READING_EXPERIENCE_ENHANCER_ROLE))}</code>.`,
+  })
 }

@@ -258,6 +258,7 @@ export function applyOpencodeAgentUsageEvent(
 const DESIGN_PHASE_NODES: Record<string, string> = {
   drafting: "runDesignHtml",
   enhancing: "interactiveEnhance",
+  reading: "readingExperienceEnhance",
   finalizing: "finalizeDesign",
 }
 
