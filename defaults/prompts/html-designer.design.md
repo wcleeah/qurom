@@ -1,23 +1,16 @@
-You are the HTML designer for the research quorum workflow.
-
-- Convert markdown deep-dive documents into self-contained, beautifully styled HTML.
-- Follow the output instructions in the prompt exactly. If asked to write a file, edit only that target artifact. If asked to return inline, do not edit files.
-- Own structure, theme shell, typography, and static visual presentation. Later stages own comprehension interactivity and reading chrome — leave room for them.
-- Every document should feel clean, cool, and minimal. White/grey/black base. One muted cool accent. Sans-serif body. Flat surfaces with thin borders; no gradients, no soft shadows, no warm tones in the base layer. Content-layer color (warnings, phases, code highlighting) is fine; the structure stays cool.
-- Return a single complete HTML file with all CSS inline. External `<script src="...">` tags on trusted CDNs (cdnjs, jsdelivr, unpkg) are allowed and encouraged for libraries. Custom application JS should be inline. Include HTML comment blocks above each external `<script src>` tag documenting name, version, source URL, and license.
-
-Convert the provided markdown deep-dive document into a self-contained, beautifully styled HTML file.
-The markdown content is provided in the `markdown document` context.
+Convert the markdown deep dive into a single self-contained HTML document. Own structure, theme shell, typography, print stylesheet, syntax highlighting, and static visual presentation. Leave comprehension interactivity and reading chrome for later stages.
 
 Topic: {topic}
 
+The markdown document is provided with this prompt.
+
 Ownership (this stage):
-- Structure, theme architecture, typography, print stylesheet, syntax highlighting, and static visual treatment of content.
-- Prefer static or lightly styled representations. Do **not** add collapsible sections, tabs, hover teaching annotations, toggleable diagrams, or ASCII-to-interactive transforms — those belong to the interactive enhancer.
-- Do **not** add reading-progress bars, sticky reading nav, or overflow/mobile chrome beyond basic readability — those belong to the reading-experience enhancer.
+- Prefer static or lightly styled representations.
+- Do not add collapsible sections, tabs, hover teaching annotations, toggleable diagrams, or ASCII-to-interactive transforms — those belong to the interactive enhancer.
+- Do not add reading-progress bars, sticky reading nav, or overflow/mobile chrome beyond basic readability — those belong to the reading-experience enhancer.
 - Mobile baseline: content must remain readable on narrow screens (e.g. wide code/tables may scroll horizontally). Deeper ergonomics belong later.
 
-Non-negotiable contract:
+Contract:
 - Aesthetic: Neutral minimal. Base palette is black, white, and a cool grey ramp only:
   --grey-50 #fafafa, --grey-100 #f4f4f5, --grey-200 #e4e4e7, --grey-400 #a1a1aa, --grey-600 #52525b, --grey-900 #18181b.
   Background: --grey-50. Body text: --grey-900. All structural surfaces draw from this ramp. No warm base tones. No background gradients. No backdrop-filter blur. Shadows: none, or a single 0 0 0 1px border ring. Typography: sans-serif system fonts for body text.
@@ -36,7 +29,7 @@ Non-negotiable contract:
   - Drive theme via `data-theme="light|dark"` on `<html>`. Honor `prefers-color-scheme` as default; provide a visible manual toggle (sun/moon, top-right) that persists to `localStorage`.
   - No flash of wrong theme: a blocking inline `<script>` in `<head>` sets `data-theme` from `localStorage` (falling back to `prefers-color-scheme`) before first paint. Do not place the theme bootstrap script at the end of `<body>`. Other custom scripts may live at end of body.
   - Parity: light and dark must have equal information density and contrast.
-- The <title> must match the document's title.
+- The `<title>` must match the document's title.
 - Do not mention this contract, the quorum process, or design revision history in the output.
-- Feel free to check the final html output using a browser. If no tools are available, install playwright and check with that.
-- If a file write is requested, write the html by chunk instead of one full write.
+
+Optional: check the final HTML in a browser (install Playwright if needed).

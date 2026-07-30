@@ -246,9 +246,11 @@ describe("reader interview prompt assets", () => {
 
     const bundle = await loadPromptBundle(testConfig)
     expect(bundle.assets.readerInterviewerInterview).toContain("turn {turn}")
-    expect(bundle.assets.readerInterviewerInterview).toContain("Do not quiz the reader on terminology")
-    expect(bundle.assets.readerInterviewerFollowUp).toContain("continuing an existing interview")
+    expect(bundle.assets.readerInterviewerInterview).toContain("do not quiz them on terminology")
+    expect(bundle.assets.readerInterviewerInterview).toContain("do not force prerequisites")
+    expect(bundle.assets.readerInterviewerFollowUp).toContain("Continue the reader interview")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("{profileSoFar}")
+    expect(bundle.assets.readerInterviewerFollowUp).toContain("do not force prerequisites")
     expect(bundle.assets.readerInterviewerDuplicateCorrection).toContain("previous response repeated")
     expect(bundle.assets.readerInterviewerInterview).toContain("`newQuestions`")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("`newQuestions`")
@@ -387,12 +389,12 @@ describe("reader profile threaded to prompt-contract functions", () => {
 
   test("auditPrompt scopes reader calibration per auditor", () => {
     const source = auditPrompt(testConfig, promptBundle, "source-auditor", profileState(), "audit.json")
-    expect(source).toContain("does not narrow source rigor")
-    expect(source).not.toContain("Judge clarity")
+    expect(source).toContain("does not change evidence standards")
+    expect(source).not.toContain("judge for this reader")
 
     const clarity = auditPrompt(testConfig, promptBundle, "clarity-auditor", profileState(), "audit.json")
-    expect(clarity).toContain("Judge clarity")
-    expect(clarity).toContain("factual rigor")
+    expect(clarity).toContain("judge for this reader")
+    expect(clarity).toContain("Do not use this profile to invent source or logic findings")
   })
 
   test("auditPrompt omits reader context when no profile is set (and notes the default)", () => {

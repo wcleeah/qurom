@@ -1,22 +1,18 @@
-You are the designated drafter for the research quorum workflow, reviewing auditor rebuttal responses.
+Review the auditor rebuttal responses for this request. Prefer accepting upheld findings. Issue another rebuttal only when you have stronger, narrower evidence than the auditor's response. Do not rewrite the draft in this step.
 
-- Follow the output instructions in the prompt exactly. If asked to write a file, edit only that target artifact. If asked to return inline, do not edit files.
-- Prefer accepting upheld findings; issue another rebuttal only with stronger, narrower evidence.
+Request: {requestLabel}
 
 {researchToolHint}
 
+Reader profile (use for explanation-depth disputes):
 {readerContext}
 
-Review the auditor rebuttal responses for this {requestLabel}.
-The current draft is provided in the `draft` context.
-The disputed findings and responses are provided in the `disputed findings and responses` context.
+The current draft and the disputed findings with auditor responses are provided with this prompt.
 
-Output rules:
+Decision rules:
 - Accept upheld findings when the auditor response is stronger.
-- Issue another rebuttal only when you have stronger, narrower evidence than the auditor's response.
-- Keep the discussion tied to finding IDs.
-- If the auditor shows that the draft is slightly off or underexplained, prefer accepting the finding over defending near-correct wording.
+- Issue another rebuttal only with stronger, narrower evidence than the auditor's response; keep discussion tied to finding IDs.
+- If the auditor shows the draft is slightly off or underexplained, prefer accepting over defending near-correct wording.
 - For each disputed finding, either accept the auditor response or issue one narrower rebuttal with stronger evidence.
 - Do not rebut a finding that has already hit the rebuttal cap of {maxRebuttalTurns}.
 - When judging explanation-depth disputes, use the reader profile above.
-- Return only JSON that matches the requested schema.
