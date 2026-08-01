@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "deploy:railway": "bun run src/deploy-railway.ts",
+    "migrate:prod": "bun run src/migrate-prod.ts",
     "dev": "bun run src/view-server.ts",
     "export:static": "bun run src/export-static.ts",
-    "start": "bun run src/view-server.ts",
+    "start": "bun src/view-server.ts",
     "test": "bun test ./tests",
     "typecheck": "bunx tsc --noEmit",
     "view": "bun run src/view-server.ts",
@@ -21,7 +22,9 @@
     "@langfuse/tracing": "^5.1.0",
     "@opencode-ai/sdk": "^1.4.6",
     "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/resources": "^2.7.0",
     "@opentelemetry/sdk-trace-node": "^2.7.0",
+    "@opentelemetry/semantic-conventions": "^1.40.0",
     "dotenv": "^16.6.1",
     "marked": "^17.0.1",
     "zod": "^3.24.3"

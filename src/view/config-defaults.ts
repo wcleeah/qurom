@@ -18,7 +18,9 @@ import {
   updateQuorumConfig,
   updateRoleBinding,
 } from "../config-store"
-import { promptAssetDefs, type PromptAssetKey } from "../prompt-asset-defs"
+import { openDefaultsPullRequest } from "../github-defaults-pr"
+import { promptAssetDefs, promptAssetFiles, type PromptAssetKey } from "../prompt-asset-defs"
+import { defaultsConfigDbPath } from "../data-paths"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
 import { DEFAULT_PROVIDER } from "../role-registry"
 import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
@@ -312,6 +314,31 @@ export async function renderConfigDefaultsBindings(): Promise<Response> {
   })
 }
 
+async function maybeOpenDefaultsPr(
+  workspaceDir: string,
+  changedRelativePaths: string[],
+  summary: string,
+): Promise<string | undefined> {
+  const result = await openDefaultsPullRequest({ workspaceDir, changedRelativePaths, summary })
+  if (result.status === "created") {
+    console.log(`Defaults PR opened: ${result.prUrl}`)
+    return result.prUrl
+  }
+  if (result.status === "error") {
+    console.error(`Defaults PR failed: ${result.message}`)
+  } else {
+    console.log(`Defaults PR skipped: ${result.reason}`)
+  }
+  return undefined
+}
+
+function redirect(location: string, prUrl?: string): Response {
+  const url = prUrl
+    ? `${location}${location.includes("?") ? "&" : "?"}defaultsPr=${encodeURIComponent(prUrl)}`
+    : location
+  return new Response(null, { status: 303, headers: { Location: url } })
+}
+
 export async function handleConfigDefaultsPost(req: Request, path: string): Promise<Response | undefined> {
   const config = await loadRuntimeConfig()
   const workspaceDir = config.env.QUORUM_WORKSPACE_DIRECTORY
@@ -321,7 +348,8 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
     try {
       const parsed = normalizeQuorumConfig(parseQuorumConfigForm(params))
       await updateDefaultsQuorumConfig(workspaceDir, JSON.stringify(parsed, null, 2))
-      return new Response(null, { status: 303, headers: { Location: "/config/defaults" } })
+      const prUrl = await maybeOpenDefaultsPr(workspaceDir, ["defaults/quorum.config.json"], "update quorum.config.json")
+      return redirect("/config/defaults", prUrl)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       let draftConfig
@@ -401,13 +429,20 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
   const promptMatch = path.match(/^\/config\/defaults\/prompts\/(.+)$/)
   if (promptMatch) {
     const params = new URLSearchParams(await req.text())
-    await updateDefaultsPrompt(workspaceDir, decodeURIComponent(promptMatch[1]), params.get("content") ?? "")
-    return new Response(null, { status: 303, headers: { Location: "/config/defaults/prompts" } })
+    const key = decodeURIComponent(promptMatch[1])
+    await updateDefaultsPrompt(workspaceDir, key, params.get("content") ?? "")
+    const filename = promptAssetFiles[key as PromptAssetKey]
+    const rel = filename ? `defaults/prompts/${filename}` : undefined
+    const prUrl = rel
+      ? await maybeOpenDefaultsPr(workspaceDir, [rel], `update prompt ${key}`)
+      : undefined
+    return redirect("/config/defaults/prompts", prUrl)
   }
 
   const bindingMatch = path.match(/^\/config\/defaults\/bindings\/(.+)$/)
   if (bindingMatch) {
     const params = new URLSearchParams(await req.text())
+    const role = decodeURIComponent(bindingMatch[1])
     const provider = params.get("provider")?.trim() || undefined
     const options: Record<string, unknown> = {}
     if (provider === "cursor") {
@@ -416,22 +451,37 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
         .map(([key, value]) => ({ id: key.slice("modelParam:".length), value: value.trim() }))
       if (modelParams.length > 0) options.modelParams = modelParams
     }
-    await updateDefaultsRoleBinding(workspaceDir, decodeURIComponent(bindingMatch[1]), {
+    await updateDefaultsRoleBinding(workspaceDir, role, {
       provider,
       providerAgent: params.get("providerAgent")?.trim() || undefined,
       model: params.get("model")?.trim() || undefined,
       variant: params.get("variant")?.trim() || undefined,
       options,
     })
-    return new Response(null, { status: 303, headers: { Location: "/config/defaults/bindings" } })
+    const dbRel = relativeDefaultsDb(workspaceDir)
+    const prUrl = await maybeOpenDefaultsPr(workspaceDir, [dbRel], `update defaults binding ${role}`)
+    return redirect("/config/defaults/bindings", prUrl)
   }
 
   const opencodeMatch = path.match(/^\/config\/defaults\/opencode\/(.+)$/)
   if (opencodeMatch) {
     const params = new URLSearchParams(await req.text())
-    await updateDefaultsOpencodeAgent(workspaceDir, decodeURIComponent(opencodeMatch[1]), params.get("content") ?? "")
-    return new Response(null, { status: 303, headers: { Location: "/config/defaults/opencode" } })
+    const role = decodeURIComponent(opencodeMatch[1])
+    await updateDefaultsOpencodeAgent(workspaceDir, role, params.get("content") ?? "")
+    const prUrl = await maybeOpenDefaultsPr(
+      workspaceDir,
+      [`defaults/opencode/agents/${role}.md`],
+      `update OpenCode agent ${role}`,
+    )
+    return redirect("/config/defaults/opencode", prUrl)
   }
 
   return undefined
+}
+
+function relativeDefaultsDb(workspaceDir: string): string {
+  const abs = defaultsConfigDbPath(workspaceDir)
+  const prefix = workspaceDir.replace(/\/$/, "") + "/"
+  if (abs.startsWith(prefix)) return abs.slice(prefix.length)
+  return "defaults/quorum-config.sqlite"
 }

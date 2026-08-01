@@ -13,7 +13,7 @@ import {
     startObservation,
 } from "@langfuse/tracing";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { SEMRESATTRS_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
+import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 
 import type { RuntimeConfig } from "./config";
@@ -222,7 +222,7 @@ export async function createTelemetry(
 
     const provider = new NodeTracerProvider({
         resource: resourceFromAttributes({
-            [SEMRESATTRS_SERVICE_NAME]: "research-qurom",
+            [ATTR_SERVICE_NAME]: "research-qurom",
         }),
         spanProcessors: [
             new LangfuseSpanProcessor({

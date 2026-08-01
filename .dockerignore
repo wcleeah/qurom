@@ -1,0 +1,16 @@
+node_modules
+.opencode
+.git
+.env
+.env.*
+dist
+runs
+checkpoints.sqlite
+checkpoints.sqlite-*
+quorum-config.sqlite
+quorum-config.sqlite-*
+**/.DS_Store
+docs
+.cursor
+tests
+**/*.test.ts

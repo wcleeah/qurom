@@ -196,6 +196,26 @@ bun run deploy:railway
 This regenerates `dist/static` and uploads the complete directory with
 Railway's gitignore filtering disabled.
 
+### Live app on Railway
+
+The live dashboard deploys from the repo `Dockerfile` (Bun + OpenCode). Persist
+data with a volume mounted at `/data` (`QUORUM_DATA_DIR=/data`).
+
+Push local runtime config and missing runs to the linked Railway volume:
+
+```bash
+bun run migrate:prod
+# bun run migrate:prod --dry-run
+# bun run migrate:prod --skip-runs
+# bun run migrate:prod --skip-config
+```
+
+Do not run this casually against production without reviewing what will upload.
+
+When `QUORUM_DEFAULTS_GIT_PR=1` and `GITHUB_TOKEN` are set, saving shipped
+defaults in the admin UI opens a GitHub PR against `QUORUM_GITHUB_PR_BASE`
+(default `main`) for the changed files under `defaults/`.
+
 ## Dashboard Flow
 
 ### Index (`/`)

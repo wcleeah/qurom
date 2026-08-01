@@ -10,7 +10,7 @@ runs/
 /quorum-config.sqlite
 /quorum-config.sqlite-shm
 /quorum-config.sqlite-wal
-defaults/quorum-config.sqlite
+# Ship defaults/quorum-config.sqlite in git (role bindings). Ignore WAL sidecars only.
 defaults/quorum-config.sqlite-shm
 defaults/quorum-config.sqlite-wal
 .DS_Store
