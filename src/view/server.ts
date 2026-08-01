@@ -59,8 +59,8 @@ export function startViewServer(): void {
 
       if (path === "/") {
         try {
-          // Legacy starred filter bookmarks land on the unread (default) view.
-          if (url.searchParams.get("starred") === "1") {
+          // Legacy starred / active filter bookmarks land on the unread (default) view.
+          if (url.searchParams.get("starred") === "1" || url.searchParams.get("active") === "1") {
             const dest = new URL("/", url)
             dest.search = ""
             return Response.redirect(dest, 302)

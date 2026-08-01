@@ -5,10 +5,11 @@ import { readCursorUsageImport, CURSOR_USAGE_IMPORT_FILENAME, type CursorUsageIm
 import { reconcileAwaitingReaderReplyWithDisk, readerInterviewStateFromRunDir } from "../reader-transcript"
 import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
 import { isRunManagedActive } from "../run-manager"
-import { listReadRunNames } from "./read-store"
+import { listReadRunNames, listRunAccessTimes } from "./read-store"
 import { isSqliteFile } from "./utils"
 import type { FileClass, LiveStatus, NodeHistoryEntry, RequestJson, RunMeta, RunStats, RunStatus } from "./types"
 import type { ReaderTranscriptEntry } from "../reader-transcript"
+import { resolveRunTelemetry, runElapsedMs } from "./telemetry-view"
 
 function sanitizeLiveStatus(status: LiveStatus): LiveStatus {
   if (status.phase === "complete" || status.phase === "error") {
@@ -180,38 +181,72 @@ export async function listRuns(): Promise<RunMeta[]> {
   }
 
   const read = await listReadRunNames()
+  const accessTimes = await listRunAccessTimes()
   for (const meta of metas) {
     meta.unread = !read.has(meta.name)
+    meta.accessedAt = accessTimes.get(meta.name)
   }
 
+  await Promise.all(metas.map((meta) => enrichRunIndexFields(meta)))
+
   metas.sort((a, b) => {
-    if (a.unread !== b.unread) return a.unread ? -1 : 1
+    const aAccess = a.accessedAt ?? 0
+    const bAccess = b.accessedAt ?? 0
+    if (aAccess !== bAccess) return bAccess - aAccess
     return b.mtime - a.mtime
   })
   return metas
 }
 
+async function enrichRunIndexFields(meta: RunMeta): Promise<void> {
+  const [liveStatus, sessionTelemetry] = await Promise.all([
+    readLiveStatus(meta.name),
+    readRunSessionTelemetry(meta.name),
+  ])
+
+  let nodeHistory: NodeHistoryEntry[] = []
+  if (liveStatus?.nodeHistory?.length) {
+    nodeHistory = liveStatus.nodeHistory
+  } else {
+    try {
+      nodeHistory = await Bun.file(safeFilePath(meta.name, "node-history.json")).json() as NodeHistoryEntry[]
+    } catch {
+      nodeHistory = []
+    }
+  }
+
+  const elapsedMs = runElapsedMs(liveStatus, nodeHistory)
+  if (elapsedMs !== undefined) meta.elapsedMs = elapsedMs
+
+  const { usage, costAvailable, costEstimated } = resolveRunTelemetry(sessionTelemetry)
+  if (costAvailable) {
+    meta.costAvailable = true
+    meta.costUsd = usage.costUsd ?? 0
+    meta.costEstimated = costEstimated
+  }
+}
+
 export function filterRunsForIndex(
   runs: RunMeta[],
   searchParams: URLSearchParams,
-): { runs: RunMeta[]; showUnreadOnly: boolean; showActive: boolean; showAll: boolean } {
+): { runs: RunMeta[]; showUnreadOnly: boolean; showReadOnly: boolean; showAll: boolean } {
   const showAll = searchParams.get("all") === "1"
-  const showActive = searchParams.get("active") === "1"
+  const showReadOnly = searchParams.get("read") === "1"
   if (showAll) {
-    return { runs, showUnreadOnly: false, showActive: false, showAll }
+    return { runs, showUnreadOnly: false, showReadOnly: false, showAll }
   }
-  if (showActive) {
+  if (showReadOnly) {
     return {
-      runs: runs.filter((run) => run.status !== "failed" || run.unread),
+      runs: runs.filter((run) => !run.unread),
       showUnreadOnly: false,
-      showActive: true,
+      showReadOnly: true,
       showAll: false,
     }
   }
   return {
     runs: runs.filter((run) => run.unread),
     showUnreadOnly: true,
-    showActive: false,
+    showReadOnly: false,
     showAll: false,
   }
 }
@@ -219,9 +254,9 @@ export function filterRunsForIndex(
 export function computeStats(runs: RunMeta[]): RunStats {
   return {
     total: runs.length,
-    approved: runs.filter((r) => r.status === "approved").length,
+    read: runs.filter((r) => !r.unread).length,
+    unread: runs.filter((r) => r.unread).length,
     failed: runs.filter((r) => r.status === "failed").length,
-    running: runs.filter((r) => r.status === "running").length,
   }
 }
 

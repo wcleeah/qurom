@@ -207,9 +207,9 @@ a:hover { text-decoration: underline; }
   margin-top: 0.15rem;
 }
 .stat-total  .stat-value { color: var(--accent); }
-.stat-approved .stat-value { color: var(--green); }
+.stat-read .stat-value { color: var(--green); }
 .stat-failed  .stat-value { color: var(--red); }
-.stat-running .stat-value { color: var(--orange); }
+.stat-unread .stat-value { color: var(--orange); }
 
 /* ── Run cards (index) ── */
 .run-card {

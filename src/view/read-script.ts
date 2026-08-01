@@ -4,9 +4,11 @@ export const READ_SCRIPT = /* html */ `
   function parseUnread(value) {
     return value === "true" || value === true
   }
-  function isUnreadFilter() {
+  function currentFilter() {
     const params = new URLSearchParams(window.location.search)
-    return params.get("active") !== "1" && params.get("all") !== "1"
+    if (params.get("all") === "1") return "all"
+    if (params.get("read") === "1") return "read"
+    return "unread"
   }
   function renderReadButton(btn, unread) {
     btn.dataset.unread = unread ? "true" : "false"
@@ -19,6 +21,15 @@ export const READ_SCRIPT = /* html */ `
     return Array.from(document.querySelectorAll("[data-read-toggle]")).find(
       (el) => el instanceof HTMLButtonElement && el.dataset.runName === runName,
     )
+  }
+  function emptyStateHtml(filter) {
+    if (filter === "unread") {
+      return '<div class="empty-state">No unread runs. <a href="/?read=1">Show read runs</a></div>'
+    }
+    if (filter === "read") {
+      return '<div class="empty-state">No read runs. <a href="/">Show unread runs</a></div>'
+    }
+    return ""
   }
   document.addEventListener("click", async (event) => {
     const target = event.target
@@ -43,14 +54,19 @@ export const READ_SCRIPT = /* html */ `
       const targetBtn = liveBtn instanceof HTMLButtonElement ? liveBtn : btn
       renderReadButton(targetBtn, !!data.unread)
       targetBtn.disabled = false
+      const filter = currentFilter()
       const card = targetBtn.closest(".run-card")
-      if (card && isUnreadFilter() && !data.unread) {
+      const shouldRemove =
+        card && (
+          (filter === "unread" && !data.unread) ||
+          (filter === "read" && data.unread)
+        )
+      if (shouldRemove) {
         card.remove()
         if (!document.querySelector(".run-card")) {
           const list = document.getElementById("run-card-list")
-          if (list) {
-            list.innerHTML = '<div class="empty-state">No unread runs. <a href="/?active=1">Show active runs</a></div>'
-          }
+          const html = emptyStateHtml(filter)
+          if (list && html) list.innerHTML = html
         }
       }
     } catch {

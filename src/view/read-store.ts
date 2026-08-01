@@ -53,6 +53,12 @@ CREATE TABLE IF NOT EXISTS read_runs (
   read_at TEXT NOT NULL
 );
   `)
+  db.run(`
+CREATE TABLE IF NOT EXISTS run_access (
+  run_name TEXT PRIMARY KEY,
+  accessed_at TEXT NOT NULL
+);
+  `)
   await migrateStarredToRead(db)
   return db
 }
@@ -101,5 +107,30 @@ export async function setRunRead(runName: string, read: boolean): Promise<void> 
       return
     }
     db.query("DELETE FROM read_runs WHERE run_name = ?").run(runName)
+  })
+}
+
+/** Last time each run detail page was opened (ms epoch). */
+export async function listRunAccessTimes(): Promise<Map<string, number>> {
+  return withDb((db) => {
+    const rows = db.query<{ run_name: string; accessed_at: string }, []>(
+      "SELECT run_name, accessed_at FROM run_access",
+    ).all()
+    const map = new Map<string, number>()
+    for (const row of rows) {
+      const t = Date.parse(row.accessed_at)
+      if (Number.isFinite(t)) map.set(row.run_name, t)
+    }
+    return map
+  })
+}
+
+/** Record that the run detail page was opened. */
+export async function touchRunAccess(runName: string): Promise<void> {
+  safeRunPath(runName)
+  await withDb((db) => {
+    db.query(
+      "INSERT INTO run_access (run_name, accessed_at) VALUES (?, ?) ON CONFLICT(run_name) DO UPDATE SET accessed_at = excluded.accessed_at",
+    ).run(runName, nowIso())
   })
 }

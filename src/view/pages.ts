@@ -26,12 +26,12 @@ import { renderNoteTagsEditor } from "./tag-ui"
 import { tableWrap } from "./html"
 import { renderDebugLogHtml, type DebugLogEntry } from "./debug-log-viewer"
 import { appNavbarAction } from "./app-nav"
-import { badge, formatRelative, layout, phaseBadge, designPhaseBadge, designStatusLabel } from "./layout"
+import { badge, layout, phaseBadge, designPhaseBadge, designStatusLabel } from "./layout"
 import { getRunsDir, resolveRunName, safeFilePath, safeRunPath } from "./paths"
 import { renderRefreshControls } from "./refresh-controls"
 import { READ_SCRIPT } from "./read-script"
-import { isRunUnread } from "./read-store"
-import { contentType, escapeHtml, formatBytes, formatElapsed, formatUsagePair, renderMarkdown, statusDot } from "./utils"
+import { isRunUnread, touchRunAccess } from "./read-store"
+import { contentType, escapeHtml, formatBytes, formatCostUsd, formatElapsed, formatUsagePair, renderMarkdown, statusDot } from "./utils"
 import type { RequestJson, RunStatus } from "./types"
 
 function renderReadButton(runName: string, unread: boolean): string {
@@ -226,7 +226,7 @@ export async function renderDebugLog(runName: string, files: string[]): Promise<
 export async function renderIndex(searchParams = new URLSearchParams()): Promise<Response> {
   const runError = searchParams.get("error") ?? undefined
   const allRuns = await listRuns()
-  const { runs, showUnreadOnly, showActive, showAll } = filterRunsForIndex(allRuns, searchParams)
+  const { runs, showUnreadOnly, showReadOnly, showAll } = filterRunsForIndex(allRuns, searchParams)
   const stats = computeStats(allRuns)
 
   const manager = tryGetRunManager()
@@ -253,31 +253,31 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     <div class="stat-value">${stats.total}</div>
     <div class="stat-label">Total</div>
   </div>
-  <div class="stat-card stat-approved">
-    <div class="stat-value">${stats.approved}</div>
-    <div class="stat-label">Approved</div>
+  <div class="stat-card stat-read">
+    <div class="stat-value">${stats.read}</div>
+    <div class="stat-label">Read</div>
+  </div>
+  <div class="stat-card stat-unread">
+    <div class="stat-value">${stats.unread}</div>
+    <div class="stat-label">Unread</div>
   </div>
   <div class="stat-card stat-failed">
     <div class="stat-value">${stats.failed}</div>
     <div class="stat-label">Failed</div>
   </div>
-  <div class="stat-card stat-running">
-    <div class="stat-value">${stats.running}</div>
-    <div class="stat-label">Running</div>
-  </div>
 </div>`
 
-  // Active run hero — scan for live-status.json
+  // Active run hero — scan all runs so filters don't hide it
   let activeRunHtml = ""
   let hasActiveRun = false
-  for (const run of runs) {
+  for (const run of allRuns) {
     if (run.status !== "running") continue
     const liveStatus = await readLiveStatus(run.name)
     if (!liveStatus) continue
     hasActiveRun = true
     const nodeHistory = await readNodeHistory(run.name)
     const sessionTelemetry = await readRunSessionTelemetry(run.name)
-    const elapsedMs = runElapsedMs(liveStatus, nodeHistory)
+    const elapsedMs = run.elapsedMs ?? runElapsedMs(liveStatus, nodeHistory)
     const elapsed = elapsedMs !== undefined ? formatElapsed(elapsedMs) : ""
     const { usage, usageAvailable, costAvailable } = resolveRunTelemetry(sessionTelemetry)
     const usageLabel = usageAvailable || costAvailable ? ` · ${formatUsagePair(usage, true)}` : ""
@@ -304,21 +304,22 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   let runCards = ""
   if (runs.length === 0) {
     runCards = showUnreadOnly
-      ? `<div class="empty-state">No unread runs. <a href="/?active=1">Show active runs</a></div>`
-      : showActive
-        ? `<div class="empty-state">No active runs. <a href="/?all=1">Show all runs including failed</a></div>`
+      ? `<div class="empty-state">No unread runs. <a href="/?read=1">Show read runs</a></div>`
+      : showReadOnly
+        ? `<div class="empty-state">No read runs. <a href="/">Show unread runs</a></div>`
         : `<div class="empty-state">No runs found in <code>${escapeHtml(getRunsDir())}</code></div>`
   } else {
     for (const run of runs) {
-      const roundLabel =
-        run.roundCount > 0
-          ? `<span>${run.roundCount} round${run.roundCount !== 1 ? "s" : ""}</span>`
-          : ""
       const iconsStr = run.hasFinalHtml ? ` <span class="tiny-text muted-text">html</span>` : ""
 
       const designBadge = run.designStatus
         ? `<span class="badge ${run.designStatus === "approved" ? "badge-approved" : run.designStatus === "failed" ? "badge-failed" : "badge-running"} design-badge">design: ${escapeHtml(designStatusLabel(run.designStatus))}</span>`
         : ""
+
+      const costLabel = run.costAvailable
+        ? formatCostUsd(run.costUsd ?? 0, { estimated: run.costEstimated })
+        : "—"
+      const elapsedLabel = run.elapsedMs !== undefined ? formatElapsed(run.elapsedMs) : "—"
 
       runCards += `<div class="run-card">
   <div class="run-card-top">
@@ -329,11 +330,8 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     <div class="row-inline-spread">${badge(run.status)}${designBadge}</div>
   </div>
   <div class="run-card-meta">
-    ${roundLabel}
-    ${run.designRoundCount > 0 ? `<span>${run.designRoundCount} design round${run.designRoundCount !== 1 ? "s" : ""}</span>` : ""}
-    <span>${run.fileCount} file${run.fileCount !== 1 ? "s" : ""}</span>
-    <span>${formatRelative(run.mtime)}</span>
-    <span class="tiny-text dim-text">${escapeHtml(run.name.slice(-12))}</span>
+    <span>${escapeHtml(costLabel)}</span>
+    <span>${escapeHtml(elapsedLabel)}</span>
   </div>
 </div>`
     }
@@ -341,7 +339,7 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
 
   const filterHtml = `<div class="run-filters">
   <a href="/"${showUnreadOnly ? ' class="active"' : ""}>Unread</a>
-  <a href="/?active=1"${showActive ? ' class="active"' : ""}>Active</a>
+  <a href="/?read=1"${showReadOnly ? ' class="active"' : ""}>Read</a>
   <a href="/?all=1"${showAll ? ' class="active"' : ""}>All</a>
 </div>`
 
@@ -423,6 +421,12 @@ export async function renderRun(name: string): Promise<Response> {
   const canonical = await canonicalRunResponse(name)
   if (canonical.early) return canonical.early
   name = canonical.runName
+
+  try {
+    await touchRunAccess(name)
+  } catch {
+    // Access tracking is best-effort; never block the run page.
+  }
 
   let dirPath: string
   try {

@@ -13,13 +13,20 @@ export interface RunMeta {
   designStatus: RunStatus | null
   designRoundCount: number
   unread: boolean
+  /** Last time the run detail page was opened (ms epoch). */
+  accessedAt?: number
+  /** Pipeline wall time from telemetry / live status. */
+  elapsedMs?: number
+  costUsd?: number
+  costAvailable?: boolean
+  costEstimated?: boolean
 }
 
 export interface RunStats {
   total: number
-  approved: number
+  read: number
+  unread: number
   failed: number
-  running: number
 }
 
 export interface RequestJson {
