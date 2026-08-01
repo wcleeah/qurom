@@ -442,10 +442,12 @@ function salvageStateOutput(state: ResearchState) {
 // Exported for direct testing; runQuorum is the only production caller.
 export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) {
   const sessionObservations = new Map<string, TraceObservation>()
+  const generationObservations = new Map<string, TraceObservation>()
   const sessionRoles = new Map<string, string>()
   const toolObservations = new Map<string, TraceObservation>()
   const toolPermissions = new Map<string, string[]>()
   const pending = new Map<string, Promise<void>>()
+  const sessionUsage = new Map<string, { tokensIn: number; tokensOut: number }>()
 
   const off = bus.on((event) => {
     if (event.kind === "session.created") {
@@ -461,6 +463,21 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
       const list = toolPermissions.get(key) ?? []
       list.push(event.permission)
       toolPermissions.set(key, list)
+      return
+    }
+
+    if (event.kind === "agent.usage") {
+      if (!sessionRoles.has(event.sessionID) && !sessionObservations.has(event.sessionID)) return
+      const previous = pending.get(`usage:${event.sessionID}`) ?? Promise.resolve()
+      const next = previous
+        .then(() => handleUsage(event))
+        .catch(() => {})
+      pending.set(
+        `usage:${event.sessionID}`,
+        next.finally(() => {
+          if (pending.get(`usage:${event.sessionID}`) === next) pending.delete(`usage:${event.sessionID}`)
+        }),
+      )
       return
     }
 
@@ -485,6 +502,58 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
       }),
     )
   })
+
+  async function handleUsage(event: {
+    sessionID: string
+    tokensIn: number
+    tokensOut: number
+    costUsd?: number
+    costAvailable?: boolean
+    costEstimated?: boolean
+  }) {
+    const prior = sessionUsage.get(event.sessionID) ?? { tokensIn: 0, tokensOut: 0 }
+    const accumulated = {
+      tokensIn: prior.tokensIn + event.tokensIn,
+      tokensOut: prior.tokensOut + event.tokensOut,
+    }
+    sessionUsage.set(event.sessionID, accumulated)
+
+    const { toUsageDetails, toCostDetails } = await import("./telemetry")
+    const usageDetails = toUsageDetails(accumulated)
+    const costDetails = toCostDetails({
+      tokensIn: event.tokensIn,
+      tokensOut: event.tokensOut,
+      costUsd: event.costUsd,
+      costAvailable: event.costAvailable,
+      costEstimated: event.costEstimated,
+    })
+
+    const generation = generationObservations.get(event.sessionID)
+    if (generation) {
+      await telemetry.updateObservation(generation, {
+        usageDetails,
+        costDetails,
+        metadata: {
+          sessionId: event.sessionID,
+          cumulativeTokensIn: accumulated.tokensIn,
+          cumulativeTokensOut: accumulated.tokensOut,
+        },
+      })
+    }
+
+    const agent = sessionObservations.get(event.sessionID)
+    if (agent) {
+      await telemetry.updateObservation(agent, {
+        usageDetails,
+        costDetails,
+        metadata: {
+          sessionId: event.sessionID,
+          cumulativeTokensIn: accumulated.tokensIn,
+          cumulativeTokensOut: accumulated.tokensOut,
+        },
+      })
+    }
+  }
 
   async function handle(snapshot: {
     role: string
@@ -558,12 +627,20 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
     sessionObservations.set(sessionID, observation)
   }
 
+  function trackGenerationObservation(sessionID: string, observation: TraceObservation | undefined) {
+    if (!observation) {
+      generationObservations.delete(sessionID)
+      return
+    }
+    generationObservations.set(sessionID, observation)
+  }
+
   async function dispose() {
     off()
     await Promise.allSettled([...pending.values()])
   }
 
-  return { trackSessionObservation, dispose }
+  return { trackSessionObservation, trackGenerationObservation, dispose }
 }
 
 /** Continue from the latest checkpoint for this thread (thread_id only — no historical pin). */
@@ -789,6 +866,7 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
         telemetry: {
           run: telemetry,
           trackSessionObservation: telemetryListener.trackSessionObservation,
+          trackGenerationObservation: telemetryListener.trackGenerationObservation,
           trackAgentMetadata,
           debugLog: { write(type, data) { debugLogRef.current?.write(type, data) } } as DebugLog,
         },

@@ -50,6 +50,7 @@ export async function tagArticle(input: {
     run: TelemetryRun
     parentObservation?: TraceObservation
     trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
+    trackGenerationObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
     trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
     name?: string
     metadata?: Record<string, unknown>
@@ -89,6 +90,7 @@ export async function tagArticle(input: {
           run: input.telemetry.run,
           parentObservation: input.telemetry.parentObservation,
           trackSessionObservation: input.telemetry.trackSessionObservation,
+          trackGenerationObservation: input.telemetry.trackGenerationObservation,
           trackAgentMetadata: input.telemetry.trackAgentMetadata,
           name: input.telemetry.name ?? "agent.tagOutputArtifact",
           metadata: {
@@ -133,6 +135,7 @@ export async function tagOutputArtifact(
     run: TelemetryRun
     parentObservation?: TraceObservation
     trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
+    trackGenerationObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
     trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
     debugLog?: { write: (event: string, payload: Record<string, unknown>) => void }
   },
@@ -165,6 +168,7 @@ export async function tagOutputArtifact(
             run: telemetry.run,
             parentObservation: telemetry.parentObservation,
             trackSessionObservation: telemetry.trackSessionObservation,
+            trackGenerationObservation: telemetry.trackGenerationObservation,
             trackAgentMetadata: telemetry.trackAgentMetadata,
             name: "agent.tagOutputArtifact",
             metadata: { requestId: state.requestId },

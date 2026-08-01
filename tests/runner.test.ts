@@ -57,6 +57,7 @@ function disabledTelemetry(): TelemetryRun {
     enabled: false,
     runWithRootObservation: async (fn) => fn(),
     startObservation: async () => undefined,
+    updateObservation: async () => {},
     endObservation: async () => {},
     updateTrace: async () => {},
     shutdown: async () => {},
@@ -220,6 +221,7 @@ describe("runResearchPipeline", () => {
         throw new Error("simulated graph failure")
       },
       startObservation: async () => undefined,
+      updateObservation: async () => {},
       endObservation: async () => {},
       updateTrace: async () => {},
       async shutdown() {
@@ -604,6 +606,7 @@ describe("runResearchPipeline", () => {
       rootObservation: { id: "root-1", traceId: "trace-1", type: "Span", observation: {} as TraceObservation["observation"] },
       runWithRootObservation: async (fn) => fn(),
       startObservation: async () => undefined,
+      updateObservation: async () => {},
       endObservation: async () => {},
       async updateTrace(input) {
         traceUpdates.push(input)
@@ -665,10 +668,12 @@ describe("attachTelemetryListener", () => {
     telemetry: TelemetryRun
     starts: StartArgs[]
     ends: EndArgs[]
+    updates: EndArgs[]
     nextObservationId: () => string
   } {
     const starts: StartArgs[] = []
     const ends: EndArgs[] = []
+    const updates: EndArgs[] = []
     let counter = 0
     const nextObservationId = () => `obs-${++counter}`
 
@@ -686,6 +691,9 @@ describe("attachTelemetryListener", () => {
         }
         return observation
       },
+      async updateObservation(observation, input) {
+        updates.push([observation, input])
+      },
       async endObservation(observation, input) {
         ends.push([observation, input])
       },
@@ -693,7 +701,7 @@ describe("attachTelemetryListener", () => {
       shutdown: async () => {},
     }
 
-    return { telemetry, starts, ends, nextObservationId }
+    return { telemetry, starts, ends, updates, nextObservationId }
   }
 
   function makeParent(): TraceObservation {
@@ -882,5 +890,45 @@ describe("attachTelemetryListener", () => {
 
     expect(starts[0]?.metadata?.permissions).toEqual(["edit"])
     expect(ends[0][1]?.metadata?.permissions).toEqual(["edit"])
+  })
+
+  test("mirrors agent.usage into tracked Agent and Generation observations", async () => {
+    const bus = createEventBus()
+    const { telemetry, updates } = makeRecordingTelemetry()
+    const listener = attachTelemetryListener(bus, telemetry)
+    const agent = makeParent()
+    const generation: TraceObservation = {
+      id: "gen-obs",
+      traceId: "trace-1",
+      type: "Generation",
+      observation: {} as TraceObservation["observation"],
+    }
+
+    bus.emit({ kind: "session.created", sessionID: "s1", role: "drafter" })
+    listener.trackSessionObservation("s1", agent)
+    listener.trackGenerationObservation("s1", generation)
+
+    bus.emit({
+      kind: "agent.usage",
+      sessionID: "s1",
+      source: "message",
+      tokensIn: 100,
+      tokensOut: 40,
+    })
+    bus.emit({
+      kind: "agent.usage",
+      sessionID: "s1",
+      source: "message",
+      tokensIn: 20,
+      tokensOut: 10,
+    })
+
+    await listener.dispose()
+
+    expect(updates.length).toBeGreaterThanOrEqual(2)
+    const lastGen = [...updates].reverse().find(([obs]) => obs?.id === "gen-obs")
+    const lastAgent = [...updates].reverse().find(([obs]) => obs?.id === "parent-obs")
+    expect(lastGen?.[1]?.usageDetails).toEqual({ input: 120, output: 50, total: 170 })
+    expect(lastAgent?.[1]?.usageDetails).toEqual({ input: 120, output: 50, total: 170 })
   })
 })

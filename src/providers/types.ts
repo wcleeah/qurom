@@ -81,6 +81,7 @@ export type ProviderPromptInput<T> = {
     run: TelemetryRun
     parentObservation?: TraceObservation
     trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
+    trackGenerationObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
     trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
     debugLog?: DebugLog
     name: string

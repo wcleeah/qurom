@@ -72,6 +72,7 @@ type GraphTelemetry = {
   run: TelemetryRun
   currentNode?: TraceObservation
   trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
+  trackGenerationObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
   trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
   debugLog?: DebugLog
 }
@@ -355,6 +356,7 @@ export async function summarizeInputDocument(config: RuntimeConfig, state: Resea
             run: telemetry.run,
             parentObservation: telemetry.currentNode,
             trackSessionObservation: telemetry.trackSessionObservation,
+            trackGenerationObservation: telemetry.trackGenerationObservation,
             name: "agent.summarizeInputDocument",
             metadata: {
               requestId: state.requestId,
@@ -932,6 +934,7 @@ function graphAgentTelemetry(input: {
       sessionId: input.sessionId,
     },
     trackSessionObservation: input.telemetry.trackSessionObservation,
+    trackGenerationObservation: input.telemetry.trackGenerationObservation,
     trackAgentMetadata: input.telemetry.trackAgentMetadata,
   }
 }
@@ -1272,6 +1275,7 @@ async function runTargetedRebuttals(
               run: telemetry.run,
               parentObservation: chainObservation ?? telemetry.currentNode,
               trackSessionObservation: telemetry.trackSessionObservation,
+            trackGenerationObservation: telemetry.trackGenerationObservation,
               name: `agent.rebuttal.${agent}`,
               input: {
                 requestId: state.requestId,
@@ -2106,6 +2110,7 @@ export async function enrichApprovedOutput(
         run: telemetry.run,
         parentObservation: telemetry.currentNode,
         trackSessionObservation: telemetry.trackSessionObservation,
+            trackGenerationObservation: telemetry.trackGenerationObservation,
         trackAgentMetadata: telemetry.trackAgentMetadata,
         debugLog: telemetry.debugLog,
       }, runtime)
@@ -2140,6 +2145,7 @@ export async function summarizeOutputArtifact(config: RuntimeConfig, state: Rese
             run: telemetry.run,
             parentObservation: telemetry.currentNode,
             trackSessionObservation: telemetry.trackSessionObservation,
+            trackGenerationObservation: telemetry.trackGenerationObservation,
             name: "agent.summarizeOutputArtifact",
             metadata: {
               requestId: state.requestId,

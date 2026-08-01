@@ -18,6 +18,7 @@ import type { RuntimeConfig } from "../config"
 import type { EventBus } from "../runner"
 import { estimateCursorCostUsd, resolveCursorPricingModelId } from "../cursor-pricing"
 import { foldCursorUsage, hasUsage, type UsageTotals } from "../usage"
+import { toCostDetails, toUsageDetails, type TraceObservation } from "../telemetry"
 import { toCursorMcpServers } from "../mcp-config"
 import type {
   AgentProvider,
@@ -616,6 +617,117 @@ function emitCursorDelta(input: {
   }
 }
 
+type CursorPromptTelemetry = NonNullable<Parameters<AgentProvider["prompt"]>[0]["telemetry"]>
+
+async function startCursorAgentObservation(
+  telemetry: CursorPromptTelemetry | undefined,
+  input: { handleId: string; role: AgentRole; name: string; promptPreview: string },
+): Promise<TraceObservation | undefined> {
+  const run = telemetry?.run
+  if (!run?.traceId || !run.rootObservation) return undefined
+  const observation = await run.startObservation({
+    traceId: run.traceId,
+    parentObservationId: telemetry?.parentObservation?.id ?? run.rootObservation.id,
+    name: input.name,
+    type: "Agent",
+    input: {
+      agentName: input.role,
+      sessionId: input.handleId,
+      promptPreview: input.promptPreview.slice(0, 500),
+    },
+    metadata: {
+      agentName: input.role,
+      sessionId: input.handleId,
+      provider: "cursor",
+    },
+  })
+  telemetry?.trackSessionObservation?.(input.handleId, observation)
+  return observation
+}
+
+async function startCursorGenerationObservation(
+  telemetry: CursorPromptTelemetry | undefined,
+  input: {
+    handleId: string
+    agent: TraceObservation | undefined
+    name: string
+    model?: string
+    promptPreview: string
+  },
+): Promise<TraceObservation | undefined> {
+  const run = telemetry?.run
+  if (!run?.traceId || !input.agent) return undefined
+  const observation = await run.startObservation({
+    traceId: run.traceId,
+    parentObservationId: input.agent.id,
+    name: input.name,
+    type: "Generation",
+    input: {
+      promptPreview: input.promptPreview.slice(0, 500),
+      model: input.model,
+    },
+    metadata: {
+      sessionId: input.handleId,
+      provider: "cursor",
+      model: input.model,
+    },
+  })
+  telemetry?.trackGenerationObservation?.(input.handleId, observation)
+  return observation
+}
+
+async function endCursorGenerationObservation(
+  telemetry: CursorPromptTelemetry | undefined,
+  handleId: string,
+  generation: TraceObservation | undefined,
+  update: {
+    usage?: UsageTotals
+    model?: string
+    output?: unknown
+    level?: "ERROR"
+    statusMessage?: string
+  },
+) {
+  await telemetry?.run.endObservation(generation, {
+    output: update.output,
+    model: update.model,
+    usageDetails: toUsageDetails(update.usage),
+    costDetails: toCostDetails(update.usage),
+    level: update.level,
+    statusMessage: update.statusMessage,
+    metadata: {
+      sessionId: handleId,
+      provider: "cursor",
+      model: update.model,
+    },
+  })
+  telemetry?.trackGenerationObservation?.(handleId, undefined)
+}
+
+async function endCursorAgentObservation(
+  telemetry: CursorPromptTelemetry | undefined,
+  agent: TraceObservation | undefined,
+  update: {
+    usage?: UsageTotals
+    model?: string
+    output?: unknown
+    level?: "ERROR"
+    statusMessage?: string
+  },
+) {
+  await telemetry?.run.endObservation(agent, {
+    output: update.output,
+    usageDetails: toUsageDetails(update.usage),
+    costDetails: toCostDetails(update.usage),
+    level: update.level,
+    statusMessage: update.statusMessage,
+    metadata: {
+      provider: "cursor",
+      model: update.model,
+    },
+  })
+}
+
 export const cursorProvider: AgentProvider = {
   id: "cursor",
   capabilities,
@@ -732,12 +844,26 @@ export const cursorProvider: AgentProvider = {
     }
 
     const roleRuntime = roleConfig(input.config, input.role)
+    const telemetryName = input.telemetry?.name ?? `cursor.${input.role}`
+    const agentObservation = await startCursorAgentObservation(input.telemetry, {
+      handleId: input.handle.id,
+      role: input.role,
+      name: telemetryName,
+      promptPreview: input.prompt,
+    })
 
     if (!input.outputFile && !input.schema) {
       if (input.inputFiles && input.inputFiles.length > 0) {
         throw new Error("Cursor provider expects input files to be inlined by the agent runtime")
       }
       for (let attempt = 1; attempt <= cursorTransportRetryAttempts; attempt++) {
+        const generationObservation = await startCursorGenerationObservation(input.telemetry, {
+          handleId: input.handle.id,
+          agent: agentObservation,
+          name: `${telemetryName}.generation`,
+          model: roleRuntime?.model,
+          promptPreview: input.prompt,
+        })
         try {
           const messageID = `cursor:${input.handle.id}:${attempt}:${Date.now()}`
           input.bus?.emit({ kind: "agent.message.start", sessionID: input.handle.id, messageID })
@@ -793,6 +919,16 @@ export const cursorProvider: AgentProvider = {
             done: true,
           })
           input.bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "completed" })
+          await endCursorGenerationObservation(input.telemetry, input.handle.id, generationObservation, {
+            usage,
+            model: resolvedModel ?? roleRuntime?.model,
+            output: { response: text, runId: run.id },
+          })
+          await endCursorAgentObservation(input.telemetry, agentObservation, {
+            usage,
+            model: resolvedModel ?? roleRuntime?.model,
+            output: { response: text, runId: run.id },
+          })
           return {
             text,
             model: roleRuntime?.model,
@@ -810,10 +946,20 @@ export const cursorProvider: AgentProvider = {
             willRetry,
             error,
           })
+          await endCursorGenerationObservation(input.telemetry, input.handle.id, generationObservation, {
+            level: "ERROR",
+            statusMessage: error instanceof Error ? error.message : String(error),
+            model: roleRuntime?.model,
+          })
           if (willRetry) {
             await cancelCursorRun(active.run)
             continue
           }
+          await endCursorAgentObservation(input.telemetry, agentObservation, {
+            level: "ERROR",
+            statusMessage: error instanceof Error ? error.message : String(error),
+            model: roleRuntime?.model,
+          })
           input.bus?.emit({
             kind: "session.error",
             sessionID: input.handle.id,
@@ -827,6 +973,11 @@ export const cursorProvider: AgentProvider = {
           throw error
         }
       }
+      await endCursorAgentObservation(input.telemetry, agentObservation, {
+        level: "ERROR",
+        statusMessage: "Cursor agent chat prompt failed after retry budget was exhausted",
+        model: roleRuntime?.model,
+      })
       throw new Error("Cursor agent chat prompt failed after retry budget was exhausted")
     }
 
@@ -839,132 +990,172 @@ export const cursorProvider: AgentProvider = {
     const outputFile = input.outputFile
 
     let callIndex = 0
+    let lastUsage: UsageTotals | undefined
+    let lastModel: string | undefined
 
-    return runProviderStructuredPrompt({
-      prompt: input.prompt,
-      providerOutputFile: input.outputFile,
-      schema: input.schema,
-      artifactFile: input.outputFile,
-      async sendPrompt(prompt) {
-        callIndex += 1
-        const currentCallIndex = callIndex
-        for (let attempt = 1; attempt <= cursorTransportRetryAttempts; attempt++) {
-          try {
-            const messageID = `cursor:${input.handle.id}:${attempt}:${Date.now()}`
-            input.bus?.emit({ kind: "agent.message.start", sessionID: input.handle.id, messageID })
-            const run = await sendCursorRun({
-              active,
-              prompt,
-              onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
-            })
-            const { result } = await completeCursorRun({
-              run,
-              config: input.config,
+    try {
+      const result = await runProviderStructuredPrompt({
+        prompt: input.prompt,
+        providerOutputFile: input.outputFile,
+        schema: input.schema,
+        artifactFile: input.outputFile,
+        async sendPrompt(prompt) {
+          callIndex += 1
+          const currentCallIndex = callIndex
+          for (let attempt = 1; attempt <= cursorTransportRetryAttempts; attempt++) {
+            const generationObservation = await startCursorGenerationObservation(input.telemetry, {
               handleId: input.handle.id,
-              debugLog: input.telemetry?.debugLog,
-            })
-            const status = result.status
-            const text = extractRunText(result)
-            let artifacts: Awaited<ReturnType<CursorAgentHandle["listArtifacts"]>> = []
-            let artifactsPayload: unknown = artifacts
-            try {
-              artifacts = await active.agent.listArtifacts()
-              artifactsPayload = artifacts
-            } catch (error) {
-              artifactsPayload = { error: cursorErrorMessage(error) }
-            }
-            let conversation: unknown
-            if (run.supports("conversation")) {
-              try {
-                conversation = await run.conversation()
-              } catch (error) {
-                conversation = { error: cursorErrorMessage(error) }
-              }
-            }
-            const resolvedModel = cursorResolvedModel(result, roleRuntime?.model)
-            const durationMs = result.durationMs
-            const completedAt = new Date().toISOString()
-            const debugPaths = await saveCursorDebugFiles({
-              outputFile,
-              role: input.role,
-              agentId: input.handle.id,
-              runId: run.id,
-              callIndex: currentCallIndex,
-              attempt,
-              result,
-              text,
-              artifacts: artifactsPayload,
-              conversation,
-              requestedModel: active.requestedModel,
-              modelParams: active.modelParams,
-              resolvedModel,
-              completedAt,
-            })
-            if (status && status !== "finished") {
-              throw new CursorRunStatusError(run.id, status, result)
-            }
-            const usage = cursorUsageTotalsFromRun(run, result, roleRuntime?.model)
-            emitCursorRunUsage(input.bus, input.handle.id, run, result, roleRuntime?.model)
-            emitCursorSessionTelemetry({
-              bus: input.bus,
-              role: input.role,
-              handleId: input.handle.id,
-              roleRuntime,
-              modelParams: active.modelParams,
-              runId: run.id,
-              callIndex: currentCallIndex,
-              durationMs,
-              result,
-              usage,
-            })
-            logCursorPromptComplete({
-              debugLog: input.telemetry?.debugLog,
-              role: input.role,
-              handleId: input.handle.id,
-              runId: run.id,
-              callIndex: currentCallIndex,
-              requestedModel: active.requestedModel,
-              modelParams: active.modelParams,
-              resolvedModel,
-              durationMs,
-            })
-            await downloadCursorArtifact({
-              agent: active.agent,
-              handle: input.handle,
-              outputFile,
-              artifacts,
-              artifactsFile: debugPaths.artifacts,
-            })
-            return {
-              text,
+              agent: agentObservation,
+              name: `${telemetryName}.generation`,
               model: roleRuntime?.model,
-              provider: "cursor",
-              variant: input.variant ?? roleRuntime?.variant,
-              raw: { agentId: input.handle.id, runId: run.id, result },
-            }
-          } catch (error) {
-            const willRetry = attempt < cursorTransportRetryAttempts && shouldRetryCursorPrompt(error)
-            logCursorPromptError({
-              debugLog: input.telemetry?.debugLog,
-              role: input.role,
-              handleId: input.handle.id,
-              attempt,
-              willRetry,
-              error,
+              promptPreview: prompt,
             })
-            if (willRetry) {
-              await cancelCursorRun(active.run)
-              continue
+            try {
+              const messageID = `cursor:${input.handle.id}:${attempt}:${Date.now()}`
+              input.bus?.emit({ kind: "agent.message.start", sessionID: input.handle.id, messageID })
+              const run = await sendCursorRun({
+                active,
+                prompt,
+                onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
+              })
+              const { result } = await completeCursorRun({
+                run,
+                config: input.config,
+                handleId: input.handle.id,
+                debugLog: input.telemetry?.debugLog,
+              })
+              const status = result.status
+              const text = extractRunText(result)
+              let artifacts: Awaited<ReturnType<CursorAgentHandle["listArtifacts"]>> = []
+              let artifactsPayload: unknown = artifacts
+              try {
+                artifacts = await active.agent.listArtifacts()
+                artifactsPayload = artifacts
+              } catch (error) {
+                artifactsPayload = { error: cursorErrorMessage(error) }
+              }
+              let conversation: unknown
+              if (run.supports("conversation")) {
+                try {
+                  conversation = await run.conversation()
+                } catch (error) {
+                  conversation = { error: cursorErrorMessage(error) }
+                }
+              }
+              const resolvedModel = cursorResolvedModel(result, roleRuntime?.model)
+              const durationMs = result.durationMs
+              const completedAt = new Date().toISOString()
+              const debugPaths = await saveCursorDebugFiles({
+                outputFile,
+                role: input.role,
+                agentId: input.handle.id,
+                runId: run.id,
+                callIndex: currentCallIndex,
+                attempt,
+                result,
+                text,
+                artifacts: artifactsPayload,
+                conversation,
+                requestedModel: active.requestedModel,
+                modelParams: active.modelParams,
+                resolvedModel,
+                completedAt,
+              })
+              if (status && status !== "finished") {
+                throw new CursorRunStatusError(run.id, status, result)
+              }
+              const usage = cursorUsageTotalsFromRun(run, result, roleRuntime?.model)
+              lastUsage = usage
+              lastModel = resolvedModel ?? roleRuntime?.model
+              emitCursorRunUsage(input.bus, input.handle.id, run, result, roleRuntime?.model)
+              emitCursorSessionTelemetry({
+                bus: input.bus,
+                role: input.role,
+                handleId: input.handle.id,
+                roleRuntime,
+                modelParams: active.modelParams,
+                runId: run.id,
+                callIndex: currentCallIndex,
+                durationMs,
+                result,
+                usage,
+              })
+              logCursorPromptComplete({
+                debugLog: input.telemetry?.debugLog,
+                role: input.role,
+                handleId: input.handle.id,
+                runId: run.id,
+                callIndex: currentCallIndex,
+                requestedModel: active.requestedModel,
+                modelParams: active.modelParams,
+                resolvedModel,
+                durationMs,
+              })
+              await downloadCursorArtifact({
+                agent: active.agent,
+                handle: input.handle,
+                outputFile,
+                artifacts,
+                artifactsFile: debugPaths.artifacts,
+              })
+              await endCursorGenerationObservation(input.telemetry, input.handle.id, generationObservation, {
+                usage,
+                model: lastModel,
+                output: { response: text, runId: run.id, callIndex: currentCallIndex },
+              })
+              return {
+                text,
+                model: roleRuntime?.model,
+                provider: "cursor",
+                variant: input.variant ?? roleRuntime?.variant,
+                raw: { agentId: input.handle.id, runId: run.id, result },
+              }
+            } catch (error) {
+              const willRetry = attempt < cursorTransportRetryAttempts && shouldRetryCursorPrompt(error)
+              logCursorPromptError({
+                debugLog: input.telemetry?.debugLog,
+                role: input.role,
+                handleId: input.handle.id,
+                attempt,
+                willRetry,
+                error,
+              })
+              await endCursorGenerationObservation(input.telemetry, input.handle.id, generationObservation, {
+                level: "ERROR",
+                statusMessage: error instanceof Error ? error.message : String(error),
+                model: roleRuntime?.model,
+              })
+              if (willRetry) {
+                await cancelCursorRun(active.run)
+                continue
+              }
+              if (error instanceof CursorAgentError) {
+                throw new Error(`Cursor agent prompt failed: ${cursorErrorMessage(error)}`)
+              }
+              throw error
             }
-            if (error instanceof CursorAgentError) {
-              throw new Error(`Cursor agent prompt failed: ${cursorErrorMessage(error)}`)
-            }
-            throw error
           }
-        }
-        throw new Error("Cursor agent prompt failed after retry budget was exhausted")
-      },
-    })
+          throw new Error("Cursor agent prompt failed after retry budget was exhausted")
+        },
+      })
+      await endCursorAgentObservation(input.telemetry, agentObservation, {
+        usage: lastUsage,
+        model: lastModel ?? roleRuntime?.model,
+        output: {
+          structured: Boolean(result.structured),
+          outputSource: result.outputSource,
+        },
+      })
+      return result
+    } catch (error) {
+      await endCursorAgentObservation(input.telemetry, agentObservation, {
+        level: "ERROR",
+        statusMessage: error instanceof Error ? error.message : String(error),
+        model: lastModel ?? roleRuntime?.model,
+        usage: lastUsage,
+      })
+      throw error
+    }
   },
   async abort(_config, handleId) {
     const active = activeAgents.get(handleId)

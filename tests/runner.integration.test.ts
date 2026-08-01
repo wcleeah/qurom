@@ -54,6 +54,7 @@ function disabledTelemetry(): TelemetryRun {
     enabled: false,
     runWithRootObservation: async (fn) => fn(),
     startObservation: async () => undefined,
+    updateObservation: async () => {},
     endObservation: async () => {},
     updateTrace: async () => {},
     shutdown: async () => {},

@@ -8,6 +8,9 @@ configureViewServer({ admin: process.argv.includes("--admin") })
 const config = await loadRuntimeConfig()
 await resolveOpencodeBootstrap({ interactive: false, workspaceDir: config.env.OPENCODE_DIRECTORY })
 
+const { ensureLangfuseProvider, shutdownLangfuseProvider } = await import("./telemetry")
+ensureLangfuseProvider(config)
+
 initRunManager({ getConfig: loadRuntimeConfig })
 
 const SHUTDOWN_TIMEOUT_MS = Number(process.env.QUORUM_SHUTDOWN_TIMEOUT_MS ?? 20_000)
@@ -27,6 +30,11 @@ const shutdown = async (signal: string) => {
     await getRunManager().shutdown()
   } catch (error) {
     console.error("Shutdown error:", error instanceof Error ? error.message : String(error))
+  }
+  try {
+    await shutdownLangfuseProvider()
+  } catch (error) {
+    console.error("Langfuse shutdown error:", error instanceof Error ? error.message : String(error))
   } finally {
     clearTimeout(force)
     process.exit(0)

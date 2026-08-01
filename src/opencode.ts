@@ -71,6 +71,7 @@ export async function promptAgent<T>(input: {
     run: TelemetryRun
     parentObservation?: TraceObservation
     trackSessionObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
+    trackGenerationObservation?: (sessionID: string, observation: TraceObservation | undefined) => void
     trackAgentMetadata?: (input: { agent: string; sessionID: string; model?: string; variant?: string }) => void
     debugLog?: DebugLog
     name: string
@@ -136,6 +137,13 @@ export async function promptAgent<T>(input: {
             })
         : undefined
 
+    input.telemetry?.trackGenerationObservation?.(activeSessionID, generationObservation)
+
+    async function endGeneration(update?: Parameters<NonNullable<typeof input.telemetry>["run"]["endObservation"]>[1]) {
+      await input.telemetry?.run?.endObservation(generationObservation, update)
+      input.telemetry?.trackGenerationObservation?.(activeSessionID, undefined)
+    }
+
     const parts: Array<TextPartInput | FilePartInput> = [
       { type: "text", text: prompt } satisfies TextPartInput,
     ]
@@ -185,7 +193,7 @@ export async function promptAgent<T>(input: {
           continue
         }
         if (response.error) {
-          await input.telemetry?.run?.endObservation(generationObservation, {
+          await endGeneration({
             level: "ERROR",
             statusMessage: `OpenCode prompt failed: ${JSON.stringify(response.error)}`,
           })
@@ -196,7 +204,7 @@ export async function promptAgent<T>(input: {
             `transport.prompt_failed: Failed to prompt agent ${input.agent} in session ${activeSessionID}: ${JSON.stringify(response.error)}`,
           )
         }
-        await input.telemetry?.run?.endObservation(generationObservation, {
+        await endGeneration({
           level: "ERROR",
           statusMessage: "OpenCode returned no response data",
         })
@@ -218,7 +226,7 @@ export async function promptAgent<T>(input: {
     input.telemetry?.trackAgentMetadata?.({ agent: input.agent, sessionID: activeSessionID, model, variant })
 
     if (info.error) {
-      await input.telemetry?.run?.endObservation(generationObservation, {
+      await endGeneration({
         level: "ERROR",
         statusMessage: `OpenCode assistant call failed: ${JSON.stringify(info.error)}`,
         output: {
@@ -279,18 +287,18 @@ export async function promptAgent<T>(input: {
       }
     }
 
-    await input.telemetry?.run?.endObservation(generationObservation, {
+    await endGeneration({
       output: {
         response: finalText,
       },
       model: info.modelID,
-        metadata: {
-          ...generationMetadata({
-            agent: input.agent,
-            sessionID: activeSessionID,
-            provider: info.providerID,
-            variant,
-          }),
+      metadata: {
+        ...generationMetadata({
+          agent: input.agent,
+          sessionID: activeSessionID,
+          provider: info.providerID,
+          variant,
+        }),
         model: info.modelID,
       },
     })

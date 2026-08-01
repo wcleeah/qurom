@@ -103,6 +103,8 @@ Main environment variables:
 - `LANGFUSE_PUBLIC_KEY`
 - `LANGFUSE_SECRET_KEY`
 - `LANGFUSE_BASE_URL`
+- `LANGFUSE_TRACING_ENVIRONMENT` — optional; falls back to `RAILWAY_ENVIRONMENT_NAME` or `default`
+- `LANGFUSE_RELEASE` — optional; falls back to `RAILWAY_GIT_COMMIT_SHA`
 
 Default values are defined in `src/config.ts` and `src/data-paths.ts`.
 
@@ -136,7 +138,7 @@ If any role uses Cursor, also set `CURSOR_API_KEY`.
 
 On first dashboard start, Qurom seeds SQLite from `defaults/`, auto-seeds missing `.opencode/agents/` files when using OpenCode, and shows a bootstrap banner on the index page if local agents differ from shipped defaults. Existing repo-local `runs/` data is auto-migrated into `~/.local/share/qurom/` (or `$XDG_DATA_HOME/qurom`).
 
-Leave the `LANGFUSE_*` keys blank to skip telemetry.
+Leave the `LANGFUSE_*` keys blank to skip cloud tracing. When set, Qurom uses a process-level OpenTelemetry provider (`batched` export) and mirrors token usage into Langfuse Generations/Agents for OpenCode and Cursor. Local `session-telemetry.json` remains the dashboard cost source of truth.
 
 4. If you use OpenCode-bound roles, confirm `opencode` is on your `PATH` (`opencode --version`).
 
