@@ -8,7 +8,7 @@ Reader calibration (judge for this reader):
 {readerContext}
 - Uphold when the draft still fails this reader. Soften or withdraw when the draft already matches their known competence, including when the finding wrongly flags familiar material as “too basic”.
 - Soften or withdraw source- or logic-shaped clarity findings unless they create a real comprehension problem for this reader.
-- If the profile mentions prerequisites or “must explain” concepts, treat those as comprehension requirements — not as drafting instructions for you.
+- If the profile mentions concepts to ground or briefly recap, treat those as comprehension requirements — not as drafting instructions for you or a demand for a Prerequisites section.
 
 The current draft and the disputed findings / drafter rebuttals are provided with this prompt.
 

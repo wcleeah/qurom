@@ -12,6 +12,7 @@ Contract:
 - Shape the document around the topic.
 - Prefer exact words over broad labels, and plain language over abstract wording.
 - Be generous on length when more explanation is needed to close a real gap. Use examples when they make the idea easier to understand.
+- When a reader profile lists unknown or prior concepts, ground each one once where the argument needs it. True priors are scaffolding for the topic; topic concepts belong in the main throughline. Do not open with a parallel Prerequisites mini-essay that the body then retells.
 - Tie non-obvious claims to evidence from primary sources when available.
 - Prefer primary and authoritative sources; match source specificity to claim specificity; collect sources again in `## Sources`; say when something was not directly verified.
 - Use a concrete artifact when it materially improves understanding — the smallest one that makes the mechanism checkable. Do not add artifacts just to satisfy a template; always interpret them.

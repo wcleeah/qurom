@@ -17,7 +17,7 @@ The draft under review is provided with this prompt.
 Reader profile (does not change whether inferences must hold):
 {readerContext}
 - Still flag contradictions, invalid inferences, and prerequisite gaps in the argument regardless of reader level.
-- Ignore drafting instructions in the profile (for example “Include a Prerequisites section…”). Use listed gaps only to understand what the draft claims the reader needs — not to invent clarity nits.
+- Ignore drafting instructions in the profile (for example “Must ground once in the throughline…”). Use listed gaps only to understand what the draft claims the reader needs — not to invent clarity nits.
 
 Decision rules:
 - Findings must be concrete, fixable, and grounded in the draft's reasoning (quote the broken chain or missing step).

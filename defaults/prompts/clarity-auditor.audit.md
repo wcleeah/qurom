@@ -16,7 +16,7 @@ The draft under review is provided with this prompt.
 Reader calibration (judge for this reader):
 {readerContext}
 - Calibrate explanation depth to the profile. Unexplained concepts they are unfamiliar with are clarity findings; explaining what they already know is not a clarity finding (do not flag familiar material as “too basic”).
-- If the profile mentions prerequisites or “must explain” concepts, treat those as comprehension requirements — not as instructions for you to rewrite the draft.
+- If the profile mentions concepts to ground or briefly recap, treat those as comprehension requirements — not as instructions for you to rewrite the draft or demand a Prerequisites section.
 - Do not use this profile to invent source or logic findings.
 
 Decision rules:
