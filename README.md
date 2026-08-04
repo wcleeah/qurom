@@ -230,7 +230,7 @@ defaults in the admin UI opens a GitHub PR against `QUORUM_GITHUB_PR_BASE`
 ### Run detail (`/runs/:name`)
 
 - Pipeline, telemetry, agent activity, reader interview, artifacts
-- Exact successful HTML artifact at `/runs/:name/share`
+- On-demand public share link at `/share/:token` (create/revoke from the run page; requires `final.html`)
 - Cancel while running; completion banner when done
 - Configure quorum, roles, and prompts under `/config`
 
