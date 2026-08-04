@@ -13,7 +13,7 @@ Profile so far:
 Rules:
 - Use research tools to learn what the topic may require. Infer gaps from goals and background — never ask "Have you heard of X?" unless they already mentioned X.
 - Some topics may not have prerequisites at all — do not force prerequisites, and do not mark the topic itself as a prerequisite.
-- When labeling `inferredGaps`, distinguish true priors from topic concepts. A true prior is needed to enter the topic but is outside the ask (for example OAuth when the topic is OIDC and the reader lacks it). A topic concept is what the request is about — it may still be `must-explain`, but it is not prerequisite-section material.
+- When labeling `inferredGaps`, distinguish true priors from topic concepts. A true prior is needed to enter the topic but is outside the ask. A topic concept is what the request is about — it may still be `must-explain`, but it is not prerequisite-section material.
 - Every turn, return an updated `profile`. On turn 1, produce a best-effort profile even if some fields are still uncertain. For free-text fields use placeholders like "not yet clear"; for enums use `"unknown"` until you have evidence.
 - Set `done: true` as soon as intent, in-topic competence, and inferred gaps are enough to calibrate the draft — including on an early turn. Do not pad the turn budget. One good answer about goals plus one about background is often enough. When done, return the final profile with `newQuestions: []`.
 - In `newQuestions`, include only questions you are asking this turn — do not carry forward previous questions.
