@@ -196,6 +196,9 @@ export type RunResearchPipelineArgs = {
   promptBundle: RuntimePromptBundle
   request?: InputRequest
   requestId?: string
+  /** Seeded profile for reruns that skip reader discovery. */
+  readerProfile?: GraphInput["readerProfile"]
+  readerInterviewComplete?: boolean
   resume?: { runId: string }
   bus: EventBus
   signal?: AbortSignal
@@ -872,7 +875,16 @@ export async function runResearchPipeline(args: RunResearchPipelineArgs): Promis
         },
       })
 
-      let initialInput: Record<string, unknown> | null = { ...request, requestId }
+      let initialInput: Record<string, unknown> | null = {
+        ...request,
+        requestId,
+        ...(args.readerProfile && args.readerInterviewComplete
+          ? {
+              readerProfile: args.readerProfile,
+              readerInterviewComplete: true,
+            }
+          : {}),
+      }
       let initialConfig: { configurable: { thread_id: string; checkpoint_id?: string }; recursionLimit: number; signal: AbortSignal } = {
         configurable: { thread_id: requestId },
         recursionLimit: config.quorumConfig.recursionLimit,

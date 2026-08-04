@@ -21,7 +21,8 @@ import {
 } from "./output"
 import type { LiveStatus } from "./live-status"
 import { resolveRunDirectory } from "./run-resume"
-import type { InputRequest } from "./schema"
+import type { InputRequest, ReaderCalibrationProfile } from "./schema"
+import { loadPriorRunForRerun, RerunLoadError, type RerunInterviewMode } from "./run-rerun"
 
 export type ActiveRun = {
   runId: string
@@ -35,10 +36,21 @@ export type RunManagerStatus = {
   providers: Record<string, ProviderLifecycleStatus>
 }
 
+export type StartResearchOptions = {
+  readerProfile?: ReaderCalibrationProfile
+}
+
 export type RunManager = {
   status: () => RunManagerStatus
-  startResearch: (request: InputRequest) => Promise<{ runId: string; runPath: string }>
+  startResearch: (
+    request: InputRequest,
+    options?: StartResearchOptions,
+  ) => Promise<{ runId: string; runPath: string }>
   resumeResearch: (runId: string) => Promise<{ runId: string }>
+  rerunResearch: (
+    sourceRunRef: string,
+    options: { interview: RerunInterviewMode },
+  ) => Promise<{ runId: string; runPath: string }>
   cancel: (runId?: string) => Promise<boolean>
   shutdown: () => Promise<void>
 }
@@ -232,6 +244,60 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     return { runId: input.runId }
   }
 
+  async function startResearch(request: InputRequest, options?: StartResearchOptions) {
+    const runId = crypto.randomUUID()
+    const cfg = await config()
+
+    let pipelineRequest = request
+    const runDirInput = {
+      requestId: runId,
+      inputMode: request.inputMode,
+      topic: request.inputMode === "topic" ? request.topic : undefined,
+      documentPath: request.inputMode === "document" ? request.documentPath : undefined,
+      documentText: request.inputMode === "document" ? request.documentText : undefined,
+    }
+    const runPath = buildRunDirName(runDirInput)
+    const runDir = await ensureRunDir(cfg.env.QUORUM_RUNS_DIR, runDirInput)
+
+    if (request.inputMode === "document") {
+      pipelineRequest = await normalizeDocumentRequest(request, runDir)
+    }
+
+    await writeRunJsonArtifact(runDir, "request.json", {
+      requestId: runId,
+      inputMode: pipelineRequest.inputMode,
+      topic: pipelineRequest.inputMode === "topic" ? pipelineRequest.topic : undefined,
+      documentPath: pipelineRequest.inputMode === "document" ? pipelineRequest.documentPath : undefined,
+      documentSource: pipelineRequest.inputMode === "document" ? pipelineRequest.documentSource : undefined,
+      originalDocumentPath:
+        pipelineRequest.inputMode === "document" ? pipelineRequest.originalDocumentPath : undefined,
+    })
+
+    const seededProfile = options?.readerProfile
+    const roles = configuredAgentRoles(cfg)
+    await runPipeline({
+      runId,
+      roles,
+      runDir,
+      maxRounds: cfg.quorumConfig.maxRounds,
+      execute: ({ bus, signal, bridgeFactory, prerequisites: prereqs, promptBundle: bundle, config: pipelineCfg }) =>
+        runPipelineFn({
+          config: pipelineCfg,
+          prerequisites: prereqs,
+          promptBundle: bundle,
+          request: pipelineRequest,
+          requestId: runId,
+          ...(seededProfile
+            ? { readerProfile: seededProfile, readerInterviewComplete: true }
+            : {}),
+          bus,
+          signal,
+          bridgeFactory,
+        }),
+    })
+    return { runId, runPath }
+  }
+
   return {
     status() {
       return {
@@ -243,54 +309,17 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
       }
     },
 
-    async startResearch(request) {
-      const runId = crypto.randomUUID()
+    startResearch,
+
+    async rerunResearch(sourceRunRef, options) {
       const cfg = await config()
-
-      let pipelineRequest = request
-      const runDirInput = {
-        requestId: runId,
-        inputMode: request.inputMode,
-        topic: request.inputMode === "topic" ? request.topic : undefined,
-        documentPath: request.inputMode === "document" ? request.documentPath : undefined,
-        documentText: request.inputMode === "document" ? request.documentText : undefined,
-      }
-      const runPath = buildRunDirName(runDirInput)
-      const runDir = await ensureRunDir(cfg.env.QUORUM_RUNS_DIR, runDirInput)
-
-      if (request.inputMode === "document") {
-        pipelineRequest = await normalizeDocumentRequest(request, runDir)
-      }
-
-      await writeRunJsonArtifact(runDir, "request.json", {
-        requestId: runId,
-        inputMode: pipelineRequest.inputMode,
-        topic: pipelineRequest.inputMode === "topic" ? pipelineRequest.topic : undefined,
-        documentPath: pipelineRequest.inputMode === "document" ? pipelineRequest.documentPath : undefined,
-        documentSource: pipelineRequest.inputMode === "document" ? pipelineRequest.documentSource : undefined,
-        originalDocumentPath:
-          pipelineRequest.inputMode === "document" ? pipelineRequest.originalDocumentPath : undefined,
-      })
-
-      const roles = configuredAgentRoles(cfg)
-      await runPipeline({
-        runId,
-        roles,
-        runDir,
-        maxRounds: cfg.quorumConfig.maxRounds,
-        execute: ({ bus, signal, bridgeFactory, prerequisites: prereqs, promptBundle: bundle, config: pipelineCfg }) =>
-          runPipelineFn({
-            config: pipelineCfg,
-            prerequisites: prereqs,
-            promptBundle: bundle,
-            request: pipelineRequest,
-            requestId: runId,
-            bus,
-            signal,
-            bridgeFactory,
-          }),
-      })
-      return { runId, runPath }
+      const prior = await loadPriorRunForRerun(sourceRunRef, options.interview, cfg.env.QUORUM_RUNS_DIR)
+      return startResearch(
+        prior.request,
+        options.interview === "reuse" && prior.readerProfile
+          ? { readerProfile: prior.readerProfile }
+          : undefined,
+      )
     },
 
     async resumeResearch(rawRunId) {
@@ -356,6 +385,7 @@ export class RunManagerError extends Error {
 
 export function toRunManagerError(error: unknown): RunManagerError {
   if (error instanceof RunManagerError) return error
+  if (error instanceof RerunLoadError) return new RunManagerError(error.message, error.status)
   if (error instanceof DocumentInputError) return new RunManagerError(error.message, 400)
   if (error instanceof ZodError) {
     const message = error.issues[0]?.message ?? "Invalid request"

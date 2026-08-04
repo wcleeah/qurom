@@ -596,9 +596,21 @@ function buildActiveRebuttalMap(audits: AuditResultRecord[], rebuttals: Rebuttal
   return activeRebuttals
 }
 
+export function hasSeededReaderInterview(
+  state: Pick<ResearchState, "readerProfile" | "readerInterviewComplete">,
+) {
+  return Boolean(state.readerInterviewComplete && state.readerProfile)
+}
+
 export async function ingestRequest(input: GraphInput) {
   const parsed = inputRequestSchema.parse(input)
   const requestId = input.requestId ?? randomUUID()
+  const seededInterview = hasSeededReaderInterview(input)
+    ? {
+        readerProfile: input.readerProfile,
+        readerInterviewComplete: true as const,
+      }
+    : {}
   const baseState = {
     requestId,
     round: 0,
@@ -614,6 +626,7 @@ export async function ingestRequest(input: GraphInput) {
     status: "drafting" as const,
     failureReason: undefined,
     lastUnresolvedSignature: undefined,
+    ...seededInterview,
   }
 
   if (parsed.inputMode === "topic") {
@@ -684,11 +697,22 @@ async function discoverReaderPrompt(
   telemetry?: GraphTelemetry,
   observer?: RunObserver,
 ): Promise<ResearchState> {
+  if (!state.outputPath) throw new Error("Missing outputPath during discoverReaderPrompt")
+
+  // Rerun with a reused profile: persist it and skip the interviewer entirely.
+  if (hasSeededReaderInterview(state) && state.readerProfile) {
+    await writeRunJsonArtifact(state.outputPath, "reader-profile.json", state.readerProfile)
+    return researchStateSchema.parse({
+      ...state,
+      readerInterviewComplete: true,
+      pendingNewReaderQuestions: undefined,
+    })
+  }
+
   // Kill-switch: short-circuit to a default (empty) profile, run proceeds as today.
   if (!config.quorumConfig.readerDiscovery?.enabled) {
     return researchStateSchema.parse({ ...state })
   }
-  if (!state.outputPath) throw new Error("Missing outputPath during discoverReaderPrompt")
 
   const transcript = [...(state.interviewTranscript ?? [])]
 

@@ -582,6 +582,8 @@ export async function renderRun(name: string): Promise<Response> {
     hasFinalMd,
     hasFinalHtml,
     hasInputMd: files.includes("input.md"),
+    hasTopic: Boolean(requestJson?.topic?.trim()),
+    hasReaderProfile: files.includes("reader-profile.json"),
     designStatus: design?.status ?? null,
   })
   const runControlsHtml = renderRunControlsSection({

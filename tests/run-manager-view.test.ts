@@ -18,10 +18,14 @@ describe("resolveRunResumeActions", () => {
       hasFinalMd: false,
       hasFinalHtml: false,
       hasInputMd: false,
+      hasTopic: true,
+      hasReaderProfile: false,
       designStatus: null,
     })
     expect(actions.showResume).toBe(true)
     expect(actions.showRestartFromSource).toBe(false)
+    expect(actions.showRerunFreshInterview).toBe(true)
+    expect(actions.showRerunReuseProfile).toBe(false)
   })
 
   test("offers resume when research approved without final html", () => {
@@ -30,10 +34,14 @@ describe("resolveRunResumeActions", () => {
       hasFinalMd: true,
       hasFinalHtml: false,
       hasInputMd: true,
+      hasTopic: false,
+      hasReaderProfile: true,
       designStatus: "failed",
     })
     expect(actions.showResume).toBe(true)
     expect(actions.showRestartFromSource).toBe(true)
+    expect(actions.showRerunReuseProfile).toBe(true)
+    expect(actions.showRerunFreshInterview).toBe(true)
   })
 
   test("hides actions while running", () => {
@@ -42,21 +50,29 @@ describe("resolveRunResumeActions", () => {
       hasFinalMd: false,
       hasFinalHtml: false,
       hasInputMd: true,
+      hasTopic: true,
+      hasReaderProfile: true,
       designStatus: null,
     })
     expect(actions.showResume).toBe(false)
     expect(actions.showRestartFromSource).toBe(false)
+    expect(actions.showRerunReuseProfile).toBe(false)
+    expect(actions.showRerunFreshInterview).toBe(false)
   })
 
-  test("hides resume when design is complete", () => {
+  test("hides resume when design is complete but still offers rerun", () => {
     const actions = resolveRunResumeActions({
       isRunning: false,
       hasFinalMd: true,
       hasFinalHtml: true,
       hasInputMd: true,
+      hasTopic: false,
+      hasReaderProfile: true,
       designStatus: "approved",
     })
     expect(actions.showResume).toBe(false)
+    expect(actions.showRerunReuseProfile).toBe(true)
+    expect(actions.showRerunFreshInterview).toBe(true)
   })
 })
 
@@ -65,6 +81,8 @@ describe("renderRunActionStrip", () => {
     const html = renderRunActionStrip("my-run-abc", {
       showResume: true,
       showRestartFromSource: false,
+      showRerunReuseProfile: false,
+      showRerunFreshInterview: false,
     })
     expect(html).toContain("/api/runs/my-run-abc/resume")
     expect(html).toContain("Resume run")
@@ -74,15 +92,37 @@ describe("renderRunActionStrip", () => {
     const html = renderRunActionStrip("my-run-abc", {
       showResume: false,
       showRestartFromSource: true,
+      showRerunReuseProfile: false,
+      showRerunFreshInterview: false,
     })
     expect(html).toContain("/api/runs/my-run-abc/restart-from-source")
     expect(html).toContain("New run from source document")
   })
 
+  test("renders both rerun buttons", () => {
+    const html = renderRunActionStrip("my-run-abc", {
+      showResume: false,
+      showRestartFromSource: false,
+      showRerunReuseProfile: true,
+      showRerunFreshInterview: true,
+    })
+    expect(html).toContain("/api/runs/my-run-abc/rerun")
+    expect(html).toContain('name="interview" value="reuse"')
+    expect(html).toContain('name="interview" value="fresh"')
+    expect(html).toContain("Rerun (reuse profile)")
+    expect(html).toContain("Rerun (fresh interview)")
+    expect(html).toContain("Start a new run")
+  })
+
   test("renders archive button when showArchive is set", () => {
     const html = renderRunActionStrip(
       "my-run-abc",
-      { showResume: false, showRestartFromSource: false },
+      {
+        showResume: false,
+        showRestartFromSource: false,
+        showRerunReuseProfile: false,
+        showRerunFreshInterview: false,
+      },
       { showArchive: true },
     )
     expect(html).toContain("/api/runs/my-run-abc/archive")
