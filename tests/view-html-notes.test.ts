@@ -9,7 +9,9 @@ import {
 } from "../src/view/html-notes-store.ts"
 import { addNoteTag } from "../src/tags-store.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
-import { renderRun, serveRawFile, serveSharedRun } from "../src/view/pages.ts"
+import { renderRun, serveRawFile, serveSharedByToken } from "../src/view/pages.ts"
+import { handleShareApi } from "../src/view/share-api.ts"
+import { ensureShareLink, revokeShareLink } from "../src/view/share-store.ts"
 
 let dir: string
 let originalDataDir: string | undefined
@@ -135,21 +137,45 @@ describe("serveRawFile html handling", () => {
 })
 
 describe("published html sharing", () => {
-  test("returns exact html only for successful runs", async () => {
-    const incomplete = await serveSharedRun("alpha-run")
-    expect(incomplete.status).toBe(404)
+  test("serves exact html for a share token", async () => {
+    const missing = await serveSharedByToken("not-a-real-token-value-xxxxxxxxxx")
+    expect(missing.status).toBe(404)
 
-    await writeFile(join(dir, "runs", "alpha-run", "final.md"), "# Approved")
-    const shared = await serveSharedRun("alpha-run")
+    const link = await ensureShareLink("alpha-run")
+    const shared = await serveSharedByToken(link.token)
     expect(shared.status).toBe(200)
+    expect(shared.headers.get("content-type")).toContain("text/html")
     expect(await shared.text()).toBe("<html><body>Hello</body></html>")
   })
 
-  test("shows the share link on a successful run page", async () => {
-    await writeFile(join(dir, "runs", "alpha-run", "final.md"), "# Approved")
+  test("create is idempotent and revoke 404s the public url", async () => {
+    const created = await handleShareApi(
+      new Request("http://localhost/api/runs/alpha-run/share", { method: "POST" }),
+      "/api/runs/alpha-run/share",
+    )
+    expect(created?.status).toBe(200)
+    const first = await created!.json() as { token: string; url: string }
+    expect(first.url).toBe(`/share/${first.token}`)
+
+    const again = await handleShareApi(
+      new Request("http://localhost/api/runs/alpha-run/share", { method: "POST" }),
+      "/api/runs/alpha-run/share",
+    )
+    const second = await again!.json() as { token: string }
+    expect(second.token).toBe(first.token)
+
+    expect((await serveSharedByToken(first.token)).status).toBe(200)
+    await revokeShareLink("alpha-run")
+    expect((await serveSharedByToken(first.token)).status).toBe(404)
+  })
+
+  test("shows share controls on a run page with final.html", async () => {
     await writeFile(join(dir, "runs", "alpha-run", "request.json"), JSON.stringify({ topic: "Alpha" }))
 
     const response = await renderRun("alpha-run")
-    expect(await response.text()).toContain('/runs/alpha-run/share')
+    const body = await response.text()
+    expect(body).toContain("Create share link")
+    expect(body).toContain("data-share-create")
+    expect(body).not.toContain("/runs/alpha-run/share")
   })
 })

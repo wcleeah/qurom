@@ -1697,6 +1697,41 @@ code {
   flex-direction: column;
   gap: 0.65rem;
 }
+.share-section {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+.share-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.share-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.share-active {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.share-url {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  word-break: break-all;
+}
+.share-status {
+  min-height: 1.1em;
+  margin: 0;
+}
 .round-chip.active {
   border-color: var(--accent);
   background: var(--accent-bg, rgba(59, 130, 246, 0.08));

@@ -21,9 +21,10 @@ import {
 } from "./html-ask-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
 import { renderLibraryPage } from "./library-page"
-import { renderIndex, renderNodePage, renderFilesPage, renderRun, serveRawFile, serveSharedRun } from "./pages"
+import { renderIndex, renderNodePage, renderFilesPage, renderRun, serveRawFile, serveSharedByToken } from "./pages"
 import { handleOpencodeBootstrapPost } from "./opencode-bootstrap-view"
 import { handleRunApi } from "./run-api"
+import { handleShareApi } from "./share-api"
 import { handleTagsApi } from "./tags-api"
 import { resolveRunName, safeFilePath, HOST, PORT, safeRunPath } from "./paths"
 import { setRunRead } from "./read-store"
@@ -74,6 +75,9 @@ export function startViewServer(): void {
 
       const runApiResponse = await handleRunApi(req, path, url)
       if (runApiResponse) return runApiResponse
+
+      const shareApiResponse = await handleShareApi(req, path)
+      if (shareApiResponse) return shareApiResponse
 
       if (path === "/api/opencode-bootstrap" && req.method === "POST") {
         try {
@@ -517,12 +521,12 @@ export function startViewServer(): void {
         }
       }
 
-      const shareMatch = path.match(/^\/runs\/(.+?)\/share\/?$/)
-      if (shareMatch) {
+      const publicShareMatch = path.match(/^\/share\/([^/]+)\/?$/)
+      if (publicShareMatch) {
         try {
-          return await serveSharedRun(decodeURIComponent(shareMatch[1]))
+          return await serveSharedByToken(decodeURIComponent(publicShareMatch[1]))
         } catch (e) {
-          console.error("Shared run error:", e)
+          console.error("Public share error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

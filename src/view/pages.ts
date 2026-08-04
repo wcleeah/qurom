@@ -31,6 +31,8 @@ import { getRunsDir, resolveRunName, safeFilePath, safeRunPath } from "./paths"
 import { renderRefreshControls } from "./refresh-controls"
 import { READ_SCRIPT } from "./read-script"
 import { isRunUnread, touchRunAccess } from "./read-store"
+import { renderSharePanel, SHARE_SCRIPT } from "./share-ui"
+import { getShareLinkByRun, getShareLinkByToken, isValidShareToken } from "./share-store"
 import { contentType, escapeHtml, formatBytes, formatCostUsd, formatElapsed, formatUsagePair, renderMarkdown, statusDot } from "./utils"
 import type { RequestJson, RunStatus } from "./types"
 
@@ -506,15 +508,13 @@ export async function renderRun(name: string): Promise<Response> {
   let finalOutputHtml = ""
   const finalOutputLinks: string[] = []
 
+  let sharePanelHtml = ""
   if (hasFinalHtml) {
     finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.html">
   Open final.html →
 </a>`)
-    if (hasFinalMd && !files.includes("design-failure.json")) {
-      finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/share">
-  Share published HTML →
-</a>`)
-    }
+    const shareLink = await getShareLinkByRun(name)
+    sharePanelHtml = renderSharePanel(name, shareLink)
   } else {
     if (hasFinalMd) {
       const sz = fileSizes.get("final.md") ?? 0
@@ -550,12 +550,13 @@ export async function renderRun(name: string): Promise<Response> {
     }
   }
 
-  if (finalOutputLinks.length > 0) {
+  if (finalOutputLinks.length > 0 || sharePanelHtml) {
     finalOutputHtml = `<div class="section">
   <h2>Final output</h2>
   <div class="final-output-links">
     ${finalOutputLinks.join("\n")}
   </div>
+  ${sharePanelHtml ? `<div class="share-section"><h3 class="share-heading">Public share</h3>${sharePanelHtml}</div>` : ""}
 </div>`
   }
 
@@ -668,6 +669,7 @@ ${debugLogSection}
 ${markdownSection}
 ${filesSection}
 ${READ_SCRIPT}
+${hasFinalHtml ? SHARE_SCRIPT : ""}
 ${hasResearchRounds ? ROUND_TABS_SCRIPT : ""}
 ${isRunning ? POLLING_SCRIPT : ""}
 ${articleTagsSection ? TAG_FORMS_SCRIPT : ""}`
@@ -687,26 +689,19 @@ ${articleTagsSection ? TAG_FORMS_SCRIPT : ""}`
 }
 
 // ---------------------------------------------------------------------------
-// Route: GET /runs/:name/share
+// Route: GET /share/:token
 // ---------------------------------------------------------------------------
 
-export async function serveSharedRun(name: string): Promise<Response> {
-  const canonical = await canonicalRunResponse(name, "/share")
-  if (canonical.early) return canonical.early
-  name = canonical.runName
-
-  let files: string[]
-  try {
-    files = await getRunFiles(name)
-  } catch {
-    return new Response("Not found", { status: 404 })
-  }
-  if (!files.includes("final.md") || !files.includes("final.html") || files.includes("design-failure.json")) {
+export async function serveSharedByToken(token: string): Promise<Response> {
+  if (!isValidShareToken(token)) {
     return new Response("Not found", { status: 404 })
   }
 
+  const link = await getShareLinkByToken(token)
+  if (!link) return new Response("Not found", { status: 404 })
+
   try {
-    const file = Bun.file(safeFilePath(name, "final.html"))
+    const file = Bun.file(safeFilePath(link.runName, "final.html"))
     if (!(await file.exists())) return new Response("Not found", { status: 404 })
     return new Response(file, {
       headers: { "content-type": "text/html; charset=utf-8" },
