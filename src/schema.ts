@@ -61,7 +61,7 @@ export const inputRequestSchema = z
     }
   })
 
-export const graphInputSchema = z.object({
+const baseGraphInputSchema = z.object({
   inputMode: inputModeSchema,
   topic: nonEmptyStringSchema.optional(),
   documentPath: nonEmptyStringSchema.optional(),
@@ -333,6 +333,13 @@ export const readerCalibrationProfileSchema = z.object({
     treatment: readerGapTreatmentSchema,
     rationale: z.string(),
   })),
+})
+
+/** Graph start input: request fields plus optional seeded reader interview. */
+export const graphInputSchema = baseGraphInputSchema.extend({
+  /** When set with readerInterviewComplete, discoverReader skips the interview. */
+  readerProfile: readerCalibrationProfileSchema.optional(),
+  readerInterviewComplete: z.boolean().optional(),
 })
 
 export const readerInterviewTurnSchema = z.object({

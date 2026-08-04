@@ -4,6 +4,8 @@ import type { RunStatus } from "./types"
 export type RunResumeActions = {
   showResume: boolean
   showRestartFromSource: boolean
+  showRerunReuseProfile: boolean
+  showRerunFreshInterview: boolean
 }
 
 export function resolveRunResumeActions(input: {
@@ -11,19 +13,30 @@ export function resolveRunResumeActions(input: {
   hasFinalMd: boolean
   hasFinalHtml: boolean
   hasInputMd: boolean
+  hasTopic: boolean
+  hasReaderProfile: boolean
   designStatus?: RunStatus | "running" | null
 }): RunResumeActions {
   if (input.isRunning) {
-    return { showResume: false, showRestartFromSource: false }
+    return {
+      showResume: false,
+      showRestartFromSource: false,
+      showRerunReuseProfile: false,
+      showRerunFreshInterview: false,
+    }
   }
 
   const showResume =
     !input.hasFinalMd
     || (input.hasFinalMd && !input.hasFinalHtml && input.designStatus !== "approved")
 
+  const canRerun = input.hasTopic || input.hasInputMd
+
   return {
     showResume,
     showRestartFromSource: input.hasInputMd,
+    showRerunReuseProfile: canRerun && input.hasReaderProfile,
+    showRerunFreshInterview: canRerun,
   }
 }
 
@@ -45,6 +58,20 @@ function renderRestartFromSourceForm(runName: string, disabled: boolean): string
 </form>`
 }
 
+function renderRerunReuseForm(runName: string, disabled: boolean): string {
+  return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/rerun">
+  <input type="hidden" name="interview" value="reuse" />
+  <button type="submit" class="btn btn-secondary"${disabled ? " disabled" : ""}>Rerun (reuse profile)</button>
+</form>`
+}
+
+function renderRerunFreshForm(runName: string, disabled: boolean): string {
+  return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/rerun">
+  <input type="hidden" name="interview" value="fresh" />
+  <button type="submit" class="btn btn-secondary"${disabled ? " disabled" : ""}>Rerun (fresh interview)</button>
+</form>`
+}
+
 function renderArchiveForm(runName: string): string {
   return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/archive">
   <button type="submit" class="btn btn-secondary">Archive run</button>
@@ -57,7 +84,8 @@ export function renderRunActionStrip(
   options?: { runActiveGlobally?: boolean; showArchive?: boolean },
 ): string {
   const showArchive = options?.showArchive === true
-  if (!actions.showResume && !actions.showRestartFromSource && !showArchive) return ""
+  const hasRerun = actions.showRerunReuseProfile || actions.showRerunFreshInterview
+  if (!actions.showResume && !actions.showRestartFromSource && !hasRerun && !showArchive) return ""
 
   const disabled = options?.runActiveGlobally === true
   const busyNote = disabled
@@ -69,6 +97,11 @@ export function renderRunActionStrip(
     actions.showRestartFromSource ? renderRestartFromSourceForm(runName, disabled) : "",
   ].filter(Boolean).join("\n")
 
+  const rerunButtons = [
+    actions.showRerunReuseProfile ? renderRerunReuseForm(runName, disabled) : "",
+    actions.showRerunFreshInterview ? renderRerunFreshForm(runName, disabled) : "",
+  ].filter(Boolean).join("\n")
+
   const archiveButtons = showArchive ? renderArchiveForm(runName) : ""
 
   const sections: string[] = []
@@ -76,6 +109,11 @@ export function renderRunActionStrip(
     sections.push(`<span class="run-actions-label">Continue this run</span>
   <div class="run-actions-buttons">${continueButtons}</div>
   ${busyNote}`)
+  }
+  if (rerunButtons) {
+    sections.push(`<span class="run-actions-label">Start a new run</span>
+  <div class="run-actions-buttons">${rerunButtons}</div>
+  ${continueButtons ? "" : busyNote}`)
   }
   if (archiveButtons) {
     sections.push(`<span class="run-actions-label">Manage</span>

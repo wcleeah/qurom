@@ -23,6 +23,8 @@ const {
   drafterReviewPrompt,
   readerContextBlock,
   repeatsPreviousReaderQuestion,
+  ingestRequest,
+  hasSeededReaderInterview,
 } = await import("../src/graph")
 const { loadPromptBundle } = await import("../src/prompt-assets")
 const { promptAssetFiles } = await import("../src/prompt-asset-defs")
@@ -313,6 +315,49 @@ describe("reader-profile.json artifact shape", () => {
     await writeFile(profileFile, JSON.stringify(profile, null, 2))
     const loaded = JSON.parse(await Bun.file(profileFile).text())
     expect(readerCalibrationProfileSchema.safeParse(loaded).success).toBe(true)
+  })
+})
+
+describe("seeded reader interview for reruns", () => {
+  test("hasSeededReaderInterview requires both complete flag and profile", () => {
+    expect(hasSeededReaderInterview({
+      readerInterviewComplete: true,
+      readerProfile: sampleReaderProfile(),
+    })).toBe(true)
+    expect(hasSeededReaderInterview({
+      readerInterviewComplete: true,
+      readerProfile: undefined,
+    })).toBe(false)
+    expect(hasSeededReaderInterview({
+      readerInterviewComplete: false,
+      readerProfile: sampleReaderProfile(),
+    })).toBe(false)
+  })
+
+  test("ingestRequest copies a seeded complete profile into initial state", async () => {
+    const profile = sampleReaderProfile()
+    const state = await ingestRequest({
+      inputMode: "topic",
+      topic: "What is MLX?",
+      requestId: "seeded-1",
+      readerProfile: profile,
+      readerInterviewComplete: true,
+    })
+    expect(state.readerInterviewComplete).toBe(true)
+    expect(state.readerProfile).toEqual(profile)
+    expect(state.topic).toBe("What is MLX?")
+  })
+
+  test("ingestRequest ignores a profile without the complete flag", async () => {
+    const state = await ingestRequest({
+      inputMode: "topic",
+      topic: "What is MLX?",
+      requestId: "seeded-2",
+      readerProfile: sampleReaderProfile(),
+      readerInterviewComplete: false,
+    })
+    expect(state.readerInterviewComplete).toBeUndefined()
+    expect(state.readerProfile).toBeUndefined()
   })
 })
 

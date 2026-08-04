@@ -1,5 +1,6 @@
 import { inputRequestSchema } from "../schema"
 import { readRunSourceDocument } from "../document-input"
+import { parseRerunInterviewMode } from "../run-rerun"
 import {
   RunManagerError,
   getRunManager,
@@ -95,6 +96,33 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
         documentText,
       })
       return redirectOrJson(req, url, `/runs/${encodeURIComponent(runPath)}`, { ok: true, runId, runPath })
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
+  const rerunMatch = path.match(/^\/api\/runs\/(.+?)\/rerun$/)
+  if (rerunMatch && req.method === "POST") {
+    try {
+      const runRef = decodeURIComponent(rerunMatch[1])
+      const raw = await req.text()
+      let interviewRaw: unknown = url.searchParams.get("interview")
+      if (raw.trim()) {
+        if (raw.trim().startsWith("{")) {
+          const body = JSON.parse(raw) as { interview?: unknown }
+          interviewRaw = body.interview ?? interviewRaw
+        } else {
+          interviewRaw = new URLSearchParams(raw).get("interview") ?? interviewRaw
+        }
+      }
+      const interview = parseRerunInterviewMode(interviewRaw)
+      const { runId, runPath } = await getRunManager().rerunResearch(runRef, { interview })
+      return redirectOrJson(req, url, `/runs/${encodeURIComponent(runPath)}`, {
+        ok: true,
+        runId,
+        runPath,
+        interview,
+      })
     } catch (error) {
       return errorResponse(error, req, url)
     }

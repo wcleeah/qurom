@@ -162,6 +162,7 @@ Start runs from the index page, or via HTTP API:
 
 - `POST /api/runs` — new research run (`inputMode`, `topic` or `documentText` / `documentPath`)
 - `POST /api/runs/:id/restart-from-source` — new document run from a prior run's `input.md`
+- `POST /api/runs/:id/rerun` — new run from a prior run's topic or `input.md` (`interview=reuse|fresh`; reuse seeds `reader-profile.json` and skips the interview)
 - `POST /api/runs/:id/resume` — resume research or design from checkpoint (`node` optional)
 - `POST /api/runs/:id/cancel` — cancel active run
 - `GET /api/status` — active run + provider lifecycle status
