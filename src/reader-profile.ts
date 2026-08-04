@@ -51,15 +51,16 @@ export function readerContextBlock(profile: ReaderCalibrationProfile | undefined
   if (canAssume.length > 0) {
     lines.push(`Reader already knows (do not re-teach): ${canAssume.join(", ")}`)
   }
-  const prereqConcepts = [...mustExplain, ...briefRecap]
-  if (prereqConcepts.length > 0) {
-    lines.push(`Include a Prerequisites section covering: ${prereqConcepts.join(", ")}.`)
-    if (mustExplain.length > 0) {
-      lines.push(`Explain fully before the main topic: ${mustExplain.join(", ")}.`)
-    }
-    if (briefRecap.length > 0) {
-      lines.push(`Brief recap only in Prerequisites: ${briefRecap.join(", ")}.`)
-    }
+  if (mustExplain.length > 0) {
+    lines.push(`Must ground once in the throughline (true priors / unknown concepts): ${mustExplain.join(", ")}.`)
+  }
+  if (briefRecap.length > 0) {
+    lines.push(`Brief recap at first use only: ${briefRecap.join(", ")}.`)
+  }
+  if (mustExplain.length > 0 || briefRecap.length > 0) {
+    lines.push(
+      "Do not add a separate Prerequisites section. Do not explain the same concept fully twice.",
+    )
   }
 
   return lines.join("\n")

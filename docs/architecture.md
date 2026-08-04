@@ -267,13 +267,13 @@ Reader discovery is the project's human-in-the-loop step. It exists to prevent d
 The prompt asks the interviewer to discover:
 
 - The reader's learning goal.
-- Which prerequisite concepts matter for the topic.
-- Whether the reader is `familiar`, `heard-of`, or `unknown` for each concept.
+- Which concepts matter for calibration — true priors versus topic concepts.
+- How to treat each inferred gap (`must-explain`, `brief-recap`, or `can-assume`).
 
 The resulting profile affects drafting through `readerContextBlock()`:
 
-- Known concepts are marked as already familiar.
-- Unknown or weak concepts are requested in a `Prerequisites` section.
+- Known concepts are marked as already familiar (`can-assume`).
+- Unknown or weak concepts are listed as grounding/recap guidance for the throughline — not as a required `Prerequisites` section.
 - The learning goal is injected so the draft can prioritize the right depth.
 
 If the feature is disabled or the turn budget is exhausted, the graph continues without a profile.

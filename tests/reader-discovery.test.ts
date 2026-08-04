@@ -248,9 +248,11 @@ describe("reader interview prompt assets", () => {
     expect(bundle.assets.readerInterviewerInterview).toContain("turn {turn}")
     expect(bundle.assets.readerInterviewerInterview).toContain("do not quiz them on terminology")
     expect(bundle.assets.readerInterviewerInterview).toContain("do not force prerequisites")
+    expect(bundle.assets.readerInterviewerInterview).toContain("true priors from topic concepts")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("Continue the reader interview")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("{profileSoFar}")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("do not force prerequisites")
+    expect(bundle.assets.readerInterviewerFollowUp).toContain("true priors from topic concepts")
     expect(bundle.assets.readerInterviewerDuplicateCorrection).toContain("previous response repeated")
     expect(bundle.assets.readerInterviewerInterview).toContain("`newQuestions`")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("`newQuestions`")
@@ -341,15 +343,17 @@ describe("reader profile threaded to prompt-contract functions", () => {
     promptBundle = await loadPromptBundle(testConfig)
   })
 
-  test("readerContextBlock lists intent, competence, and prerequisites from inferred gaps", () => {
+  test("readerContextBlock lists intent, competence, and throughline grounding from inferred gaps", () => {
     const block = readerContextBlock(profileState())
     expect(block).toContain("Reader goal: decide if MLX is worth learning")
     expect(block).toContain("Desired depth: evaluation")
     expect(block).toContain("In-topic level (intermediate)")
     expect(block).toContain("Reader already knows (do not re-teach): tensor ops")
-    expect(block).toContain("Include a Prerequisites section covering: autograd, Swift")
-    expect(block).toContain("Explain fully before the main topic: autograd")
-    expect(block).toContain("Brief recap only in Prerequisites: Swift")
+    expect(block).toContain("Must ground once in the throughline (true priors / unknown concepts): autograd")
+    expect(block).toContain("Brief recap at first use only: Swift")
+    expect(block).toContain("Do not add a separate Prerequisites section")
+    expect(block).not.toContain("Include a Prerequisites section covering")
+    expect(block).not.toContain("Explain fully before the main topic")
   })
 
   test("readerContextBlock returns empty when no profile (default-reader fallback)", () => {
@@ -360,13 +364,15 @@ describe("reader profile threaded to prompt-contract functions", () => {
 
   test("fullDraftPrompt includes the reader context block when a profile is set", () => {
     const prompt = fullDraftPrompt(testConfig, promptBundle, profileState())
-    expect(prompt).toContain("Include a Prerequisites section covering: autograd, Swift")
+    expect(prompt).toContain("Must ground once in the throughline (true priors / unknown concepts): autograd")
     expect(prompt).toContain("Desired depth: evaluation")
+    expect(prompt).toContain("ground each one once where the argument needs it")
+    expect(prompt).not.toContain("Include a Prerequisites section covering")
   })
 
   test("fullDraftPrompt omits reader context when no profile is set", () => {
     const prompt = fullDraftPrompt(testConfig, promptBundle, profileState({ readerProfile: undefined }))
-    expect(prompt).not.toContain("Prerequisites section")
+    expect(prompt).not.toContain("Must ground once in the throughline")
     expect(prompt).not.toContain("Reader goal")
   })
 
@@ -384,7 +390,8 @@ describe("reader profile threaded to prompt-contract functions", () => {
 
   test("auditPrompt includes the reader context block when a profile is set", () => {
     const prompt = auditPrompt(testConfig, promptBundle, "source-auditor", profileState(), "audit.json")
-    expect(prompt).toContain("Include a Prerequisites section covering: autograd, Swift")
+    expect(prompt).toContain("Must ground once in the throughline (true priors / unknown concepts): autograd")
+    expect(prompt).not.toContain("Include a Prerequisites section covering")
   })
 
   test("auditPrompt scopes reader calibration per auditor", () => {
