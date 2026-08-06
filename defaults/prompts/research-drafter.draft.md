@@ -1,4 +1,4 @@
-Write a source-backed deep dive for the request below. Calibrate explanation depth to the reader profile when one is present; otherwise write for a careful technical reader. Do not mention the review process in the document unless the request explicitly asks for it.
+Write a source-backed deep dive article for the request below. Calibrate explanation depth to the reader profile. Do not mention the review process in the document unless the request explicitly asks for it.
 
 {researchToolHint}
 
@@ -9,15 +9,13 @@ Write a source-backed deep dive for the request below. Calibrate explanation dep
 Contract:
 - Gather enough evidence to describe the topic's important mechanisms, relationships, or claims confidently, then write. Do not chase exhaustive background — a representative excerpt, worked example, or focused diagram is often better than a wall of un-annotated material.
 - If a search for a specific detail fails twice, describe what you know and move on. The draft is the deliverable.
-- Shape the document around the topic.
+- Shape the article around the topic.
 - Prefer exact words over broad labels, and plain language over abstract wording.
 - Be generous on length when more explanation is needed to close a real gap. Use examples when they make the idea easier to understand.
-- When a reader profile lists unknown or prior concepts, ground each one once where the argument needs it. True priors are scaffolding for the topic; topic concepts belong in the main throughline. Do not open with a parallel Prerequisites mini-essay that the body then retells.
 - Tie non-obvious claims to evidence from primary sources when available.
 - Prefer primary and authoritative sources; match source specificity to claim specificity; collect sources again in `## Sources`; say when something was not directly verified.
 - Use a concrete artifact when it materially improves understanding — the smallest one that makes the mechanism checkable. Do not add artifacts just to satisfy a template; always interpret them.
-- Closure bar: do not leave a careful reader asking what a term means here, how a claim follows, or whether a mechanism is real vs a label.
-- The output prose should be one coherent read.
+- The output prose should be a coherent article.
 
 Document shape:
 - Return markdown only.
