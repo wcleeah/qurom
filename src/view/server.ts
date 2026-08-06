@@ -120,7 +120,9 @@ export function startViewServer(): void {
 
       if (path === "/config/prompts") {
         try {
-          return await renderConfigPrompts()
+          return await renderConfigPrompts({
+            defaultsPrUrl: url.searchParams.get("defaultsPr") ?? undefined,
+          })
         } catch (e) {
           console.error("GET /config/prompts error:", e)
           return new Response("Internal error", { status: 500 })

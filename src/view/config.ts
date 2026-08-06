@@ -9,8 +9,9 @@ import {
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { deleteMcpServer, listConfigSummary, loadMcpRegistryFromStore, normalizeQuorumConfig, saveMcpServer, setEnabledMcpServers, updatePromptAsset, updatePromptAssets, updateQuorumConfig, updateRoleBinding } from "../config-store"
-import { listDefaultsPrompts } from "../defaults-store"
-import { promptAssetDefs, type PromptAssetKey } from "../prompt-asset-defs"
+import { listDefaultsPrompts, updateDefaultsPrompt } from "../defaults-store"
+import { openDefaultsPullRequest } from "../github-defaults-pr"
+import { promptAssetDefs, promptAssetFiles, type PromptAssetKey } from "../prompt-asset-defs"
 import { promptsMatch } from "../prompt-compare"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
 import { getProviderLifecycle } from "../providers/lifecycle"
@@ -21,7 +22,9 @@ import { card, section, summaryRow, summaryTable } from "./html"
 import { layout } from "./layout"
 import { configNavbarOptions } from "./config-nav"
 import { readActiveOpencodeAgent, renderOpencodeAgentReadonly } from "./opencode-agent-display"
+import { promptDiffScript } from "./prompt-diff-script"
 import { parseQuorumConfigForm, quorumConfigFormScript, renderQuorumConfigForm } from "./quorum-config-form"
+import { viewServerAdminEnabled } from "./server-options"
 import { escapeHtml } from "./utils"
 import { mcpServerSchema, type McpServer } from "../mcp-config"
 
@@ -363,8 +366,9 @@ export async function renderConfigRoles(): Promise<Response> {
   })
 }
 
-export async function renderConfigPrompts(): Promise<Response> {
+export async function renderConfigPrompts(options?: { defaultsPrUrl?: string }): Promise<Response> {
   const config = await loadRuntimeConfig()
+  const admin = viewServerAdminEnabled()
   const [summary, defaults] = await Promise.all([
     listConfigSummary(config.env),
     listDefaultsPrompts(config.env.QUORUM_WORKSPACE_DIRECTORY),
@@ -378,23 +382,37 @@ export async function renderConfigPrompts(): Promise<Response> {
       .map(([key, def]) => {
         const prompt = promptByKey.get(key)
         const content = prompt?.content ?? ""
+        const defaultContent = defaultByKey.get(key) ?? ""
         const version = prompt?.version ?? 0
-        const diverted = !promptsMatch(content, defaultByKey.get(key))
+        const diverted = !promptsMatch(content, defaultContent)
         const status = diverted
-          ? `<span class="status-chip diverted" title="Active prompt differs from shipped default">Modified from default</span>`
-          : `<span class="status-chip matches" title="Active prompt matches shipped default">Matches default</span>`
-        return card(`<h3>${escapeHtml(def.label)} <span class="tiny-text muted-text">${escapeHtml(key)} v${version}</span> ${status}</h3>
+          ? `<button type="button" class="status-chip diverted" data-prompt-diff-toggle aria-expanded="false" title="Active prompt differs from shipped default — click to show diff">Modified from default</button>`
+          : `<button type="button" class="status-chip matches" data-prompt-diff-toggle aria-expanded="false" title="Active prompt matches shipped default — click to show diff">Matches default</button>`
+        const applyDefault = admin
+          ? `<button type="submit" class="btn btn-secondary" formaction="/config/prompts/${encodeURIComponent(key)}/apply-default">Apply to default</button>`
+          : ""
+        return card(`<div data-prompt-card data-prompt-key="${escapeHtml(key)}">
+  <h3>${escapeHtml(def.label)} <span class="tiny-text muted-text">${escapeHtml(key)} v${version}</span> ${status}</h3>
+  <div class="prompt-diff-panel" data-prompt-diff-panel hidden></div>
   <p class="tiny-text muted-text"><code>${escapeHtml(def.file)}</code></p>
-  <textarea name="content:${escapeHtml(key)}" rows="14">${escapeHtml(content)}</textarea>
+  <textarea name="content:${escapeHtml(key)}" rows="14" data-prompt-active>${escapeHtml(content)}</textarea>
+  <textarea hidden data-prompt-default aria-hidden="true">${escapeHtml(defaultContent)}</textarea>
   <div class="form-actions">
     <button type="submit" class="btn btn-primary" formaction="/config/prompts/${encodeURIComponent(key)}">Save prompt</button>
-  </div>`)
+    ${applyDefault}
+  </div>
+</div>`, "prompt-card")
       })
     return section(role, cards.join("\n"))
   })
 
+  const prBanner = options?.defaultsPrUrl
+    ? `<div class="outcome-banner needs-revision">Defaults pull request: <a href="${escapeHtml(options.defaultsPrUrl)}" target="_blank" rel="noopener">${escapeHtml(options.defaultsPrUrl)}</a></div>`
+    : ""
+
   const body = [
-    `<div class="header-bar"><div class="header-main"><h1>Prompts</h1><p class="tiny-text muted-text">Each file is the full prompt for that call site. The graph only fills template placeholders.</p></div></div>`,
+    `<div class="header-bar"><div class="header-main"><h1>Prompts</h1><p class="tiny-text muted-text">Each file is the full prompt for that call site. The graph only fills template placeholders. Click the status chip to compare the live textarea with the shipped default.${admin ? " Admin: Apply to default writes the textarea into defaults/prompts and updates the grouped defaults PR." : ""}</p></div></div>`,
+    prBanner,
     `<form class="config-form prompts-batch-form" method="POST" action="/config/prompts">
   <div class="prompts-batch-actions form-actions">
     <button type="submit" class="btn btn-primary">Save all</button>
@@ -404,6 +422,7 @@ export async function renderConfigPrompts(): Promise<Response> {
   ].join("\n")
 
   return new Response(layout("Config Prompts", body, {
+    extraHead: promptDiffScript,
     navbar: configNavbarOptions("Prompts", "prompts"),
   }), {
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -554,6 +573,41 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
     const params = new URLSearchParams(await req.text())
     await updatePromptAssets(config.env, promptUpdatesFromParams(params))
     return new Response(null, { status: 303, headers: { Location: "/config/prompts" } })
+  }
+
+  const applyDefaultMatch = path.match(/^\/config\/prompts\/(.+)\/apply-default$/)
+  if (applyDefaultMatch) {
+    if (!viewServerAdminEnabled()) {
+      return new Response("Not found", { status: 404 })
+    }
+    const params = new URLSearchParams(await req.text())
+    const key = decodeURIComponent(applyDefaultMatch[1])
+    if (!(key in promptAssetFiles)) {
+      throw new Error(`Unknown prompt asset ${JSON.stringify(key)}`)
+    }
+    const content = promptContentFromParams(params, key)
+    const workspaceDir = config.env.QUORUM_WORKSPACE_DIRECTORY
+    await updateDefaultsPrompt(workspaceDir, key, content)
+    const filename = promptAssetFiles[key as PromptAssetKey]
+    const rel = `defaults/prompts/${filename}`
+    const result = await openDefaultsPullRequest({
+      workspaceDir,
+      changedRelativePaths: [rel],
+      summary: `apply active prompt ${key} to default`,
+    })
+    let prUrl: string | undefined
+    if (result.status === "created" || result.status === "updated") {
+      console.log(`Defaults PR ${result.status}: ${result.prUrl}`)
+      prUrl = result.prUrl
+    } else if (result.status === "error") {
+      console.error(`Defaults PR failed: ${result.message}`)
+    } else {
+      console.log(`Defaults PR skipped: ${result.reason}`)
+    }
+    const location = prUrl
+      ? `/config/prompts?defaultsPr=${encodeURIComponent(prUrl)}`
+      : "/config/prompts"
+    return new Response(null, { status: 303, headers: { Location: location } })
   }
 
   const promptMatch = path.match(/^\/config\/prompts\/(.+)$/)
