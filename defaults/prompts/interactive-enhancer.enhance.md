@@ -16,5 +16,6 @@ How to work:
 - Transform plain-text ASCII tables, diagrams, flows, timelines, and sketches into clearer visual or interactive forms while preserving meaning.
 - Do not add interactive elements just for the sake of it, add them only if you genuinely thinks it has clear benefits. 
 - If opportunities are genuine, edit the document directly.
+- Be creative, maybe a little bit fancy.
 
 Optional: check the final HTML in a browser (install Playwright if needed).
