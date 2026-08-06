@@ -777,33 +777,47 @@ ON CONFLICT(profile_id, domain) DO UPDATE SET
 }
 
 export async function updatePromptAsset(env: RuntimeEnv, key: string, content: string) {
-  if (!(key in promptAssetFiles)) throw new Error(`Unknown prompt asset ${JSON.stringify(key)}`)
-  if (!content.trim()) throw new Error("Prompt content cannot be empty")
+  await updatePromptAssets(env, [{ key, content }])
+}
+
+export async function updatePromptAssets(
+  env: RuntimeEnv,
+  updates: Array<{ key: string; content: string }>,
+) {
+  if (updates.length === 0) return
+  for (const update of updates) {
+    if (!(update.key in promptAssetFiles)) throw new Error(`Unknown prompt asset ${JSON.stringify(update.key)}`)
+    if (!update.content.trim()) throw new Error(`Prompt content cannot be empty for ${update.key}`)
+  }
   const store = getConfigStore(env)
   try {
     const profile = await ensureActiveProfile(store, env)
-    const before = store.db
-      .query<{ content: string }, [number, string]>("SELECT content FROM prompt_assets WHERE profile_id = ? AND key = ?")
-      .get(profile.id, key)
     const ts = nowIso()
-    store.db
-      .query(`
+    for (const update of updates) {
+      const before = store.db
+        .query<{ content: string }, [number, string]>("SELECT content FROM prompt_assets WHERE profile_id = ? AND key = ?")
+        .get(profile.id, update.key)
+      const next = update.content.trim()
+      if (before?.content.trim() === next) continue
+      store.db
+        .query(`
 INSERT INTO prompt_assets (profile_id, key, content, version, created_at, updated_at)
 VALUES (?, ?, ?, 1, ?, ?)
 ON CONFLICT(profile_id, key) DO UPDATE SET
   content = excluded.content,
   version = prompt_assets.version + 1,
   updated_at = excluded.updated_at
-      `)
-      .run(profile.id, key, content.trim(), ts, ts)
-    writeAudit(store, {
-      profileId: profile.id,
-      source: "view",
-      action: "update",
-      subject: `prompt:${key}`,
-      before: before?.content,
-      after: content.trim(),
-    })
+        `)
+        .run(profile.id, update.key, next, ts, ts)
+      writeAudit(store, {
+        profileId: profile.id,
+        source: "view",
+        action: "update",
+        subject: `prompt:${update.key}`,
+        before: before?.content,
+        after: next,
+      })
+    }
   } finally {
     store.close()
   }

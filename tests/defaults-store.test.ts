@@ -96,7 +96,10 @@ describe("defaults config UI", () => {
     expect(promptsHtml).toContain("source-auditor")
     expect(promptsHtml).toContain("sourceAuditorAudit")
     expect(promptsHtml).toContain("Apply to active")
+    expect(promptsHtml).toContain("Save all")
+    expect(promptsHtml).toContain('name="content:sourceAuditorAudit"')
     expect(promptsHtml).toContain('formaction="/config/defaults/apply/prompts/sourceAuditorAudit"')
+    expect(promptsHtml).toContain('formaction="/config/defaults/prompts/sourceAuditorAudit"')
     expect(promptsHtml).not.toContain('class="config-form inline-form"')
 
     const bindingsHtml = await renderConfigDefaultsBindings().then((r) => r.text())
@@ -128,5 +131,23 @@ describe("defaults config UI", () => {
     expect(response?.status).toBe(200)
     expect((await loadPromptAssetsFromStore(testRuntimeEnv({ dataDir, workspaceDir: dir }))).htmlDesignerDesign)
       .toBe("applied-from-form design prompt")
+  })
+
+  test("save all defaults prompts writes every posted content field", async () => {
+    const response = await handleConfigDefaultsPost(
+      new Request("http://localhost/config/defaults/prompts", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          "content:sourceAuditorAudit": "batch-default-audit",
+          "content:logicAuditorAudit": "batch-default-logic",
+        }).toString(),
+      }),
+      "/config/defaults/prompts",
+    )
+    expect(response?.status).toBe(303)
+    const prompts = await listDefaultsPrompts(dir)
+    expect(prompts.find((prompt) => prompt.key === "sourceAuditorAudit")?.content).toBe("batch-default-audit")
+    expect(prompts.find((prompt) => prompt.key === "logicAuditorAudit")?.content).toBe("batch-default-logic")
   })
 })
