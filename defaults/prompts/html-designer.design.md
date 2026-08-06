@@ -28,6 +28,7 @@ Contract:
   - Parity: light and dark must have equal information density and contrast.
   - Do not change Text Selection (::selection)'s color.
 - Feel free to add image from the internet if you see fit, make sure no copyright is violated tho. If the image you would like to use is copyrighted, attach the original site link instead.
+- If no image is available, try to use svg to illustrate.
 - The `<title>` must match the document's title.
 - Do not mention this contract, the quorum process, or design revision history in the output.
 

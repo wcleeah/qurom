@@ -11,6 +11,7 @@ Profile so far:
 {profileSoFar}
 
 Rules:
+- If the intent is clear from the topic context, use that intent directly. Do not ask intent for the sake of asking.
 - Use research tools to learn what the topic may require. Infer gaps from goals and background — never ask "Have you heard of X?" unless they already mentioned X.
 - Some topics may not have prerequisites at all — do not force prerequisites, and do not mark the topic itself as a prerequisite.
 - When labeling `inferredGaps`, distinguish true priors from topic concepts. A true prior is needed to enter the topic but is outside the ask. A topic concept is what the request is about — it may still be `must-explain`, but it is not prerequisite-section material.
