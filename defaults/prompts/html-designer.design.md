@@ -26,6 +26,7 @@ Contract:
   - Drive theme via `data-theme="light|dark"` on `<html>`. Honor `prefers-color-scheme` as default; provide a visible manual toggle (sun/moon, top-right) that persists to `localStorage`.
   - No flash of wrong theme: a blocking inline `<script>` in `<head>` sets `data-theme` from `localStorage` (falling back to `prefers-color-scheme`) before first paint. Do not place the theme bootstrap script at the end of `<body>`. Other custom scripts may live at end of body.
   - Parity: light and dark must have equal information density and contrast.
+  - Do not change Text Selection (::selection)'s color.
 - Feel free to add image from the internet if you see fit, make sure no copyright is violated tho. If the image you would like to use is copyrighted, attach the original site link instead.
 - The `<title>` must match the document's title.
 - Do not mention this contract, the quorum process, or design revision history in the output.
