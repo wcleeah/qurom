@@ -45,7 +45,7 @@ describe("config store", () => {
     expect(bindingCount).toBeGreaterThan(0)
     expect((await loadQuorumConfigFromStore(env())).maxRounds).toBeGreaterThan(0)
     expect((await loadRoleBindingsFromStore(env()))["source-auditor"]).toBeDefined()
-    expect((await loadPromptAssetsFromStore(env())).sourceAuditorAudit).toContain("source auditor")
+    expect((await loadPromptAssetsFromStore(env())).sourceAuditorAudit).toContain("source support")
   })
 
   test("role binding updates are stored separately from quorum policy", async () => {
@@ -111,6 +111,29 @@ describe("config store", () => {
     expect(assets.sourceAuditorAudit).toBe("updated audit prompt")
   })
 
+  test("save all active prompts updates every posted content field", async () => {
+    await ensureConfigInitialized(env())
+    process.env.QUORUM_DATA_DIR = dataDir
+    process.env.OPENCODE_DIRECTORY = dir
+    process.env.QUORUM_WORKSPACE_DIRECTORY = dir
+
+    const response = await handleConfigPost(
+      new Request("http://localhost/config/prompts", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          "content:sourceAuditorAudit": "batch-active-audit",
+          "content:logicAuditorAudit": "batch-active-logic",
+        }).toString(),
+      }),
+      "/config/prompts",
+    )
+    expect(response?.status).toBe(303)
+    const assets = await loadPromptAssetsFromStore(env())
+    expect(assets.sourceAuditorAudit).toBe("batch-active-audit")
+    expect(assets.logicAuditorAudit).toBe("batch-active-logic")
+  })
+
   test("view config routes render and update sqlite-backed settings", async () => {
     await ensureConfigInitialized(env())
     process.env.QUORUM_DATA_DIR = dataDir
@@ -130,6 +153,13 @@ describe("config store", () => {
     const promptHtml = await renderConfigPrompts().then((r) => r.text())
     expect(promptHtml).toContain("source-auditor")
     expect(promptHtml).toContain("sourceAuditorAudit")
+    expect(promptHtml).toContain("Save all")
+    expect(promptHtml).toContain("Matches default")
+    expect(promptHtml).toContain('name="content:sourceAuditorAudit"')
+
+    await updatePromptAsset(env(), "sourceAuditorAudit", "diverted active audit prompt")
+    const divertedHtml = await renderConfigPrompts().then((r) => r.text())
+    expect(divertedHtml).toContain("Modified from default")
 
     const req = new Request("http://localhost/config/roles/source-auditor", {
       method: "POST",

@@ -209,10 +209,30 @@ export async function applyDefaultsOpencodeAgent(workspaceDir: string, role: str
 }
 
 export async function updateDefaultsPrompt(workspaceDir: string, key: string, content: string) {
-  if (!(key in promptAssetFiles)) throw new Error(`Unknown prompt asset ${JSON.stringify(key)}`)
-  if (!content.trim()) throw new Error("Prompt content cannot be empty")
-  const filename = promptAssetFiles[key as PromptAssetKey]
-  await writeFile(safeDefaultsPath(workspaceDir, join("prompts", filename)), content.trim() + "\n", "utf8")
+  await updateDefaultsPrompts(workspaceDir, [{ key, content }])
+}
+
+export async function updateDefaultsPrompts(
+  workspaceDir: string,
+  updates: Array<{ key: string; content: string }>,
+): Promise<string[]> {
+  if (updates.length === 0) return []
+  const written: string[] = []
+  for (const update of updates) {
+    if (!(update.key in promptAssetFiles)) throw new Error(`Unknown prompt asset ${JSON.stringify(update.key)}`)
+    if (!update.content.trim()) throw new Error(`Prompt content cannot be empty for ${update.key}`)
+    const filename = promptAssetFiles[update.key as PromptAssetKey]
+    const abs = safeDefaultsPath(workspaceDir, join("prompts", filename))
+    const next = update.content.trim() + "\n"
+    const existing = Bun.file(abs)
+    if (await existing.exists()) {
+      const current = await existing.text()
+      if (current === next || current.trim() === update.content.trim()) continue
+    }
+    await writeFile(abs, next, "utf8")
+    written.push(`defaults/prompts/${filename}`)
+  }
+  return written
 }
 
 export async function updateDefaultsOpencodeAgent(workspaceDir: string, role: string, content: string) {

@@ -159,7 +159,9 @@ export function startViewServer(): void {
 
       if (path === "/config/defaults") {
         try {
-          return await renderConfigDefaultsIndex()
+          return await renderConfigDefaultsIndex({
+            defaultsPrUrl: url.searchParams.get("defaultsPr") ?? undefined,
+          })
         } catch (e) {
           console.error("GET /config/defaults error:", e)
           return new Response("Internal error", { status: 500 })
@@ -168,7 +170,9 @@ export function startViewServer(): void {
 
       if (path === "/config/defaults/prompts") {
         try {
-          return await renderConfigDefaultsPrompts()
+          return await renderConfigDefaultsPrompts({
+            defaultsPrUrl: url.searchParams.get("defaultsPr") ?? undefined,
+          })
         } catch (e) {
           console.error("GET /config/defaults/prompts error:", e)
           return new Response("Internal error", { status: 500 })
@@ -177,7 +181,9 @@ export function startViewServer(): void {
 
       if (path === "/config/defaults/opencode") {
         try {
-          return await renderConfigDefaultsOpencode()
+          return await renderConfigDefaultsOpencode({
+            defaultsPrUrl: url.searchParams.get("defaultsPr") ?? undefined,
+          })
         } catch (e) {
           console.error("GET /config/defaults/opencode error:", e)
           return new Response("Internal error", { status: 500 })
@@ -186,7 +192,9 @@ export function startViewServer(): void {
 
       if (path === "/config/defaults/bindings") {
         try {
-          return await renderConfigDefaultsBindings()
+          return await renderConfigDefaultsBindings({
+            defaultsPrUrl: url.searchParams.get("defaultsPr") ?? undefined,
+          })
         } catch (e) {
           console.error("GET /config/defaults/bindings error:", e)
           return new Response("Internal error", { status: 500 })

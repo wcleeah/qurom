@@ -8,8 +8,10 @@ import {
 } from "../opencode-usage-import"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { deleteMcpServer, listConfigSummary, loadMcpRegistryFromStore, normalizeQuorumConfig, saveMcpServer, setEnabledMcpServers, updatePromptAsset, updateQuorumConfig, updateRoleBinding } from "../config-store"
+import { deleteMcpServer, listConfigSummary, loadMcpRegistryFromStore, normalizeQuorumConfig, saveMcpServer, setEnabledMcpServers, updatePromptAsset, updatePromptAssets, updateQuorumConfig, updateRoleBinding } from "../config-store"
+import { listDefaultsPrompts } from "../defaults-store"
 import { promptAssetDefs, type PromptAssetKey } from "../prompt-asset-defs"
+import { promptsMatch } from "../prompt-compare"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
 import { getProviderLifecycle } from "../providers/lifecycle"
 import { rolesUsingProvider, validateProviderPrerequisites } from "../providers/registry"
@@ -363,8 +365,12 @@ export async function renderConfigRoles(): Promise<Response> {
 
 export async function renderConfigPrompts(): Promise<Response> {
   const config = await loadRuntimeConfig()
-  const summary = await listConfigSummary(config.env)
+  const [summary, defaults] = await Promise.all([
+    listConfigSummary(config.env),
+    listDefaultsPrompts(config.env.QUORUM_WORKSPACE_DIRECTORY),
+  ])
   const promptByKey = new Map(summary.prompts.map((prompt) => [prompt.key, prompt]))
+  const defaultByKey = new Map(defaults.map((prompt) => [prompt.key, prompt.content]))
   const roles = [...new Set(Object.values(promptAssetDefs).map((def) => def.role))].sort()
   const sections = roles.map((role) => {
     const cards = (Object.entries(promptAssetDefs) as Array<[PromptAssetKey, (typeof promptAssetDefs)[PromptAssetKey]]>)
@@ -373,19 +379,28 @@ export async function renderConfigPrompts(): Promise<Response> {
         const prompt = promptByKey.get(key)
         const content = prompt?.content ?? ""
         const version = prompt?.version ?? 0
-        const form = `<form class="config-form" method="POST" action="/config/prompts/${encodeURIComponent(key)}">
+        const diverted = !promptsMatch(content, defaultByKey.get(key))
+        const status = diverted
+          ? `<span class="status-chip diverted" title="Active prompt differs from shipped default">Modified from default</span>`
+          : `<span class="status-chip matches" title="Active prompt matches shipped default">Matches default</span>`
+        return card(`<h3>${escapeHtml(def.label)} <span class="tiny-text muted-text">${escapeHtml(key)} v${version}</span> ${status}</h3>
   <p class="tiny-text muted-text"><code>${escapeHtml(def.file)}</code></p>
-  <textarea name="content" rows="14">${escapeHtml(content)}</textarea>
-  <div class="form-actions"><button type="submit" class="btn btn-primary">Save prompt</button></div>
-</form>`
-        return card(`<h3>${escapeHtml(def.label)} <span class="tiny-text muted-text">${escapeHtml(key)} v${version}</span></h3>${form}`)
+  <textarea name="content:${escapeHtml(key)}" rows="14">${escapeHtml(content)}</textarea>
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary" formaction="/config/prompts/${encodeURIComponent(key)}">Save prompt</button>
+  </div>`)
       })
     return section(role, cards.join("\n"))
   })
 
   const body = [
     `<div class="header-bar"><div class="header-main"><h1>Prompts</h1><p class="tiny-text muted-text">Each file is the full prompt for that call site. The graph only fills template placeholders.</p></div></div>`,
-    ...sections,
+    `<form class="config-form prompts-batch-form" method="POST" action="/config/prompts">
+  <div class="prompts-batch-actions form-actions">
+    <button type="submit" class="btn btn-primary">Save all</button>
+  </div>
+  ${sections.join("\n")}
+</form>`,
   ].join("\n")
 
   return new Response(layout("Config Prompts", body, {
@@ -393,6 +408,21 @@ export async function renderConfigPrompts(): Promise<Response> {
   }), {
     headers: { "content-type": "text/html; charset=utf-8" },
   })
+}
+
+function promptUpdatesFromParams(params: URLSearchParams): Array<{ key: string; content: string }> {
+  const updates: Array<{ key: string; content: string }> = []
+  for (const [name, value] of params.entries()) {
+    if (!name.startsWith("content:")) continue
+    const key = name.slice("content:".length)
+    if (!(key in promptAssetDefs)) continue
+    updates.push({ key, content: value })
+  }
+  return updates
+}
+
+function promptContentFromParams(params: URLSearchParams, key: string): string {
+  return params.get(`content:${key}`) ?? params.get("content") ?? ""
 }
 
 export async function handleConfigPost(req: Request, path: string): Promise<Response | undefined> {
@@ -520,10 +550,17 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
     return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
   }
 
+  if (path === "/config/prompts") {
+    const params = new URLSearchParams(await req.text())
+    await updatePromptAssets(config.env, promptUpdatesFromParams(params))
+    return new Response(null, { status: 303, headers: { Location: "/config/prompts" } })
+  }
+
   const promptMatch = path.match(/^\/config\/prompts\/(.+)$/)
   if (promptMatch) {
     const params = new URLSearchParams(await req.text())
-    await updatePromptAsset(config.env, decodeURIComponent(promptMatch[1]), params.get("content") ?? "")
+    const key = decodeURIComponent(promptMatch[1])
+    await updatePromptAsset(config.env, key, promptContentFromParams(params, key))
     return new Response(null, { status: 303, headers: { Location: "/config/prompts" } })
   }
 

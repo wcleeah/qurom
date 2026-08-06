@@ -2415,6 +2415,48 @@ details[open] > .markdown-preview summary::before {
   align-items: center;
   gap: 0.5rem;
 }
+.status-chip {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.12rem 0.4rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.status-chip.matches {
+  background: var(--green-bg);
+  color: var(--green);
+  border-color: transparent;
+}
+.status-chip.diverted {
+  background: var(--orange-bg);
+  color: var(--orange);
+  border-color: transparent;
+}
+.status-chip.pending-pr {
+  background: var(--orange-bg);
+  color: var(--orange);
+  border-color: transparent;
+}
+.status-chip.pending-pr a {
+  color: inherit;
+  text-decoration: none;
+}
+.status-chip.pending-pr a:hover {
+  text-decoration: underline;
+}
+.prompts-batch-form .prompts-batch-actions {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 0.55rem 0;
+  margin-bottom: 0.75rem;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(4px);
+}
 .btn {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

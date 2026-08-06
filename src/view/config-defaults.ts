@@ -9,6 +9,7 @@ import {
   readDefaultsQuorumConfig,
   updateDefaultsOpencodeAgent,
   updateDefaultsPrompt,
+  updateDefaultsPrompts,
   updateDefaultsQuorumConfig,
   updateDefaultsRoleBinding,
 } from "../defaults-store"
@@ -18,7 +19,7 @@ import {
   updateQuorumConfig,
   updateRoleBinding,
 } from "../config-store"
-import { openDefaultsPullRequest } from "../github-defaults-pr"
+import { getPendingDefaultsPr, openDefaultsPullRequest, type DefaultsPrInfo } from "../github-defaults-pr"
 import { promptAssetDefs, promptAssetFiles, type PromptAssetKey } from "../prompt-asset-defs"
 import { defaultsConfigDbPath } from "../data-paths"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
@@ -44,10 +45,16 @@ function applyButton(path: string, label: string) {
   return `<button type="submit" class="btn btn-secondary" formaction="${escapeHtml(path)}" formmethod="post">${escapeHtml(label)}</button>`
 }
 
-export async function renderConfigDefaultsIndex(options?: { error?: string; draftConfig?: QuorumConfig }): Promise<Response> {
+export async function renderConfigDefaultsIndex(options?: {
+  error?: string
+  draftConfig?: QuorumConfig
+  defaultsPrUrl?: string
+}): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listDefaultsSummary(config.env.QUORUM_WORKSPACE_DIRECTORY)
   const defaultsConfig = options?.draftConfig ?? await loadDefaultsQuorumConfig(config.env.QUORUM_WORKSPACE_DIRECTORY)
+  const pending = await getPendingDefaultsPr()
+  const quorumChip = pendingPrChip("defaults/quorum.config.json", pending)
   const quorumConfigForm = renderQuorumConfigForm({
     action: "/config/defaults/quorum",
     config: defaultsConfig,
@@ -63,7 +70,8 @@ export async function renderConfigDefaultsIndex(options?: { error?: string; draf
   ].join("\n")
 
   const body = [
-    `<div class="header-bar"><div class="header-main"><h1>Default resources</h1><div class="meta-row"><span class="meta-item">Directory: <code>${escapeHtml(summary.root)}</code></span></div></div></div>`,
+    `<div class="header-bar"><div class="header-main"><h1>Default resources</h1><div class="meta-row"><span class="meta-item">Directory: <code>${escapeHtml(summary.root)}</code></span>${quorumChip}</div></div></div>`,
+    defaultsPrBanner(pending, options?.defaultsPrUrl),
     section("Overview", overviewCards),
     section("Quorum policy", quorumConfigForm),
   ].join("\n")
@@ -76,9 +84,45 @@ export async function renderConfigDefaultsIndex(options?: { error?: string; draf
   })
 }
 
-export async function renderConfigDefaultsPrompts(): Promise<Response> {
+function defaultsPrBanner(pr: DefaultsPrInfo | undefined, flashUrl?: string): string {
+  const url = flashUrl || pr?.url
+  if (!url) return ""
+  const label = pr?.state === "open"
+    ? `Pending defaults PR #${pr.number}`
+    : "Defaults pull request"
+  return `<div class="outcome-banner needs-revision">${escapeHtml(label)}: <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a></div>`
+}
+
+function pendingPrChip(path: string, pending: DefaultsPrInfo | undefined): string {
+  if (!pending || pending.state !== "open") return ""
+  if (!pending.paths.includes(path)) return ""
+  return `<span class="status-chip pending-pr" title="Included in open defaults PR #${pending.number}"><a href="${escapeHtml(pending.url)}" target="_blank" rel="noopener">PR pending</a></span>`
+}
+
+function promptUpdatesFromParams(params: URLSearchParams): Array<{ key: string; content: string }> {
+  const updates: Array<{ key: string; content: string }> = []
+  for (const [name, value] of params.entries()) {
+    if (!name.startsWith("content:")) continue
+    const key = name.slice("content:".length)
+    if (!(key in promptAssetFiles)) continue
+    updates.push({ key, content: value })
+  }
+  return updates
+}
+
+function promptContentFromParams(params: URLSearchParams, key: string): string {
+  return params.get(`content:${key}`) ?? params.get("content") ?? ""
+}
+
+export async function renderConfigDefaultsPrompts(options?: {
+  defaultsPrUrl?: string
+}): Promise<Response> {
   const config = await loadRuntimeConfig()
-  const prompts = await listDefaultsPrompts(config.env.QUORUM_WORKSPACE_DIRECTORY)
+  const workspaceDir = config.env.QUORUM_WORKSPACE_DIRECTORY
+  const [prompts, pending] = await Promise.all([
+    listDefaultsPrompts(workspaceDir),
+    getPendingDefaultsPr(),
+  ])
   const promptByKey = new Map(prompts.map((prompt) => [prompt.key, prompt]))
   const roles = [...new Set(Object.values(promptAssetDefs).map((def) => def.role))].sort()
   const sections = roles.map((role) => {
@@ -87,22 +131,28 @@ export async function renderConfigDefaultsPrompts(): Promise<Response> {
       .map(([key, def]) => {
         const prompt = promptByKey.get(key)
         const content = prompt?.content ?? ""
-        const form = `<form class="config-form" method="POST" action="/config/defaults/prompts/${encodeURIComponent(key)}">
+        const rel = `defaults/prompts/${def.file}`
+        const chip = pendingPrChip(rel, pending)
+        return card(`<h3>${escapeHtml(def.label)} <span class="tiny-text muted-text">${escapeHtml(key)}</span> ${chip}</h3>
   <p class="tiny-text muted-text"><code>defaults/prompts/${escapeHtml(def.file)}</code></p>
-  <textarea name="content" rows="14">${escapeHtml(content)}</textarea>
+  <textarea name="content:${escapeHtml(key)}" rows="14">${escapeHtml(content)}</textarea>
   <div class="form-actions">
-    <button type="submit" class="btn btn-primary">Save default</button>
+    <button type="submit" class="btn btn-primary" formaction="/config/defaults/prompts/${encodeURIComponent(key)}">Save default</button>
     ${applyButton(`/config/defaults/apply/prompts/${encodeURIComponent(key)}`, "Apply to active")}
-  </div>
-</form>`
-        return card(`<h3>${escapeHtml(def.label)} <span class="tiny-text muted-text">${escapeHtml(key)}</span></h3>${form}`)
+  </div>`)
       })
     return section(role, cards.join("\n"))
   })
 
   const body = [
     `<div class="header-bar"><div class="header-main"><h1>Default prompts</h1><p class="tiny-text muted-text">Full call-site prompts. Graph only fills template placeholders.</p></div></div>`,
-    ...sections,
+    defaultsPrBanner(pending, options?.defaultsPrUrl),
+    `<form class="config-form prompts-batch-form" method="POST" action="/config/defaults/prompts">
+  <div class="prompts-batch-actions form-actions">
+    <button type="submit" class="btn btn-primary">Save all</button>
+  </div>
+  ${sections.join("\n")}
+</form>`,
   ].join("\n")
 
   return new Response(layout("Default prompts", body, {
@@ -112,20 +162,24 @@ export async function renderConfigDefaultsPrompts(): Promise<Response> {
   })
 }
 
-export async function renderConfigDefaultsOpencode(): Promise<Response> {
+export async function renderConfigDefaultsOpencode(options?: { defaultsPrUrl?: string }): Promise<Response> {
   const config = await loadRuntimeConfig()
   const agents = await listDefaultsOpencodeAgents(config.env.QUORUM_WORKSPACE_DIRECTORY)
+  const pending = await getPendingDefaultsPr()
   const cards = agents.map((agent) => {
+    const rel = `defaults/opencode/agents/${agent.role}.md`
+    const chip = pendingPrChip(rel, pending)
     const form = `<form class="config-form" method="POST" action="/config/defaults/opencode/${encodeURIComponent(agent.role)}">
   <p class="tiny-text muted-text"><code>defaults/opencode/agents/${escapeHtml(agent.role)}.md</code> — frontmatter only (model/permissions). Behavioral prompts live under defaults/prompts/. Runtime copies go to <code>.opencode/agents/</code> on disk.</p>
   <textarea name="content" rows="16">${escapeHtml(agent.content)}</textarea>
   <div class="form-actions"><button type="submit" class="btn btn-primary">Save default</button></div>
 </form>`
-    return card(`<h3>${escapeHtml(agent.role)}</h3>${form}`)
+    return card(`<h3>${escapeHtml(agent.role)} ${chip}</h3>${form}`)
   })
 
   const body = [
     `<div class="header-bar"><div class="header-main"><h1>Default OpenCode agents</h1></div></div>`,
+    defaultsPrBanner(pending, options?.defaultsPrUrl),
     section("Shipped OpenCode agent definitions", cards.join("\n") || "<p class=\"muted-text\">No defaults OpenCode agents found.</p>"),
   ].join("\n")
 
@@ -136,7 +190,7 @@ export async function renderConfigDefaultsOpencode(): Promise<Response> {
   })
 }
 
-export async function renderConfigDefaultsBindings(): Promise<Response> {
+export async function renderConfigDefaultsBindings(options?: { defaultsPrUrl?: string }): Promise<Response> {
   const config = await loadRuntimeConfig()
   const workspaceDir = config.env.QUORUM_WORKSPACE_DIRECTORY
   const defaultsConfig = await loadDefaultsQuorumConfig(workspaceDir)
@@ -145,6 +199,8 @@ export async function renderConfigDefaultsBindings(): Promise<Response> {
   const providerIds = availableProviderIds()
   const roles = configuredAgentRoles(defaultsRuntime)
   const descriptors = new Map(await Promise.all(providerIds.map(async (id) => [id, await providerConfigForm(defaultsRuntime, id as AgentProviderId)] as const)))
+  const pending = await getPendingDefaultsPr()
+  const bindingsChip = pendingPrChip(relativeDefaultsDb(workspaceDir), pending)
 
   const field = (label: string, name: string, value: string, help: string, placeholder = "unset", disabled = false) =>
     `<label class="form-field"><span>${label}</span><input class="form-input" name="${name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${disabled ? " disabled" : ""}><small>${escapeHtml(help)}</small></label>`
@@ -267,11 +323,12 @@ export async function renderConfigDefaultsBindings(): Promise<Response> {
   <div class="form-actions" data-save-actions${opencodeActive ? " hidden" : ""}><button type="submit" class="btn btn-primary">Save default binding</button></div>
   <div class="form-actions">${applyButton(`/config/defaults/apply/bindings/${encodeURIComponent(role)}`, "Apply to active")}</div>
 </form>`
-    return card(`<div data-role-card><h3>${escapeHtml(role)}</h3>${form}</div>`)
+    return card(`<div data-role-card><h3>${escapeHtml(role)} ${bindingsChip}</h3>${form}</div>`)
   })
 
   const body = [
     `<div class="header-bar"><div class="header-main"><h1>Default role bindings</h1></div></div>`,
+    defaultsPrBanner(pending, options?.defaultsPrUrl),
     section("Shipped provider bindings", cards.join("\n")),
   ].join("\n")
 
@@ -320,8 +377,8 @@ async function maybeOpenDefaultsPr(
   summary: string,
 ): Promise<string | undefined> {
   const result = await openDefaultsPullRequest({ workspaceDir, changedRelativePaths, summary })
-  if (result.status === "created") {
-    console.log(`Defaults PR opened: ${result.prUrl}`)
+  if (result.status === "created" || result.status === "updated") {
+    console.log(`Defaults PR ${result.status}: ${result.prUrl}`)
     return result.prUrl
   }
   if (result.status === "error") {
@@ -372,7 +429,7 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
   if (applyPromptMatch) {
     const key = decodeURIComponent(applyPromptMatch[1])
     const params = new URLSearchParams(await req.text())
-    let content = params.get("content") ?? ""
+    let content = promptContentFromParams(params, key)
     if (!content.trim()) {
       const prompts = await listDefaultsPrompts(workspaceDir)
       const prompt = prompts.find((entry) => entry.key === key)
@@ -426,11 +483,21 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
     return renderConfigDefaultsBindings()
   }
 
+  if (path === "/config/defaults/prompts") {
+    const params = new URLSearchParams(await req.text())
+    const updates = promptUpdatesFromParams(params)
+    const paths = await updateDefaultsPrompts(workspaceDir, updates)
+    const prUrl = paths.length > 0
+      ? await maybeOpenDefaultsPr(workspaceDir, paths, `update ${paths.length} prompt(s)`)
+      : undefined
+    return redirect("/config/defaults/prompts", prUrl)
+  }
+
   const promptMatch = path.match(/^\/config\/defaults\/prompts\/(.+)$/)
   if (promptMatch) {
     const params = new URLSearchParams(await req.text())
     const key = decodeURIComponent(promptMatch[1])
-    await updateDefaultsPrompt(workspaceDir, key, params.get("content") ?? "")
+    await updateDefaultsPrompt(workspaceDir, key, promptContentFromParams(params, key))
     const filename = promptAssetFiles[key as PromptAssetKey]
     const rel = filename ? `defaults/prompts/${filename}` : undefined
     const prUrl = rel
