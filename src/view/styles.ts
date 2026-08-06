@@ -2426,6 +2426,17 @@ details[open] > .markdown-preview summary::before {
   vertical-align: middle;
   white-space: nowrap;
 }
+button.status-chip {
+  font: inherit;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  line-height: inherit;
+}
+button.status-chip:hover {
+  filter: brightness(0.97);
+}
 .status-chip.matches {
   background: var(--green-bg);
   color: var(--green);
@@ -2447,6 +2458,47 @@ details[open] > .markdown-preview summary::before {
 }
 .status-chip.pending-pr a:hover {
   text-decoration: underline;
+}
+.prompt-diff-panel {
+  margin: 0.45rem 0 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  overflow: auto;
+  max-height: 22rem;
+}
+.prompt-diff-legend {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.prompt-diff-legend .add { color: var(--green); }
+.prompt-diff-legend .del { color: var(--red); }
+.prompt-diff-body {
+  margin: 0;
+  padding: 0.35rem 0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+.prompt-diff-line {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.05rem 0.6rem;
+}
+.prompt-diff-line.equal { color: var(--muted); }
+.prompt-diff-line.add { background: var(--green-bg); color: var(--green); }
+.prompt-diff-line.del { background: var(--red-bg); color: var(--red); }
+.prompt-diff-prefix {
+  flex-shrink: 0;
+  width: 0.8rem;
+  user-select: none;
+}
+.prompt-diff-panel > .tiny-text {
+  padding: 0.55rem 0.7rem;
+  margin: 0;
 }
 .prompts-batch-form .prompts-batch-actions {
   position: sticky;

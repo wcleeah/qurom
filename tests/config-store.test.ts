@@ -14,7 +14,9 @@ import {
   updateRoleBinding,
 } from "../src/config-store"
 import { promptAssetFiles } from "../src/prompt-asset-defs"
+import { listDefaultsPrompts } from "../src/defaults-store"
 import { handleConfigPost, renderConfigIndex, renderConfigPrompts, renderConfigRoles } from "../src/view/config"
+import { configureViewServer } from "../src/view/server-options"
 import { prepareTestDataDir, testRuntimeEnv } from "./test-env"
 
 let dir: string
@@ -150,12 +152,19 @@ describe("config store", () => {
     expect(rolesHtml).toContain(".opencode/agents/")
     expect(rolesHtml).not.toContain("edited file definition")
 
+    configureViewServer({ admin: false })
     const promptHtml = await renderConfigPrompts().then((r) => r.text())
     expect(promptHtml).toContain("source-auditor")
     expect(promptHtml).toContain("sourceAuditorAudit")
     expect(promptHtml).toContain("Save all")
     expect(promptHtml).toContain("Matches default")
     expect(promptHtml).toContain('name="content:sourceAuditorAudit"')
+    expect(promptHtml).toContain("data-prompt-diff-toggle")
+    expect(promptHtml).toContain("data-prompt-diff-panel")
+    expect(promptHtml).toContain("data-prompt-active")
+    expect(promptHtml).toContain("data-prompt-default")
+    expect(promptHtml).toContain("data-prompt-diff-toggle")
+    expect(promptHtml).not.toContain("Apply to default")
 
     await updatePromptAsset(env(), "sourceAuditorAudit", "diverted active audit prompt")
     const divertedHtml = await renderConfigPrompts().then((r) => r.text())
@@ -187,6 +196,47 @@ describe("config store", () => {
     const quorumResponse = await handleConfigPost(quorumReq, "/config/quorum")
     expect(quorumResponse?.status).toBe(303)
     expect((await loadQuorumConfigFromStore(env())).maxRounds).toBe(8)
+  })
+
+  test("apply to default is admin-only and writes textarea content into defaults", async () => {
+    await ensureConfigInitialized(env())
+    process.env.QUORUM_DATA_DIR = dataDir
+    process.env.OPENCODE_DIRECTORY = dir
+    process.env.QUORUM_WORKSPACE_DIRECTORY = dir
+
+    configureViewServer({ admin: false })
+    const denied = await handleConfigPost(
+      new Request("http://localhost/config/prompts/sourceAuditorAudit/apply-default", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          "content:sourceAuditorAudit": "should-not-write",
+        }).toString(),
+      }),
+      "/config/prompts/sourceAuditorAudit/apply-default",
+    )
+    expect(denied?.status).toBe(404)
+
+    configureViewServer({ admin: true })
+    const adminHtml = await renderConfigPrompts().then((r) => r.text())
+    expect(adminHtml).toContain("Apply to default")
+    expect(adminHtml).toContain('formaction="/config/prompts/sourceAuditorAudit/apply-default"')
+
+    const response = await handleConfigPost(
+      new Request("http://localhost/config/prompts/sourceAuditorAudit/apply-default", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          "content:sourceAuditorAudit": "applied-from-active textarea",
+        }).toString(),
+      }),
+      "/config/prompts/sourceAuditorAudit/apply-default",
+    )
+    expect(response?.status).toBe(303)
+    expect(response?.headers.get("Location")).toBe("/config/prompts")
+    const prompts = await listDefaultsPrompts(dir)
+    expect(prompts.find((prompt) => prompt.key === "sourceAuditorAudit")?.content)
+      .toBe("applied-from-active textarea")
   })
 
   test("migrates legacy checkpoints.sqlite into the data directory", async () => {
