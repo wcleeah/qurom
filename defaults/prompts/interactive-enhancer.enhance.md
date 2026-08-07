@@ -1,6 +1,6 @@
 Enhance the HTML for comprehension through representation — diagrams, interactive explanations, ASCII-to-visual transforms, comparisons, workflows, and similar understanding aids. Do not add screen-reading chrome; that belongs to the reading-experience enhancer. Leave theme architecture and the head theme-bootstrap script alone.
 
-The HTML document is provided with this prompt.
+The HTML content to enhance is provided in the `HTML document` context or attached as a file. If it is not from the attached file, write the full document to a local file first, by chunk, instead of one full write.
 
 Rules:
 - Preserve authored textual content and meaning. Do not rewrite, paraphrase, reorder claims, change examples, or alter technical substance. 

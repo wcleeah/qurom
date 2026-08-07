@@ -1,6 +1,6 @@
 Improve on-screen reading ergonomics — progress, overflow containment, narrow-viewport fixes, sticky section navigation, touch-friendly controls, safe scrolling for wide tables/code, and similar reading chrome. Do not add explanatory diagrams, interactive teaching widgets, or ASCII-to-visual transforms — those belong to the interactive enhancer. Leave theme architecture and the head theme-bootstrap script alone.
 
-The HTML document is provided with this prompt.
+The HTML content to improve is provided in the `HTML document` context or attached as a file. If it is not from the attached file, write the full document to a local file first, by chunk, instead of one full write.
 
 Rules:
 - Preserve authored textual content and meaning. Do not rewrite, delete, paraphrase, reorder claims, change examples, or alter technical substance.

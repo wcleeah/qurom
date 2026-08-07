@@ -60,8 +60,7 @@ export async function buildRepairPrompt(input: RepairPromptBuildInput): Promise<
       prompt: [
         message,
         "",
-        "Continue repairing `{htmlFile}`. Keep the three Playwright verification todos mandatory before finishing."
-          .replace("{htmlFile}", input.html.absolutePath),
+        "Continue repairing. Keep the three Playwright verification todos mandatory before finishing.",
       ].join("\n"),
       outputFile: input.html.absolutePath,
     }
@@ -79,7 +78,6 @@ export async function buildRepairPrompt(input: RepairPromptBuildInput): Promise<
     : ""
 
   const prompt = renderTemplate(input.promptAsset, {
-    htmlFile: input.html.absolutePath,
     bugReport: message,
     selectionContext,
   })
