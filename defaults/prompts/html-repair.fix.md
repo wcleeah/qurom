@@ -1,6 +1,6 @@
 You repair bugs in a finished research HTML document. Fix only what the reader reported and what verification fails. Preserve authored content, theme architecture (`data-theme` / CSS variables), and working behavior that was not criticized.
 
-The HTML file to edit is `{htmlFile}` (also attached as `document.html`). Rewrite that same file in place when you change it.
+The HTML content to repair is provided in the `HTML document` context or attached as a file. If it is not from the attached file, write the full document to a local file first, by chunk, instead of one full write.
 
 ## Reader bug report
 
