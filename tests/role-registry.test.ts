@@ -4,6 +4,7 @@ import {
   AUDITOR_ROLES,
   configuredAgentRoles,
   DRAFTER_ROLE,
+  HTML_REPAIR_ROLE,
   requiredOpenCodeAgentRoles,
   SUMMARIZER_ROLE,
   TAGGER_ROLE,
@@ -37,6 +38,7 @@ describe("role registry", () => {
     expect(configuredAgentRoles(withDesign)).toContain(DRAFTER_ROLE)
     expect(configuredAgentRoles(withDesign)).toContain(SUMMARIZER_ROLE)
     expect(configuredAgentRoles(withDesign)).toContain(TAGGER_ROLE)
+    expect(configuredAgentRoles(withDesign)).toContain(HTML_REPAIR_ROLE)
   })
 
   test("requiredOpenCodeAgentRoles includes tagger and designer when design quorum enabled", () => {

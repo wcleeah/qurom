@@ -48,6 +48,7 @@ Design quorum (when `designQuorum.enabled` is true):
 HTML viewer:
 
 - `html-reading-companion` (ask-about-page agent in the HTML viewer)
+- `html-repair` (viewer Fix flow: repair `final.html` bugs and verify with Playwright MCP)
 
 Recovery helpers (structured-output recovery router):
 
@@ -75,6 +76,8 @@ Optional:
 Runtime config is stored in SQLite under the Qurom data directory. Shipped defaults live in `defaults/` and are seeded on first run.
 
 The `/config/mcp` dashboard page is the sole MCP registry for both Cursor and OpenCode. Add a structured local server (`command`, arguments, environment, optional working directory) or remote server (`url`, headers, optional OAuth), then select the globally enabled servers. This enabled list is independent of `researchTools.prefer`. Values may reference environment variables as `${NAME}`, `${env:NAME}`, or `{ENV:NAME}`; placeholders remain stored and are resolved immediately before provider startup.
+
+New profiles (and lazy migration) seed a headless Playwright MCP server (`npx @playwright/mcp@latest --headless`) and enable it by default so the HTML Fix agent can verify scroll, mobile overflow, and UI checks in a real browser.
 
 Qurom does not read `~/.cursor/mcp.json`, role-level `mcpServers`, or external OpenCode MCP configuration. It preserves unrelated JSON from `OPENCODE_CONFIG_CONTENT`, replaces its `mcp` section with the enabled registry, and passes the result to the OpenCode process it launches.
 
