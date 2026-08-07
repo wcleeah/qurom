@@ -67,7 +67,7 @@ describe("html repair", () => {
     expect(registry.enabled).toContain("playwright")
   })
 
-  test("resolveRepairHtml and buildRepairPrompt attach html and require verification todos", async () => {
+  test("resolveRepairHtml and buildRepairPrompt require verification todos without attachment-path wording", async () => {
     const html = await resolveRepairHtml("alpha-run", "final.html")
     expect(html.htmlFile).toBe("final.html")
     const built = await buildRepairPrompt({
@@ -75,7 +75,6 @@ describe("html repair", () => {
       bootstrap: true,
       html,
       promptAsset: [
-        "File: {htmlFile}",
         "Bug: {bugReport}",
         "{selectionContext}",
         "todowrite",
@@ -87,6 +86,7 @@ describe("html repair", () => {
     expect(built.outputFile).toBe(html.absolutePath)
     expect(built.inputFiles?.[0]?.filename).toBe("document.html")
     expect(built.prompt).toContain("cannot scroll")
+    expect(built.prompt).not.toContain(html.absolutePath)
     expect(built.prompt).toContain("Scrolling works all the way")
     expect(built.prompt).toContain("Mobile overflow checks")
     expect(built.prompt).toContain("UI looks fine")
@@ -98,6 +98,7 @@ describe("html repair", () => {
       promptAsset: "unused",
     })
     expect(followup.prompt).toContain("still broken on mobile")
+    expect(followup.prompt).not.toContain(html.absolutePath)
     expect(followup.outputFile).toBe(html.absolutePath)
   })
 
@@ -175,6 +176,20 @@ describe("html repair", () => {
     expect(prompt).toContain("Mobile overflow checks")
     expect(prompt).toContain("UI looks fine")
     expect(prompt).toContain("Playwright MCP")
+    expect(prompt).toContain("`HTML document` context or attached as a file")
+    expect(prompt).toContain("by chunk, instead of one full write")
+    expect(prompt).not.toContain("{htmlFile}")
+    expect(prompt).not.toContain("also attached as `document.html`")
+  })
+
+  test("enhancer prompts restore chunked local-file write guidance", async () => {
+    const interactive = await Bun.file(join(dir, "defaults", "prompts", "interactive-enhancer.enhance.md")).text()
+    const reading = await Bun.file(join(dir, "defaults", "prompts", "reading-experience-enhancer.enhance.md")).text()
+    for (const prompt of [interactive, reading]) {
+      expect(prompt).toContain("`HTML document` context or attached as a file")
+      expect(prompt).toContain("by chunk, instead of one full write")
+      expect(prompt).not.toContain("The HTML document is provided with this prompt.")
+    }
   })
 
   test("shipped agent allows bash and todowrite", async () => {
