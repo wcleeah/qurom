@@ -40,9 +40,11 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   const notesTab = document.querySelector('[data-html-tab="notes"]')
   const highlightsTab = document.querySelector('[data-html-tab="highlights"]')
   const askTab = document.querySelector('[data-html-tab="ask"]')
+  const fixTab = document.querySelector('[data-html-tab="fix"]')
   const notesPanel = document.querySelector('[data-html-panel="notes"]')
   const highlightsPanel = document.querySelector('[data-html-panel="highlights"]')
   const askPanel = document.querySelector('[data-html-panel="ask"]')
+  const fixPanel = document.querySelector('[data-html-panel="fix"]')
   const selectionInput = document.querySelector("[data-html-highlight-selection]")
   const composeBlock = document.querySelector("[data-html-highlight-compose]")
   const listEl = document.querySelector("[data-html-highlight-list]")
@@ -423,6 +425,7 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
       ["notes", notesTab, notesPanel],
       ["highlights", highlightsTab, highlightsPanel],
       ["ask", askTab, askPanel],
+      ["fix", fixTab, fixPanel],
     ]
     for (const [name, button, panel] of tabs) {
       button?.classList.toggle("html-viewer-tab-active", tab === name)
@@ -439,7 +442,7 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
     let tab = "notes"
     try {
       const stored = localStorage.getItem(tabStorageKey)
-      if (stored === "notes" || stored === "highlights" || stored === "ask") tab = stored
+      if (stored === "notes" || stored === "highlights" || stored === "ask" || stored === "fix") tab = stored
     } catch {}
     setActiveTab(tab)
     // Never auto-open the ask sheet overlay on load — only when the user asks.
@@ -572,7 +575,21 @@ export const HTML_HIGHLIGHTS_SCRIPT = /* html */ `
   notesTab?.addEventListener("click", () => setActiveTab("notes"))
   highlightsTab?.addEventListener("click", () => setActiveTab("highlights"))
   askTab?.addEventListener("click", () => setActiveTab("ask"))
+  fixTab?.addEventListener("click", () => setActiveTab("fix"))
   window.addEventListener("html-ask-open", () => setActiveTab("ask"))
+  window.addEventListener("html-repair-open", () => setActiveTab("fix"))
+
+  const navFixBtn = document.querySelector("[data-html-nav-fix]")
+  navFixBtn?.addEventListener("click", () => {
+    const selection = pendingSelection
+      ? {
+        quote: pendingSelection.quote,
+        prefix: pendingSelection.prefix || "",
+        suffix: pendingSelection.suffix || "",
+      }
+      : null
+    window.dispatchEvent(new CustomEvent("html-repair-open", { detail: { selection } }))
+  })
   saveBtn?.addEventListener("click", () => { void saveHighlight() })
   askBtn?.addEventListener("click", askAboutSelection)
   clearBtn?.addEventListener("click", clearSelection)

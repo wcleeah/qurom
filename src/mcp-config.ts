@@ -31,6 +31,15 @@ export const mcpServerSchema = z.discriminatedUnion("type", [localSchema, remote
 export type McpServer = z.infer<typeof mcpServerSchema>
 export type McpRegistry = { servers: McpServer[]; enabled: string[] }
 
+/** Shipped Playwright MCP used by the html-repair agent for browser verification. */
+export const DEFAULT_PLAYWRIGHT_MCP_SERVER: McpServer = {
+  name: "playwright",
+  type: "local",
+  command: "npx",
+  args: ["-y", "@playwright/mcp@latest", "--headless"],
+  env: {},
+}
+
 export function validateMcpRegistry(input: McpRegistry): McpRegistry {
   const servers = input.servers.map((server) => mcpServerSchema.parse(server))
   const names = new Set<string>()

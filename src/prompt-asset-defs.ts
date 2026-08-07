@@ -95,6 +95,11 @@ export const promptAssetDefs = {
     role: "html-reading-companion",
     label: "Ask highlight",
   },
+  htmlRepairFix: {
+    file: "html-repair.fix.md",
+    role: "html-repair",
+    label: "Fix HTML",
+  },
   markdownSummarizerInput: {
     file: "markdown-summarizer.input.md",
     role: "markdown-summarizer",

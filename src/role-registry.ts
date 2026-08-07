@@ -17,10 +17,13 @@ export const AUDITOR_ROLES = [
   "clarity-auditor",
 ] as const
 
+export const HTML_REPAIR_ROLE = "html-repair"
+
 export const UTILITY_ROLES = [
   "reader-interviewer",
   "json-fixer",
   "html-reading-companion",
+  HTML_REPAIR_ROLE,
   TAGGER_ROLE,
 ] as const
 

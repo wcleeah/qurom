@@ -7,6 +7,8 @@ import {
 import { askThreadsToJson, HTML_ASK_SCRIPT } from "./html-viewer-ask"
 import { HTML_VIEWER_MARKDOWN_SCRIPT } from "./html-viewer-markdown"
 import type { HtmlReaderAskThread } from "./html-ask-store"
+import type { HtmlReaderRepairThread } from "./html-repair-store"
+import { repairThreadsToJson, HTML_REPAIR_SCRIPT } from "./html-viewer-repair"
 import { highlightsToJson, HTML_HIGHLIGHTS_SCRIPT } from "./html-viewer-highlights"
 import { appNavbarAction, appNavbarButton, renderAppNavbar } from "./app-nav"
 import { layoutHtmlViewer } from "./layout"
@@ -163,6 +165,7 @@ export function renderHtmlViewerPage(
   pageNoteTagsHtml = "",
   highlightTagsById: Record<string, Array<{ slug: string; label: string; noteSource: string }>> = {},
   allTags: TagPickerOption[] = [],
+  repairThreads: HtmlReaderRepairThread[] = [],
 ): string {
   const baseName = basename(filePath)
   const runHref = `/runs/${encodeURIComponent(runName)}`
@@ -174,9 +177,11 @@ export function renderHtmlViewerPage(
   const initialSaveLabel = notes.trim().length > 0 ? "All changes saved" : "Notes auto-save"
   const highlightsJson = highlightsToJson(highlights, highlightTagsById)
   const askThreadsJson = askThreadsToJson(askThreads)
+  const repairThreadsJson = repairThreadsToJson(repairThreads)
   const allTagsJson = escapeHtml(JSON.stringify(allTags))
   const highlightIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>`
   const askIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>`
+  const fixIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`
   const primaryActions = [
     `<button type="button" class="app-navbar-action app-navbar-action-has-icon html-viewer-nav-highlight" data-html-nav-highlight disabled aria-label="Highlight selection">
       <span class="app-navbar-action-icon">${highlightIcon}</span>
@@ -185,6 +190,10 @@ export function renderHtmlViewerPage(
     `<button type="button" class="app-navbar-action app-navbar-action-has-icon html-viewer-nav-ask" data-html-nav-ask aria-label="Ask about selection">
       <span class="app-navbar-action-icon">${askIcon}</span>
       <span class="app-navbar-action-label">Ask</span>
+    </button>`,
+    `<button type="button" class="app-navbar-action app-navbar-action-has-icon html-viewer-nav-fix" data-html-nav-fix aria-label="Report HTML bug">
+      <span class="app-navbar-action-icon">${fixIcon}</span>
+      <span class="app-navbar-action-label">Fix</span>
     </button>`,
   ].join("")
   const navbarActions = [
@@ -203,6 +212,7 @@ export function renderHtmlViewerPage(
   const body = `<div class="html-viewer-shell">
   <div data-html-highlights-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-highlights="${highlightsJson}" data-all-tags="${allTagsJson}"></div>
   <div data-html-ask-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-threads="${askThreadsJson}" data-highlights="${highlightsJson}"></div>
+  <div data-html-repair-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-threads="${repairThreadsJson}"></div>
   ${navbar}
   <div class="html-viewer-main">
     <div class="html-viewer-frame-wrap">
@@ -219,6 +229,7 @@ export function renderHtmlViewerPage(
         <button type="button" class="html-viewer-tab html-viewer-tab-active" data-html-tab="notes" role="tab">Notes</button>
         <button type="button" class="html-viewer-tab" data-html-tab="highlights" role="tab">Highlights</button>
         <button type="button" class="html-viewer-tab" data-html-tab="ask" role="tab">Ask</button>
+        <button type="button" class="html-viewer-tab" data-html-tab="fix" role="tab">Fix</button>
       </div>
       <div class="html-viewer-panel" data-html-panel="notes" role="tabpanel">
         <div class="html-viewer-panel-header">
@@ -278,6 +289,22 @@ export function renderHtmlViewerPage(
           </form>
         </div>
       </div>
+      <div class="html-viewer-panel" data-html-panel="fix" role="tabpanel" hidden>
+        <div class="html-viewer-ask-layout">
+          <p class="html-viewer-sidebar-hint muted-text">Report a bug in this HTML. The repair agent will fix it and verify with Playwright.</p>
+          <div class="html-viewer-ask-chat-list" data-html-repair-chat-list></div>
+          <div class="html-viewer-ask-context muted-text" data-html-repair-context hidden></div>
+          <div class="html-viewer-ask-messages" data-html-repair-messages></div>
+          <p class="html-viewer-ask-status muted-text" data-html-repair-status></p>
+          <form class="html-viewer-ask-form" data-html-repair-form>
+            <textarea class="html-viewer-ask-input" data-html-repair-input rows="3" placeholder="Describe the bug (e.g. cannot scroll, content overflows on mobile)..." required></textarea>
+            <div class="html-viewer-ask-actions">
+              <button type="submit" class="html-viewer-action html-viewer-ask-send" data-html-repair-send>Fix</button>
+              <button type="button" class="html-viewer-action" data-html-repair-new>New report</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </aside>
   </div>
 </div>
@@ -285,6 +312,7 @@ ${HTML_VIEWER_SCRIPT}
 ${HTML_HIGHLIGHTS_SCRIPT}
 ${HTML_VIEWER_MARKDOWN_SCRIPT}
 ${HTML_ASK_SCRIPT}
+${HTML_REPAIR_SCRIPT}
 ${TAG_FORMS_SCRIPT}`
 
   return layoutHtmlViewer(`${baseName} — ${escapeHtml(runName)}`, body)

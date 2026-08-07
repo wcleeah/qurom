@@ -188,6 +188,43 @@ CREATE INDEX IF NOT EXISTS idx_html_reader_ask_threads_run_file_updated
 CREATE INDEX IF NOT EXISTS idx_html_reader_ask_messages_thread
   ON html_reader_ask_messages (thread_id, created_at);
   `)
+  db.run(`
+CREATE TABLE IF NOT EXISTS html_reader_repair_threads (
+  id TEXT PRIMARY KEY,
+  run_name TEXT NOT NULL,
+  html_file TEXT NOT NULL,
+  html_mtime_ms INTEGER NOT NULL,
+  context_quote TEXT,
+  context_prefix TEXT NOT NULL DEFAULT '',
+  context_suffix TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL,
+  handle_id TEXT,
+  status TEXT NOT NULL DEFAULT 'idle',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+  `)
+  db.run(`
+CREATE TABLE IF NOT EXISTS html_reader_repair_messages (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL REFERENCES html_reader_repair_threads(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+  `)
+  db.run(`
+CREATE INDEX IF NOT EXISTS idx_html_reader_repair_threads_run_file
+  ON html_reader_repair_threads (run_name, html_file);
+  `)
+  db.run(`
+CREATE INDEX IF NOT EXISTS idx_html_reader_repair_threads_run_file_updated
+  ON html_reader_repair_threads (run_name, html_file, updated_at DESC);
+  `)
+  db.run(`
+CREATE INDEX IF NOT EXISTS idx_html_reader_repair_messages_thread
+  ON html_reader_repair_messages (thread_id, created_at);
+  `)
   return db
 }
 

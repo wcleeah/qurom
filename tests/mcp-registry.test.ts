@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { deleteMcpServer, ensureConfigInitialized, getConfigStore, loadMcpRegistryFromStore, saveMcpServer, setEnabledMcpServers } from "../src/config-store"
-import { toCursorMcpServers, toOpenCodeMcp, validateMcpRegistry } from "../src/mcp-config"
+import { DEFAULT_PLAYWRIGHT_MCP_SERVER, toCursorMcpServers, toOpenCodeMcp, validateMcpRegistry } from "../src/mcp-config"
 import { ensureOpenCodeServer } from "../src/opencode-server"
 import { managedOpenCodeConfig } from "../src/providers/opencode"
 import { handleConfigPost, renderConfigMcp } from "../src/view/config"
@@ -23,19 +23,32 @@ describe("MCP registry", () => {
   test("persists CRUD and global enabled selection independently of research tools", async () => {
     const env = testRuntimeEnv({ dataDir, workspaceDir: dir })
     await ensureConfigInitialized(env)
+    expect(await loadMcpRegistryFromStore(env)).toEqual({
+      servers: [DEFAULT_PLAYWRIGHT_MCP_SERVER],
+      enabled: ["playwright"],
+    })
     await saveMcpServer(env, { name: "search", type: "remote", url: "https://mcp.example", headers: { Authorization: "Bearer ${TOKEN}" } })
     await setEnabledMcpServers(env, ["search"])
     expect(await loadMcpRegistryFromStore(env)).toEqual({
-      servers: [{ name: "search", type: "remote", url: "https://mcp.example", headers: { Authorization: "Bearer ${TOKEN}" } }],
+      servers: [
+        DEFAULT_PLAYWRIGHT_MCP_SERVER,
+        { name: "search", type: "remote", url: "https://mcp.example", headers: { Authorization: "Bearer ${TOKEN}" } },
+      ],
       enabled: ["search"],
     })
     await saveMcpServer(env, { name: "renamed", type: "remote", url: "https://mcp.example", headers: {} }, "search")
     expect(await loadMcpRegistryFromStore(env)).toEqual({
-      servers: [{ name: "renamed", type: "remote", url: "https://mcp.example", headers: {} }],
+      servers: [
+        DEFAULT_PLAYWRIGHT_MCP_SERVER,
+        { name: "renamed", type: "remote", url: "https://mcp.example", headers: {} },
+      ],
       enabled: ["renamed"],
     })
     await deleteMcpServer(env, "renamed")
-    expect(await loadMcpRegistryFromStore(env)).toEqual({ servers: [], enabled: [] })
+    expect(await loadMcpRegistryFromStore(env)).toEqual({
+      servers: [DEFAULT_PLAYWRIGHT_MCP_SERVER],
+      enabled: [],
+    })
   })
 
   test("rejects duplicate names, unknown enabled names, and invalid providers fields", () => {
@@ -128,6 +141,10 @@ describe("MCP registry", () => {
     store.db.run("UPDATE config_profiles SET active = 0")
     store.db.query("INSERT INTO config_profiles (name, active, created_at, updated_at) VALUES ('other', 1, ?, ?)").run(now, now)
     store.close()
-    expect(await loadMcpRegistryFromStore(env)).toEqual({ servers: [], enabled: [] })
+    // Active profile switch lazy-migrates the shipped Playwright MCP onto the new profile.
+    expect(await loadMcpRegistryFromStore(env)).toEqual({
+      servers: [DEFAULT_PLAYWRIGHT_MCP_SERVER],
+      enabled: ["playwright"],
+    })
   })
 })

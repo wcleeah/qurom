@@ -19,6 +19,12 @@ import {
   handleListAskThreads,
   handlePostAskMessage,
 } from "./html-ask-routes"
+import {
+  handleDeleteRepairThread,
+  handleListRepairMessages,
+  handleListRepairThreads,
+  handlePostRepairMessage,
+} from "./html-repair-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
 import { renderLibraryPage } from "./library-page"
 import { renderIndex, renderNodePage, renderFilesPage, renderRun, serveRawFile, serveSharedByToken } from "./pages"
@@ -493,6 +499,46 @@ export function startViewServer(): void {
           return await handlePostAskMessage(req, runName)
         } catch (e) {
           console.error("POST /html-ask/messages error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const htmlRepairThreadsMatch = path.match(/^\/runs\/(.+?)\/html-repair\/threads(?:\/([^/]+))?(?:\/messages)?$/)
+      if (htmlRepairThreadsMatch) {
+        const runName = decodeURIComponent(htmlRepairThreadsMatch[1])
+        const threadId = htmlRepairThreadsMatch[2] ? decodeURIComponent(htmlRepairThreadsMatch[2]) : undefined
+        const isMessages = path.endsWith("/messages")
+        try {
+          const file = url.searchParams.get("file") ?? ""
+          if (!file) {
+            return new Response("Missing file", { status: 400 })
+          }
+          if (req.method === "GET" && !threadId && !isMessages) {
+            return await handleListRepairThreads(runName, file)
+          }
+          if (req.method === "GET" && threadId && isMessages) {
+            return await handleListRepairMessages(runName, file, threadId)
+          }
+          if (req.method === "DELETE" && threadId && !isMessages) {
+            return await handleDeleteRepairThread(runName, file, threadId)
+          }
+        } catch (e) {
+          if (e instanceof Error && (e.message === "Path traversal blocked" || e.message === "Not found" || e.message === "Only HTML files support reader annotations")) {
+            return new Response("Not found", { status: 404 })
+          }
+          console.error("HTML repair threads error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const htmlRepairMessagesMatch = path.match(/^\/runs\/(.+?)\/html-repair\/messages$/)
+      if (htmlRepairMessagesMatch && req.method === "POST") {
+        server.timeout(req, 0)
+        const runName = decodeURIComponent(htmlRepairMessagesMatch[1])
+        try {
+          return await handlePostRepairMessage(req, runName)
+        } catch (e) {
+          console.error("POST /html-repair/messages error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

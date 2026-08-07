@@ -8,7 +8,13 @@ import { quorumConfigSchema } from "./config"
 import { ensureQuorumDataDirs, quorumDataPaths, repoDefaultsDir } from "./data-paths"
 import { copyPreserveTimes } from "./migrate-copy"
 import { promptAssetFiles, type PromptAssetKey } from "./prompt-asset-defs"
-import { mcpServerSchema, validateMcpRegistry, type McpRegistry, type McpServer } from "./mcp-config"
+import {
+  DEFAULT_PLAYWRIGHT_MCP_SERVER,
+  mcpServerSchema,
+  validateMcpRegistry,
+  type McpRegistry,
+  type McpServer,
+} from "./mcp-config"
 
 type ConfigProfileRow = {
   id: number
@@ -371,6 +377,34 @@ async function seedBindingsFromDefaultsSqlite(store: ConfigStore, profileId: num
   }
 }
 
+/** Insert Playwright MCP when missing; enable it only on first insert. */
+function ensureDefaultPlaywrightMcp(store: ConfigStore, profileId: number, source: string) {
+  const existing = store.db.query<{ name: string }, [number, string]>(
+    "SELECT name FROM mcp_servers WHERE profile_id = ? AND name = ?",
+  ).get(profileId, DEFAULT_PLAYWRIGHT_MCP_SERVER.name)
+  if (existing) return
+
+  const ts = nowIso()
+  const configJson = JSON.stringify(DEFAULT_PLAYWRIGHT_MCP_SERVER)
+  store.db.query(`
+INSERT INTO mcp_servers (profile_id, name, config_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+  `).run(profileId, DEFAULT_PLAYWRIGHT_MCP_SERVER.name, configJson, ts, ts)
+
+  const maxPos = store.db.query<{ position: number }, [number]>(
+    "SELECT COALESCE(MAX(position), -1) AS position FROM mcp_enabled WHERE profile_id = ?",
+  ).get(profileId)
+  store.db.query("INSERT INTO mcp_enabled (profile_id, name, position) VALUES (?, ?, ?)")
+    .run(profileId, DEFAULT_PLAYWRIGHT_MCP_SERVER.name, (maxPos?.position ?? -1) + 1)
+
+  writeAudit(store, {
+    profileId,
+    source,
+    action: "seed",
+    subject: `mcp:${DEFAULT_PLAYWRIGHT_MCP_SERVER.name}`,
+    after: configJson,
+  })
+}
+
 async function seedProfileFromDefaults(store: ConfigStore, workspaceDir: string): Promise<ConfigProfileRow> {
   const profile = createProfile(store, "default")
   const configPath = join(repoDefaultsDir(workspaceDir), "quorum.config.json")
@@ -394,6 +428,7 @@ async function seedProfileFromDefaults(store: ConfigStore, workspaceDir: string)
     insertPromptAsset(store, profile.id, prompt.key, prompt.content, "seed-defaults")
   }
   await seedBindingsFromDefaultsSqlite(store, profile.id, workspaceDir, "seed-defaults")
+  ensureDefaultPlaywrightMcp(store, profile.id, "seed-defaults")
 
   pruneLegacyBrowserQaRows(store, profile.id)
   return profile
@@ -414,6 +449,7 @@ async function lazyMigrateMissingDefaults(store: ConfigStore, profileId: number,
       .get(profileId, binding.role)
     if (!existing) insertRoleBindingFromRow(store, profileId, binding, "lazy-migrate")
   }
+  ensureDefaultPlaywrightMcp(store, profileId, "lazy-migrate")
 }
 
 async function importLegacyPromptFiles(store: ConfigStore, profileId: number, workspaceDir: string) {
