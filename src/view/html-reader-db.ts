@@ -225,6 +225,16 @@ CREATE INDEX IF NOT EXISTS idx_html_reader_repair_threads_run_file_updated
 CREATE INDEX IF NOT EXISTS idx_html_reader_repair_messages_thread
   ON html_reader_repair_messages (thread_id, created_at);
   `)
+  db.run(`
+CREATE TABLE IF NOT EXISTS html_reader_progress (
+  run_name TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  scroll_y REAL NOT NULL DEFAULT 0,
+  scroll_ratio REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (run_name, file_path)
+);
+  `)
   return db
 }
 

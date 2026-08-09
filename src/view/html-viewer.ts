@@ -7,9 +7,11 @@ import {
 import { askThreadsToJson, HTML_ASK_SCRIPT } from "./html-viewer-ask"
 import { HTML_VIEWER_MARKDOWN_SCRIPT } from "./html-viewer-markdown"
 import type { HtmlReaderAskThread } from "./html-ask-store"
+import type { HtmlReaderProgress } from "./html-progress-store"
 import type { HtmlReaderRepairThread } from "./html-repair-store"
 import { repairThreadsToJson, HTML_REPAIR_SCRIPT } from "./html-viewer-repair"
 import { highlightsToJson, HTML_HIGHLIGHTS_SCRIPT } from "./html-viewer-highlights"
+import { HTML_PROGRESS_SCRIPT, progressToDataAttrs } from "./html-viewer-progress"
 import { appNavbarAction, appNavbarButton, renderAppNavbar } from "./app-nav"
 import { layoutHtmlViewer } from "./layout"
 import { TAG_FORMS_SCRIPT, type TagPickerOption } from "./tag-ui"
@@ -166,6 +168,7 @@ export function renderHtmlViewerPage(
   highlightTagsById: Record<string, Array<{ slug: string; label: string; noteSource: string }>> = {},
   allTags: TagPickerOption[] = [],
   repairThreads: HtmlReaderRepairThread[] = [],
+  progress: HtmlReaderProgress | null = null,
 ): string {
   const baseName = basename(filePath)
   const runHref = `/runs/${encodeURIComponent(runName)}`
@@ -209,7 +212,9 @@ export function renderHtmlViewerPage(
     actionsHtml: navbarActions,
   })
 
+  const progressAttrs = progressToDataAttrs(progress)
   const body = `<div class="html-viewer-shell">
+  <div data-html-progress-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" ${progressAttrs}></div>
   <div data-html-highlights-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-highlights="${highlightsJson}" data-all-tags="${allTagsJson}"></div>
   <div data-html-ask-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-threads="${askThreadsJson}" data-highlights="${highlightsJson}"></div>
   <div data-html-repair-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-threads="${repairThreadsJson}"></div>
@@ -309,6 +314,7 @@ export function renderHtmlViewerPage(
   </div>
 </div>
 ${HTML_VIEWER_SCRIPT}
+${HTML_PROGRESS_SCRIPT}
 ${HTML_HIGHLIGHTS_SCRIPT}
 ${HTML_VIEWER_MARKDOWN_SCRIPT}
 ${HTML_ASK_SCRIPT}

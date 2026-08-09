@@ -26,6 +26,7 @@ import {
   handlePostRepairMessage,
 } from "./html-repair-routes"
 import { setHtmlReaderNotes } from "./html-notes-store"
+import { setHtmlReaderProgress } from "./html-progress-store"
 import { renderLibraryPage } from "./library-page"
 import { renderIndex, renderNodePage, renderFilesPage, renderRun, serveRawFile, serveSharedByToken } from "./pages"
 import { handleOpencodeBootstrapPost } from "./opencode-bootstrap-view"
@@ -340,6 +341,68 @@ export function startViewServer(): void {
             return new Response("Not found", { status: 404 })
           }
           console.error("POST /html-notes error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
+
+      const htmlProgressMatch = path.match(/^\/runs\/(.+?)\/html-progress$/)
+      if (htmlProgressMatch && req.method === "POST") {
+        const runName = decodeURIComponent(htmlProgressMatch[1])
+        try {
+          const { runName: resolvedName, runDir } = await resolveRunDir(runName)
+          const runStat = await stat(runDir)
+          if (!runStat.isDirectory()) {
+            return new Response("Not found", { status: 404 })
+          }
+          const raw = await req.text()
+          let file = ""
+          let scrollY = 0
+          let scrollRatio = 0
+          if (raw.trim().startsWith("{")) {
+            const parsed = JSON.parse(raw) as {
+              file?: unknown
+              scrollY?: unknown
+              scrollRatio?: unknown
+            }
+            file = typeof parsed.file === "string" ? parsed.file : ""
+            scrollY = typeof parsed.scrollY === "number" ? parsed.scrollY : Number(parsed.scrollY)
+            scrollRatio = typeof parsed.scrollRatio === "number"
+              ? parsed.scrollRatio
+              : Number(parsed.scrollRatio)
+          } else {
+            const params = new URLSearchParams(raw)
+            file = params.get("file") ?? ""
+            scrollY = Number(params.get("scrollY") ?? "0")
+            scrollRatio = Number(params.get("scrollRatio") ?? "0")
+          }
+          if (!file) {
+            return new Response("Missing file", { status: 400 })
+          }
+          if (!Number.isFinite(scrollY) || !Number.isFinite(scrollRatio)) {
+            return new Response("Invalid scroll position", { status: 400 })
+          }
+          const resolved = safeFilePath(resolvedName, file)
+          const fileStat = await stat(resolved)
+          if (!fileStat.isFile()) {
+            return new Response("Not found", { status: 404 })
+          }
+          const result = await setHtmlReaderProgress({
+            runName: resolvedName,
+            filePath: file,
+            scrollY,
+            scrollRatio,
+          })
+          return Response.json({
+            ok: true,
+            updatedAt: result.updatedAt,
+            scrollY: result.scrollY,
+            scrollRatio: result.scrollRatio,
+          })
+        } catch (e) {
+          if (e instanceof Error && (e.message === "Path traversal blocked" || e.message === "Only HTML files support reader annotations")) {
+            return new Response("Not found", { status: 404 })
+          }
+          console.error("POST /html-progress error:", e)
           return new Response("Internal error", { status: 500 })
         }
       }

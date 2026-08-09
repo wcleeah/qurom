@@ -21,6 +21,7 @@ import { listHtmlReaderAskThreads } from "./html-ask-store"
 import { listHtmlReaderRepairThreads } from "./html-repair-store"
 import { listHtmlReaderHighlights } from "./html-highlights-store"
 import { getHtmlReaderNotes } from "./html-notes-store"
+import { getHtmlReaderProgress } from "./html-progress-store"
 import { getPageNoteLibraryId } from "./library-notes-store"
 import { renderHtmlViewerPage } from "./html-viewer"
 import { renderNoteTagsEditor } from "./tag-ui"
@@ -802,6 +803,7 @@ export async function serveRawFile(
     const highlights = await listHtmlReaderHighlights(runName, filePath)
     const askThreads = await listHtmlReaderAskThreads(runName, filePath)
     const repairThreads = await listHtmlReaderRepairThreads(runName, filePath)
+    const progress = await getHtmlReaderProgress(runName, filePath)
     const allTags = (await listAllTags()).map((tag) => ({ slug: tag.slug, label: tag.label }))
     let pageNoteTagsHtml = ""
     const pageNoteId = await getPageNoteLibraryId(runName, filePath)
@@ -828,6 +830,7 @@ export async function serveRawFile(
       highlightTagsById,
       allTags,
       repairThreads,
+      progress,
     )
     return new Response(html, {
       headers: { "content-type": "text/html; charset=utf-8" },
