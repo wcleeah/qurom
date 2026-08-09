@@ -92,6 +92,7 @@ Derived paths:
 - `{dataDir}/quorum-config.sqlite` — quorum config, prompts, role instructions, bindings
 - `{dataDir}/checkpoints.sqlite` — LangGraph checkpoints
 - `{dataDir}/runs/` — run artifacts
+- `{dataDir}/archive/` — archived run directories (moved out of `runs/`)
 
 Main environment variables:
 
@@ -168,6 +169,8 @@ Start runs from the index page, or via HTTP API:
 - `POST /api/runs/:id/rerun` — new run from a prior run's topic or `input.md` (`interview=reuse|fresh`; reuse seeds `reader-profile.json` and skips the interview)
 - `POST /api/runs/:id/resume` — resume research or design from checkpoint (`node` optional)
 - `POST /api/runs/:id/cancel` — cancel active run
+- `POST /api/runs/:id/archive` — move an idle run into `{dataDir}/archive/`
+- `POST /api/runs/:id/unarchive` — restore an archived run back into `runs/`
 - `GET /api/status` — active run + provider lifecycle status
 
 ## Static export
@@ -230,12 +233,14 @@ defaults in the admin UI opens a GitHub PR against `QUORUM_GITHUB_PR_BASE`
 - One active pipeline run at a time
 - Live refresh for the active-run hero when a run is in progress
 - OpenCode agent bootstrap controls when local agents differ from defaults
+- Filter tabs: Unread / Read / All / Archived (`/?archived=1` lists archived runs and can unarchive them)
 
 ### Run detail (`/runs/:name`)
 
 - Pipeline, telemetry, agent activity, reader interview, artifacts
 - On-demand public share link at `/share/:token` (create/revoke from the run page; requires `final.html`)
 - Cancel while running; completion banner when done
+- Archive idle runs (moves the directory into `{dataDir}/archive/`)
 - Configure quorum, roles, and prompts under `/config`
 
 ## Notes

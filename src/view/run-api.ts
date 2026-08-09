@@ -7,7 +7,13 @@ import {
   isRunManagedActive,
   toRunManagerError,
 } from "../run-manager"
-import { archiveRunDirectory, resolveRunName, safeRunPath } from "./paths"
+import {
+  archiveRunDirectory,
+  resolveArchiveRunName,
+  resolveRunName,
+  safeRunPath,
+  unarchiveRunDirectory,
+} from "./paths"
 
 function wantsJson(req: Request, url: URL): boolean {
   return url.searchParams.get("json") === "1"
@@ -175,6 +181,36 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
       }
       const archivedPath = await archiveRunDirectory(runName)
       return redirectOrJson(req, url, "/", { ok: true, runName, archivedPath })
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
+  const unarchiveMatch = path.match(/^\/api\/runs\/(.+?)\/unarchive$/)
+  if (unarchiveMatch && req.method === "POST") {
+    try {
+      const runRef = decodeURIComponent(unarchiveMatch[1])
+      const runName = await resolveArchiveRunName(runRef)
+      if (!runName) {
+        throw new RunManagerError(`Archived run not found: ${runRef}`, 404)
+      }
+      try {
+        await unarchiveRunDirectory(runName)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (message.startsWith("Cannot unarchive:")) {
+          throw new RunManagerError(message, 409)
+        }
+        if (message.startsWith("Archived run not found:")) {
+          throw new RunManagerError(message, 404)
+        }
+        throw error
+      }
+      return redirectOrJson(req, url, `/runs/${encodeURIComponent(runName)}`, {
+        ok: true,
+        runName,
+        restoredPath: safeRunPath(runName),
+      })
     } catch (error) {
       return errorResponse(error, req, url)
     }
