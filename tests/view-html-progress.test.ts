@@ -126,9 +126,10 @@ describe("html viewer progress wiring", () => {
     )
 
     expect(html).toContain('data-html-progress-root')
+    expect(html).toContain('data-run-name="alpha-run"')
     expect(html).toContain('data-scroll-y="250"')
     expect(html).toContain('data-scroll-ratio="0.42"')
-    expect(html).toContain("/runs/alpha-run/html-progress")
+    expect(html).toContain('"/html-progress"')
     expect(html).toContain("findScrollRoot")
   })
 
