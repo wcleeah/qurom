@@ -78,6 +78,12 @@ function renderArchiveForm(runName: string): string {
 </form>`
 }
 
+export function renderUnarchiveForm(runName: string): string {
+  return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/unarchive">
+  <button type="submit" class="btn btn-secondary">Unarchive</button>
+</form>`
+}
+
 export function renderRunActionStrip(
   runName: string,
   actions: RunResumeActions,

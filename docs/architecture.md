@@ -10,7 +10,7 @@
 
 `research-qurom` is a local research-document pipeline built around a quorum of AI agents. One agent drafts a source-backed deep dive. Several auditors review it from different angles. The drafter can accept or rebut findings. The graph repeats until the draft is approved, revised, or fails by policy.
 
-The app is intentionally file-backed and local-first. Runs produce durable artifacts under `{dataDir}/runs/`, graph checkpoints are stored in SQLite, agent activity is mirrored into structured logs, and the web dashboard (plus optional TUI) read those artifacts instead of owning the pipeline.
+The app is intentionally file-backed and local-first. Runs produce durable artifacts under `{dataDir}/runs/`, idle runs can be moved into `{dataDir}/archive/` (and restored back), graph checkpoints are stored in SQLite, agent activity is mirrored into structured logs, and the web dashboard (plus optional TUI) read those artifacts instead of owning the pipeline.
 
 At a high level:
 

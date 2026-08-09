@@ -62,6 +62,40 @@ export function safeRunPath(runName: string): string {
   return resolved
 }
 
+export function safeArchivePath(runName: string): string {
+  const archiveDir = getArchiveDir()
+  const resolved = resolve(archiveDir, runName)
+  if (!resolved.startsWith(archiveDir + "/") && resolved !== archiveDir) {
+    throw new Error("Path traversal blocked")
+  }
+  return resolved
+}
+
+/** Resolve a run URL segment to an on-disk directory name under archive/. */
+export async function resolveArchiveRunName(runName: string): Promise<string | null> {
+  try {
+    const direct = safeArchivePath(runName)
+    if ((await stat(direct)).isDirectory()) return runName
+  } catch {
+    // not an exact match — try fuzzy lookup below
+  }
+
+  const archiveDir = getArchiveDir()
+  let dirs: string[]
+  try {
+    const entries = await readdir(archiveDir, { withFileTypes: true })
+    dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name)
+  } catch {
+    return null
+  }
+
+  if (dirs.includes(runName)) return runName
+  const suffixMatch = dirs.find((dir) => dir.endsWith(`-${runName}`))
+  if (suffixMatch) return suffixMatch
+  const includeMatch = dirs.find((dir) => dir.includes(runName))
+  return includeMatch ?? null
+}
+
 export function safeFilePath(runName: string, filePath: string): string {
   const runDir = safeRunPath(runName)
   const clean = filePath.replace(/^\/+/, "")
@@ -98,4 +132,35 @@ export async function archiveRunDirectory(runName: string): Promise<string> {
 
   await rename(source, resolvedDest)
   return resolvedDest
+}
+
+/**
+ * Move a run directory from archive/ back into runs/.
+ * Throws if a run with the same name already exists under runs/.
+ * Returns the destination path.
+ */
+export async function unarchiveRunDirectory(runName: string): Promise<string> {
+  const source = safeArchivePath(runName)
+  try {
+    if (!(await stat(source)).isDirectory()) {
+      throw new Error(`Archived run not found: ${runName}`)
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Archived run not found:")) throw error
+    throw new Error(`Archived run not found: ${runName}`)
+  }
+
+  const runsDir = getRunsDir()
+  await mkdir(runsDir, { recursive: true })
+  const dest = safeRunPath(runName)
+  try {
+    await stat(dest)
+    throw new Error(`Cannot unarchive: a run named "${runName}" already exists`)
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Cannot unarchive:")) throw error
+    // destination free
+  }
+
+  await rename(source, dest)
+  return dest
 }

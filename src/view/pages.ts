@@ -5,12 +5,12 @@ import { listArticleTags, listAllTags, listNoteTags } from "../tags-store"
 import { renderArticleTagsSection, TAG_FORMS_SCRIPT } from "./tag-ui"
 import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
 import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
-import { renderRunControlsSection, resolveRunResumeActions } from "./run-controls"
+import { renderRunControlsSection, renderUnarchiveForm, resolveRunResumeActions } from "./run-controls"
 import { tryGetRunManager } from "../run-manager"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard } from "./components"
-import { computeStats, filterRunsForIndex, getRunFiles, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry } from "./data"
+import { computeStats, filterRunsForIndex, getRunFiles, listArchivedRuns, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry } from "./data"
 import { getNodeDefinition, isRebuttalsViewerNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
 import { renderNodeDashboard, renderGlobalResearchRoundStrip, renderNodeGrid, renderNodeMiniPipeline, nodePageRoundNumbers } from "./node-view"
 import { renderLiveStatusMeta, renderRoundStrip } from "./round-view"
@@ -228,8 +228,13 @@ export async function renderDebugLog(runName: string, files: string[]): Promise<
 
 export async function renderIndex(searchParams = new URLSearchParams()): Promise<Response> {
   const runError = searchParams.get("error") ?? undefined
+  const showArchived = searchParams.get("archived") === "1"
   const allRuns = await listRuns()
-  const { runs, showUnreadOnly, showReadOnly, showAll } = filterRunsForIndex(allRuns, searchParams)
+  const archivedRuns = showArchived ? await listArchivedRuns() : []
+  const filtered = showArchived
+    ? { runs: archivedRuns, showUnreadOnly: false, showReadOnly: false, showAll: false }
+    : filterRunsForIndex(allRuns, searchParams)
+  const { runs, showUnreadOnly, showReadOnly, showAll } = filtered
   const stats = computeStats(allRuns)
 
   const manager = tryGetRunManager()
@@ -243,14 +248,18 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     // Index renders in test fixtures without a full config tree.
   }
 
-  const newRunHtml = renderNewRunForm({
-    runActive,
-    activeRunId: managerStatus?.active?.runId,
-    error: runError,
-  })
+  const newRunHtml = showArchived
+    ? ""
+    : renderNewRunForm({
+      runActive,
+      activeRunId: managerStatus?.active?.runId,
+      error: runError,
+    })
 
   // Stats dashboard
-  const statsHtml = `
+  const statsHtml = showArchived
+    ? ""
+    : `
 <div class="stats-grid">
   <div class="stat-card stat-total">
     <div class="stat-value">${stats.total}</div>
@@ -273,22 +282,23 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   // Active run hero — scan all runs so filters don't hide it
   let activeRunHtml = ""
   let hasActiveRun = false
-  for (const run of allRuns) {
-    if (run.status !== "running") continue
-    const liveStatus = await readLiveStatus(run.name)
-    if (!liveStatus) continue
-    hasActiveRun = true
-    const nodeHistory = await readNodeHistory(run.name)
-    const sessionTelemetry = await readRunSessionTelemetry(run.name)
-    const elapsedMs = run.elapsedMs ?? runElapsedMs(liveStatus, nodeHistory)
-    const elapsed = elapsedMs !== undefined ? formatElapsed(elapsedMs) : ""
-    const { usage, usageAvailable, costAvailable } = resolveRunTelemetry(sessionTelemetry)
-    const usageLabel = usageAvailable || costAvailable ? ` · ${formatUsagePair(usage, true)}` : ""
-    const agentList = Object.entries(liveStatus.agents)
-      .slice(0, 4)
-      .map(([name, a]) => `${statusDot(a.status)} ${escapeHtml(name)}${a.tool ? ` · ${escapeHtml(a.tool)}` : ""}`)
-      .join(" · ")
-    activeRunHtml = `<div class="card active-run-hero">
+  if (!showArchived) {
+    for (const run of allRuns) {
+      if (run.status !== "running") continue
+      const liveStatus = await readLiveStatus(run.name)
+      if (!liveStatus) continue
+      hasActiveRun = true
+      const nodeHistory = await readNodeHistory(run.name)
+      const sessionTelemetry = await readRunSessionTelemetry(run.name)
+      const elapsedMs = run.elapsedMs ?? runElapsedMs(liveStatus, nodeHistory)
+      const elapsed = elapsedMs !== undefined ? formatElapsed(elapsedMs) : ""
+      const { usage, usageAvailable, costAvailable } = resolveRunTelemetry(sessionTelemetry)
+      const usageLabel = usageAvailable || costAvailable ? ` · ${formatUsagePair(usage, true)}` : ""
+      const agentList = Object.entries(liveStatus.agents)
+        .slice(0, 4)
+        .map(([name, a]) => `${statusDot(a.status)} ${escapeHtml(name)}${a.tool ? ` · ${escapeHtml(a.tool)}` : ""}`)
+        .join(" · ")
+      activeRunHtml = `<div class="card active-run-hero">
   <div class="active-run-header">
     <span class="badge badge-running">● Active</span>
   </div>
@@ -300,17 +310,40 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   </div>
   ${agentList ? `<div class="active-run-agents">${agentList}</div>` : ""}
 </div>`
-    break
+      break
+    }
   }
 
   // Run cards
   let runCards = ""
   if (runs.length === 0) {
-    runCards = showUnreadOnly
-      ? `<div class="empty-state">No unread runs. <a href="/?read=1">Show read runs</a></div>`
-      : showReadOnly
-        ? `<div class="empty-state">No read runs. <a href="/">Show unread runs</a></div>`
-        : `<div class="empty-state">No runs found in <code>${escapeHtml(getRunsDir())}</code></div>`
+    runCards = showArchived
+      ? `<div class="empty-state">No archived runs.</div>`
+      : showUnreadOnly
+        ? `<div class="empty-state">No unread runs. <a href="/?read=1">Show read runs</a></div>`
+        : showReadOnly
+          ? `<div class="empty-state">No read runs. <a href="/">Show unread runs</a></div>`
+          : `<div class="empty-state">No runs found in <code>${escapeHtml(getRunsDir())}</code></div>`
+  } else if (showArchived) {
+    for (const run of runs) {
+      const iconsStr = run.hasFinalHtml ? ` <span class="tiny-text muted-text">html</span>` : ""
+      const designBadge = run.designStatus
+        ? `<span class="badge ${run.designStatus === "approved" ? "badge-approved" : run.designStatus === "failed" ? "badge-failed" : "badge-running"} design-badge">design: ${escapeHtml(designStatusLabel(run.designStatus))}</span>`
+        : ""
+
+      runCards += `<div class="run-card">
+  <div class="run-card-top">
+    <div class="run-card-title">
+      <span>${escapeHtml(run.topic)}${iconsStr}</span>
+      <div class="tiny-text muted-text">${escapeHtml(run.name)}</div>
+    </div>
+    <div class="row-inline-spread">${badge(run.status)}${designBadge}</div>
+  </div>
+  <div class="run-card-meta">
+    ${renderUnarchiveForm(run.name)}
+  </div>
+</div>`
+    }
   } else {
     for (const run of runs) {
       const iconsStr = run.hasFinalHtml ? ` <span class="tiny-text muted-text">html</span>` : ""
@@ -344,6 +377,7 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   <a href="/"${showUnreadOnly ? ' class="active"' : ""}>Unread</a>
   <a href="/?read=1"${showReadOnly ? ' class="active"' : ""}>Read</a>
   <a href="/?all=1"${showAll ? ' class="active"' : ""}>All</a>
+  <a href="/?archived=1"${showArchived ? ' class="active"' : ""}>Archived</a>
 </div>`
 
   const body = `
@@ -355,8 +389,8 @@ ${statsHtml}
 ${hasActiveRun ? renderRefreshControls() : ""}
 <div id="index-active-section">${activeRunHtml}</div>
 <div id="run-card-list">${runCards}</div>
-${READ_SCRIPT}
-${NEW_RUN_FORM_SCRIPT}
+${showArchived ? "" : READ_SCRIPT}
+${showArchived ? "" : NEW_RUN_FORM_SCRIPT}
 ${hasActiveRun ? INDEX_REFRESH_SCRIPT : ""}`
 
   const html = layout("Runs — quorum", body, { navbar: { section: "runs" } })

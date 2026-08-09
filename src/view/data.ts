@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { readSessionTelemetry, SESSION_TELEMETRY_FILENAME, type SessionTelemetryFile } from "../session-telemetry"
 import { readCursorUsageImport, CURSOR_USAGE_IMPORT_FILENAME, type CursorUsageImportFile } from "../cursor-usage-import"
 import { reconcileAwaitingReaderReplyWithDisk, readerInterviewStateFromRunDir } from "../reader-transcript"
-import { getRunsDir, safeFilePath, safeRunPath } from "./paths"
+import { getArchiveDir, getRunsDir, safeFilePath, safeRunPath } from "./paths"
 import { isRunManagedActive } from "../run-manager"
 import { listReadRunNames, listRunAccessTimes } from "./read-store"
 import { isSqliteFile } from "./utils"
@@ -83,8 +83,14 @@ export async function readNodeHistory(runName: string): Promise<NodeHistoryEntry
   }
 }
 
-export async function listRuns(): Promise<RunMeta[]> {
-  const entries = await readdir(getRunsDir(), { withFileTypes: true })
+async function collectRunMetasFromDir(rootDir: string): Promise<RunMeta[]> {
+  let entries
+  try {
+    entries = await readdir(rootDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
   const dirs = entries.filter(
     (e) => e.isDirectory() && !e.name.startsWith(".") && !isSqliteFile(e.name),
   )
@@ -92,7 +98,7 @@ export async function listRuns(): Promise<RunMeta[]> {
   const metas: RunMeta[] = []
 
   for (const dir of dirs) {
-    const dirPath = join(getRunsDir(), dir.name)
+    const dirPath = join(rootDir, dir.name)
     let requestJson: RequestJson | null = null
     let roundCount = 0
     let designRoundCount = 0
@@ -180,6 +186,12 @@ export async function listRuns(): Promise<RunMeta[]> {
     })
   }
 
+  return metas
+}
+
+export async function listRuns(): Promise<RunMeta[]> {
+  const metas = await collectRunMetasFromDir(getRunsDir())
+
   const read = await listReadRunNames()
   const accessTimes = await listRunAccessTimes()
   for (const meta of metas) {
@@ -195,6 +207,13 @@ export async function listRuns(): Promise<RunMeta[]> {
     if (aAccess !== bAccess) return bAccess - aAccess
     return b.mtime - a.mtime
   })
+  return metas
+}
+
+/** List runs that have been moved into the archive directory. */
+export async function listArchivedRuns(): Promise<RunMeta[]> {
+  const metas = await collectRunMetasFromDir(getArchiveDir())
+  metas.sort((a, b) => b.mtime - a.mtime)
   return metas
 }
 
