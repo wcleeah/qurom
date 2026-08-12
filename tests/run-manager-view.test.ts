@@ -26,6 +26,7 @@ describe("resolveRunResumeActions", () => {
     expect(actions.showRestartFromSource).toBe(false)
     expect(actions.showRerunFreshInterview).toBe(true)
     expect(actions.showRerunReuseProfile).toBe(false)
+    expect(actions.showRerunRepairProfile).toBe(false)
   })
 
   test("offers resume when research approved without final html", () => {
@@ -41,6 +42,7 @@ describe("resolveRunResumeActions", () => {
     expect(actions.showResume).toBe(true)
     expect(actions.showRestartFromSource).toBe(true)
     expect(actions.showRerunReuseProfile).toBe(true)
+    expect(actions.showRerunRepairProfile).toBe(true)
     expect(actions.showRerunFreshInterview).toBe(true)
   })
 
@@ -57,6 +59,7 @@ describe("resolveRunResumeActions", () => {
     expect(actions.showResume).toBe(false)
     expect(actions.showRestartFromSource).toBe(false)
     expect(actions.showRerunReuseProfile).toBe(false)
+    expect(actions.showRerunRepairProfile).toBe(false)
     expect(actions.showRerunFreshInterview).toBe(false)
   })
 
@@ -72,6 +75,7 @@ describe("resolveRunResumeActions", () => {
     })
     expect(actions.showResume).toBe(false)
     expect(actions.showRerunReuseProfile).toBe(true)
+    expect(actions.showRerunRepairProfile).toBe(true)
     expect(actions.showRerunFreshInterview).toBe(true)
   })
 })
@@ -82,6 +86,7 @@ describe("renderRunActionStrip", () => {
       showResume: true,
       showRestartFromSource: false,
       showRerunReuseProfile: false,
+      showRerunRepairProfile: false,
       showRerunFreshInterview: false,
     })
     expect(html).toContain("/api/runs/my-run-abc/resume")
@@ -93,23 +98,27 @@ describe("renderRunActionStrip", () => {
       showResume: false,
       showRestartFromSource: true,
       showRerunReuseProfile: false,
+      showRerunRepairProfile: false,
       showRerunFreshInterview: false,
     })
     expect(html).toContain("/api/runs/my-run-abc/restart-from-source")
     expect(html).toContain("New run from source document")
   })
 
-  test("renders both rerun buttons", () => {
+  test("renders reuse, repair, and fresh rerun buttons", () => {
     const html = renderRunActionStrip("my-run-abc", {
       showResume: false,
       showRestartFromSource: false,
       showRerunReuseProfile: true,
+      showRerunRepairProfile: true,
       showRerunFreshInterview: true,
     })
     expect(html).toContain("/api/runs/my-run-abc/rerun")
     expect(html).toContain('name="interview" value="reuse"')
+    expect(html).toContain('name="interview" value="repair"')
     expect(html).toContain('name="interview" value="fresh"')
     expect(html).toContain("Rerun (reuse profile)")
+    expect(html).toContain("Rerun (repair profile)")
     expect(html).toContain("Rerun (fresh interview)")
     expect(html).toContain("Start a new run")
   })
@@ -121,6 +130,7 @@ describe("renderRunActionStrip", () => {
         showResume: false,
         showRestartFromSource: false,
         showRerunReuseProfile: false,
+        showRerunRepairProfile: false,
         showRerunFreshInterview: false,
       },
       { showArchive: true },

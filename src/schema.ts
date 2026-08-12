@@ -310,7 +310,13 @@ export const readerGapTreatmentSchema = z.enum(["must-explain", "brief-recap", "
 
 export const readerCalibrationProfileSchema = z.object({
   intent: z.object({
+    /** Primary outcome — the throughline the draft should be organized around. */
     goal: z.string(),
+    /**
+     * Additional outcomes that must still be served, as consequences of the primary
+     * throughline (not peer top-level jobs). Absent on legacy profiles → [].
+     */
+    secondaryGoals: z.array(z.string()).optional(),
     depth: readerIntentDepthSchema,
     format: z.string().optional(),
   }),
@@ -333,13 +339,29 @@ export const readerCalibrationProfileSchema = z.object({
     treatment: readerGapTreatmentSchema,
     rationale: z.string(),
   })),
-})
+}).transform((profile) => ({
+  ...profile,
+  intent: {
+    ...profile.intent,
+    secondaryGoals: profile.intent.secondaryGoals ?? [],
+  },
+}))
 
 /** Graph start input: request fields plus optional seeded reader interview. */
 export const graphInputSchema = baseGraphInputSchema.extend({
   /** When set with readerInterviewComplete, discoverReader skips the interview. */
   readerProfile: readerCalibrationProfileSchema.optional(),
   readerInterviewComplete: z.boolean().optional(),
+  /**
+   * When true with a seeded readerProfile, discoverReader runs an intent-only
+   * repair pass (primary + secondaryGoals) instead of interviewing or skipping.
+   */
+  readerProfileRepair: z.boolean().optional(),
+  /** Optional transcript seeded from a prior run for repair context. */
+  interviewTranscript: z.array(z.object({
+    role: z.enum(["interviewer", "reader"]),
+    text: z.string(),
+  })).optional(),
 })
 
 export const readerInterviewTurnSchema = z.object({
@@ -354,8 +376,8 @@ export const readerInterviewTurnSchema = z.object({
   }
 })
 
-export type ReaderCalibrationProfile = z.infer<typeof readerCalibrationProfileSchema>
-export type ReaderInterviewTurn = z.infer<typeof readerInterviewTurnSchema>
+export type ReaderCalibrationProfile = z.output<typeof readerCalibrationProfileSchema>
+export type ReaderInterviewTurn = z.output<typeof readerInterviewTurnSchema>
 
 export const runSummarySchema = z.object({
   requestId: nonEmptyStringSchema,
@@ -426,6 +448,7 @@ export const researchStateObjectSchema = z.object({
   outputPath: nonEmptyStringSchema.optional(),
   readerProfile: readerCalibrationProfileSchema.optional(),
   readerInterviewComplete: z.boolean().optional(),
+  readerProfileRepair: z.boolean().optional(),
   pendingNewReaderQuestions: z.array(z.string()).optional(),
   interviewTranscript: z.array(z.object({
     role: z.enum(["interviewer", "reader"]),

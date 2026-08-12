@@ -78,7 +78,7 @@ export function renderRequestCard(data: unknown): string {
 // ── reader-profile-N.json ──
 
 type ReaderProfileData = {
-  intent?: { goal?: string; depth?: string; format?: string }
+  intent?: { goal?: string; secondaryGoals?: string[]; depth?: string; format?: string }
   background?: { summary?: string }
   competence?: {
     inTopic?: { level?: string; summary?: string; evidence?: string[] }
@@ -108,6 +108,12 @@ export function renderReaderProfileSummary(data: unknown): string {
   const goal = profile.intent?.goal
     ? escapeHtml(String(profile.intent.goal))
     : "<span class=\"placeholder-muted\">(intent not yet clear)</span>"
+  const secondaryGoals = Array.isArray(profile.intent?.secondaryGoals)
+    ? profile.intent.secondaryGoals.map((g) => String(g).trim()).filter(Boolean)
+    : []
+  const secondaryRow = secondaryGoals.length > 0
+    ? `<tr><td>Secondary</td><td colspan="2">${escapeHtml(secondaryGoals.join("; "))}</td></tr>`
+    : ""
   const depth = profile.intent?.depth ? escapeHtml(String(profile.intent.depth)) : "—"
   const background = profile.background?.summary
     ? escapeHtml(String(profile.background.summary))
@@ -131,7 +137,8 @@ export function renderReaderProfileSummary(data: unknown): string {
     : "<tr><td colspan=\"3\" class=\"placeholder-muted\">(gaps not yet inferred)</td></tr>"
 
   return tableWrap(`<table class="summary-table summary-table-wide reader-profile-summary">
-    <tr><td>Goal</td><td colspan="2">${goal}</td></tr>
+    <tr><td>Primary</td><td colspan="2">${goal}</td></tr>
+    ${secondaryRow}
     <tr><td>Depth</td><td colspan="2">${depth}</td></tr>
     <tr><td>Background</td><td colspan="2">${background}</td></tr>
     <tr><td>In-topic</td><td>${inTopicLevel}</td><td>${inTopicSummary}</td></tr>

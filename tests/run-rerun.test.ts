@@ -12,7 +12,7 @@ import type { ReaderCalibrationProfile } from "../src/schema"
 import { testRuntimeConfig, unitTestDataDir } from "./test-env"
 
 const sampleProfile: ReaderCalibrationProfile = {
-  intent: { goal: "learn the topic", depth: "conceptual" },
+  intent: { goal: "learn the topic", secondaryGoals: [], depth: "conceptual" },
   background: { summary: "curious reader" },
   competence: {
     inTopic: { level: "novice", summary: "new to it", evidence: ["said so"] },
@@ -43,9 +43,10 @@ function createTestLifecycle(): ProviderLifecycle {
 }
 
 describe("parseRerunInterviewMode", () => {
-  test("accepts reuse and fresh", () => {
+  test("accepts reuse, fresh, and repair", () => {
     expect(parseRerunInterviewMode("reuse")).toBe("reuse")
     expect(parseRerunInterviewMode("fresh")).toBe("fresh")
+    expect(parseRerunInterviewMode("repair")).toBe("repair")
   })
 
   test("rejects other values", () => {
@@ -91,7 +92,64 @@ describe("loadPriorRunForRerun", () => {
 
     const loaded = await loadPriorRunForRerun(runDir, "reuse", root)
     expect(loaded.request).toEqual({ inputMode: "document", documentText: "# Notes\n\nBody" })
-    expect(loaded.readerProfile).toEqual(sampleProfile)
+    expect(loaded.readerProfile).toEqual({
+      ...sampleProfile,
+      intent: { ...sampleProfile.intent, secondaryGoals: [] },
+    })
+  })
+
+  test("legacy profile without secondaryGoals still loads for reuse", async () => {
+    root = await mkdtemp(join(tmpdir(), "qurom-rerun-legacy-"))
+    const runDir = join(root, "legacy-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    await mkdir(runDir, { recursive: true })
+    await writeFile(join(runDir, "request.json"), JSON.stringify({
+      requestId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      inputMode: "topic",
+      topic: "Python packages and modules system.",
+    }))
+    const legacy = {
+      intent: {
+        goal: "Organize multi-file projects cleanly, diagnose import errors confidently, and understand how Python’s import machinery resolves and loads code",
+        depth: "implementation",
+        format: "Practical conceptual guide",
+      },
+      background: { summary: "Already writing multi-file Python" },
+      competence: {
+        inTopic: { level: "novice", summary: "hitting import friction", evidence: ["said so"] },
+        adjacent: { summary: "comfortable with Python", evidence: [] },
+      },
+      inferredGaps: [
+        { concept: "sys.path", treatment: "must-explain", rationale: "central" },
+      ],
+    }
+    await writeFile(join(runDir, "reader-profile.json"), JSON.stringify(legacy))
+
+    const loaded = await loadPriorRunForRerun(runDir, "reuse", root)
+    expect(loaded.readerProfile?.intent.goal).toContain("Organize multi-file")
+    expect(loaded.readerProfile?.intent.secondaryGoals).toEqual([])
+  })
+
+  test("repair mode loads profile and completed transcript", async () => {
+    root = await mkdtemp(join(tmpdir(), "qurom-rerun-repair-"))
+    const runDir = join(root, "repair-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    await mkdir(runDir, { recursive: true })
+    await writeFile(join(runDir, "request.json"), JSON.stringify({
+      requestId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      inputMode: "topic",
+      topic: "Python packages",
+    }))
+    await writeFile(join(runDir, "reader-profile.json"), JSON.stringify(sampleProfile))
+    await writeFile(join(runDir, "question-1.json"), JSON.stringify({
+      questions: ["organize, diagnose, or understand?"],
+    }))
+    await writeFile(join(runDir, "reply-1.json"), JSON.stringify({ reply: "All of the above." }))
+
+    const loaded = await loadPriorRunForRerun(runDir, "repair", root)
+    expect(loaded.readerProfile?.intent.goal).toBe("learn the topic")
+    expect(loaded.interviewTranscript).toEqual([
+      { role: "interviewer", text: "organize, diagnose, or understand?" },
+      { role: "reader", text: "All of the above." },
+    ])
   })
 
   test("reuse mode requires reader-profile.json", async () => {
@@ -120,7 +178,7 @@ describe("run manager rerunResearch", () => {
     dataDir = ""
   })
 
-  test("reuse seeds readerProfile into the pipeline; fresh does not", async () => {
+  test("reuse seeds readerProfile into the pipeline; repair seeds repair flag; fresh does not", async () => {
     dataDir = await mkdtemp(join(tmpdir(), "qurom-rerun-manager-"))
     const config = testRuntimeConfig({ dataDir: unitTestDataDir(`rerun-manager-${Date.now()}`) })
     config.env.QUORUM_RUNS_DIR = join(dataDir, "runs")
@@ -134,6 +192,10 @@ describe("run manager rerunResearch", () => {
       topic: "What is MLX?",
     }))
     await writeFile(join(sourceDir, "reader-profile.json"), JSON.stringify(sampleProfile))
+    await writeFile(join(sourceDir, "question-1.json"), JSON.stringify({
+      questions: ["What do you want?"],
+    }))
+    await writeFile(join(sourceDir, "reply-1.json"), JSON.stringify({ reply: "All of the above." }))
 
     async function waitUntil(predicate: () => boolean, timeoutMs = 2000) {
       const deadline = Date.now() + timeoutMs
@@ -155,6 +217,8 @@ describe("run manager rerunResearch", () => {
           topic: args.request && "topic" in args.request ? args.request.topic : undefined,
           readerProfile: args.readerProfile,
           readerInterviewComplete: args.readerInterviewComplete,
+          readerProfileRepair: args.readerProfileRepair,
+          interviewTranscript: args.interviewTranscript,
           requestId: args.requestId,
         })
         return {
@@ -170,20 +234,37 @@ describe("run manager rerunResearch", () => {
     expect(reused.runPath).not.toContain("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     await waitUntil(() => calls.length === 1 && manager.status().active === null)
 
+    const repaired = await manager.rerunResearch(sourceDir, { interview: "repair" })
+    expect(repaired.runId).toBeTruthy()
+    await waitUntil(() => calls.length === 2 && manager.status().active === null)
+
     const fresh = await manager.rerunResearch(sourceDir, { interview: "fresh" })
     expect(fresh.runId).toBeTruthy()
-    await waitUntil(() => calls.length === 2 && manager.status().active === null)
+    await waitUntil(() => calls.length === 3 && manager.status().active === null)
 
     expect(calls[0]).toMatchObject({
       topic: "What is MLX?",
       readerInterviewComplete: true,
     })
     expect(calls[0]!.readerProfile).toEqual(sampleProfile)
+    expect(calls[0]!.readerProfileRepair).toBeUndefined()
+
     expect(calls[1]).toMatchObject({
       topic: "What is MLX?",
+      readerInterviewComplete: false,
+      readerProfileRepair: true,
     })
-    expect(calls[1]!.readerProfile).toBeUndefined()
-    expect(calls[1]!.readerInterviewComplete).toBeUndefined()
+    expect(calls[1]!.readerProfile).toEqual(sampleProfile)
+    expect(calls[1]!.interviewTranscript).toEqual([
+      { role: "interviewer", text: "What do you want?" },
+      { role: "reader", text: "All of the above." },
+    ])
+
+    expect(calls[2]).toMatchObject({
+      topic: "What is MLX?",
+    })
+    expect(calls[2]!.readerProfile).toBeUndefined()
+    expect(calls[2]!.readerInterviewComplete).toBeUndefined()
     expect(calls[0]!.requestId).not.toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
   })
 })

@@ -37,7 +37,28 @@ describe("view artifact renderers", () => {
 
     expect(html).toContain("Reader profile")
     expect(html).toContain("Understand quorum reads")
+    expect(html).toContain("Primary")
     expect(html).toContain("linearizability")
+  })
+
+  test("renders secondary goals on the reader profile card", () => {
+    const html = renderStructuredJson("reader-profile.json", {
+      intent: {
+        goal: "Understand import machinery",
+        secondaryGoals: ["Organize projects", "Diagnose errors"],
+        depth: "conceptual",
+      },
+      background: { summary: "Python novice" },
+      competence: {
+        inTopic: { level: "novice", summary: "hitting friction", evidence: [] },
+        adjacent: { summary: "writes scripts", evidence: [] },
+      },
+      inferredGaps: [],
+    })
+    expect(html).toContain("Primary")
+    expect(html).toContain("Secondary")
+    expect(html).toContain("Organize projects")
+    expect(html).toContain("Diagnose errors")
   })
 
   test("renders rebuttal input files with structured rebuttal entries", () => {

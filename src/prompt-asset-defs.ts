@@ -70,6 +70,11 @@ export const promptAssetDefs = {
     role: "reader-interviewer",
     label: "Duplicate correction",
   },
+  readerProfileRepairerRepair: {
+    file: "reader-profile-repairer.repair.md",
+    role: "reader-profile-repairer",
+    label: "Repair profile intent",
+  },
   htmlDesignerDesign: {
     file: "html-designer.design.md",
     role: "html-designer",

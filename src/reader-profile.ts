@@ -4,7 +4,10 @@ export function formatReaderProfileForPrompt(profile: ReaderCalibrationProfile |
   if (!profile) return "(none yet — synthesize a best-effort profile from the topic context and your first question plan)"
 
   const lines: string[] = []
-  lines.push(`Goal: ${profile.intent.goal}`)
+  lines.push(`Primary goal: ${profile.intent.goal}`)
+  if (profile.intent.secondaryGoals.length > 0) {
+    lines.push(`Secondary goals: ${profile.intent.secondaryGoals.join("; ")}`)
+  }
   lines.push(`Depth: ${profile.intent.depth}`)
   if (profile.intent.format) lines.push(`Format: ${profile.intent.format}`)
   lines.push(`Background: ${profile.background.summary}`)
@@ -33,7 +36,15 @@ export function readerContextBlock(profile: ReaderCalibrationProfile | undefined
   if (!profile) return ""
 
   const lines: string[] = []
-  lines.push(`Reader goal: ${profile.intent.goal}`)
+  lines.push(`Reader primary goal: ${profile.intent.goal}`)
+  if (profile.intent.secondaryGoals.length > 0) {
+    lines.push(
+      `Reader secondary goals (must still serve, as consequences of the primary throughline — not peer chapters): ${profile.intent.secondaryGoals.join("; ")}`,
+    )
+    lines.push(
+      "Structure the document around the primary goal. Serve secondary goals via worked examples, layouts, checklists, or success criteria hanging off that spine. Do not drop them; do not give each equal top-level weight.",
+    )
+  }
   lines.push(`Desired depth: ${profile.intent.depth}`)
   if (profile.intent.format) lines.push(`Preferred format: ${profile.intent.format}`)
   lines.push(`Background: ${profile.background.summary}`)
@@ -64,4 +75,30 @@ export function readerContextBlock(profile: ReaderCalibrationProfile | undefined
   }
 
   return lines.join("\n")
+}
+
+/**
+ * Enforce intent-only repair: take goal / secondaryGoals / format from the
+ * repaired profile, preserve depth and everything outside intent from the original.
+ */
+export function applyIntentOnlyRepair(
+  original: ReaderCalibrationProfile,
+  repaired: {
+    intent: {
+      goal: string
+      secondaryGoals?: string[]
+      depth: ReaderCalibrationProfile["intent"]["depth"]
+      format?: string
+    }
+  },
+): ReaderCalibrationProfile {
+  return {
+    ...original,
+    intent: {
+      goal: repaired.intent.goal,
+      secondaryGoals: repaired.intent.secondaryGoals ?? [],
+      depth: original.intent.depth,
+      format: repaired.intent.format ?? original.intent.format,
+    },
+  }
 }

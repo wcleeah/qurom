@@ -245,20 +245,25 @@ describe("reader interview prompt assets", () => {
     expect(promptAssetFiles.readerInterviewerInterview).toBe("reader-interviewer.interview.md")
     expect(promptAssetFiles.readerInterviewerFollowUp).toBe("reader-interviewer.follow-up.md")
     expect(promptAssetFiles.readerInterviewerDuplicateCorrection).toBe("reader-interviewer.duplicate-correction.md")
+    expect(promptAssetFiles.readerProfileRepairerRepair).toBe("reader-profile-repairer.repair.md")
 
     const bundle = await loadPromptBundle(testConfig)
     expect(bundle.assets.readerInterviewerInterview).toContain("turn {turn}")
     expect(bundle.assets.readerInterviewerInterview).toContain("do not quiz them on terminology")
     expect(bundle.assets.readerInterviewerInterview).toContain("do not force prerequisites")
     expect(bundle.assets.readerInterviewerInterview).toContain("true priors from topic concepts")
+    expect(bundle.assets.readerInterviewerInterview).toContain("secondaryGoals")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("Continue the reader interview")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("{profileSoFar}")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("do not force prerequisites")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("true priors from topic concepts")
+    expect(bundle.assets.readerInterviewerFollowUp).toContain("secondaryGoals")
     expect(bundle.assets.readerInterviewerDuplicateCorrection).toContain("previous response repeated")
     expect(bundle.assets.readerInterviewerInterview).toContain("`newQuestions`")
     expect(bundle.assets.readerInterviewerFollowUp).toContain("`newQuestions`")
     expect(bundle.assets.readerInterviewerDuplicateCorrection).toContain("`newQuestions`")
+    expect(bundle.assets.readerProfileRepairerRepair).toContain("secondaryGoals")
+    expect(bundle.assets.readerProfileRepairerRepair).toContain("{profileJson}")
   })
 
   test("formats batched reader questions and answers as numbered pairs", () => {
@@ -276,9 +281,21 @@ describe("reader interview prompt assets", () => {
 
   test("formats partial profile for follow-up prompts", () => {
     const formatted = formatReaderProfileForPrompt(sampleReaderProfile())
-    expect(formatted).toContain("Goal: decide if MLX is worth learning")
+    expect(formatted).toContain("Primary goal: decide if MLX is worth learning")
     expect(formatted).toContain("In-topic (intermediate)")
     expect(formatted).toContain("autograd (must-explain)")
+  })
+
+  test("formats secondary goals when present", () => {
+    const formatted = formatReaderProfileForPrompt(sampleReaderProfile({
+      intent: {
+        goal: "Understand the import machinery",
+        secondaryGoals: ["Organize multi-file projects", "Diagnose import errors"],
+        depth: "conceptual",
+      },
+    }))
+    expect(formatted).toContain("Primary goal: Understand the import machinery")
+    expect(formatted).toContain("Secondary goals: Organize multi-file projects; Diagnose import errors")
   })
 
   test("detects repeated interviewer questions", () => {
@@ -318,8 +335,83 @@ describe("reader-profile.json artifact shape", () => {
   })
 })
 
+describe("readerCalibrationProfileSchema secondaryGoals", () => {
+  test("legacy profiles without secondaryGoals parse to []", () => {
+    const parsed = readerCalibrationProfileSchema.parse({
+      intent: { goal: "packed conjunction of three outcomes", depth: "implementation" },
+      background: { summary: "novice" },
+      competence: {
+        inTopic: { level: "novice", summary: "new", evidence: [] },
+        adjacent: { summary: "some", evidence: [] },
+      },
+      inferredGaps: [],
+    })
+    expect(parsed.intent.secondaryGoals).toEqual([])
+  })
+
+  test("accepts explicit secondaryGoals", () => {
+    const parsed = readerCalibrationProfileSchema.parse({
+      intent: {
+        goal: "Understand the machinery",
+        secondaryGoals: ["Organize projects", "Diagnose errors"],
+        depth: "conceptual",
+      },
+      background: { summary: "novice" },
+      competence: {
+        inTopic: { level: "novice", summary: "new", evidence: [] },
+        adjacent: { summary: "some", evidence: [] },
+      },
+      inferredGaps: [],
+    })
+    expect(parsed.intent.goal).toBe("Understand the machinery")
+    expect(parsed.intent.secondaryGoals).toEqual(["Organize projects", "Diagnose errors"])
+  })
+})
+
+describe("applyIntentOnlyRepair", () => {
+  test("keeps competence and gaps from the original profile", async () => {
+    const { applyIntentOnlyRepair } = await import("../src/reader-profile")
+    const original = sampleReaderProfile({
+      intent: {
+        goal: "Organize, diagnose, and understand import machinery",
+        depth: "implementation",
+        format: "practical guide",
+      },
+    })
+    const repaired = sampleReaderProfile({
+      intent: {
+        goal: "Understand how Python’s import machinery resolves and loads code",
+        secondaryGoals: [
+          "Organize multi-file projects cleanly",
+          "Diagnose import errors confidently",
+        ],
+        depth: "conceptual",
+        format: "mental model first, then friction walkthroughs",
+      },
+      background: { summary: "CHANGED — should not stick" },
+      competence: {
+        inTopic: { level: "expert", summary: "CHANGED", evidence: ["nope"] },
+        adjacent: { summary: "CHANGED", evidence: [] },
+      },
+      inferredGaps: [],
+    })
+
+    const merged = applyIntentOnlyRepair(original, repaired)
+    expect(merged.intent.goal).toBe("Understand how Python’s import machinery resolves and loads code")
+    expect(merged.intent.secondaryGoals).toEqual([
+      "Organize multi-file projects cleanly",
+      "Diagnose import errors confidently",
+    ])
+    expect(merged.intent.format).toBe("mental model first, then friction walkthroughs")
+    expect(merged.intent.depth).toBe("implementation")
+    expect(merged.background).toEqual(original.background)
+    expect(merged.competence).toEqual(original.competence)
+    expect(merged.inferredGaps).toEqual(original.inferredGaps)
+  })
+})
+
 describe("seeded reader interview for reruns", () => {
-  test("hasSeededReaderInterview requires both complete flag and profile", () => {
+  test("hasSeededReaderInterview requires both complete flag and profile without repair", () => {
     expect(hasSeededReaderInterview({
       readerInterviewComplete: true,
       readerProfile: sampleReaderProfile(),
@@ -331,6 +423,11 @@ describe("seeded reader interview for reruns", () => {
     expect(hasSeededReaderInterview({
       readerInterviewComplete: false,
       readerProfile: sampleReaderProfile(),
+    })).toBe(false)
+    expect(hasSeededReaderInterview({
+      readerInterviewComplete: true,
+      readerProfile: sampleReaderProfile(),
+      readerProfileRepair: true,
     })).toBe(false)
   })
 
@@ -358,6 +455,26 @@ describe("seeded reader interview for reruns", () => {
     })
     expect(state.readerInterviewComplete).toBeUndefined()
     expect(state.readerProfile).toBeUndefined()
+  })
+
+  test("ingestRequest seeds repair mode with profile and transcript", async () => {
+    const profile = sampleReaderProfile()
+    const transcript = [
+      { role: "interviewer" as const, text: "What do you want?" },
+      { role: "reader" as const, text: "All of the above." },
+    ]
+    const state = await ingestRequest({
+      inputMode: "topic",
+      topic: "Python packages",
+      requestId: "repair-seed-1",
+      readerProfile: profile,
+      readerProfileRepair: true,
+      interviewTranscript: transcript,
+    })
+    expect(state.readerProfile).toEqual(profile)
+    expect(state.readerProfileRepair).toBe(true)
+    expect(state.readerInterviewComplete).toBe(false)
+    expect(state.interviewTranscript).toEqual(transcript)
   })
 })
 
@@ -390,7 +507,7 @@ describe("reader profile threaded to prompt-contract functions", () => {
 
   test("readerContextBlock lists intent, competence, and throughline grounding from inferred gaps", () => {
     const block = readerContextBlock(profileState())
-    expect(block).toContain("Reader goal: decide if MLX is worth learning")
+    expect(block).toContain("Reader primary goal: decide if MLX is worth learning")
     expect(block).toContain("Desired depth: evaluation")
     expect(block).toContain("In-topic level (intermediate)")
     expect(block).toContain("Reader already knows (do not re-teach): tensor ops")
@@ -399,6 +516,22 @@ describe("reader profile threaded to prompt-contract functions", () => {
     expect(block).toContain("Do not add a separate Prerequisites section")
     expect(block).not.toContain("Include a Prerequisites section covering")
     expect(block).not.toContain("Explain fully before the main topic")
+  })
+
+  test("readerContextBlock instructs secondary goals as consequences of the primary", () => {
+    const block = readerContextBlock(profileState({
+      readerProfile: sampleReaderProfile({
+        intent: {
+          goal: "Understand the import machinery",
+          secondaryGoals: ["Organize multi-file projects", "Diagnose import errors"],
+          depth: "implementation",
+        },
+      }),
+    }))
+    expect(block).toContain("Reader primary goal: Understand the import machinery")
+    expect(block).toContain("Reader secondary goals")
+    expect(block).toContain("Organize multi-file projects")
+    expect(block).toContain("Structure the document around the primary goal")
   })
 
   test("readerContextBlock returns empty when no profile (default-reader fallback)", () => {
@@ -411,14 +544,14 @@ describe("reader profile threaded to prompt-contract functions", () => {
     const prompt = fullDraftPrompt(testConfig, promptBundle, profileState())
     expect(prompt).toContain("Must ground once in the throughline (true priors / unknown concepts): autograd")
     expect(prompt).toContain("Desired depth: evaluation")
-    expect(prompt).toContain("ground each one once where the argument needs it")
+    expect(prompt).toContain("When the reader profile lists secondary goals")
     expect(prompt).not.toContain("Include a Prerequisites section covering")
   })
 
   test("fullDraftPrompt omits reader context when no profile is set", () => {
     const prompt = fullDraftPrompt(testConfig, promptBundle, profileState({ readerProfile: undefined }))
     expect(prompt).not.toContain("Must ground once in the throughline")
-    expect(prompt).not.toContain("Reader goal")
+    expect(prompt).not.toContain("Reader primary goal")
   })
 
   test("fullDraftPrompt includes pasted document text for document-mode runs", () => {
