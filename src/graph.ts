@@ -20,7 +20,7 @@ import { auditorAuditPromptKey, auditorRebuttalPromptKey } from "./prompt-asset-
 import { buildResearchToolHint } from "./research-tools"
 import { summarizeMarkdown } from "./summarizer"
 import { tagOutputArtifact } from "./tagger"
-import { formatReaderProfileForPrompt, readerContextBlock as buildReaderContextBlock } from "./reader-profile"
+import { formatReaderProfileForPrompt, readerContextBlock as buildReaderContextBlock, applyIntentOnlyRepair } from "./reader-profile"
 import {
   designHtmlArtifactName,
   INTERACTIVE_ENHANCER_ROLE,
@@ -44,6 +44,7 @@ import {
   researchStateSchema,
   runSummarySchema,
   readerInterviewTurnSchema,
+  readerCalibrationProfileSchema,
   type AggregatedFinding,
   type AggregatedFindings,
   type AuditResultRecord,
@@ -51,6 +52,7 @@ import {
   type RunDisplaySummary,
   type Rebuttal,
   type RebuttalResponseRecord,
+  type ReaderCalibrationProfile,
   type ReaderInterviewTurn,
   type ResearchState,
 } from "./schema"
@@ -597,9 +599,9 @@ function buildActiveRebuttalMap(audits: AuditResultRecord[], rebuttals: Rebuttal
 }
 
 export function hasSeededReaderInterview(
-  state: Pick<ResearchState, "readerProfile" | "readerInterviewComplete">,
+  state: Pick<ResearchState, "readerProfile" | "readerInterviewComplete" | "readerProfileRepair">,
 ) {
-  return Boolean(state.readerInterviewComplete && state.readerProfile)
+  return Boolean(state.readerInterviewComplete && state.readerProfile && !state.readerProfileRepair)
 }
 
 export async function ingestRequest(input: GraphInput) {
@@ -610,7 +612,16 @@ export async function ingestRequest(input: GraphInput) {
         readerProfile: input.readerProfile,
         readerInterviewComplete: true as const,
       }
-    : {}
+    : input.readerProfile && input.readerProfileRepair
+      ? {
+          readerProfile: input.readerProfile,
+          readerProfileRepair: true as const,
+          readerInterviewComplete: false as const,
+          ...(input.interviewTranscript && input.interviewTranscript.length > 0
+            ? { interviewTranscript: input.interviewTranscript }
+            : {}),
+        }
+      : {}
   const baseState = {
     requestId,
     round: 0,
@@ -689,6 +700,85 @@ function renderReaderInterviewPrompt(input: {
   })
 }
 
+function renderReaderProfileRepairPrompt(input: {
+  config: RuntimeConfig
+  promptBundle: PromptBundle
+  state: ResearchState
+  profile: ReaderCalibrationProfile
+}) {
+  return renderPromptTemplate(input.promptBundle.assets.readerProfileRepairerRepair, {
+    requestContext: requestContextBlock(input.state),
+    researchToolHint: buildResearchToolHint(input.config),
+    transcript: formatReaderTranscriptForPrompt(input.state.interviewTranscript ?? []),
+    profileJson: JSON.stringify(input.profile, null, 2),
+  })
+}
+
+async function repairSeededReaderProfile(input: {
+  config: RuntimeConfig
+  runtime: AgentRuntime
+  promptBundle: PromptBundle
+  state: ResearchState
+  telemetry?: GraphTelemetry
+  observer?: RunObserver
+}): Promise<ReaderCalibrationProfile> {
+  const { config, runtime, promptBundle, state, telemetry, observer } = input
+  if (!state.outputPath) throw new Error("Missing outputPath during reader profile repair")
+  if (!state.readerProfile) throw new Error("Missing readerProfile during reader profile repair")
+
+  const original = state.readerProfile
+  const scratchFile = `${state.outputPath}/.profile-repair-scratch.json`
+  const handle = await createObservedHandle({
+    runtime,
+    role: "reader-profile-repairer",
+    title: `reader-profile-repairer:${state.requestId}`,
+    requestId: state.requestId,
+    observer,
+  })
+
+  try {
+    const prompt = renderReaderProfileRepairPrompt({
+      config,
+      promptBundle,
+      state,
+      profile: original,
+    })
+    const response = await runtime.prompt({
+      role: "reader-profile-repairer",
+      handle,
+      prompt,
+      schema: readerCalibrationProfileSchema,
+      outputFile: scratchFile,
+      telemetry: graphAgentTelemetry({
+        telemetry,
+        state,
+        name: "agent.repairReaderProfile",
+        agentName: "reader-profile-repairer",
+        sessionId: handle.id,
+        input: { goal: original.intent.goal },
+      }),
+    })
+    const repairedRaw = response.structured
+      ? readerCalibrationProfileSchema.parse(response.structured)
+      : undefined
+    if (!repairedRaw) throw new Error("Reader profile repairer returned no structured profile")
+    await ensureJsonArtifact(scratchFile, repairedRaw, "reader profile repair")
+    return applyIntentOnlyRepair(original, repairedRaw)
+  } finally {
+    try {
+      const { unlink } = await import("node:fs/promises")
+      await unlink(scratchFile)
+    } catch {
+      // Scratch may already be gone.
+    }
+    try {
+      await runtime.abort(handle)
+    } catch {
+      // Best-effort dispose.
+    }
+  }
+}
+
 async function discoverReaderPrompt(
   config: RuntimeConfig,
   runtime: AgentRuntime,
@@ -698,6 +788,26 @@ async function discoverReaderPrompt(
   observer?: RunObserver,
 ): Promise<ResearchState> {
   if (!state.outputPath) throw new Error("Missing outputPath during discoverReaderPrompt")
+
+  // Rerun with repair: intent-only upgrade, then proceed as a seeded complete profile.
+  if (state.readerProfileRepair && state.readerProfile) {
+    const repaired = await repairSeededReaderProfile({
+      config,
+      runtime,
+      promptBundle,
+      state,
+      telemetry,
+      observer,
+    })
+    await writeRunJsonArtifact(state.outputPath, "reader-profile.json", repaired)
+    return researchStateSchema.parse({
+      ...state,
+      readerProfile: repaired,
+      readerProfileRepair: false,
+      readerInterviewComplete: true,
+      pendingNewReaderQuestions: undefined,
+    })
+  }
 
   // Rerun with a reused profile: persist it and skip the interviewer entirely.
   if (hasSeededReaderInterview(state) && state.readerProfile) {
@@ -791,6 +901,8 @@ async function discoverReaderPrompt(
         }),
       })
       turnResult = response.structured
+        ? readerInterviewTurnSchema.parse(response.structured) as ReaderInterviewTurn
+        : undefined
       if (!turnResult || turnResult.done || !repeatsPreviousReaderQuestion(turnResult.newQuestions, transcript) || attempt === 2) {
         break
       }

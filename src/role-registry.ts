@@ -19,8 +19,11 @@ export const AUDITOR_ROLES = [
 
 export const HTML_REPAIR_ROLE = "html-repair"
 
+export const READER_PROFILE_REPAIRER_ROLE = "reader-profile-repairer"
+
 export const UTILITY_ROLES = [
   "reader-interviewer",
+  READER_PROFILE_REPAIRER_ROLE,
   "json-fixer",
   "html-reading-companion",
   HTML_REPAIR_ROLE,

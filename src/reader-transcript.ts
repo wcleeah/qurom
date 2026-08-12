@@ -146,6 +146,62 @@ export async function readerInterviewStateFromRunDir(runDir: string): Promise<{
   return undefined
 }
 
+/** Load a completed interview transcript (Q+A pairs only) from a prior run dir. */
+export async function loadCompletedReaderTranscriptFromRunDir(runDir: string): Promise<ReaderTranscriptEntry[]> {
+  const { readdir, readFile } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+
+  let files: string[]
+  try {
+    files = await readdir(runDir)
+  } catch {
+    return []
+  }
+
+  const questionTurns = new Map<number, string[]>()
+  const replyTurns = new Map<number, string>()
+
+  for (const file of files) {
+    const questionMatch = file.match(/^question-(\d+)\.json$/)
+    if (questionMatch) {
+      const turn = Number.parseInt(questionMatch[1]!, 10)
+      try {
+        const raw = JSON.parse(await readFile(join(runDir, file), "utf8")) as QuestionArtifact
+        const questions = Array.isArray(raw.questions)
+          ? raw.questions.map((entry) => String(entry).trim()).filter(Boolean)
+          : []
+        if (questions.length > 0) questionTurns.set(turn, questions)
+      } catch {
+        // Skip unreadable question artifacts.
+      }
+      continue
+    }
+    const replyMatch = file.match(/^reply-(\d+)\.json$/)
+    if (replyMatch) {
+      const turn = Number.parseInt(replyMatch[1]!, 10)
+      try {
+        const raw = JSON.parse(await readFile(join(runDir, file), "utf8")) as ReplyArtifact
+        if (typeof raw.reply === "string" && raw.reply.trim()) replyTurns.set(turn, raw.reply.trim())
+      } catch {
+        // Skip unreadable reply artifacts.
+      }
+    }
+  }
+
+  if (questionTurns.size === 0) return []
+
+  const transcript: ReaderTranscriptEntry[] = []
+  const maxQuestionTurn = Math.max(...questionTurns.keys())
+  for (let turn = 1; turn <= maxQuestionTurn; turn += 1) {
+    const questions = questionTurns.get(turn)
+    const reply = replyTurns.get(turn)
+    if (!questions || reply === undefined) break
+    transcript.push({ role: "interviewer", text: questions.join("\n") })
+    transcript.push({ role: "reader", text: reply })
+  }
+  return transcript
+}
+
 export type AwaitingReaderReplyState = {
   turn: number
   answeredQuestions?: Array<{ question: string; answer: string }>

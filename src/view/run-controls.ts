@@ -5,6 +5,7 @@ export type RunResumeActions = {
   showResume: boolean
   showRestartFromSource: boolean
   showRerunReuseProfile: boolean
+  showRerunRepairProfile: boolean
   showRerunFreshInterview: boolean
 }
 
@@ -22,6 +23,7 @@ export function resolveRunResumeActions(input: {
       showResume: false,
       showRestartFromSource: false,
       showRerunReuseProfile: false,
+      showRerunRepairProfile: false,
       showRerunFreshInterview: false,
     }
   }
@@ -36,6 +38,7 @@ export function resolveRunResumeActions(input: {
     showResume,
     showRestartFromSource: input.hasInputMd,
     showRerunReuseProfile: canRerun && input.hasReaderProfile,
+    showRerunRepairProfile: canRerun && input.hasReaderProfile,
     showRerunFreshInterview: canRerun,
   }
 }
@@ -65,6 +68,13 @@ function renderRerunReuseForm(runName: string, disabled: boolean): string {
 </form>`
 }
 
+function renderRerunRepairForm(runName: string, disabled: boolean): string {
+  return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/rerun">
+  <input type="hidden" name="interview" value="repair" />
+  <button type="submit" class="btn btn-secondary"${disabled ? " disabled" : ""}>Rerun (repair profile)</button>
+</form>`
+}
+
 function renderRerunFreshForm(runName: string, disabled: boolean): string {
   return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/rerun">
   <input type="hidden" name="interview" value="fresh" />
@@ -90,7 +100,7 @@ export function renderRunActionStrip(
   options?: { runActiveGlobally?: boolean; showArchive?: boolean },
 ): string {
   const showArchive = options?.showArchive === true
-  const hasRerun = actions.showRerunReuseProfile || actions.showRerunFreshInterview
+  const hasRerun = actions.showRerunReuseProfile || actions.showRerunRepairProfile || actions.showRerunFreshInterview
   if (!actions.showResume && !actions.showRestartFromSource && !hasRerun && !showArchive) return ""
 
   const disabled = options?.runActiveGlobally === true
@@ -105,6 +115,7 @@ export function renderRunActionStrip(
 
   const rerunButtons = [
     actions.showRerunReuseProfile ? renderRerunReuseForm(runName, disabled) : "",
+    actions.showRerunRepairProfile ? renderRerunRepairForm(runName, disabled) : "",
     actions.showRerunFreshInterview ? renderRerunFreshForm(runName, disabled) : "",
   ].filter(Boolean).join("\n")
 

@@ -38,6 +38,9 @@ export type RunManagerStatus = {
 
 export type StartResearchOptions = {
   readerProfile?: ReaderCalibrationProfile
+  /** When true with readerProfile, discoverReader runs intent-only repair then continues. */
+  readerProfileRepair?: boolean
+  interviewTranscript?: Array<{ role: "interviewer" | "reader"; text: string }>
 }
 
 export type RunManager = {
@@ -274,6 +277,8 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     })
 
     const seededProfile = options?.readerProfile
+    const repairProfile = options?.readerProfileRepair === true && Boolean(seededProfile)
+    const seededTranscript = options?.interviewTranscript
     const roles = configuredAgentRoles(cfg)
     await runPipeline({
       runId,
@@ -287,9 +292,18 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
           promptBundle: bundle,
           request: pipelineRequest,
           requestId: runId,
-          ...(seededProfile
-            ? { readerProfile: seededProfile, readerInterviewComplete: true }
-            : {}),
+          ...(seededProfile && repairProfile
+            ? {
+                readerProfile: seededProfile,
+                readerProfileRepair: true,
+                readerInterviewComplete: false,
+                ...(seededTranscript && seededTranscript.length > 0
+                  ? { interviewTranscript: seededTranscript }
+                  : {}),
+              }
+            : seededProfile
+              ? { readerProfile: seededProfile, readerInterviewComplete: true }
+              : {}),
           bus,
           signal,
           bridgeFactory,
@@ -314,6 +328,13 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     async rerunResearch(sourceRunRef, options) {
       const cfg = await config()
       const prior = await loadPriorRunForRerun(sourceRunRef, options.interview, cfg.env.QUORUM_RUNS_DIR)
+      if (options.interview === "repair" && prior.readerProfile) {
+        return startResearch(prior.request, {
+          readerProfile: prior.readerProfile,
+          readerProfileRepair: true,
+          interviewTranscript: prior.interviewTranscript,
+        })
+      }
       return startResearch(
         prior.request,
         options.interview === "reuse" && prior.readerProfile

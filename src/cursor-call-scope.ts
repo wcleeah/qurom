@@ -94,6 +94,7 @@ function inferScopeFromArtifact(artifact: string, role: string): CursorCallScope
 function inferScopeFromRole(role: string): CursorCallScope {
   switch (role) {
     case "reader-interviewer":
+    case "reader-profile-repairer":
       return { node: "discoverReader", round: 0 }
     case DESIGNER_ROLE:
       return { node: "runDesignHtml", round: 0 }

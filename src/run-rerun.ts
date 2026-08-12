@@ -1,6 +1,7 @@
 import { join } from "node:path"
 
 import { readRunSourceDocument } from "./document-input"
+import { loadCompletedReaderTranscriptFromRunDir, type ReaderTranscriptEntry } from "./reader-transcript"
 import { resolveRunDirectory } from "./run-resume"
 import {
   inputRequestSchema,
@@ -9,12 +10,13 @@ import {
   type ReaderCalibrationProfile,
 } from "./schema"
 
-export type RerunInterviewMode = "reuse" | "fresh"
+export type RerunInterviewMode = "reuse" | "fresh" | "repair"
 
 export type PriorRunRerunLoad = {
   sourceRunDir: string
   request: InputRequest
   readerProfile?: ReaderCalibrationProfile
+  interviewTranscript?: ReaderTranscriptEntry[]
 }
 
 export class RerunLoadError extends Error {
@@ -28,13 +30,13 @@ export class RerunLoadError extends Error {
 }
 
 export function parseRerunInterviewMode(raw: unknown): RerunInterviewMode {
-  if (raw === "reuse" || raw === "fresh") return raw
-  throw new RerunLoadError('interview must be "reuse" or "fresh"', 400)
+  if (raw === "reuse" || raw === "fresh" || raw === "repair") return raw
+  throw new RerunLoadError('interview must be "reuse", "fresh", or "repair"', 400)
 }
 
 /**
  * Rebuild a new-run InputRequest from a prior run, optionally loading its
- * accepted reader profile for interview-skipping reuse.
+ * accepted reader profile for interview-skipping reuse or intent-only repair.
  */
 export async function loadPriorRunForRerun(
   runRef: string,
@@ -80,5 +82,14 @@ export async function loadPriorRunForRerun(
     throw new RerunLoadError(`Invalid reader-profile.json in prior run: ${profileParsed.error.message}`, 400)
   }
 
-  return { sourceRunDir, request, readerProfile: profileParsed.data }
+  const interviewTranscript = mode === "repair"
+    ? await loadCompletedReaderTranscriptFromRunDir(sourceRunDir)
+    : undefined
+
+  return {
+    sourceRunDir,
+    request,
+    readerProfile: profileParsed.data,
+    ...(interviewTranscript && interviewTranscript.length > 0 ? { interviewTranscript } : {}),
+  }
 }

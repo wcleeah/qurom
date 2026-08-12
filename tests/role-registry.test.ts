@@ -39,6 +39,7 @@ describe("role registry", () => {
     expect(configuredAgentRoles(withDesign)).toContain(SUMMARIZER_ROLE)
     expect(configuredAgentRoles(withDesign)).toContain(TAGGER_ROLE)
     expect(configuredAgentRoles(withDesign)).toContain(HTML_REPAIR_ROLE)
+    expect(configuredAgentRoles(withDesign)).toContain("reader-profile-repairer")
   })
 
   test("requiredOpenCodeAgentRoles includes tagger and designer when design quorum enabled", () => {
