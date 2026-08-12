@@ -38,6 +38,7 @@ Research quorum:
 Reader discovery:
 
 - `reader-interviewer`
+- `reader-profile-repairer` (intent-only upgrade on **Rerun (repair profile)**)
 
 Design quorum (when `designQuorum.enabled` is true):
 
