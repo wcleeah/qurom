@@ -160,11 +160,16 @@ export async function resolveOpencodeBootstrap(input: { interactive: boolean; wo
   } else if (assessment.status === "absent" || assessment.status === "empty") {
     decision = "seed"
   } else {
-    console.warn(
-      "[qurom] Local .opencode/agents/ differs from defaults; keeping local files. "
-      + "Set QUORUM_OPENCODE_BOOTSTRAP=overwrite to refresh, or run the TUI to choose interactively.",
-    )
-    decision = "keep"
+    // Local tree exists but is missing and/or diverged from defaults. Seed only
+    // missing files (seed never overwrites existing), and warn about divergences.
+    if (assessment.differing.length > 0) {
+      console.warn(
+        "[qurom] Local .opencode/agents/ differs from defaults; keeping local files for changed agents. "
+          + "Missing agents will be seeded. Set QUORUM_OPENCODE_BOOTSTRAP=overwrite to refresh all, "
+          + "or run the TUI to choose interactively.",
+      )
+    }
+    decision = "seed"
   }
 
   await applyOpencodeBootstrap(decision, input.workspaceDir)

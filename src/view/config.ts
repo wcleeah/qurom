@@ -21,7 +21,7 @@ import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormP
 import { card, section, summaryRow, summaryTable } from "./html"
 import { layout } from "./layout"
 import { configNavbarOptions } from "./config-nav"
-import { readActiveOpencodeAgent, renderOpencodeAgentReadonly } from "./opencode-agent-display"
+import { readOpencodeAgentForConfigRoles, renderOpencodeAgentReadonly } from "./opencode-agent-display"
 import { promptDiffScript } from "./prompt-diff-script"
 import { parseQuorumConfigForm, quorumConfigFormScript, renderQuorumConfigForm } from "./quorum-config-form"
 import { viewServerAdminEnabled } from "./server-options"
@@ -304,7 +304,7 @@ export async function renderConfigRoles(): Promise<Response> {
 
   const descriptors = new Map(await Promise.all(providerIds.map(async (id) => [id, await providerConfigForm(config, id as AgentProviderId)] as const)))
   const opencodeAgentHtmlByRole = new Map(await Promise.all(
-    roles.map(async (role) => [role, renderOpencodeAgentReadonly(await readActiveOpencodeAgent(config.env.OPENCODE_DIRECTORY, role))] as const),
+    roles.map(async (role) => [role, renderOpencodeAgentReadonly(await readOpencodeAgentForConfigRoles(config.env.OPENCODE_DIRECTORY, role))] as const),
   ))
   const cards = await Promise.all(roles.map(async (role) => {
     const binding = bindingByRole.get(role)
