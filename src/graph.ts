@@ -2557,7 +2557,10 @@ export function createGraph(
       "runDesignHtml",
       "__end__",
     ])
-    .addEdge("runDesignHtml", "graphicalEnhance")
+    .addConditionalEdges("runDesignHtml", () => "graphicalEnhance", [
+      "graphicalEnhance",
+      "interactiveEnhance",
+    ])
     .addEdge("graphicalEnhance", "readingExperienceEnhance")
     .addEdge("interactiveEnhance", "readingExperienceEnhance")
     .addEdge("readingExperienceEnhance", "finalizeDesign")
