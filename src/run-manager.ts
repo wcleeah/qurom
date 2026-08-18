@@ -1,3 +1,5 @@
+import { basename } from "node:path"
+
 import type { RuntimeConfig } from "./config"
 import { normalizeDocumentRequest, DocumentInputError } from "./document-input"
 import { loadPromptBundle, type PromptBundle } from "./prompt-assets"
@@ -20,9 +22,23 @@ import {
   writeRunJsonArtifact,
 } from "./output"
 import type { LiveStatus } from "./live-status"
+import { archiveSourceRunAfterRerun } from "./run-archive"
+import {
+  createSqliteRerunQueueStore,
+  type RerunQueueItem,
+  type RerunQueueStore,
+  type UnattendedRerunInterview,
+} from "./rerun-queue-store"
 import { resolveRunDirectory } from "./run-resume"
 import type { InputRequest, ReaderCalibrationProfile } from "./schema"
-import { loadPriorRunForRerun, RerunLoadError, type RerunInterviewMode } from "./run-rerun"
+import {
+  displayTopicForRerun,
+  isUnattendedRerunInterview,
+  loadPriorRunForRerun,
+  RerunLoadError,
+  type PriorRunRerunLoad,
+  type RerunInterviewMode,
+} from "./run-rerun"
 
 export type ActiveRun = {
   runId: string
@@ -43,6 +59,27 @@ export type StartResearchOptions = {
   interviewTranscript?: Array<{ role: "interviewer" | "reader"; text: string }>
 }
 
+export type StartedRerun = {
+  kind: "started"
+  runId: string
+  runPath: string
+}
+
+export type QueuedRerun = {
+  kind: "queued"
+  queueId: string
+  sourceRunName: string
+  topic: string
+  interview: UnattendedRerunInterview
+}
+
+export type RerunResult = StartedRerun | QueuedRerun
+
+export type RerunQueueSnapshot = {
+  paused: boolean
+  items: RerunQueueItem[]
+}
+
 export type RunManager = {
   status: () => RunManagerStatus
   startResearch: (
@@ -53,7 +90,12 @@ export type RunManager = {
   rerunResearch: (
     sourceRunRef: string,
     options: { interview: RerunInterviewMode },
-  ) => Promise<{ runId: string; runPath: string }>
+  ) => Promise<RerunResult>
+  listRerunQueue: () => Promise<RerunQueueSnapshot>
+  removeRerunQueueItem: (id: string) => Promise<boolean>
+  clearRerunQueue: () => Promise<number>
+  setRerunQueuePaused: (paused: boolean) => Promise<RerunQueueSnapshot>
+  drainRerunQueue: () => Promise<void>
   cancel: (runId?: string) => Promise<boolean>
   shutdown: () => Promise<void>
 }
@@ -64,6 +106,7 @@ export type RunManagerDeps = {
   loadPromptBundleFn?: typeof loadPromptBundle
   validatePrerequisitesFn?: typeof validateProviderPrerequisites
   runResearchPipelineFn?: typeof runResearchPipeline
+  rerunQueue?: RerunQueueStore
 }
 
 function parseResumeRunId(raw: string): string {
@@ -139,9 +182,21 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
   const runPipelineFn = deps.runResearchPipelineFn ?? runResearchPipeline
 
   let active: ActiveRun | undefined
+  let shuttingDown = false
+  let draining = false
+  let cachedQueue: RerunQueueStore | undefined
 
   async function config(): Promise<RuntimeConfig> {
     return await Promise.resolve(deps.getConfig())
+  }
+
+  async function queueStore(): Promise<RerunQueueStore> {
+    if (deps.rerunQueue) return deps.rerunQueue
+    if (!cachedQueue) {
+      const cfg = await config()
+      cachedQueue = createSqliteRerunQueueStore(cfg.env.QUORUM_DATA_DIR)
+    }
+    return cachedQueue
   }
 
   async function promptBundle(cfg: RuntimeConfig): Promise<PromptBundle> {
@@ -229,6 +284,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
           await releaseProviders().catch(() => {})
           releaseProviders = undefined
         }
+        scheduleDrain()
       }
     })()
 
@@ -268,6 +324,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
 
     await writeRunJsonArtifact(runDir, "request.json", {
       requestId: runId,
+      createdAt: Date.now(),
       inputMode: pipelineRequest.inputMode,
       topic: pipelineRequest.inputMode === "topic" ? pipelineRequest.topic : undefined,
       documentPath: pipelineRequest.inputMode === "document" ? pipelineRequest.documentPath : undefined,
@@ -312,6 +369,87 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     return { runId, runPath }
   }
 
+  function startFromPrior(prior: PriorRunRerunLoad, interview: RerunInterviewMode) {
+    if (interview === "repair" && prior.readerProfile) {
+      return startResearch(prior.request, {
+        readerProfile: prior.readerProfile,
+        readerProfileRepair: true,
+        interviewTranscript: prior.interviewTranscript,
+      })
+    }
+    return startResearch(
+      prior.request,
+      interview === "reuse" && prior.readerProfile
+        ? { readerProfile: prior.readerProfile }
+        : undefined,
+    )
+  }
+
+  async function startFromQueueItem(item: RerunQueueItem) {
+    if (item.interview === "repair") {
+      return startResearch(item.payload.request, {
+        readerProfile: item.payload.readerProfile,
+        readerProfileRepair: true,
+        interviewTranscript: item.payload.interviewTranscript,
+      })
+    }
+    return startResearch(item.payload.request, {
+      readerProfile: item.payload.readerProfile,
+    })
+  }
+
+  async function archivePriorSource(sourceRunDir: string) {
+    try {
+      const cfg = await config()
+      await archiveSourceRunAfterRerun(sourceRunDir, cfg.env.QUORUM_RUNS_DIR)
+    } catch (error) {
+      console.error(
+        "Failed to archive source run after rerun:",
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
+  function scheduleDrain() {
+    if (shuttingDown) return
+    void drainRerunQueue().catch((error) => {
+      console.error(
+        "Rerun queue drain failed:",
+        error instanceof Error ? error.message : String(error),
+      )
+    })
+  }
+
+  async function drainRerunQueue() {
+    if (shuttingDown || draining || active) return
+    const store = await queueStore()
+    if (await store.isPaused()) return
+
+    draining = true
+    try {
+      while (!shuttingDown && !active) {
+        if (await store.isPaused()) return
+        const next = await store.takeNext()
+        if (!next) return
+        try {
+          await startFromQueueItem(next)
+          return
+        } catch (error) {
+          if (error instanceof RunManagerError && error.status === 409) {
+            await store.requeueFront(next).catch(() => {})
+            return
+          }
+          console.error(
+            "Queued rerun failed to start:",
+            error instanceof Error ? error.message : String(error),
+          )
+        }
+      }
+    } finally {
+      draining = false
+    }
+  }
+
   return {
     status() {
       return {
@@ -328,20 +466,66 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     async rerunResearch(sourceRunRef, options) {
       const cfg = await config()
       const prior = await loadPriorRunForRerun(sourceRunRef, options.interview, cfg.env.QUORUM_RUNS_DIR)
-      if (options.interview === "repair" && prior.readerProfile) {
-        return startResearch(prior.request, {
-          readerProfile: prior.readerProfile,
-          readerProfileRepair: true,
-          interviewTranscript: prior.interviewTranscript,
+      const sourceRunName = basename(prior.sourceRunDir)
+      const topic = displayTopicForRerun(prior.request, sourceRunName)
+
+      if (active && isUnattendedRerunInterview(options.interview)) {
+        if (!prior.readerProfile) {
+          throw new RerunLoadError("This run has no reader-profile.json to reuse.", 404)
+        }
+        const queued = await (await queueStore()).enqueue({
+          interview: options.interview,
+          sourceRunName,
+          topic,
+          payload: {
+            request: prior.request,
+            readerProfile: prior.readerProfile,
+            ...(options.interview === "repair" && prior.interviewTranscript
+              ? { interviewTranscript: prior.interviewTranscript }
+              : {}),
+          },
         })
+        await archivePriorSource(prior.sourceRunDir)
+        return {
+          kind: "queued",
+          queueId: queued.id,
+          sourceRunName,
+          topic,
+          interview: options.interview,
+        }
       }
-      return startResearch(
-        prior.request,
-        options.interview === "reuse" && prior.readerProfile
-          ? { readerProfile: prior.readerProfile }
-          : undefined,
-      )
+
+      const started = await startFromPrior(prior, options.interview)
+      await archivePriorSource(prior.sourceRunDir)
+      return { kind: "started", ...started }
     },
+
+    async listRerunQueue() {
+      const store = await queueStore()
+      const [paused, items] = await Promise.all([store.isPaused(), store.list()])
+      return { paused, items }
+    },
+
+    async removeRerunQueueItem(id) {
+      return await (await queueStore()).remove(id)
+    },
+
+    async clearRerunQueue() {
+      return await (await queueStore()).clear()
+    },
+
+    async setRerunQueuePaused(paused) {
+      const store = await queueStore()
+      await store.setPaused(paused)
+      const snapshot = {
+        paused: await store.isPaused(),
+        items: await store.list(),
+      }
+      if (!paused) scheduleDrain()
+      return snapshot
+    },
+
+    drainRerunQueue,
 
     async resumeResearch(rawRunId) {
       const runId = parseResumeRunId(rawRunId)
@@ -385,6 +569,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     },
 
     async shutdown() {
+      shuttingDown = true
       if (active) {
         active.abortController.abort()
         await active.promise.catch(() => {})

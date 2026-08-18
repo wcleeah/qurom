@@ -509,6 +509,65 @@ a:hover { text-decoration: underline; }
   margin: 0;
   font-size: 0.78rem;
 }
+.run-created {
+  white-space: nowrap;
+}
+.rerun-queue-section {
+  margin-bottom: 1.25rem;
+}
+.rerun-queue-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+.rerun-queue-header h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.05rem;
+}
+.rerun-queue-header .muted-note {
+  margin: 0;
+}
+.rerun-queue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.rerun-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.rerun-queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0;
+  border-top: 1px solid var(--border);
+}
+.rerun-queue-item:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.rerun-queue-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.rerun-queue-topic {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.rerun-queue-empty {
+  margin: 0;
+}
 .run-completion-banner {
   margin-bottom: 1rem;
 }

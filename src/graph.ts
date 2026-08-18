@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { readdir } from "node:fs/promises"
+import { join } from "node:path"
 import { START, StateGraph, interrupt } from "@langchain/langgraph"
 
 import { BunSqliteSaver } from "./checkpointer"
@@ -278,8 +279,22 @@ function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state
 async function persistRequestArtifact(state: ResearchState) {
   if (!state.outputPath) return
 
+  let createdAt: number | undefined
+  try {
+    const existing = await Bun.file(join(state.outputPath, "request.json")).json() as { createdAt?: unknown }
+    if (typeof existing.createdAt === "number" && existing.createdAt > 0) {
+      createdAt = existing.createdAt
+    } else if (typeof existing.createdAt === "string") {
+      const parsed = Date.parse(existing.createdAt)
+      if (Number.isFinite(parsed) && parsed > 0) createdAt = parsed
+    }
+  } catch {
+    // first write
+  }
+
   await writeRunJsonArtifact(state.outputPath, "request.json", {
     requestId: state.requestId,
+    ...(createdAt !== undefined ? { createdAt } : {}),
     inputMode: state.inputMode,
     topic: state.topic,
     documentPath: state.documentPath,

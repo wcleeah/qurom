@@ -5,6 +5,8 @@ export interface RunMeta {
   topic: string
   status: RunStatus
   mtime: number
+  /** Directory / request create time (ms epoch). */
+  createdAt: number
   roundCount: number
   hasFinalHtml: boolean
   hasFinalMd: boolean
@@ -31,6 +33,7 @@ export interface RunStats {
 
 export interface RequestJson {
   requestId?: string
+  createdAt?: number | string
   inputMode?: string
   topic?: string
   inputSummary?: { title?: string; summary?: string }

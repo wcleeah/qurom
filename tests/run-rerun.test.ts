@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
 import { emptyPromptBundle } from "../src/prompt-assets"
 import type { ProviderLifecycle, ProviderLifecycleStatus } from "../src/providers/lifecycle"
@@ -230,15 +230,23 @@ describe("run manager rerunResearch", () => {
     })
 
     const reused = await manager.rerunResearch(sourceDir, { interview: "reuse" })
+    expect(reused.kind).toBe("started")
+    if (reused.kind !== "started") return
     expect(reused.runId).toBeTruthy()
     expect(reused.runPath).not.toContain("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     await waitUntil(() => calls.length === 1 && manager.status().active === null)
+    expect(await Bun.file(join(dataDir, "archive", basename(sourceDir), "request.json")).exists()).toBe(true)
+    expect(await Bun.file(join(sourceDir, "request.json")).exists()).toBe(false)
 
     const repaired = await manager.rerunResearch(sourceDir, { interview: "repair" })
+    expect(repaired.kind).toBe("started")
+    if (repaired.kind !== "started") return
     expect(repaired.runId).toBeTruthy()
     await waitUntil(() => calls.length === 2 && manager.status().active === null)
 
     const fresh = await manager.rerunResearch(sourceDir, { interview: "fresh" })
+    expect(fresh.kind).toBe("started")
+    if (fresh.kind !== "started") return
     expect(fresh.runId).toBeTruthy()
     await waitUntil(() => calls.length === 3 && manager.status().active === null)
 
@@ -266,5 +274,67 @@ describe("run manager rerunResearch", () => {
     expect(calls[2]!.readerProfile).toBeUndefined()
     expect(calls[2]!.readerInterviewComplete).toBeUndefined()
     expect(calls[0]!.requestId).not.toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+  })
+
+  test("queues unattended reruns while a run is active, then drains and archives the source", async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "qurom-rerun-queue-mgr-"))
+    const config = testRuntimeConfig({ dataDir: unitTestDataDir(`rerun-queue-${Date.now()}`) })
+    config.env.QUORUM_RUNS_DIR = join(dataDir, "runs")
+    await mkdir(config.env.QUORUM_RUNS_DIR, { recursive: true })
+
+    const sourceDir = join(config.env.QUORUM_RUNS_DIR, "queued-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "request.json"), JSON.stringify({
+      requestId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      inputMode: "topic",
+      topic: "Queued topic",
+    }))
+    await writeFile(join(sourceDir, "reader-profile.json"), JSON.stringify(sampleProfile))
+
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const calls: string[] = []
+    const manager = createRunManager({
+      getConfig: () => config,
+      lifecycle: createTestLifecycle(),
+      loadPromptBundleFn: async () => emptyPromptBundle(),
+      validatePrerequisitesFn: async () => ({ providers: [] }),
+      runResearchPipelineFn: async (args) => {
+        const topic = args.request && "topic" in args.request ? String(args.request.topic) : "unknown"
+        calls.push(topic)
+        if (calls.length === 1) await firstGate
+        return { requestId: String(args.requestId), outcome: "approved", raw: {} }
+      },
+    })
+
+    await manager.startResearch({ inputMode: "topic", topic: "Blocking run" })
+    await Bun.sleep(20)
+    expect(manager.status().active).not.toBeNull()
+
+    const queued = await manager.rerunResearch(sourceDir, { interview: "reuse" })
+    expect(queued).toMatchObject({
+      kind: "queued",
+      interview: "reuse",
+      topic: "Queued topic",
+    })
+    expect(await Bun.file(join(dataDir, "archive", basename(sourceDir), "request.json")).exists()).toBe(true)
+
+    const snapshot = await manager.listRerunQueue()
+    expect(snapshot.items).toHaveLength(1)
+
+    await expect(manager.rerunResearch(sourceDir, { interview: "fresh" })).rejects.toMatchObject({
+      status: 409,
+    })
+
+    releaseFirst()
+    const deadline = Date.now() + 2000
+    while (Date.now() < deadline) {
+      if (calls.includes("Queued topic") && manager.status().active === null) break
+      await Bun.sleep(10)
+    }
+    expect(calls).toEqual(["Blocking run", "Queued topic"])
+    expect((await manager.listRerunQueue()).items).toHaveLength(0)
   })
 })

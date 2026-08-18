@@ -103,20 +103,23 @@ export function renderRunActionStrip(
   const hasRerun = actions.showRerunReuseProfile || actions.showRerunRepairProfile || actions.showRerunFreshInterview
   if (!actions.showResume && !actions.showRestartFromSource && !hasRerun && !showArchive) return ""
 
-  const disabled = options?.runActiveGlobally === true
-  const busyNote = disabled
-    ? `<p class="muted-note dim-text run-actions-note">Another run is active — wait for it to finish first.</p>`
+  const blocked = options?.runActiveGlobally === true
+  const hasUnattendedRerun = actions.showRerunReuseProfile || actions.showRerunRepairProfile
+  const busyNote = blocked
+    ? hasUnattendedRerun
+      ? `<p class="muted-note dim-text run-actions-note">A run is active — reuse and repair will queue. Other actions wait.</p>`
+      : `<p class="muted-note dim-text run-actions-note">Another run is active — wait for it to finish first.</p>`
     : ""
 
   const continueButtons = [
-    actions.showResume ? renderResumeForm(runName, disabled) : "",
-    actions.showRestartFromSource ? renderRestartFromSourceForm(runName, disabled) : "",
+    actions.showResume ? renderResumeForm(runName, blocked) : "",
+    actions.showRestartFromSource ? renderRestartFromSourceForm(runName, blocked) : "",
   ].filter(Boolean).join("\n")
 
   const rerunButtons = [
-    actions.showRerunReuseProfile ? renderRerunReuseForm(runName, disabled) : "",
-    actions.showRerunRepairProfile ? renderRerunRepairForm(runName, disabled) : "",
-    actions.showRerunFreshInterview ? renderRerunFreshForm(runName, disabled) : "",
+    actions.showRerunReuseProfile ? renderRerunReuseForm(runName, false) : "",
+    actions.showRerunRepairProfile ? renderRerunRepairForm(runName, false) : "",
+    actions.showRerunFreshInterview ? renderRerunFreshForm(runName, blocked) : "",
   ].filter(Boolean).join("\n")
 
   const archiveButtons = showArchive ? renderArchiveForm(runName) : ""

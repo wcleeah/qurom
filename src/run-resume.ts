@@ -1,5 +1,5 @@
 import { readdir, stat } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { basename, join, resolve } from "node:path"
 
 import { inputRequestSchema, type InputRequest } from "./schema"
 
@@ -17,16 +17,42 @@ async function isDirectory(path: string) {
   }
 }
 
-export async function resolveRunDirectory(runId: string, runsRoot = resolve(process.cwd(), "runs")) {
-  if (await isDirectory(runId)) return runId
-
-  const direct = join(runsRoot, runId)
+async function resolveInRoot(runId: string, root: string): Promise<string | undefined> {
+  const direct = join(root, runId)
   if (await isDirectory(direct)) return direct
 
-  const dirs = await readdir(runsRoot)
-  const match = dirs.find((dir) => dir.includes(runId))
-  if (!match) throw new Error(`No run directory found matching "${runId}"`)
-  return join(runsRoot, match)
+  const name = basename(runId)
+  if (name !== runId) {
+    const byName = join(root, name)
+    if (await isDirectory(byName)) return byName
+  }
+
+  let dirs: string[]
+  try {
+    dirs = await readdir(root)
+  } catch {
+    return undefined
+  }
+  const match = dirs.find((dir) => dir === runId || dir === name || dir.includes(runId) || dir.includes(name))
+  return match ? join(root, match) : undefined
+}
+
+export async function resolveRunDirectory(
+  runId: string,
+  runsRoot = resolve(process.cwd(), "runs"),
+  archiveRoot?: string,
+) {
+  if (await isDirectory(runId)) return runId
+
+  const inRuns = await resolveInRoot(runId, runsRoot)
+  if (inRuns) return inRuns
+
+  if (archiveRoot) {
+    const inArchive = await resolveInRoot(runId, archiveRoot)
+    if (inArchive) return inArchive
+  }
+
+  throw new Error(`No run directory found matching "${runId}"`)
 }
 
 export async function resolveRunForResume(runId: string, runsRoot?: string): Promise<ResolvedRun> {

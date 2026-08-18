@@ -59,7 +59,7 @@ function renderIndex(runs: StaticRun[]): string {
   const cards = runs.map((run) => `<a class="card" href="runs/${encodedRunName(run.name)}/">
   <h2>${escapeHtml(run.topic)}</h2>
   ${run.summary ? `<p class="summary">${escapeHtml(run.summary)}</p>` : ""}
-  <span class="meta">${new Date(run.mtime).toISOString().slice(0, 10)} · ${run.roundCount} research round${run.roundCount === 1 ? "" : "s"}</span>
+  <span class="meta">${new Date(run.createdAt || run.mtime).toISOString().slice(0, 10)} · ${run.roundCount} research round${run.roundCount === 1 ? "" : "s"}</span>
 </a>`).join("\n")
   return page("Successful runs — quorum", `<a class="brand" href="./">quorum</a>
 <p class="eyebrow">Published research</p>

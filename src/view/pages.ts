@@ -7,10 +7,11 @@ import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
 import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
 import { renderRunControlsSection, renderUnarchiveForm, resolveRunResumeActions } from "./run-controls"
 import { tryGetRunManager } from "../run-manager"
+import { renderRerunQueueStrip } from "./rerun-queue-view"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard } from "./components"
-import { computeStats, filterRunsForIndex, getRunFiles, listArchivedRuns, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry } from "./data"
+import { computeStats, filterRunsForIndex, getRunFiles, listArchivedRuns, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry, resolveRunCreatedAtMs } from "./data"
 import { getNodeDefinition, isRebuttalsViewerNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
 import { renderNodeDashboard, renderGlobalResearchRoundStrip, renderNodeGrid, renderNodeMiniPipeline, nodePageRoundNumbers } from "./node-view"
 import { renderLiveStatusMeta, renderRoundStrip } from "./round-view"
@@ -28,7 +29,7 @@ import { renderNoteTagsEditor } from "./tag-ui"
 import { tableWrap } from "./html"
 import { renderDebugLogHtml, type DebugLogEntry } from "./debug-log-viewer"
 import { appNavbarAction } from "./app-nav"
-import { badge, layout, phaseBadge, designPhaseBadge, designStatusLabel } from "./layout"
+import { badge, layout, formatDate, formatRelative, phaseBadge, designPhaseBadge, designStatusLabel } from "./layout"
 import { getRunsDir, resolveRunName, safeFilePath, safeRunPath } from "./paths"
 import { renderRefreshControls } from "./refresh-controls"
 import { READ_SCRIPT } from "./read-script"
@@ -37,6 +38,10 @@ import { renderSharePanel, SHARE_SCRIPT } from "./share-ui"
 import { getShareLinkByRun, getShareLinkByToken, isValidShareToken } from "./share-store"
 import { contentType, escapeHtml, formatBytes, formatCostUsd, formatElapsed, formatUsagePair, renderMarkdown, statusDot } from "./utils"
 import type { RequestJson, RunStatus } from "./types"
+
+function renderCreatedAt(ms: number): string {
+  return `<span class="run-created" title="${escapeHtml(formatDate(ms))}">${escapeHtml(formatRelative(ms))}</span>`
+}
 
 function renderReadButton(runName: string, unread: boolean): string {
   const unreadClass = unread ? " read-button-unread" : ""
@@ -241,6 +246,10 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   const manager = tryGetRunManager()
   const managerStatus = manager?.status()
   const runActive = Boolean(managerStatus?.active)
+  const rerunQueue = manager
+    ? await manager.listRerunQueue()
+    : { paused: false, items: [] }
+  const rerunQueueHtml = showArchived ? "" : renderRerunQueueStrip(rerunQueue)
 
   let bootstrapHtml = ""
   try {
@@ -341,6 +350,7 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     <div class="row-inline-spread">${badge(run.status)}${designBadge}</div>
   </div>
   <div class="run-card-meta">
+    ${renderCreatedAt(run.createdAt)}
     ${renderUnarchiveForm(run.name)}
   </div>
 </div>`
@@ -367,6 +377,7 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     <div class="row-inline-spread">${badge(run.status)}${designBadge}</div>
   </div>
   <div class="run-card-meta">
+    ${renderCreatedAt(run.createdAt)}
     <span>${escapeHtml(costLabel)}</span>
     <span>${escapeHtml(elapsedLabel)}</span>
   </div>
@@ -386,13 +397,14 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
 ${filterHtml}
 ${bootstrapHtml}
 ${newRunHtml}
+${rerunQueueHtml}
 ${statsHtml}
-${hasActiveRun ? renderRefreshControls() : ""}
+${hasActiveRun || rerunQueue.items.length > 0 || rerunQueue.paused ? renderRefreshControls() : ""}
 <div id="index-active-section">${activeRunHtml}</div>
 <div id="run-card-list">${runCards}</div>
 ${showArchived ? "" : READ_SCRIPT}
 ${showArchived ? "" : NEW_RUN_FORM_SCRIPT}
-${hasActiveRun ? INDEX_REFRESH_SCRIPT : ""}`
+${hasActiveRun || rerunQueue.items.length > 0 || rerunQueue.paused ? INDEX_REFRESH_SCRIPT : ""}`
 
   const html = layout("Runs — quorum", body, { navbar: { section: "runs" } })
   return new Response(html, {
@@ -612,7 +624,23 @@ export async function renderRun(name: string): Promise<Response> {
   const interviewChatHtml = renderInterviewChatCard(name, liveStatus)
 
   const isRunning = liveStatus?.phase === "running"
-  const runActiveGlobally = Boolean(tryGetRunManager()?.status().active)
+  const runManager = tryGetRunManager()
+  const runActiveGlobally = Boolean(runManager?.status().active)
+  const rerunQueue = runManager
+    ? await runManager.listRerunQueue()
+    : { paused: false, items: [] }
+  let createdAtMs = 0
+  try {
+    const dirStat = await stat(dirPath)
+    createdAtMs = resolveRunCreatedAtMs({
+      birthtimeMs: dirStat.birthtimeMs,
+      ctimeMs: dirStat.ctimeMs,
+      mtimeMs: dirStat.mtimeMs,
+      requestCreatedAt: requestJson?.createdAt,
+    })
+  } catch {
+    createdAtMs = 0
+  }
   const resumeActions = resolveRunResumeActions({
     isRunning,
     hasFinalMd,
@@ -677,6 +705,7 @@ export async function renderRun(name: string): Promise<Response> {
 
   const body = `
 ${isRunning ? renderRefreshControls() : ""}
+${renderRerunQueueStrip(rerunQueue)}
 ${runControlsHtml}
 ${interviewChatSection}
 <div class="header-bar">
@@ -687,6 +716,7 @@ ${interviewChatSection}
     </div>
     <div class="meta-row">
       ${statusTagsHtml}
+      ${createdAtMs > 0 ? `<span class="meta-item">Created: <strong>${renderCreatedAt(createdAtMs)}</strong></span>` : ""}
       <span class="meta-item">ID: <strong>${escapeHtml(requestJson?.requestId ?? name)}</strong></span>
       ${inputModeLabel}
       ${liveMetaHtml}
