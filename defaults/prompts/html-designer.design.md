@@ -1,11 +1,12 @@
-Convert the markdown deep dive into a single self-contained HTML document. Own structure, theme shell, typography, print stylesheet, syntax highlighting, and static visual presentation. Leave comprehension interactivity and reading chrome for later stages.
+Convert the markdown deep dive into a single self-contained HTML document. Own structure, theme shell, typography, print stylesheet, syntax highlighting, and static visual presentation. Leave teaching widgets, click-gated labs, and reading chrome for later stages.
 
 Topic: {topic}
 
 The markdown document is provided with this prompt.
 
 Ownership (this stage):
-- Prefer static or lightly styled representations.
+- Prefer static or lightly styled representations: hierarchy, tables, simple inline SVG, and non-copyrighted images when they help.
+- Do not add Play / Step / Reset labs, quizzes, filter toolbars, or other teaching widgets. The graphical enhancer may add or upgrade figures later.
 - Mobile baseline: content must remain readable on narrow screens (e.g. wide code/tables may scroll horizontally). Deeper ergonomics belong later.
 
 Contract:

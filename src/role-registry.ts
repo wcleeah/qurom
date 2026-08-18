@@ -2,14 +2,14 @@ import type { RuntimeConfig } from "./config"
 import type { AgentRole } from "./providers/types"
 import {
   DESIGNER_ROLE,
-  INTERACTIVE_ENHANCER_ROLE,
+  GRAPHICAL_ENHANCER_ROLE,
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "./design-artifacts"
 
 export const DRAFTER_ROLE = "research-drafter"
 export const SUMMARIZER_ROLE = "markdown-summarizer"
 export const TAGGER_ROLE = "research-tagger"
-export { DESIGNER_ROLE, INTERACTIVE_ENHANCER_ROLE, READING_EXPERIENCE_ENHANCER_ROLE }
+export { DESIGNER_ROLE, GRAPHICAL_ENHANCER_ROLE, READING_EXPERIENCE_ENHANCER_ROLE }
 
 export const AUDITOR_ROLES = [
   "source-auditor",
@@ -32,7 +32,7 @@ export const UTILITY_ROLES = [
 
 export const DESIGN_QUORUM_ROLES = [
   DESIGNER_ROLE,
-  INTERACTIVE_ENHANCER_ROLE,
+  GRAPHICAL_ENHANCER_ROLE,
   READING_EXPERIENCE_ENHANCER_ROLE,
 ] as const
 

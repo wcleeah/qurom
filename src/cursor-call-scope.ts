@@ -2,8 +2,9 @@ import { basename } from "node:path"
 
 import {
   designHtmlRoleFromFilename,
-  INTERACTIVE_ENHANCER_ROLE,
+  GRAPHICAL_ENHANCER_ROLE,
   LEGACY_DESIGN_HTML_ROUND_RE,
+  LEGACY_INTERACTIVE_ENHANCER_ROLE,
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "./design-artifacts"
 import { DESIGNER_ROLE } from "./role-registry"
@@ -30,8 +31,9 @@ function designNodeForRole(role: string): string | undefined {
   switch (role) {
     case DESIGNER_ROLE:
       return "runDesignHtml"
-    case INTERACTIVE_ENHANCER_ROLE:
-      return "interactiveEnhance"
+    case GRAPHICAL_ENHANCER_ROLE:
+    case LEGACY_INTERACTIVE_ENHANCER_ROLE:
+      return "graphicalEnhance"
     case READING_EXPERIENCE_ENHANCER_ROLE:
       return "readingExperienceEnhance"
     default:
@@ -98,8 +100,9 @@ function inferScopeFromRole(role: string): CursorCallScope {
       return { node: "discoverReader", round: 0 }
     case DESIGNER_ROLE:
       return { node: "runDesignHtml", round: 0 }
-    case INTERACTIVE_ENHANCER_ROLE:
-      return { node: "interactiveEnhance", round: 0 }
+    case GRAPHICAL_ENHANCER_ROLE:
+    case LEGACY_INTERACTIVE_ENHANCER_ROLE:
+      return { node: "graphicalEnhance", round: 0 }
     case READING_EXPERIENCE_ENHANCER_ROLE:
       return { node: "readingExperienceEnhance", round: 0 }
     case "source-auditor":

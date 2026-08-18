@@ -15,6 +15,10 @@ import {
   type McpRegistry,
   type McpServer,
 } from "./mcp-config"
+import {
+  GRAPHICAL_ENHANCER_ROLE,
+  LEGACY_INTERACTIVE_ENHANCER_ROLE,
+} from "./design-artifacts"
 
 type ConfigProfileRow = {
   id: number
@@ -67,6 +71,7 @@ function parseJson<T>(text: string, fallback: T): T {
 }
 
 const LEGACY_BROWSER_QA_ROLE = "browser-qa-enhancer"
+const LEGACY_INTERACTIVE_ENHANCER_PROMPT_KEY = "interactiveEnhancerEnhance"
 
 const LEGACY_QUORUM_FIELDS = ["artifactDir", "promptAssetsDir", "promptManagement"] as const
 
@@ -273,6 +278,68 @@ export function normalizeQuorumConfig(config: unknown) {
   return quorumConfigSchema.parse(stripped)
 }
 
+function migrateInteractiveEnhancerToGraphical(store: ConfigStore, profileId: number) {
+  const ts = nowIso()
+  const oldBinding = store.db
+    .query<RoleProviderBindingRow, [number, string]>(`
+SELECT profile_id, role, provider, provider_agent, model, variant, output_mode, options_json
+FROM role_provider_bindings
+WHERE profile_id = ? AND role = ?
+    `)
+    .get(profileId, LEGACY_INTERACTIVE_ENHANCER_ROLE)
+  const newBinding = store.db
+    .query<RoleProviderBindingRow, [number, string]>(`
+SELECT profile_id, role, provider, provider_agent, model, variant, output_mode, options_json
+FROM role_provider_bindings
+WHERE profile_id = ? AND role = ?
+    `)
+    .get(profileId, GRAPHICAL_ENHANCER_ROLE)
+
+  if (oldBinding && !newBinding) {
+    const nextAgent = oldBinding.provider_agent === LEGACY_INTERACTIVE_ENHANCER_ROLE
+      ? GRAPHICAL_ENHANCER_ROLE
+      : oldBinding.provider_agent
+    store.db.query(`
+UPDATE role_provider_bindings
+SET role = ?, provider_agent = ?, updated_at = ?
+WHERE profile_id = ? AND role = ?
+    `).run(GRAPHICAL_ENHANCER_ROLE, nextAgent, ts, profileId, LEGACY_INTERACTIVE_ENHANCER_ROLE)
+    writeAudit(store, {
+      profileId,
+      source: "migration",
+      action: "rename",
+      subject: `binding:${LEGACY_INTERACTIVE_ENHANCER_ROLE}->${GRAPHICAL_ENHANCER_ROLE}`,
+      before: JSON.stringify(oldBinding),
+      after: JSON.stringify({ ...oldBinding, role: GRAPHICAL_ENHANCER_ROLE, provider_agent: nextAgent }),
+    })
+  } else if (oldBinding && newBinding) {
+    store.db.query("DELETE FROM role_provider_bindings WHERE profile_id = ? AND role = ?")
+      .run(profileId, LEGACY_INTERACTIVE_ENHANCER_ROLE)
+    writeAudit(store, {
+      profileId,
+      source: "migration",
+      action: "prune",
+      subject: `binding:${LEGACY_INTERACTIVE_ENHANCER_ROLE}`,
+      before: JSON.stringify(oldBinding),
+    })
+  }
+
+  const oldPrompt = store.db
+    .query<{ content: string }, [number, string]>("SELECT content FROM prompt_assets WHERE profile_id = ? AND key = ?")
+    .get(profileId, LEGACY_INTERACTIVE_ENHANCER_PROMPT_KEY)
+  if (oldPrompt) {
+    store.db.query("DELETE FROM prompt_assets WHERE profile_id = ? AND key = ?")
+      .run(profileId, LEGACY_INTERACTIVE_ENHANCER_PROMPT_KEY)
+    writeAudit(store, {
+      profileId,
+      source: "migration",
+      action: "prune",
+      subject: `prompt:${LEGACY_INTERACTIVE_ENHANCER_PROMPT_KEY}`,
+      before: oldPrompt.content,
+    })
+  }
+}
+
 function pruneLegacyBrowserQaRows(store: ConfigStore, profileId: number) {
   const before = store.db
     .query<ConfigValueRow, [number, string]>("SELECT profile_id, domain, version, value_json FROM config_values WHERE profile_id = ? AND domain = ?")
@@ -431,6 +498,7 @@ async function seedProfileFromDefaults(store: ConfigStore, workspaceDir: string)
   ensureDefaultPlaywrightMcp(store, profile.id, "seed-defaults")
 
   pruneLegacyBrowserQaRows(store, profile.id)
+  migrateInteractiveEnhancerToGraphical(store, profile.id)
   return profile
 }
 
@@ -522,6 +590,7 @@ async function ensureActiveProfile(store: ConfigStore, env: RuntimeEnv): Promise
     profile = await seedProfileFromDefaults(store, workspaceDir)
   }
   pruneLegacyBrowserQaRows(store, profile.id)
+  migrateInteractiveEnhancerToGraphical(store, profile.id)
   await lazyMigrateMissingDefaults(store, profile.id, workspaceDir)
   await importLegacyPromptFiles(store, profile.id, env.QUORUM_WORKSPACE_DIRECTORY)
   return profile
@@ -564,7 +633,7 @@ WHERE profile_id = ?
       .all(profile.id)
     const bindings: Record<string, ReturnType<typeof bindingRowToRoleBinding>> = {}
     for (const row of rows) {
-      if (row.role === LEGACY_BROWSER_QA_ROLE) continue
+      if (row.role === LEGACY_BROWSER_QA_ROLE || row.role === LEGACY_INTERACTIVE_ENHANCER_ROLE) continue
       bindings[row.role] = bindingRowToRoleBinding(row)
     }
     return bindings
@@ -732,6 +801,12 @@ export async function updateRoleBinding(env: RuntimeEnv, role: string, input: {
     if (role === LEGACY_BROWSER_QA_ROLE) {
       pruneLegacyBrowserQaRows(store, profile.id)
       return
+    }
+    if (role === LEGACY_INTERACTIVE_ENHANCER_ROLE) {
+      role = GRAPHICAL_ENHANCER_ROLE
+    }
+    if (input.providerAgent === LEGACY_INTERACTIVE_ENHANCER_ROLE) {
+      input = { ...input, providerAgent: GRAPHICAL_ENHANCER_ROLE }
     }
     const before = store.db
       .query<RoleProviderBindingRow, [number, string]>(`

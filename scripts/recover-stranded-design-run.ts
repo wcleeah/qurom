@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Recover a run stranded at interactiveEnhance when the Cursor cloud agent finished
- * but Qurom never passed run.wait(). Uses the downloaded cloud artifact (or re-downloads).
+ * Recover a run stranded at graphicalEnhance / interactiveEnhance when the Cursor
+ * cloud agent finished but Qurom never passed run.wait(). Uses the downloaded
+ * cloud artifact (or re-downloads).
  *
  * Usage:
  *   bun run scripts/recover-stranded-design-run.ts [runDir] [round] [htmlBasename]
@@ -23,7 +24,7 @@ async function readJson<T>(path: string): Promise<T> {
 async function main() {
   const runDir = process.argv[2] ?? DEFAULT_RUN_DIR
   const round = Number(process.argv[3] ?? "0")
-  const htmlBasename = process.argv[4] ?? "design-html-interactive-enhancer.html"
+  const htmlBasename = process.argv[4] ?? "design-html-graphical-enhancer.html"
   const htmlPath = join(runDir, htmlBasename)
   const downloadPath = join(runDir, `cursor-download-${htmlBasename}`)
 
@@ -66,12 +67,12 @@ async function main() {
   const finalizeCompletedAt = Date.now()
 
   const filtered = nodeHistory.filter((entry) =>
-    entry.node !== "interactiveEnhance" && entry.node !== "finalizeDesign")
+    entry.node !== "graphicalEnhance" && entry.node !== "interactiveEnhance" && entry.node !== "finalizeDesign")
 
   const completedHistory: NodeHistoryEntry[] = [
     ...filtered,
     {
-      node: "interactiveEnhance",
+      node: "graphicalEnhance",
       startedAt: enhanceStartedAt,
       completedAt: enhanceCompletedAt,
       durationMs: Math.max(0, enhanceCompletedAt - enhanceStartedAt),

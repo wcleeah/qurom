@@ -10,9 +10,14 @@ describe("inferCursorCallScope", () => {
     })).toEqual({ node: "runDesignHtml", round: 0 })
 
     expect(inferCursorCallScope({
+      role: "graphical-enhancer",
+      artifact: "design-html-graphical-enhancer.html",
+    })).toEqual({ node: "graphicalEnhance", round: 0 })
+
+    expect(inferCursorCallScope({
       role: "interactive-enhancer",
       artifact: "design-html-interactive-enhancer.html",
-    })).toEqual({ node: "interactiveEnhance", round: 0 })
+    })).toEqual({ node: "graphicalEnhance", round: 0 })
 
     expect(inferCursorCallScope({
       role: "reading-experience-enhancer",
@@ -27,9 +32,14 @@ describe("inferCursorCallScope", () => {
     })).toEqual({ node: "runDesignHtml", round: 0 })
 
     expect(inferCursorCallScope({
+      role: "graphical-enhancer",
+      artifact: "design-html-round-0.html",
+    })).toEqual({ node: "graphicalEnhance", round: 0 })
+
+    expect(inferCursorCallScope({
       role: "interactive-enhancer",
       artifact: "design-html-round-0.html",
-    })).toEqual({ node: "interactiveEnhance", round: 0 })
+    })).toEqual({ node: "graphicalEnhance", round: 0 })
   })
 
   test("maps draft artifacts to draft or revise nodes", () => {
@@ -59,8 +69,10 @@ describe("inferCursorCallScope", () => {
   test("falls back to role-only mapping when artifact is missing", () => {
     expect(inferCursorCallScope({ role: "html-designer" }))
       .toEqual({ node: "runDesignHtml", round: 0 })
+    expect(inferCursorCallScope({ role: "graphical-enhancer" }))
+      .toEqual({ node: "graphicalEnhance", round: 0 })
     expect(inferCursorCallScope({ role: "interactive-enhancer" }))
-      .toEqual({ node: "interactiveEnhance", round: 0 })
+      .toEqual({ node: "graphicalEnhance", round: 0 })
     expect(inferCursorCallScope({ role: "reading-experience-enhancer" }))
       .toEqual({ node: "readingExperienceEnhance", round: 0 })
   })

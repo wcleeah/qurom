@@ -23,7 +23,7 @@ import { tagOutputArtifact } from "./tagger"
 import { formatReaderProfileForPrompt, readerContextBlock as buildReaderContextBlock, applyIntentOnlyRepair } from "./reader-profile"
 import {
   designHtmlArtifactName,
-  INTERACTIVE_ENHANCER_ROLE,
+  GRAPHICAL_ENHANCER_ROLE,
   latestDesignHtmlArtifact,
   previousDesignHtmlArtifact,
   READING_EXPERIENCE_ENHANCER_ROLE,
@@ -2099,7 +2099,7 @@ async function runDesignHtmlTransformNode(input: {
   state: ResearchState
   telemetry?: GraphTelemetry
   observer?: RunObserver
-  role: typeof INTERACTIVE_ENHANCER_ROLE | typeof READING_EXPERIENCE_ENHANCER_ROLE
+  role: typeof GRAPHICAL_ENHANCER_ROLE | typeof READING_EXPERIENCE_ENHANCER_ROLE
   phase: DesignPhase
   nodeName: string
   prompt: string
@@ -2159,7 +2159,7 @@ async function runDesignHtmlTransformNode(input: {
   })
 }
 
-async function interactiveEnhanceNode(
+async function graphicalEnhanceNode(
   config: RuntimeConfig,
   runtime: AgentRuntime,
   promptBundle: PromptBundle,
@@ -2174,10 +2174,10 @@ async function interactiveEnhanceNode(
     state,
     telemetry,
     observer,
-    role: INTERACTIVE_ENHANCER_ROLE,
+    role: GRAPHICAL_ENHANCER_ROLE,
     phase: "enhancing",
-    nodeName: "interactiveEnhance",
-    prompt: promptBundle.assets.interactiveEnhancerEnhance,
+    nodeName: "graphicalEnhance",
+    prompt: promptBundle.assets.graphicalEnhancerEnhance,
   })
 }
 
@@ -2500,9 +2500,14 @@ export function createGraph(
         designHtmlNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
+    .addNode("graphicalEnhance", async (state) =>
+      withNodeTelemetry("graphicalEnhance", state, () =>
+        graphicalEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addNode("interactiveEnhance", async (state) =>
       withNodeTelemetry("interactiveEnhance", state, () =>
-        interactiveEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
+        graphicalEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
     .addNode("readingExperienceEnhance", async (state) =>
@@ -2552,7 +2557,8 @@ export function createGraph(
       "runDesignHtml",
       "__end__",
     ])
-    .addEdge("runDesignHtml", "interactiveEnhance")
+    .addEdge("runDesignHtml", "graphicalEnhance")
+    .addEdge("graphicalEnhance", "readingExperienceEnhance")
     .addEdge("interactiveEnhance", "readingExperienceEnhance")
     .addEdge("readingExperienceEnhance", "finalizeDesign")
     .addEdge("finalizeDesign", "__end__")

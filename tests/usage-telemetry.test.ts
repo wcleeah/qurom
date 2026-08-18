@@ -608,8 +608,9 @@ describe("telemetry view", () => {
     expect(designTotals.usageAvailable).toBe(true)
     expect(designTotals.usage.tokensIn).toBe(5_371_098)
 
-    const enhanceTotals = sessionTotalsForNode(sessionTelemetry, [], "interactiveEnhance")
+    const enhanceTotals = sessionTotalsForNode(sessionTelemetry, [], "graphicalEnhance")
     expect(enhanceTotals.usageAvailable).toBe(true)
     expect(enhanceTotals.usage.tokensIn).toBe(2_628_133)
+    expect(sessionTotalsForNode(sessionTelemetry, [], "interactiveEnhance").usage.tokensIn).toBe(2_628_133)
   })
 })

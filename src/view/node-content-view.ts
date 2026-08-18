@@ -3,8 +3,9 @@ import {
   designHtmlArtifactName,
   designHtmlArtifacts,
   DESIGNER_ROLE,
-  INTERACTIVE_ENHANCER_ROLE,
+  GRAPHICAL_ENHANCER_ROLE,
   LEGACY_DESIGN_HTML_ROUND_RE,
+  presentDesignHtmlArtifact,
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "../design-artifacts"
 import { answeredQuestionsFromTranscript } from "../reader-transcript"
@@ -43,6 +44,7 @@ export function designRoundNumbers(files: string[], liveStatus: LiveStatus | nul
     const liveNode = resolveLiveNode(liveStatus)
     if (
       liveNode === "runDesignHtml"
+      || liveNode === "graphicalEnhance"
       || liveNode === "interactiveEnhance"
       || liveNode === "readingExperienceEnhance"
       || liveNode === "finalizeDesign"
@@ -299,8 +301,7 @@ function renderDesignStageScope(input: {
   liveLabel: string
   note: string
 }): string {
-  const roleFile = designHtmlArtifactName(input.role)
-  const primary = input.files.includes(roleFile) ? roleFile : undefined
+  const primary = presentDesignHtmlArtifact(input.role, input.files)
   const legacy = input.files.filter((f) => LEGACY_DESIGN_HTML_ROUND_RE.test(f)).sort()
   const live = input.liveStatus?.phase === "running" && resolveLiveNode(input.liveStatus) === input.nodeId
 
@@ -367,7 +368,7 @@ export async function renderDesignHtmlScope(
   return body
 }
 
-export async function renderInteractiveEnhanceScope(
+export async function renderGraphicalEnhanceScope(
   runName: string,
   files: string[],
   liveStatus: LiveStatus | null,
@@ -376,12 +377,12 @@ export async function renderInteractiveEnhanceScope(
     runName,
     files,
     liveStatus,
-    nodeId: "interactiveEnhance",
-    role: INTERACTIVE_ENHANCER_ROLE,
-    title: "Interactive enhancement",
-    emptyLabel: "No enhanced HTML artifact yet.",
-    liveLabel: "Interactive enhancer agent is updating the HTML…",
-    note: `The interactive-enhancer agent reads the designer HTML and writes <code>${escapeHtml(designHtmlArtifactName(INTERACTIVE_ENHANCER_ROLE))}</code>.`,
+    nodeId: "graphicalEnhance",
+    role: GRAPHICAL_ENHANCER_ROLE,
+    title: "Graphical enhancement",
+    emptyLabel: "No graphical HTML artifact yet.",
+    liveLabel: "Graphical enhancer agent is updating the HTML…",
+    note: `The graphical-enhancer agent reads the designer HTML and writes <code>${escapeHtml(designHtmlArtifactName(GRAPHICAL_ENHANCER_ROLE))}</code>. Older runs may still have <code>design-html-interactive-enhancer.html</code>.`,
   })
 }
 
@@ -399,6 +400,6 @@ export async function renderReadingExperienceEnhanceScope(
     title: "Reading experience",
     emptyLabel: "No reading-experience HTML artifact yet.",
     liveLabel: "Reading-experience enhancer is updating the HTML…",
-    note: `The reading-experience-enhancer agent reads the interactive HTML and writes <code>${escapeHtml(designHtmlArtifactName(READING_EXPERIENCE_ENHANCER_ROLE))}</code>.`,
+    note: `The reading-experience-enhancer agent reads the graphical HTML and writes <code>${escapeHtml(designHtmlArtifactName(READING_EXPERIENCE_ENHANCER_ROLE))}</code>.`,
   })
 }

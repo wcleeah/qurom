@@ -48,7 +48,7 @@ const promptBundle = emptyPromptBundle({
   readerInterviewerInterview: "reader-interview",
   readerInterviewerFollowUp: "reader-interview-follow-up",
   readerInterviewerDuplicateCorrection: "reader-interview-duplicate-correction",
-  interactiveEnhancerEnhance: "enhance",
+  graphicalEnhancerEnhance: "enhance",
   readingExperienceEnhancerEnhance: "reading",
 })
 

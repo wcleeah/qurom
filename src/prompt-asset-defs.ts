@@ -80,9 +80,9 @@ export const promptAssetDefs = {
     role: "html-designer",
     label: "Design HTML",
   },
-  interactiveEnhancerEnhance: {
-    file: "interactive-enhancer.enhance.md",
-    role: "interactive-enhancer",
+  graphicalEnhancerEnhance: {
+    file: "graphical-enhancer.enhance.md",
+    role: "graphical-enhancer",
     label: "Enhance",
   },
   readingExperienceEnhancerEnhance: {
