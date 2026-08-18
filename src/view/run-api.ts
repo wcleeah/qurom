@@ -61,6 +61,57 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
     return Response.json(getRunManager().status())
   }
 
+  if (path === "/api/rerun-queue" && req.method === "GET") {
+    const queue = await getRunManager().listRerunQueue()
+    return Response.json({
+      paused: queue.paused,
+      items: queue.items.map((item) => ({
+        id: item.id,
+        interview: item.interview,
+        sourceRunName: item.sourceRunName,
+        topic: item.topic,
+        createdAt: item.createdAt,
+      })),
+    })
+  }
+
+  if (path === "/api/rerun-queue/clear" && req.method === "POST") {
+    try {
+      const cleared = await getRunManager().clearRerunQueue()
+      return redirectOrJson(req, url, "/", { ok: true, cleared })
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
+  if (path === "/api/rerun-queue/pause" && req.method === "POST") {
+    try {
+      const queue = await getRunManager().setRerunQueuePaused(true)
+      return redirectOrJson(req, url, "/", { ok: true, paused: queue.paused })
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
+  if (path === "/api/rerun-queue/resume" && req.method === "POST") {
+    try {
+      const queue = await getRunManager().setRerunQueuePaused(false)
+      return redirectOrJson(req, url, "/", { ok: true, paused: queue.paused })
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
+  const queueRemoveMatch = path.match(/^\/api\/rerun-queue\/(.+?)\/remove$/)
+  if (queueRemoveMatch && req.method === "POST") {
+    try {
+      const removed = await getRunManager().removeRerunQueueItem(decodeURIComponent(queueRemoveMatch[1]))
+      return redirectOrJson(req, url, "/", { ok: true, removed })
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
   if (path === "/api/runs" && req.method === "POST") {
     try {
       const raw = await req.text()
@@ -122,11 +173,21 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
         }
       }
       const interview = parseRerunInterviewMode(interviewRaw)
-      const { runId, runPath } = await getRunManager().rerunResearch(runRef, { interview })
-      return redirectOrJson(req, url, `/runs/${encodeURIComponent(runPath)}`, {
+      const result = await getRunManager().rerunResearch(runRef, { interview })
+      if (result.kind === "queued") {
+        return redirectOrJson(req, url, "/", {
+          ok: true,
+          queued: true,
+          queueId: result.queueId,
+          sourceRunName: result.sourceRunName,
+          topic: result.topic,
+          interview: result.interview,
+        })
+      }
+      return redirectOrJson(req, url, `/runs/${encodeURIComponent(result.runPath)}`, {
         ok: true,
-        runId,
-        runPath,
+        runId: result.runId,
+        runPath: result.runPath,
         interview,
       })
     } catch (error) {

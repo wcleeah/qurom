@@ -166,7 +166,10 @@ Start runs from the index page, or via HTTP API:
 
 - `POST /api/runs` — new research run (`inputMode`, `topic` or `documentText` / `documentPath`)
 - `POST /api/runs/:id/restart-from-source` — new document run from a prior run's `input.md`
-- `POST /api/runs/:id/rerun` — new run from a prior run's topic or `input.md` (`interview=reuse|fresh`; reuse seeds `reader-profile.json` and skips the interview)
+- `POST /api/runs/:id/rerun` — new run from a prior run's topic or `input.md` (`interview=reuse|fresh|repair`; reuse/repair seed `reader-profile.json`. If a run is already active, reuse/repair enqueue on the unattended playlist and archive the source run)
+- `GET /api/rerun-queue` — unattended rerun playlist
+- `POST /api/rerun-queue/pause` / `resume` / `clear` — playlist controls
+- `POST /api/rerun-queue/:id/remove` — drop one playlist item
 - `POST /api/runs/:id/resume` — resume research or design from checkpoint (`node` optional)
 - `POST /api/runs/:id/cancel` — cancel active run
 - `POST /api/runs/:id/archive` — move an idle run into `{dataDir}/archive/`

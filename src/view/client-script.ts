@@ -300,7 +300,7 @@ export const FILES_REFRESH_SCRIPT = buildRefreshScript({
 
 /** Live refresh for the runs index active-run hero. */
 export const INDEX_REFRESH_SCRIPT = buildRefreshScript({
-  sectionIds: ["index-active-section"],
+  sectionIds: ["index-active-section", "rerun-queue-section"],
   defaultAutoRefresh: true,
 })
 

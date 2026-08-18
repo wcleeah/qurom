@@ -11,7 +11,10 @@ await resolveOpencodeBootstrap({ interactive: false, workspaceDir: config.env.OP
 const { ensureLangfuseProvider, shutdownLangfuseProvider } = await import("./telemetry")
 ensureLangfuseProvider(config)
 
-initRunManager({ getConfig: loadRuntimeConfig })
+const runManager = initRunManager({ getConfig: loadRuntimeConfig })
+void runManager.drainRerunQueue().catch((error) => {
+  console.error("Startup rerun-queue drain failed:", error instanceof Error ? error.message : String(error))
+})
 
 const SHUTDOWN_TIMEOUT_MS = Number(process.env.QUORUM_SHUTDOWN_TIMEOUT_MS ?? 20_000)
 

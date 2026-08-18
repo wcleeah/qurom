@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createNoOpBridge, createBridgeForRoles } from "../src/runner"
 import { resolveRunVerdict, resolveRunResumeActions, renderRunActionStrip } from "../src/view/run-controls"
+import { renderRerunQueueStrip } from "../src/view/rerun-queue-view"
 import { renderNewRunForm } from "../src/view/new-run-form"
 
 describe("createNoOpBridge", () => {
@@ -123,6 +124,28 @@ describe("renderRunActionStrip", () => {
     expect(html).toContain("Start a new run")
   })
 
+  test("keeps reuse and repair clickable while another run is active", () => {
+    const html = renderRunActionStrip(
+      "my-run-abc",
+      {
+        showResume: true,
+        showRestartFromSource: false,
+        showRerunReuseProfile: true,
+        showRerunRepairProfile: true,
+        showRerunFreshInterview: true,
+      },
+      { runActiveGlobally: true },
+    )
+    expect(html).toContain("will queue")
+    const reuse = html.match(/value="reuse"[\s\S]*?<\/button>/)?.[0] ?? ""
+    const repair = html.match(/value="repair"[\s\S]*?<\/button>/)?.[0] ?? ""
+    const fresh = html.match(/value="fresh"[\s\S]*?<\/button>/)?.[0] ?? ""
+    expect(reuse).not.toContain("disabled")
+    expect(repair).not.toContain("disabled")
+    expect(fresh).toContain("disabled")
+    expect(html).toContain('disabled>Resume run')
+  })
+
   test("renders archive button when showArchive is set", () => {
     const html = renderRunActionStrip(
       "my-run-abc",
@@ -137,6 +160,41 @@ describe("renderRunActionStrip", () => {
     )
     expect(html).toContain("/api/runs/my-run-abc/archive")
     expect(html).toContain("Archive run")
+  })
+})
+
+describe("renderRerunQueueStrip", () => {
+  test("renders queued reuse and repair rows", () => {
+    const html = renderRerunQueueStrip({
+      paused: false,
+      items: [
+        {
+          id: "q1",
+          position: 1,
+          interview: "reuse",
+          sourceRunName: "old-run",
+          topic: "What is MLX?",
+          payload: {
+            request: { inputMode: "topic", topic: "What is MLX?" },
+            readerProfile: {
+              intent: { goal: "learn", secondaryGoals: [], depth: "conceptual" },
+              background: { summary: "reader" },
+              competence: {
+                inTopic: { level: "novice", summary: "new", evidence: [] },
+                adjacent: { summary: "ok", evidence: [] },
+              },
+              inferredGaps: [],
+            },
+          },
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    })
+    expect(html).toContain("Rerun playlist")
+    expect(html).toContain("What is MLX?")
+    expect(html).toContain("Reuse reader")
+    expect(html).toContain("/api/rerun-queue/q1/remove")
+    expect(html).toContain("/api/rerun-queue/pause")
   })
 })
 

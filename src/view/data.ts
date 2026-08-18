@@ -11,6 +11,27 @@ import type { FileClass, LiveStatus, NodeHistoryEntry, RequestJson, RunMeta, Run
 import type { ReaderTranscriptEntry } from "../reader-transcript"
 import { resolveRunTelemetry, runElapsedMs } from "./telemetry-view"
 
+export function resolveRunCreatedAtMs(input: {
+  birthtimeMs?: number
+  ctimeMs?: number
+  mtimeMs: number
+  requestCreatedAt?: unknown
+}): number {
+  const stamped = input.requestCreatedAt
+  if (typeof stamped === "number" && Number.isFinite(stamped) && stamped > 0) return stamped
+  if (typeof stamped === "string") {
+    const parsed = Date.parse(stamped)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  if (typeof input.birthtimeMs === "number" && Number.isFinite(input.birthtimeMs) && input.birthtimeMs > 0) {
+    return input.birthtimeMs
+  }
+  if (typeof input.ctimeMs === "number" && Number.isFinite(input.ctimeMs) && input.ctimeMs > 0) {
+    return input.ctimeMs
+  }
+  return input.mtimeMs
+}
+
 function sanitizeLiveStatus(status: LiveStatus): LiveStatus {
   if (status.phase === "complete" || status.phase === "error") {
     return { ...status, awaitingReaderReply: undefined }
@@ -107,6 +128,7 @@ async function collectRunMetasFromDir(rootDir: string): Promise<RunMeta[]> {
     let hasLatestDraft = false
     let fileCount = 0
     let mtime = 0
+    let createdAt = 0
     let hasDesignFailure = false
 
     try {
@@ -131,6 +153,12 @@ async function collectRunMetasFromDir(rootDir: string): Promise<RunMeta[]> {
         if (file === "latest-draft.md") hasLatestDraft = true
         if (file === "design-failure.json") hasDesignFailure = true
       }
+      createdAt = resolveRunCreatedAtMs({
+        birthtimeMs: dirStat.birthtimeMs,
+        ctimeMs: dirStat.ctimeMs,
+        mtimeMs: dirStat.mtimeMs,
+        requestCreatedAt: requestJson?.createdAt,
+      })
     } catch {
       continue
     }
@@ -175,6 +203,7 @@ async function collectRunMetasFromDir(rootDir: string): Promise<RunMeta[]> {
       topic,
       status,
       mtime,
+      createdAt: createdAt || mtime,
       roundCount,
       hasFinalHtml,
       hasFinalMd,

@@ -2,6 +2,7 @@ import { join } from "node:path"
 
 import { readRunSourceDocument } from "./document-input"
 import { loadCompletedReaderTranscriptFromRunDir, type ReaderTranscriptEntry } from "./reader-transcript"
+import { archiveDirForRuns } from "./run-archive"
 import { resolveRunDirectory } from "./run-resume"
 import {
   inputRequestSchema,
@@ -9,8 +10,21 @@ import {
   type InputRequest,
   type ReaderCalibrationProfile,
 } from "./schema"
+import type { UnattendedRerunInterview } from "./rerun-queue-store"
 
 export type RerunInterviewMode = "reuse" | "fresh" | "repair"
+
+export function isUnattendedRerunInterview(mode: RerunInterviewMode): mode is UnattendedRerunInterview {
+  return mode === "reuse" || mode === "repair"
+}
+
+export function displayTopicForRerun(request: InputRequest, fallback: string): string {
+  if (request.inputMode === "topic") return request.topic
+  const text = request.documentText ?? ""
+  const line = text.split(/\r?\n/).map((entry) => entry.trim()).find(Boolean)
+  if (!line) return fallback
+  return line.replace(/^#{1,6}\s+/, "").slice(0, 120) || fallback
+}
 
 export type PriorRunRerunLoad = {
   sourceRunDir: string
@@ -42,8 +56,9 @@ export async function loadPriorRunForRerun(
   runRef: string,
   mode: RerunInterviewMode,
   runsRoot: string,
+  archiveRoot = archiveDirForRuns(runsRoot),
 ): Promise<PriorRunRerunLoad> {
-  const sourceRunDir = await resolveRunDirectory(runRef, runsRoot).catch(() => {
+  const sourceRunDir = await resolveRunDirectory(runRef, runsRoot, archiveRoot).catch(() => {
     throw new RerunLoadError(`Run not found: ${runRef}`, 404)
   })
 

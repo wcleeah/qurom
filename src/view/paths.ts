@@ -1,7 +1,8 @@
 import { mkdir, readdir, rename, stat } from "node:fs/promises"
-import { basename, join, resolve } from "node:path"
+import { basename, resolve } from "node:path"
 
 import { quorumDataPaths } from "../data-paths"
+import { archiveRunPath } from "../run-archive"
 import { isSqliteFile } from "./utils"
 
 export function getRunsDir(): string {
@@ -111,27 +112,7 @@ export function safeFilePath(runName: string, filePath: string): string {
 
 /** Move a run directory from runs/ into archive/. Returns the destination path. */
 export async function archiveRunDirectory(runName: string): Promise<string> {
-  const source = safeRunPath(runName)
-  const archiveDir = getArchiveDir()
-  await mkdir(archiveDir, { recursive: true })
-
-  let destName = runName
-  let dest = join(archiveDir, destName)
-  try {
-    await stat(dest)
-    destName = `${runName}-archived-${Date.now()}`
-    dest = join(archiveDir, destName)
-  } catch {
-    // destination free
-  }
-
-  const resolvedDest = resolve(dest)
-  if (!resolvedDest.startsWith(archiveDir + "/") && resolvedDest !== archiveDir) {
-    throw new Error("Path traversal blocked")
-  }
-
-  await rename(source, resolvedDest)
-  return resolvedDest
+  return archiveRunPath(safeRunPath(runName), getArchiveDir())
 }
 
 /**
