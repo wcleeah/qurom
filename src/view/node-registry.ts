@@ -1,9 +1,11 @@
 import {
   designHtmlArtifactName,
+  designHtmlArtifactNames,
   DESIGNER_ROLE,
-  INTERACTIVE_ENHANCER_ROLE,
+  GRAPHICAL_ENHANCER_ROLE,
   isDesignHtmlArtifact,
   LEGACY_DESIGN_HTML_ROUND_RE,
+  presentDesignHtmlArtifact,
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "../design-artifacts"
 import { indexRunArtifacts, roundHasRebuttals, type RoundArtifacts, type RunArtifactIndex } from "./run-artifacts"
@@ -144,12 +146,15 @@ export const GRAPH_NODES: NodeDefinition[] = [
     roundScoped: false,
   },
   {
-    id: "interactiveEnhance",
-    label: "Interactive enhance",
-    miniLabel: "Enhance",
+    id: "graphicalEnhance",
+    label: "Graphical enhance",
+    miniLabel: "Graphics",
     order: 16,
     phase: "design",
-    filePatterns: [new RegExp(`^${designHtmlArtifactName(INTERACTIVE_ENHANCER_ROLE).replace(/\./g, "\\.")}$`)],
+    liveNodeAliases: ["interactiveEnhance"],
+    filePatterns: designHtmlArtifactNames(GRAPHICAL_ENHANCER_ROLE).map(
+      (name) => new RegExp(`^${name.replace(/\./g, "\\.")}$`),
+    ),
     roundScoped: false,
   },
   {
@@ -173,7 +178,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
 
 const DESIGN_PHASE_NODE: Record<string, string> = {
   drafting: "runDesignHtml",
-  enhancing: "interactiveEnhance",
+  enhancing: "graphicalEnhance",
   reading: "readingExperienceEnhance",
   finalizing: "finalizeDesign",
 }
@@ -200,7 +205,7 @@ export function resolveLiveNode(liveStatus: LiveStatus | null): string | undefin
     const phase = raw.replace(/^design:\s*/, "").split(/\s+/)[0]
     if (phase && DESIGN_PHASE_NODE[phase]) return DESIGN_PHASE_NODE[phase]
     if (raw.includes("drafting")) return "runDesignHtml"
-    if (raw.includes("enhancing")) return "interactiveEnhance"
+    if (raw.includes("enhancing") || raw.includes("graphical")) return "graphicalEnhance"
     if (raw.includes("reading")) return "readingExperienceEnhance"
     if (raw.includes("finalizing")) return "finalizeDesign"
   }
@@ -431,8 +436,9 @@ export function isNodeComplete(
       return hasFile(/^final\.md$/) || hasFile(/^latest-draft\.md$/)
     case "runDesignHtml":
       return files.some((f) => f === designHtmlArtifactName(DESIGNER_ROLE) || LEGACY_DESIGN_HTML_ROUND_RE.test(f))
+    case "graphicalEnhance":
     case "interactiveEnhance":
-      return files.includes(designHtmlArtifactName(INTERACTIVE_ENHANCER_ROLE))
+      return presentDesignHtmlArtifact(GRAPHICAL_ENHANCER_ROLE, files) !== undefined
         || files.some((f) => LEGACY_DESIGN_HTML_ROUND_RE.test(f))
     case "readingExperienceEnhance":
       return files.includes(designHtmlArtifactName(READING_EXPERIENCE_ENHANCER_ROLE))

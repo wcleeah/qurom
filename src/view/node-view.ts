@@ -4,7 +4,7 @@ import {
   renderDiscoverReaderScope,
   readerInterviewArtifactFiles,
   renderDraftFullDraftScope,
-  renderInteractiveEnhanceScope,
+  renderGraphicalEnhanceScope,
   renderReadingExperienceEnhanceScope,
 } from "./node-content-view"
 import { renderFileBrowser } from "./file-browser"
@@ -300,9 +300,9 @@ async function renderNodeScopeBody(
     content += await renderDesignHtmlScope(runName, files, scope, liveStatus)
   }
 
-  if (resolvedId === "interactiveEnhance") {
+  if (resolvedId === "graphicalEnhance" || resolvedId === "interactiveEnhance") {
     if (scope === "total") {
-      content += await renderInteractiveEnhanceScope(runName, files, liveStatus)
+      content += await renderGraphicalEnhanceScope(runName, files, liveStatus)
     }
   }
 
@@ -397,6 +397,7 @@ ${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, isCurrentRound)
     scope !== "total"
     && !roundScoped
     && !content
+    && resolvedId !== "graphicalEnhance"
     && resolvedId !== "interactiveEnhance"
     && resolvedId !== "readingExperienceEnhance"
   ) {
@@ -513,7 +514,7 @@ const MINI_PIPELINE_NODE_IDS = [
   "aggregateConsensus",
   "computeConfidence",
   "runDesignHtml",
-  "interactiveEnhance",
+  "graphicalEnhance",
   "readingExperienceEnhance",
   "finalizeDesign",
 ] as const

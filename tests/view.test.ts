@@ -253,6 +253,11 @@ describe("view file browser classification", () => {
       subGroup: "HTML Drafts",
       label: "HTML · interactive-enhancer",
     })
+    expect(classifyFile("design-html-graphical-enhancer.html")).toMatchObject({
+      group: "Design",
+      subGroup: "HTML Drafts",
+      label: "HTML · graphical-enhancer",
+    })
   })
 })
 
@@ -469,7 +474,7 @@ describe("view components", () => {
     expect(html).toContain("/runs/example-run/node/draftFullDraft")
     expect(html).toContain("/runs/example-run/node/runParallelAudits")
     expect(html).toContain("/runs/example-run/node/runDesignHtml")
-    expect(html).toContain("/runs/example-run/node/interactiveEnhance")
+    expect(html).toContain("/runs/example-run/node/graphicalEnhance")
     expect(html).toContain("/runs/example-run/node/readingExperienceEnhance")
     expect(html).toContain("/runs/example-run/node/finalizeDesign")
     expect(html).toContain(">Reading<")

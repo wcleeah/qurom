@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * Download the interactive-enhancer Cursor cloud artifact for a run and compare
- * it to the on-disk design-html-<role>.html file.
+ * Download the graphical-enhancer (or legacy interactive-enhancer) Cursor cloud
+ * artifact for a run and compare it to the on-disk design-html-<role>.html file.
  *
  * Usage:
  *   bun run scripts/compare-enhancer-artifact.ts [runDir] [agentId] [htmlBasename]
@@ -20,7 +20,7 @@ loadEnv()
 const DEFAULT_RUN_DIR =
   "/home/mac/.local/share/qurom/runs/about-the-u-s-mexico-border-c7242d33-aac9-4345-9227-239f7466285e"
 const DEFAULT_AGENT_ID = "bc-1a70b421-b5d7-492d-ab51-536c334dd9f5"
-const DEFAULT_HTML_BASENAME = "design-html-interactive-enhancer.html"
+const DEFAULT_HTML_BASENAME = "design-html-graphical-enhancer.html"
 
 function sha256(data: Buffer | string) {
   return createHash("sha256").update(data).digest("hex")

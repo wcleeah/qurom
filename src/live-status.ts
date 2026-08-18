@@ -216,7 +216,7 @@ export function createLiveStatusWriter(
       case "design.phase": {
         const nodeMap: Record<string, string> = {
           drafting: "runDesignHtml",
-          enhancing: "interactiveEnhance",
+          enhancing: "graphicalEnhance",
           reading: "readingExperienceEnhance",
           finalizing: "finalizeDesign",
         }

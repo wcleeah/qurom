@@ -42,7 +42,7 @@ Reader discovery:
 Design quorum (when `designQuorum.enabled` is true):
 
 - `html-designer`
-- `interactive-enhancer`
+- `graphical-enhancer`
 - `reading-experience-enhancer`
 
 HTML viewer:
@@ -272,7 +272,7 @@ Every recovery tier emits a standardized debug-log event. Grep `{dataDir}/runs/<
 
 ## Design Quorum
 
-When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The design phase is linear: `html-designer` writes `design-html-html-designer.html`, `interactive-enhancer` writes comprehension-focused `design-html-interactive-enhancer.html`, `reading-experience-enhancer` writes screen-reading ergonomics to `design-html-reading-experience-enhancer.html`, and `finalizeDesign` publishes `final.html`.
+When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The design phase is linear: `html-designer` writes `design-html-html-designer.html`, `graphical-enhancer` writes comprehension-focused `design-html-graphical-enhancer.html`, `reading-experience-enhancer` writes screen-reading ergonomics to `design-html-reading-experience-enhancer.html`, and `finalizeDesign` publishes `final.html`. Older runs may still have `design-html-interactive-enhancer.html` from the retired interactive-enhancer role.
 
 Resume design from the dashboard **Resume run** action or:
 

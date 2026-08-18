@@ -31,7 +31,8 @@ describe("role registry", () => {
     })
 
     expect(configuredAgentRoles(withDesign)).toContain("html-designer")
-    expect(configuredAgentRoles(withDesign)).toContain("interactive-enhancer")
+    expect(configuredAgentRoles(withDesign)).toContain("graphical-enhancer")
+    expect(configuredAgentRoles(withDesign)).not.toContain("interactive-enhancer")
     expect(configuredAgentRoles(withDesign)).toContain("reading-experience-enhancer")
     expect(configuredAgentRoles(withoutDesign)).not.toContain("html-designer")
     expect(configuredAgentRoles(withoutDesign)).not.toContain("reading-experience-enhancer")

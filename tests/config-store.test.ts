@@ -105,6 +105,49 @@ describe("config store", () => {
     expect(binding).toBeNull()
   })
 
+  test("legacy interactive-enhancer bindings and prompts migrate to graphical-enhancer", async () => {
+    await ensureConfigInitialized(env())
+    const store = getConfigStore(env())
+    const profile = store.db.query<{ id: number }, []>("SELECT id FROM config_profiles WHERE active = 1").get()
+    expect(profile).toBeDefined()
+    const ts = new Date().toISOString()
+    store.db.query("DELETE FROM role_provider_bindings WHERE profile_id = ? AND role = ?")
+      .run(profile!.id, "graphical-enhancer")
+    store.db.query("DELETE FROM prompt_assets WHERE profile_id = ? AND key = ?")
+      .run(profile!.id, "graphicalEnhancerEnhance")
+    store.db.query(`
+INSERT INTO role_provider_bindings (profile_id, role, provider, provider_agent, model, variant, output_mode, options_json, created_at, updated_at)
+VALUES (?, 'interactive-enhancer', 'cursor', 'interactive-enhancer', NULL, 'high', NULL, '{}', ?, ?)
+    `).run(profile!.id, ts, ts)
+    store.db.query(`
+INSERT INTO prompt_assets (profile_id, key, content, version, created_at, updated_at)
+VALUES (?, 'interactiveEnhancerEnhance', 'old lab prompt', 1, ?, ?)
+    `).run(profile!.id, ts, ts)
+    store.close()
+
+    await ensureConfigInitialized(env())
+    const bindings = await loadRoleBindingsFromStore(env())
+    const assets = await loadPromptAssetsFromStore(env())
+    const after = getConfigStore(env())
+    const leftoverBinding = after.db
+      .query<{ role: string }, []>("SELECT role FROM role_provider_bindings WHERE role = 'interactive-enhancer'")
+      .get()
+    const leftoverPrompt = after.db
+      .query<{ key: string }, []>("SELECT key FROM prompt_assets WHERE key = 'interactiveEnhancerEnhance'")
+      .get()
+    after.close()
+
+    expect(bindings["interactive-enhancer"]).toBeUndefined()
+    expect(bindings["graphical-enhancer"]).toMatchObject({
+      provider: "cursor",
+      providerAgent: "graphical-enhancer",
+      variant: "high",
+    })
+    expect(leftoverBinding).toBeNull()
+    expect(leftoverPrompt).toBeNull()
+    expect(assets.graphicalEnhancerEnhance).toContain("visible graphics")
+  })
+
   test("prompt updates are stored in sqlite", async () => {
     await ensureConfigInitialized(env())
     await updatePromptAsset(env(), "sourceAuditorAudit", "updated audit prompt")

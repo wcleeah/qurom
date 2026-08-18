@@ -183,9 +183,9 @@ describe("html repair", () => {
   })
 
   test("enhancer prompts restore chunked local-file write guidance", async () => {
-    const interactive = await Bun.file(join(dir, "defaults", "prompts", "interactive-enhancer.enhance.md")).text()
+    const graphical = await Bun.file(join(dir, "defaults", "prompts", "graphical-enhancer.enhance.md")).text()
     const reading = await Bun.file(join(dir, "defaults", "prompts", "reading-experience-enhancer.enhance.md")).text()
-    for (const prompt of [interactive, reading]) {
+    for (const prompt of [graphical, reading]) {
       expect(prompt).toContain("`HTML document` context or attached as a file")
       expect(prompt).toContain("by chunk, instead of one full write")
       expect(prompt).not.toContain("The HTML document is provided with this prompt.")

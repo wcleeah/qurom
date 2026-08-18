@@ -1,5 +1,5 @@
 ---
-description: Interactive enhancer for design quorum HTML
+description: Graphical enhancer for design quorum HTML
 mode: subagent
 model: opencode/big-pickle
 variant: high
