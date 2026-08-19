@@ -14,7 +14,9 @@ permission:
   webfetch: allow
   websearch: allow
   codesearch: allow
-  skill: deny
+  skill:
+    "*": deny
+    frontend-design: allow
   edit:
     "runs/**/*.html": allow
   bash: deny

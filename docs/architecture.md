@@ -97,6 +97,7 @@ There is no hardcoded topic whitelist. The current prompts bias the system towar
 | OpenCode provider | `src/providers/opencode.ts` | Default provider implementation. |
 | Cursor provider | `src/providers/cursor.ts` | Cursor SDK provider implementation with inline JSON support. |
 | Design quorum | `src/design-quorum.ts` | Markdown-to-HTML design loop, design audits, revision, and final HTML writing. |
+| Design skill | `src/frontend-design-skill.ts` | Loads Anthropic's `frontend-design` skill and inlines it for design quorum roles. |
 | Output/artifacts | `src/output.ts` | Run directory creation, slug generation, approved/failed artifact writing. |
 | Checkpointing | `src/checkpointer.ts` | `BunSqliteSaver`, the custom LangGraph SQLite checkpointer. |
 | Debug log | `src/debug-log.ts` | Structured JSONL log writer. |
@@ -137,7 +138,7 @@ Important config sections:
 }
 ```
 
-OpenCode agent files live under `.opencode/agents/` (frontmatter only: model, variant, tool/file permissions). Behavioral prompts live under `defaults/prompts/` and the SQLite config store — one full file per role×task. The graph only fills template placeholders; provider-specific output wrappers are appended by code.
+OpenCode agent files live under `.opencode/agents/` (frontmatter only: model, variant, tool/file permissions). OpenCode skills ship from `defaults/opencode/skills/` into `.opencode/skills/`. Behavioral prompts live under `defaults/prompts/` and the SQLite config store — one full file per role×task. The graph only fills template placeholders; provider-specific output wrappers are appended by code. Design quorum prompts also receive the inlined `frontend-design` skill at runtime.
 
 ---
 
@@ -411,6 +412,8 @@ Agents:
 | `script-security-auditor` | Reviews inline scripts and security risks. |
 | `graphical-enhancer` | Adds visible comprehension figures after drafting. |
 | `reading-experience-enhancer` | Improves on-screen reading ergonomics after graphical enhance. |
+
+Design quorum roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped to `.opencode/skills/`). The skill is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme.
 
 The design loop mirrors the research loop:
 

@@ -166,4 +166,27 @@ describe("createAgentRuntime", () => {
 
     expect(seenPrompt).toBe("Review draft.")
   })
+
+  test("inlines frontend-design for design quorum roles", async () => {
+    let seenPrompt = ""
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt(input) {
+        seenPrompt = input.prompt
+        return { text: "ok" }
+      },
+    }
+    const runtime = createAgentRuntime(config, undefined, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("html-designer", "design")
+
+    await runtime.prompt({ role: "html-designer", handle, prompt: "Convert the draft." })
+
+    expect(seenPrompt).toContain("<frontend_design_skill>")
+    expect(seenPrompt).toContain("name: frontend-design")
+    expect(seenPrompt).toContain("Convert the draft.")
+  })
 })

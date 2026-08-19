@@ -52,6 +52,14 @@ export function defaultsOpencodeAgentsDir(workspaceDir?: string): string {
   return join(repoDefaultsDir(workspaceDir), "opencode", "agents")
 }
 
+export function opencodeSkillsDir(workspaceDir?: string): string {
+  return join(workspaceDir ?? process.env.OPENCODE_DIRECTORY ?? process.cwd(), ".opencode", "skills")
+}
+
+export function defaultsOpencodeSkillsDir(workspaceDir?: string): string {
+  return join(repoDefaultsDir(workspaceDir), "opencode", "skills")
+}
+
 export function defaultOpenCodeDbPath(): string {
   const explicit = process.env.OPENCODE_DB?.trim()
   if (explicit) return explicit

@@ -81,5 +81,9 @@ describe("reader-profile-repairer on config surfaces", () => {
     const repairer = await Bun.file(join(agentsDir, `${READER_PROFILE_REPAIRER_ROLE}.md`)).text()
     expect(repairer).toContain("Repairs reader-profile intent into primary + secondaryGoals")
     expect(await Bun.file(join(agentsDir, "research-drafter.md")).text()).toContain("description: local")
+
+    const skill = await Bun.file(join(dir, ".opencode", "skills", "frontend-design", "SKILL.md")).text()
+    expect(skill).toContain("name: frontend-design")
+    expect(skill).toContain("# Frontend Design")
   })
 })
