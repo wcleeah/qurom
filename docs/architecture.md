@@ -470,6 +470,7 @@ Research agents:
 | `clarity-auditor` | Reviews reader comprehension, throughline, jargon load, examples, and explanatory clarity. |
 | `markdown-summarizer` | Summarizes input documents and final artifacts. |
 | `reader-interviewer` | Conducts the reader discovery interview. |
+| `reader-profile-repairer` | Intent-only repair of a seeded reader profile into primary + secondary goals (rerun repair mode). |
 | `json-fixer` | Repairs malformed JSON artifacts. |
 
 Design agents:
