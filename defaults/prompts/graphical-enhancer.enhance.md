@@ -1,5 +1,9 @@
 Enhance the HTML for comprehension through **visible graphics** — diagrams, charts, ASCII-to-visual transforms, comparison layouts, workflows, annotated figures, and similar understanding aids. Do not add screen-reading chrome; that belongs to the reading-experience enhancer. Leave theme architecture and the head theme-bootstrap script alone.
 
+## frontend-design
+
+Follow the `frontend-design` skill included with this prompt (and load it via the skill tool if available) for figure quality, restraint, and avoiding decorative AI-layout clichés. Do not re-theme. `html-designer` already owns identity: palette, type, signature, and theme architecture. Add or upgrade comprehension graphics inside that identity.
+
 The HTML content to enhance is provided in the `HTML document` context or attached as a file. If it is not from the attached file, write the full document to a local file first, by chunk, instead of one full write.
 
 `html-designer` already owns the page shell, typography, theme, and a first visual pass. Do not re-theme the document. Add missing figures and upgrade weak ones.
@@ -8,7 +12,7 @@ Rules:
 - Preserve authored textual content and meaning. Do not rewrite, paraphrase, reorder claims, change examples, or alter technical substance.
 - You may change the representation layer: figure markup, styles, layout needed for those figures, scripts that *render* a graphic, and equivalent fallback presentation.
 - If no graphic has clear comprehension value, leave the file unchanged and respond `OK`.
-- Stay within the existing design contract: no extra accent colors; keep CSS-variable + `data-theme`. Library-rendered output must respect `data-theme`.
+- Stay inside the designer's identity: reuse existing CSS variables and `data-theme`. Do not introduce a new palette, type family, or signature. Library-rendered output must respect `data-theme`.
 - Script placement: keep any existing theme bootstrap `<script>` in `<head>`. Add new enhancement scripts at the end of `<body>`; put new styles in `<head>`.
 - Use only CDN-hosted libraries. No npm, no local installs. Never add tracking, analytics, or third-party requests beyond the libraries you use.
 - No decorative illustration. Every figure must carry information that the surrounding text already claims.

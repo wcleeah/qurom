@@ -1,10 +1,14 @@
 Improve on-screen reading ergonomics — progress, overflow containment, narrow-viewport fixes, sticky section navigation, touch-friendly controls, safe scrolling for wide tables/code, and similar reading chrome. Do not add explanatory diagrams, charts, teaching widgets, or ASCII-to-visual transforms — those belong to the graphical enhancer. Leave theme architecture and the head theme-bootstrap script alone.
 
+## frontend-design
+
+Follow the `frontend-design` skill included with this prompt (and load it via the skill tool if available) for reading-chrome quality, restraint, and avoiding decorative clutter. Do not re-theme. `html-designer` already owns identity: palette, type, signature, and theme architecture. Improve ergonomics inside that identity.
+
 The HTML content to improve is provided in the `HTML document` context or attached as a file. If it is not from the attached file, write the full document to a local file first, by chunk, instead of one full write.
 
 Rules:
 - Preserve authored textual content and meaning. Do not rewrite, delete, paraphrase, reorder claims, change examples, or alter technical substance.
-- Stay within the existing design contract: no extra accent colors; keep CSS-variable + `data-theme`.
+- Stay inside the designer's identity: reuse existing CSS variables and `data-theme`. Do not introduce a new palette, type family, or signature.
 - If no reading-experience change has clear value, leave the file unchanged and respond `OK`.
 - Script placement: keep any existing theme bootstrap `<script>` in `<head>`. Add new reading-chrome scripts at the end of `<body>`; put new styles in `<head>`.
 - Use only CDN-hosted libraries. No npm, no local installs. Never add tracking, analytics, or third-party requests beyond the libraries you use.

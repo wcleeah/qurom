@@ -1,9 +1,14 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { createInterface } from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 
-import { defaultsOpencodeAgentsDir, opencodeAgentsDir } from "./data-paths"
+import {
+  defaultsOpencodeAgentsDir,
+  defaultsOpencodeSkillsDir,
+  opencodeAgentsDir,
+  opencodeSkillsDir,
+} from "./data-paths"
 
 export type OpencodeBootstrapDecision = "seed" | "overwrite" | "keep"
 
@@ -65,10 +70,49 @@ export async function assessOpencodeBootstrap(workspaceDir?: string): Promise<Op
   return { status: "matches", missing: [], differing: [] }
 }
 
+async function listSkillFiles(dir: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>()
+  async function walk(current: string, prefix: string) {
+    let entries
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name
+      const abs = join(current, entry.name)
+      if (entry.isDirectory()) await walk(abs, rel)
+      else if (entry.isFile()) files.set(rel, await readFile(abs, "utf8"))
+    }
+  }
+  await walk(dir, "")
+  return files
+}
+
+export async function applyOpencodeSkillsBootstrap(
+  decision: OpencodeBootstrapDecision,
+  workspaceDir?: string,
+): Promise<void> {
+  const overwrite = decision === "overwrite"
+  const targetDir = opencodeSkillsDir(workspaceDir)
+  const defaults = await listSkillFiles(defaultsOpencodeSkillsDir(workspaceDir))
+  if (defaults.size === 0) return
+
+  await mkdir(targetDir, { recursive: true })
+  for (const [rel, content] of defaults) {
+    const dest = join(targetDir, rel)
+    if (!overwrite && await Bun.file(dest).exists()) continue
+    await mkdir(dirname(dest), { recursive: true })
+    await writeFile(dest, content, "utf8")
+  }
+}
+
 export async function applyOpencodeBootstrap(
   decision: OpencodeBootstrapDecision,
   workspaceDir?: string,
 ): Promise<void> {
+  await applyOpencodeSkillsBootstrap(decision === "overwrite" ? "overwrite" : "seed", workspaceDir)
   if (decision === "keep") return
 
   const targetDir = opencodeAgentsDir(workspaceDir)
@@ -152,7 +196,10 @@ export async function resolveOpencodeBootstrap(input: { interactive: boolean; wo
   }
 
   const assessment = await assessOpencodeBootstrap(input.workspaceDir)
-  if (assessment.status === "matches") return
+  if (assessment.status === "matches") {
+    await applyOpencodeSkillsBootstrap("seed", input.workspaceDir)
+    return
+  }
 
   let decision: OpencodeBootstrapDecision
   if (input.interactive && process.stdin.isTTY) {

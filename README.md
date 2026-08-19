@@ -66,7 +66,7 @@ These roles are configured in the active SQLite config profile. Each role is bou
   - **OpenCode** (default) — `opencode` on your `PATH`, plus `.opencode/agents/` seeded from `defaults/opencode/agents/`. Qurom always launches and owns `opencode serve`; startup fails if the configured port is already occupied.
   - **Cursor** (optional) — `CURSOR_API_KEY` and role bindings set to the `cursor` provider in `/config`. No local OpenCode server or agent files required for Cursor-only roles.
 
-Full call-site prompts live in SQLite. Shipped starters are under `defaults/prompts/` (one file per role×task). OpenCode agent files under `defaults/opencode/agents/` hold model/permissions frontmatter only. Default role provider bindings live in `defaults/quorum-config.sqlite`.
+Full call-site prompts live in SQLite. Shipped starters are under `defaults/prompts/` (one file per role×task). OpenCode agent files under `defaults/opencode/agents/` hold model/permissions frontmatter only. OpenCode skills ship under `defaults/opencode/skills/` and are bootstrapped into `.opencode/skills/`. Default role provider bindings live in `defaults/quorum-config.sqlite`.
 
 Optional:
 
@@ -277,6 +277,8 @@ Every recovery tier emits a standardized debug-log event. Grep `{dataDir}/runs/<
 ## Design Quorum
 
 When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The design phase is linear: `html-designer` writes `design-html-html-designer.html`, `graphical-enhancer` writes comprehension-focused `design-html-graphical-enhancer.html`, `reading-experience-enhancer` writes screen-reading ergonomics to `design-html-reading-experience-enhancer.html`, and `finalizeDesign` publishes `final.html`. Older runs may still have `design-html-interactive-enhancer.html` from the retired interactive-enhancer role.
+
+Those three roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped into `.opencode/skills/`). The skill text is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme.
 
 Resume design from the dashboard **Resume run** action or:
 

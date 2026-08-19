@@ -12,6 +12,7 @@ import type {
   ProviderPromptResult,
 } from "../providers/types"
 import type { PromptFileInput } from "../opencode"
+import { prependFrontendDesignSkill, usesFrontendDesignSkill } from "../frontend-design-skill"
 
 const INLINE_ATTACHMENT_MAX_BYTES = 1024 * 1024
 
@@ -202,8 +203,12 @@ export function createAgentRuntime(
     async prompt(input) {
       const provider = resolveProvider(input.role)
       const outputMode = outputModeFor(provider, input.schema, input.outputFile)
+      const workspaceDir = config.env.QUORUM_WORKSPACE_DIRECTORY || config.env.OPENCODE_DIRECTORY
+      const taskPrompt = usesFrontendDesignSkill(input.role)
+        ? await prependFrontendDesignSkill(input.prompt, workspaceDir)
+        : input.prompt
       const prompt = renderPromptForOutputMode({
-        prompt: input.prompt,
+        prompt: taskPrompt,
         outputFile: input.outputFile,
         schema: input.schema,
         mode: outputMode,
