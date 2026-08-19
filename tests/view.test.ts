@@ -37,8 +37,13 @@ describe("view artifact renderers", () => {
 
     expect(html).toContain("Reader profile")
     expect(html).toContain("Understand quorum reads")
-    expect(html).toContain("Primary")
-    expect(html).toContain("linearizability")
+    expect(html).toContain("<h3>Goal</h3>")
+    expect(html).toContain("<h3>Reader background</h3>")
+    expect(html).toContain("<h3>Topic competence</h3>")
+    expect(html).toContain("<h3>Adjacent knowledge</h3>")
+    expect(html).toContain("<h3>Knowledge gaps</h3>")
+    expect(html).toContain("<h4>linearizability</h4>")
+    expect(html).not.toContain("<table")
   })
 
   test("renders secondary goals on the reader profile card", () => {
@@ -55,10 +60,11 @@ describe("view artifact renderers", () => {
       },
       inferredGaps: [],
     })
-    expect(html).toContain("Primary")
-    expect(html).toContain("Secondary")
-    expect(html).toContain("Organize projects")
-    expect(html).toContain("Diagnose errors")
+    expect(html).toContain("<h3>Goal</h3>")
+    expect(html).toContain("<h4>Secondary</h4>")
+    expect(html).toContain("<li>Organize projects</li>")
+    expect(html).toContain("<li>Diagnose errors</li>")
+    expect(html).not.toContain("Organize projects; Diagnose errors")
   })
 
   test("renders rebuttal input files with structured rebuttal entries", () => {

@@ -1513,6 +1513,58 @@ code {
 .concept-level-heard-of { color: var(--accent); }
 .concept-level-unknown { color: var(--red); }
 .concept-level-default { color: var(--muted); }
+
+.reader-profile-summary {
+  padding: 0.55rem 0.85rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.reader-profile-block h3 {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0 0 0.25rem;
+  color: var(--muted);
+}
+.reader-profile-block h4 {
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin: 0.45rem 0 0.15rem;
+  color: var(--fg);
+}
+.reader-profile-block p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.reader-profile-list {
+  margin: 0.15rem 0 0 1.15rem;
+  font-size: 0.82rem;
+}
+.reader-profile-list li { margin-bottom: 0.15rem; }
+.reader-profile-meta {
+  margin-top: 0.4rem !important;
+  font-size: 0.75rem !important;
+  color: var(--muted);
+}
+.reader-profile-label {
+  font-weight: 600;
+  margin-right: 0.3rem;
+}
+.reader-profile-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  white-space: nowrap;
+}
+.reader-profile-competence { display: flex; flex-wrap: wrap; gap: 0.35rem 0.5rem; align-items: baseline; }
+.reader-profile-gap + .reader-profile-gap { margin-top: 0.55rem; }
 .chip-list {
   display: flex;
   flex-wrap: wrap;
@@ -2119,6 +2171,7 @@ code {
 }
 .interview-profile-so-far .reader-profile-summary {
   margin-top: 0.35rem;
+  padding: 0;
 }
 .interview-card {
   background: var(--panel);

@@ -1,6 +1,6 @@
 import { escapeHtml, renderJsonCard } from "./utils"
 import { renderJsonViewer } from "./json-viewer"
-import { summaryTable, tableWrap } from "./html"
+import { summaryTable } from "./html"
 import type { AggregatedFindings, AuditFinding, AuditRecord, RebuttalEntry, RebuttalResponseEntry } from "./types"
 
 export function outcomeLabel(outcome: string): string {
@@ -101,51 +101,85 @@ const gapTreatmentClass: Record<string, string> = {
   "can-assume": "concept-level-familiar",
 }
 
+const competenceLevelClass: Record<string, string> = {
+  unknown: "concept-level-default",
+  novice: "concept-level-unknown",
+  intermediate: "concept-level-heard-of",
+  advanced: "concept-level-familiar",
+  expert: "concept-level-familiar",
+}
+
+function profileParagraph(value: unknown, empty: string): string {
+  const text = typeof value === "string" ? value.trim() : ""
+  if (!text) return `<p class="placeholder-muted">${empty}</p>`
+  return `<p>${escapeHtml(text)}</p>`
+}
+
+function profileBadge(label: string, className: string): string {
+  return `<span class="reader-profile-badge ${className}">${escapeHtml(label)}</span>`
+}
+
 export function renderReaderProfileSummary(data: unknown): string {
   const profile = extractReaderProfileData(data)
   if (!profile) return ""
 
-  const goal = profile.intent?.goal
-    ? escapeHtml(String(profile.intent.goal))
-    : "<span class=\"placeholder-muted\">(intent not yet clear)</span>"
+  const goal = profileParagraph(profile.intent?.goal, "(intent not yet clear)")
   const secondaryGoals = Array.isArray(profile.intent?.secondaryGoals)
     ? profile.intent.secondaryGoals.map((g) => String(g).trim()).filter(Boolean)
     : []
-  const secondaryRow = secondaryGoals.length > 0
-    ? `<tr><td>Secondary</td><td colspan="2">${escapeHtml(secondaryGoals.join("; "))}</td></tr>`
+  const secondaryHtml = secondaryGoals.length > 0
+    ? `<h4>Secondary</h4>
+    <ul class="reader-profile-list">${secondaryGoals.map((g) => `<li>${escapeHtml(g)}</li>`).join("")}</ul>`
     : ""
   const depth = profile.intent?.depth ? escapeHtml(String(profile.intent.depth)) : "—"
-  const background = profile.background?.summary
-    ? escapeHtml(String(profile.background.summary))
-    : "<span class=\"placeholder-muted\">(background not yet clear)</span>"
-  const inTopicLevel = profile.competence?.inTopic?.level
-    ? escapeHtml(String(profile.competence.inTopic.level))
-    : "—"
-  const inTopicSummary = profile.competence?.inTopic?.summary
-    ? escapeHtml(String(profile.competence.inTopic.summary))
-    : "—"
-  const adjacent = profile.competence?.adjacent?.summary
-    ? escapeHtml(String(profile.competence.adjacent.summary))
-    : "—"
-  const gaps = Array.isArray(profile.inferredGaps) ? profile.inferredGaps : []
-  const gapRows = gaps.length > 0
-    ? gaps.map((g) => {
-      const treatment = escapeHtml(String(g.treatment))
-      const rationale = g.rationale ? escapeHtml(String(g.rationale)) : ""
-      return `<tr><td>${escapeHtml(String(g.concept))}</td><td class="${gapTreatmentClass[g.treatment] ?? "concept-level-default"}">${treatment}</td><td class="evidence-muted">${rationale}</td></tr>`
-    }).join("")
-    : "<tr><td colspan=\"3\" class=\"placeholder-muted\">(gaps not yet inferred)</td></tr>"
 
-  return tableWrap(`<table class="summary-table summary-table-wide reader-profile-summary">
-    <tr><td>Primary</td><td colspan="2">${goal}</td></tr>
-    ${secondaryRow}
-    <tr><td>Depth</td><td colspan="2">${depth}</td></tr>
-    <tr><td>Background</td><td colspan="2">${background}</td></tr>
-    <tr><td>In-topic</td><td>${inTopicLevel}</td><td>${inTopicSummary}</td></tr>
-    <tr><td>Adjacent</td><td colspan="2">${adjacent}</td></tr>
-    <tr><th>Gap</th><th>Treatment</th><th>Rationale</th></tr>
-    ${gapRows}
-  </table>`)
+  const inTopicLevel = profile.competence?.inTopic?.level
+    ? String(profile.competence.inTopic.level)
+    : ""
+  const inTopicSummary = profile.competence?.inTopic?.summary?.trim() ?? ""
+  const inTopicBadge = inTopicLevel
+    ? profileBadge(inTopicLevel, competenceLevelClass[inTopicLevel] ?? "concept-level-default")
+    : ""
+  const inTopicHtml = inTopicBadge || inTopicSummary
+    ? `<p class="reader-profile-competence">${inTopicBadge}${inTopicSummary ? ` ${escapeHtml(inTopicSummary)}` : ""}</p>`
+    : `<p class="placeholder-muted">(competence not yet clear)</p>`
+
+  const gaps = Array.isArray(profile.inferredGaps) ? profile.inferredGaps : []
+  const gapsHtml = gaps.length > 0
+    ? gaps.map((g) => {
+      const treatment = String(g.treatment)
+      const rationale = g.rationale ? escapeHtml(String(g.rationale)) : ""
+      return `<div class="reader-profile-gap">
+      <h4>${escapeHtml(String(g.concept))}</h4>
+      <p>${profileBadge(treatment, gapTreatmentClass[treatment] ?? "concept-level-default")}${rationale ? ` <span class="evidence-muted">${rationale}</span>` : ""}</p>
+    </div>`
+    }).join("")
+    : `<p class="placeholder-muted">(gaps not yet inferred)</p>`
+
+  return `<div class="reader-profile-summary">
+  <section class="reader-profile-block">
+    <h3>Goal</h3>
+    ${goal}
+    ${secondaryHtml}
+    <p class="reader-profile-meta"><span class="reader-profile-label">Depth</span> ${depth}</p>
+  </section>
+  <section class="reader-profile-block">
+    <h3>Reader background</h3>
+    ${profileParagraph(profile.background?.summary, "(background not yet clear)")}
+  </section>
+  <section class="reader-profile-block">
+    <h3>Topic competence</h3>
+    ${inTopicHtml}
+  </section>
+  <section class="reader-profile-block">
+    <h3>Adjacent knowledge</h3>
+    ${profileParagraph(profile.competence?.adjacent?.summary, "(adjacent knowledge not yet clear)")}
+  </section>
+  <section class="reader-profile-block">
+    <h3>Knowledge gaps</h3>
+    ${gapsHtml}
+  </section>
+</div>`
 }
 
 export function renderReaderProfileCard(data: unknown): string {
