@@ -187,18 +187,18 @@ export function renderReaderProfileCard(data: unknown): string {
   const done = d.done === true
   const summary = renderReaderProfileSummary(d)
   if (!summary) {
-    return `<div class="structured-card">
-  <div class="auditor-header">Reader profile</div>
+    return `<details class="structured-card reader-profile-details" data-collapse-key="reader-profile">
+  <summary class="auditor-header">Reader profile</summary>
   <p class="placeholder-muted">(interview in progress — no profile synthesized yet)</p>
-</div>`
+</details>`
   }
   const status = done
     ? "Reader profile"
     : "Reader profile (in progress)"
-  return `<div class="structured-card">
-  <div class="auditor-header">${status}</div>
+  return `<details class="structured-card reader-profile-details" data-collapse-key="reader-profile" open>
+  <summary class="auditor-header">${status}</summary>
   ${summary}
-</div>`
+</details>`
 }
 
 // ── summary.json ──

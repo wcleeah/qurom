@@ -173,7 +173,16 @@ function buildRefreshScript(options: {
         }
         if (sectionShouldSkipSwap(id, oldEl, newEl)) continue
         if (oldEl && newEl) {
+          const openByKey = {}
+          oldEl.querySelectorAll("details[data-collapse-key]").forEach((el) => {
+            openByKey[el.dataset.collapseKey] = el.open
+          })
           oldEl.innerHTML = newEl.innerHTML
+          oldEl.querySelectorAll("details[data-collapse-key]").forEach((el) => {
+            if (Object.prototype.hasOwnProperty.call(openByKey, el.dataset.collapseKey)) {
+              el.open = openByKey[el.dataset.collapseKey]
+            }
+          })
           if (id === "round-strip-section" && typeof window.__quorumInitRoundTabs === "function") {
             window.__quorumInitRoundTabs()
           }

@@ -515,17 +515,43 @@ a:hover { text-decoration: underline; }
 .rerun-queue-section {
   margin-bottom: 1.25rem;
 }
+.rerun-queue-details {
+  margin: 0;
+}
+.rerun-queue-summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.rerun-queue-summary::-webkit-details-marker { display: none; }
+.rerun-queue-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+details[open].rerun-queue-details > .rerun-queue-summary::before {
+  transform: rotate(90deg);
+}
+.rerun-queue-summary-main {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+}
+.rerun-queue-heading {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
 .rerun-queue-header {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem 1rem;
-  margin-bottom: 0.75rem;
-}
-.rerun-queue-header h2 {
-  margin: 0 0 0.2rem;
-  font-size: 1.05rem;
+  margin: 0.75rem 0;
 }
 .rerun-queue-header .muted-note {
   margin: 0;
@@ -1357,6 +1383,26 @@ code {
   font-weight: 600;
   font-size: 0.85rem;
 }
+details.structured-card > summary.auditor-header {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+details.structured-card > summary.auditor-header::-webkit-details-marker { display: none; }
+details.structured-card > summary.auditor-header::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+details.structured-card[open] > summary.auditor-header::before {
+  transform: rotate(90deg);
+}
+details.structured-card:not([open]) > summary.auditor-header {
+  border-bottom: none;
+}
 .auditor-vote {
   font-size: 0.7rem;
   font-weight: 700;
@@ -2168,6 +2214,11 @@ code {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
+}
+.interview-profile-so-far > summary.chat-current-label {
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 0;
 }
 .interview-profile-so-far .reader-profile-summary {
   margin-top: 0.35rem;

@@ -104,7 +104,10 @@ function renderInterviewTurnBlock(
     <h3>Turn ${turn}</h3>
   </div>
   <div class="chat-transcript">${questionsHtml}${answerHtml}</div>
-  ${profileHtml ? `<div class="interview-profile-so-far"><div class="chat-current-label">Profile after turn ${turn}</div>${profileHtml}</div>` : ""}
+  ${profileHtml ? `<details class="interview-profile-so-far" data-collapse-key="profile-after-turn-${turn}" open>
+    <summary class="chat-current-label">Profile after turn ${turn}</summary>
+    ${profileHtml}
+  </details>` : ""}
 </div>`
 }
 
@@ -153,7 +156,7 @@ export async function renderDiscoverReaderScope(
 
   if (interviewFiles.includes("reader-profile.json")) {
     const data = await readJsonFile(runName, "reader-profile.json")
-    panels += `<div class="section"><h2>Reader profile</h2>${renderReaderProfileCard(data)}</div>`
+    panels += `<div class="section">${renderReaderProfileCard(data)}</div>`
   }
 
   const awaiting = liveStatus?.awaitingReaderReply
