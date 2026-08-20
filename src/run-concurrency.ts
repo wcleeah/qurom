@@ -112,13 +112,16 @@ export function concurrencyBusyMessage(policy: PipelineConcurrencyPolicy, active
   return `Already running ${activeCount} of ${policy.maxConcurrent} allowed concurrent runs`
 }
 
+function canonicalRequestId(runRef: string): string {
+  const trimmed = runRef.trim()
+  return trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)?.[0] ?? trimmed
+}
+
 export function trackActiveRequest(runRef: string): () => void {
-  const ids = new Set<string>([runRef.trim()])
-  const uuid = runRef.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)?.[0]
-  if (uuid) ids.add(uuid)
-  for (const id of ids) activeRequestIds.add(id)
+  const id = canonicalRequestId(runRef)
+  activeRequestIds.add(id)
   return () => {
-    for (const id of ids) activeRequestIds.delete(id)
+    activeRequestIds.delete(id)
   }
 }
 
@@ -127,8 +130,9 @@ export function listActiveRequestIds(): string[] {
 }
 
 export function hasConcurrentActiveRequest(requestId: string, knownIds: Iterable<string> = activeRequestIds): boolean {
+  const self = canonicalRequestId(requestId)
   for (const id of knownIds) {
-    if (id && id !== requestId) return true
+    if (id && canonicalRequestId(id) !== self) return true
   }
   return false
 }

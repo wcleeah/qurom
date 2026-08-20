@@ -102,6 +102,7 @@ describe("active request tracking", () => {
 
   test("detects a second in-flight request", () => {
     const releaseA = trackActiveRequest("topic-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    expect(hasConcurrentActiveRequest("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")).toBe(false)
     const releaseB = trackActiveRequest("bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee")
     expect(hasConcurrentActiveRequest("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")).toBe(true)
     releaseB()

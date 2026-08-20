@@ -666,8 +666,13 @@ export function tryGetRunManager(): RunManager | undefined {
 
 /** True when the run manager is executing this run (by slug or request id). */
 export function isRunManagedActive(runRef: string): boolean {
-  const actives = defaultManager?.status().actives ?? []
-  return actives.some((active) => runRefsMatch(active.runId, runRef))
+  const status = defaultManager?.status()
+  const listed = status?.actives?.length
+    ? status.actives
+    : status?.active
+      ? [status.active]
+      : []
+  return listed.some((active) => runRefsMatch(active.runId, runRef))
 }
 
 export function resetRunManagerForTests() {
