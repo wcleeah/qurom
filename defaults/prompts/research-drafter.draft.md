@@ -113,6 +113,5 @@ Keep this planning and critique private. Return only the article.
 ## Output contract
 
 - Return markdown only.
-- Required headings: `# Title` and `## Sources`.
 - Produce a coherent standalone article.
 - Do not mention this prompt, planning process, agents, audits, or revision history.
