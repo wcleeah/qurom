@@ -14,6 +14,8 @@ export class SystemicDriftError extends Error {
   }
 }
 
+import { hasConcurrentActiveRequest } from "./run-concurrency"
+
 export class RecoveryDriftDetector {
   private readonly seen = new Map<string, Set<string>>()
 
@@ -25,6 +27,9 @@ export class RecoveryDriftDetector {
     if (set.size > 0) {
       set.add(requestId)
       this.seen.set(agent, set)
+      if (hasConcurrentActiveRequest(requestId)) {
+        return { drift: false, previousRequestIds: [...set] }
+      }
       return { drift: true, previousRequestIds: [...set] }
     }
     set.add(requestId)

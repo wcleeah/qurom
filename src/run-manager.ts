@@ -6,6 +6,7 @@ import { loadPromptBundle, type PromptBundle } from "./prompt-assets"
 import { ZodError } from "zod"
 import { getProviderLifecycle, type ProviderLifecycle, type ProviderLifecycleStatus } from "./providers/lifecycle"
 import { configuredAgentRoles, validateProviderPrerequisites } from "./providers/registry"
+import { pipelineAgentRoles } from "./role-registry"
 import type { AgentRole } from "./providers/types"
 import {
   createBridgeForRoles,
@@ -39,6 +40,13 @@ import {
   type PriorRunRerunLoad,
   type RerunInterviewMode,
 } from "./run-rerun"
+import {
+  atConcurrencyCapacity,
+  concurrencyBusyMessage,
+  pipelineConcurrencyPolicy,
+  trackActiveRequest,
+  type PipelineConcurrencyPolicy,
+} from "./run-concurrency"
 
 export type ActiveRun = {
   runId: string
@@ -49,6 +57,8 @@ export type ActiveRun = {
 
 export type RunManagerStatus = {
   active: { runId: string } | null
+  actives: Array<{ runId: string }>
+  concurrency?: PipelineConcurrencyPolicy
   providers: Record<string, ProviderLifecycleStatus>
 }
 
@@ -96,6 +106,7 @@ export type RunManager = {
   clearRerunQueue: () => Promise<number>
   setRerunQueuePaused: (paused: boolean) => Promise<RerunQueueSnapshot>
   drainRerunQueue: () => Promise<void>
+  concurrency: () => Promise<PipelineConcurrencyPolicy>
   cancel: (runId?: string) => Promise<boolean>
   shutdown: () => Promise<void>
 }
@@ -181,10 +192,11 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
   const validatePrereqs = deps.validatePrerequisitesFn ?? validateProviderPrerequisites
   const runPipelineFn = deps.runResearchPipelineFn ?? runResearchPipeline
 
-  let active: ActiveRun | undefined
+  const actives = new Map<string, ActiveRun>()
   let shuttingDown = false
   let draining = false
   let cachedQueue: RerunQueueStore | undefined
+  let cachedPolicy: PipelineConcurrencyPolicy | undefined
 
   async function config(): Promise<RuntimeConfig> {
     return await Promise.resolve(deps.getConfig())
@@ -203,9 +215,32 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     return await loadBundle(cfg)
   }
 
-  function assertNotActive() {
-    if (active) {
-      throw new RunManagerError("A run is already active", 409)
+  function firstActive(): ActiveRun | undefined {
+    return actives.values().next().value
+  }
+
+  function activeList(): Array<{ runId: string }> {
+    return [...actives.values()].map((run) => ({ runId: run.runId }))
+  }
+
+  function findActive(runRef?: string): ActiveRun | undefined {
+    if (!runRef) return firstActive()
+    for (const run of actives.values()) {
+      if (runRefsMatch(run.runId, runRef)) return run
+    }
+    return undefined
+  }
+
+  async function currentPolicy(cfg?: RuntimeConfig): Promise<PipelineConcurrencyPolicy> {
+    const resolved = cfg ?? await config()
+    cachedPolicy = pipelineConcurrencyPolicy(resolved, pipelineAgentRoles(resolved))
+    return cachedPolicy
+  }
+
+  async function assertCanStart(cfg?: RuntimeConfig) {
+    const policy = await currentPolicy(cfg)
+    if (atConcurrencyCapacity(actives.size, policy)) {
+      throw new RunManagerError(concurrencyBusyMessage(policy, actives.size), 409)
     }
   }
 
@@ -223,7 +258,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
       config: RuntimeConfig
     }) => Promise<unknown>
   }): Promise<{ runId: string }> {
-    assertNotActive()
+    await assertCanStart()
 
     const abortController = new AbortController()
     const signal = abortController.signal
@@ -231,6 +266,8 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     if (input.runDir) {
       await writeBootstrapLiveStatus(input.runDir, input.maxRounds)
     }
+
+    const untrackRequest = trackActiveRequest(input.runId)
 
     let releaseProviders: (() => Promise<void>) | undefined
 
@@ -277,9 +314,10 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
           await writeStartupFailureStatus(input.runDir, error, input.maxRounds)
         }
       } finally {
-        if (active?.promise === runPromise) {
-          active = undefined
+        if (actives.get(input.runId)?.promise === runPromise) {
+          actives.delete(input.runId)
         }
+        untrackRequest()
         if (releaseProviders) {
           await releaseProviders().catch(() => {})
           releaseProviders = undefined
@@ -288,7 +326,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
       }
     })()
 
-    active = {
+    actives.set(input.runId, {
       runId: input.runId,
       abortController,
       promise: runPromise,
@@ -298,7 +336,7 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
           releaseProviders = undefined
         }
       },
-    }
+    })
 
     return { runId: input.runId }
   }
@@ -421,19 +459,19 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
   }
 
   async function drainRerunQueue() {
-    if (shuttingDown || draining || active) return
+    if (shuttingDown || draining) return
     const store = await queueStore()
     if (await store.isPaused()) return
+    if (atConcurrencyCapacity(actives.size, await currentPolicy())) return
 
     draining = true
     try {
-      while (!shuttingDown && !active) {
+      while (!shuttingDown && !atConcurrencyCapacity(actives.size, await currentPolicy())) {
         if (await store.isPaused()) return
         const next = await store.takeNext()
         if (!next) return
         try {
           await startFromQueueItem(next)
-          return
         } catch (error) {
           if (error instanceof RunManagerError && error.status === 409) {
             await store.requeueFront(next).catch(() => {})
@@ -452,8 +490,11 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
 
   return {
     status() {
+      const first = firstActive()
       return {
-        active: active ? { runId: active.runId } : null,
+        active: first ? { runId: first.runId } : null,
+        actives: activeList(),
+        concurrency: cachedPolicy,
         providers: {
           opencode: lifecycle.status("opencode"),
           cursor: lifecycle.status("cursor"),
@@ -469,7 +510,8 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
       const sourceRunName = basename(prior.sourceRunDir)
       const topic = displayTopicForRerun(prior.request, sourceRunName)
 
-      if (active && isUnattendedRerunInterview(options.interview)) {
+      const policy = await currentPolicy(cfg)
+      if (atConcurrencyCapacity(actives.size, policy) && isUnattendedRerunInterview(options.interview)) {
         if (!prior.readerProfile) {
           throw new RerunLoadError("This run has no reader-profile.json to reuse.", 404)
         }
@@ -527,6 +569,10 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
 
     drainRerunQueue,
 
+    concurrency() {
+      return currentPolicy()
+    },
+
     async resumeResearch(rawRunId) {
       const runId = parseResumeRunId(rawRunId)
       const cfg = await config()
@@ -559,21 +605,20 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
     },
 
     async cancel(runId) {
-      if (!active) return false
-      if (runId && !runRefsMatch(active.runId, runId)) {
-        return false
-      }
-      active.abortController.abort()
-      await active.promise.catch(() => {})
+      const target = findActive(runId)
+      if (!target) return false
+      target.abortController.abort()
+      await target.promise.catch(() => {})
       return true
     },
 
     async shutdown() {
       shuttingDown = true
-      if (active) {
-        active.abortController.abort()
-        await active.promise.catch(() => {})
+      const running = [...actives.values()]
+      for (const run of running) {
+        run.abortController.abort()
       }
+      await Promise.all(running.map((run) => run.promise.catch(() => {})))
       await lifecycle.shutdown()
     },
   }
@@ -621,9 +666,8 @@ export function tryGetRunManager(): RunManager | undefined {
 
 /** True when the run manager is executing this run (by slug or request id). */
 export function isRunManagedActive(runRef: string): boolean {
-  const active = defaultManager?.status().active
-  if (!active) return false
-  return runRefsMatch(active.runId, runRef)
+  const actives = defaultManager?.status().actives ?? []
+  return actives.some((active) => runRefsMatch(active.runId, runRef))
 }
 
 export function resetRunManagerForTests() {

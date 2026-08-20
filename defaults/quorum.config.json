@@ -1,6 +1,7 @@
 {
   "maxRounds": 10,
   "maxRebuttalTurnsPerFinding": 2,
+  "maxConcurrentRuns": 1,
   "recursionLimit": 80,
   "requireUnanimousApproval": true,
   "researchTools": {

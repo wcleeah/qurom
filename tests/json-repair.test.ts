@@ -68,6 +68,7 @@ const { promptAgent } = await import("../src/opencode")
 const { coerceJson, StructuredRecoveryError } = await import("../src/agent-runtime/structured-output")
 const { auditWithRestart } = await import("../src/audit-restart")
 const { recoveryDriftDetector, SystemicDriftError } = await import("../src/recovery-drift")
+const { resetActiveRequestsForTests, trackActiveRequest } = await import("../src/run-concurrency")
 
 const testConfig: RuntimeConfig = {
   env: {
@@ -92,6 +93,7 @@ beforeEach(async () => {
   promptScript = []
   onPromptSideEffect = undefined
   recoveryDriftDetector.resetForTests()
+  resetActiveRequestsForTests()
   tempDir = await mkdtemp(join(tmpdir(), "json-repair-"))
 })
 
@@ -654,5 +656,30 @@ describe("recovery drift (Phase 6)", () => {
       }),
     ).rejects.toBeInstanceOf(StructuredRecoveryError)
     expect(capture.entries.some((e) => e.type === "recovery.systemic_drift")).toBe(false)
+  })
+
+  test("concurrent in-flight requestIds do not trigger systemic drift", async () => {
+    const capture = debugLogCapture()
+    const releaseA = trackActiveRequest("req-1")
+    const releaseB = trackActiveRequest("req-2")
+    const base = {
+      maxRestarts: 1,
+      agent: "source-auditor",
+      round: 0,
+      titleBase: "audit",
+      firstSessionID: "first",
+      createSession: async () => ({ id: "restart" }),
+      onSessionCreated: () => {},
+      runAttempt: async () => {
+        throw new StructuredRecoveryError("schema", 2, new Error("bad"))
+      },
+      debugLog: capture.log,
+    }
+
+    await expect(auditWithRestart({ ...base, requestId: "req-1" })).rejects.toBeInstanceOf(StructuredRecoveryError)
+    await expect(auditWithRestart({ ...base, requestId: "req-2" })).rejects.toBeInstanceOf(StructuredRecoveryError)
+    expect(capture.entries.some((e) => e.type === "recovery.systemic_drift")).toBe(false)
+    releaseA()
+    releaseB()
   })
 })

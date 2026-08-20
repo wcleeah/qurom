@@ -56,6 +56,7 @@ export function renderQuorumConfigForm(options: QuorumConfigFormOptions): string
     <h3>Run limits</h3>
     ${field("Max rounds", "maxRounds", config.maxRounds, "number")}
     ${field("Max rebuttal turns per finding", "maxRebuttalTurnsPerFinding", config.maxRebuttalTurnsPerFinding, "number")}
+    ${field("Max concurrent runs", "maxConcurrentRuns", config.maxConcurrentRuns ?? 1, "number", "Cursor cloud only. OpenCode and local Cursor stay at 1.")}
     ${field("Recursion limit", "recursionLimit", config.recursionLimit, "number")}
     ${field("Audit restart limit", "auditRestart.maxRestarts", config.auditRestart?.maxRestarts ?? 1, "number")}
     ${checkbox("requireUnanimousApproval", "Require unanimous approval", config.requireUnanimousApproval)}
@@ -120,6 +121,11 @@ export function parseQuorumConfigForm(params: URLSearchParams): QuorumConfig {
   return {
     maxRounds: parsePositiveInt(params, "maxRounds", 1),
     maxRebuttalTurnsPerFinding: parsePositiveInt(params, "maxRebuttalTurnsPerFinding", 1),
+    maxConcurrentRuns: (() => {
+      const value = parsePositiveInt(params, "maxConcurrentRuns", 1)
+      if (value > 8) throw new Error("maxConcurrentRuns must be between 1 and 8")
+      return value
+    })(),
     recursionLimit: parsePositiveInt(params, "recursionLimit", 80),
     requireUnanimousApproval: parseBoolean(params, "requireUnanimousApproval"),
     researchTools: {

@@ -97,7 +97,7 @@ export function renderUnarchiveForm(runName: string): string {
 export function renderRunActionStrip(
   runName: string,
   actions: RunResumeActions,
-  options?: { runActiveGlobally?: boolean; showArchive?: boolean },
+  options?: { runActiveGlobally?: boolean; showArchive?: boolean; maxConcurrent?: number },
 ): string {
   const showArchive = options?.showArchive === true
   const hasRerun = actions.showRerunReuseProfile || actions.showRerunRepairProfile || actions.showRerunFreshInterview
@@ -105,10 +105,11 @@ export function renderRunActionStrip(
 
   const blocked = options?.runActiveGlobally === true
   const hasUnattendedRerun = actions.showRerunReuseProfile || actions.showRerunRepairProfile
+  const multi = (options?.maxConcurrent ?? 1) > 1
   const busyNote = blocked
     ? hasUnattendedRerun
-      ? `<p class="muted-note dim-text run-actions-note">A run is active — reuse and repair will queue. Other actions wait.</p>`
-      : `<p class="muted-note dim-text run-actions-note">Another run is active — wait for it to finish first.</p>`
+      ? `<p class="muted-note dim-text run-actions-note">${multi ? "All run slots are busy" : "A run is active"} — reuse and repair will queue. Other actions wait.</p>`
+      : `<p class="muted-note dim-text run-actions-note">${multi ? "All run slots are busy — wait for one to finish." : "Another run is active — wait for it to finish first."}</p>`
     : ""
 
   const continueButtons = [
@@ -152,12 +153,14 @@ export function renderRunControlsSection(input: {
   completionHtml: string
   resumeActions: RunResumeActions
   runActiveGlobally: boolean
+  maxConcurrent?: number
 }): string {
   const cancelHtml = input.isRunning ? renderRunCancelButton(input.runName) : ""
   const actionsHtml = input.isRunning
     ? ""
     : renderRunActionStrip(input.runName, input.resumeActions, {
       runActiveGlobally: input.runActiveGlobally,
+      maxConcurrent: input.maxConcurrent,
       showArchive: true,
     })
   const completionHtml = input.showCompletion ? input.completionHtml : ""

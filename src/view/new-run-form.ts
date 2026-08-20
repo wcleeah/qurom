@@ -4,6 +4,9 @@ import { escapeHtml } from "./utils"
 export type NewRunFormOptions = {
   runActive: boolean
   activeRunId?: string
+  activeCount?: number
+  maxConcurrent?: number
+  concurrencyReason?: string
   error?: string
 }
 
@@ -32,11 +35,23 @@ function panelHint(id: string): string {
   return `<p class="new-run-hint">${escapeHtml(TAB_COPY[id]!.hint)}</p>`
 }
 
+function concurrencySubtitle(options: NewRunFormOptions): string {
+  const maxConcurrent = options.maxConcurrent ?? 1
+  if (maxConcurrent > 1) {
+    return `Up to ${maxConcurrent} concurrent Cursor cloud pipelines · providers start on demand`
+  }
+  return "One active pipeline at a time · providers start on demand"
+}
+
 export function renderNewRunForm(options: NewRunFormOptions): string {
   const disabled = options.runActive ? " disabled" : ""
+  const maxConcurrent = options.maxConcurrent ?? 1
+  const activeCount = options.activeCount ?? (options.runActive ? 1 : 0)
   const activeNote = options.runActive
-    ? `<div class="new-run-active-note"><span class="badge badge-running">● Active run</span><span class="muted-note">${options.activeRunId ? `Finish or <a href="/runs/${escapeHtml(encodeURIComponent(options.activeRunId))}">open the current run</a> before starting another.` : "Wait for the current run to finish before starting another."}</span></div>`
-    : ""
+    ? `<div class="new-run-active-note"><span class="badge badge-running">● ${activeCount} / ${maxConcurrent} active</span><span class="muted-note">${options.activeRunId ? `Finish or <a href="/runs/${escapeHtml(encodeURIComponent(options.activeRunId))}">open a current run</a> before starting another.` : "Wait for a current run to finish before starting another."}${options.concurrencyReason ? ` ${escapeHtml(options.concurrencyReason)}` : ""}</span></div>`
+    : activeCount > 0
+      ? `<div class="new-run-active-note"><span class="badge badge-running">● ${activeCount} / ${maxConcurrent} active</span><span class="muted-note">A slot is free — another Cursor cloud pipeline can start now.</span></div>`
+      : ""
 
   const errorHtml = options.error
     ? `<div class="new-run-error">${escapeHtml(options.error)}</div>`
@@ -47,7 +62,7 @@ export function renderNewRunForm(options: NewRunFormOptions): string {
     <div class="new-run-header">
       <div class="new-run-header-text">
         <h2 id="new-run-heading">Start a run</h2>
-        <p class="muted-note new-run-subtitle">One active pipeline at a time · providers start on demand</p>
+        <p class="muted-note new-run-subtitle">${escapeHtml(concurrencySubtitle(options))}</p>
       </div>
       <div class="new-run-tabs" role="tablist" aria-label="Run type">
         ${tabButton("topic", "Topic", true)}
