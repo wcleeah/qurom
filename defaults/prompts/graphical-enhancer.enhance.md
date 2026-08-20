@@ -2,20 +2,22 @@ Enhance the HTML for comprehension through **visible graphics** — diagrams, ch
 
 ## frontend-design
 
-Follow the `frontend-design` skill included with this prompt (and load it via the skill tool if available) for figure quality, restraint, and avoiding decorative AI-layout clichés. Do not re-theme. `html-designer` already owns identity: palette, type, signature, and theme architecture. Add or upgrade comprehension graphics inside that identity.
+Follow the `frontend-design` skill included with this prompt (and load it via the skill tool if available) for figure quality, restraint, and avoiding decorative AI-layout clichés. Do not re-theme. `html-designer` already owns identity: palette, type, signature, and theme architecture. Curate comprehension graphics inside that identity.
 
 The HTML content to enhance is provided in the `HTML document` context or attached as a file. If it is not from the attached file, write the full document to a local file first, by chunk, instead of one full write.
 
-`html-designer` already owns the page shell, typography, theme, and a first visual pass. Do not re-theme the document. Add missing figures and upgrade weak ones.
+`html-designer` already owns the page shell, typography, theme, and a first visual pass. Do not re-theme the document. Keep, merge, simplify, remove, or add representations according to their comprehension value.
 
 Rules:
 - Preserve authored textual content and meaning. Do not rewrite, paraphrase, reorder claims, change examples, or alter technical substance.
 - You may change the representation layer: figure markup, styles, layout needed for those figures, scripts that *render* a graphic, and equivalent fallback presentation.
 - If no graphic has clear comprehension value, leave the file unchanged and respond `OK`.
 - Stay inside the designer's identity: reuse existing CSS variables and `data-theme`. Do not introduce a new palette, type family, or signature. Library-rendered output must respect `data-theme`.
+- Preserve the typography role map established by the HTML designer. Figure labels and captions must use existing font variables or classes; never introduce or hardcode another family.
 - Script placement: keep any existing theme bootstrap `<script>` in `<head>`. Add new enhancement scripts at the end of `<body>`; put new styles in `<head>`.
 - Use only CDN-hosted libraries. No npm, no local installs. Never add tracking, analytics, or third-party requests beyond the libraries you use.
-- No decorative illustration. Every figure must carry information that the surrounding text already claims.
+- Every explanatory figure must provide comprehension leverage beyond adjacent prose: spatial structure, meaningful proportion, sequence, comparison, or a relationship that is difficult to hold in text. A single subject-setting signature illustration may serve orientation and identity.
+- Remove or merge figures that merely turn nearby sentences into boxes, repeat a table, visualize a number whose magnitude is already obvious, or add granular detail unrelated to the article's throughline.
 - A caption should identify what the figure shows, what to notice, or how to read it. Do not restate the surrounding paragraph or turn its claim into a slogan. Keep labels functional and specific to the subject.
 
 ## Default: show the whole idea without a click
@@ -50,10 +52,12 @@ Exception: live demos are allowed only when the document is itself about UI moti
 A graphic may be *drawn* with a library (charts, diagrams). That is rendering, not a teaching widget. Prefer hand SVG or CSS over extra libraries when a simple figure is enough.
 
 How to work:
-- Study topic, structure, and audience. Look for places where a figure would materially improve understanding.
-- Inspect complex explanations, diagrams, sequences, comparisons, workflows, dense code/tables, and plain-text ASCII artifacts.
-- Transform those into clearer visual forms while preserving meaning.
-- If opportunities are genuine, edit the document directly.
+- Inventory existing and proposed figures before editing.
+- For each figure, state privately the reader question it answers and the insight supplied by the visual form.
+- Remove or merge any figure whose answer is already equally clear in adjacent prose or a table.
+- Prefer one strong comparative or structural figure over several narrow illustrations.
+- Add a figure only when the visual representation materially improves comprehension.
+- If no change has clear value, leave the file unchanged and respond `OK`.
 
 ## Mandatory verification (Playwright + todos)
 
@@ -61,6 +65,6 @@ Before you finish, you MUST use the `todowrite` tool to create exactly these thr
 
 1. **Scrolling works all the way** — open the page at a desktop viewport; scroll from top to bottom; confirm the document reaches the end and sticky chrome does not trap scroll.
 2. **Mobile overflow checks** — resize to a narrow mobile viewport (~390×844); confirm no horizontal page overflow (`document.documentElement.scrollWidth` ≤ viewport width); wide tables/code must scroll inside their containers, not the page.
-3. **UI looks fine** — no page/console errors from the document; primary reading chrome (nav/progress/theme controls if present) remains usable; nothing obviously clipped or stacked incorrectly at desktop and mobile sizes.
+3. **Figures earn their space** — no page/console errors; every retained figure answers a distinct reader question; captions do not repeat nearby prose; figure typography matches the page; labels remain legible at desktop and mobile sizes; no figure is clipped or creates page-level overflow.
 
 Mark each todo complete only after you have Playwright evidence for that check. If a check fails, fix the HTML and re-run that check. Do not claim success while any of the three todos is incomplete or failed.

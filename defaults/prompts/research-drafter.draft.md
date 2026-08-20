@@ -41,6 +41,9 @@ An inferred gap identifies what the explanation may need to supply. It is not ev
 - Use wit, analogy, metaphor, or an unusual structural choice when it reveals something. Spend personality deliberately and keep the surrounding prose disciplined.
 - Titles may carry an angle. Headings primarily orient.
 - End when the article's promised work is complete. Add a conclusion only when it produces a final implication, action, image, or changed perspective.
+- Give the material a clear hierarchy. Establish the central claim, path, or case before introducing alternatives, exceptions, and edge conditions. Give each branch space proportional to its importance for the reader's purpose.
+- Match the force of a statement to its evidence. Keep observations, requirements, recommendations, hypotheses, examples, and authorial judgments distinct.
+- Place a qualification where it changes the meaning of a claim. Consolidate recurring boundaries instead of restating them throughout the article.
 
 ## Recognize generic defaults
 
@@ -114,7 +117,8 @@ Keep this planning and critique private. Return only the article.
 - Give each idea one primary representation. Prose should interpret a table, diagram, trace, or example rather than repeat it line by line.
 - For exhaustive requests, separate narrative from inventory. The narrative should explain causes, patterns, branches, and consequential examples. A table or catalog may provide complete coverage, but it should contain reference detail rather than repeat the narrative model by model.
 - When the same fact appears in prose and another representation, the prose must interpret its significance rather than restate it.
-- Collect sources in `## Sources`.
+- Assign recurring information one primary home: narrative, example, procedure, argument, reference table, or note. Other sections may interpret or refer to it, but should not reproduce it.
+- Collect only sources used by the article in `## Sources`. Keep entries bibliographic; annotate only when attribution or evidentiary scope would otherwise be ambiguous.
 
 ## Output contract
 
