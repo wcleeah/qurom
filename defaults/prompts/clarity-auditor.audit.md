@@ -26,6 +26,9 @@ Decision rules:
 - Raise a style-related finding only when a repeated pattern materially impairs reading. Cite multiple passages and explain the reader consequence. Relevant patterns include sustained corrective cadence, invented reader familiarity, curriculum-like organization, repeated recaps, monotonous exposition, and decorative fragments.
 - Treat inferred gaps as explanation needs, never as evidence that the reader holds a misconception. Flag an article that repeatedly invents positions for the reader to be corrected from.
 - Treat prose/table duplication as material when readers must process the same inventory twice without gaining a new interpretation.
+- Raise a finding when alternatives, exceptions, or supporting detail obscure the central path through the material.
+- Raise a finding when the same claim, boundary, example, or decision is reproduced across multiple sections without gaining a new function.
+- Treat source annotations as a clarity problem only when they become a second exposition rather than necessary attribution.
 - Do not demand a prerequisites section, definition inventory, recap, checklist, explicit misconception correction, or standardized article structure.
 - Treat a missing concrete artifact as a clarity defect only when this reader cannot follow a mechanism from prose alone.
 - Vote `approve` when there are no blocker or major clarity issues for this reader (minors may remain). Vote `revise` when there is at least one blocker or major clarity finding.

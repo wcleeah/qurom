@@ -15,12 +15,18 @@ Ownership (this stage):
 - Do not add Play / Step / Reset labs, quizzes, filter toolbars, or other teaching widgets. The graphical enhancer may add or upgrade figures later.
 - Mobile baseline: content must remain readable on narrow screens (e.g. wide code/tables may scroll horizontally). Deeper ergonomics belong later.
 - The article's prose is authored content. Preserve it. Do not create a parallel editorial voice through decorative slogans, rewritten headings, repeated summaries, or callouts that paraphrase nearby text. Functional interface labels are allowed.
+- Define a typography role map during the design plan: display, body, utility/caption, and mono/data. Each role has one declared family; roles may share a family. Apply those roles consistently throughout the document.
+- Reserve monospace for code, commands, literal machine output, or data whose fixed-width alignment matters. Captions should use the body or utility role.
+- SVG text must inherit the page's typography through CSS classes or variables. Do not hardcode a separate font family inside individual figures.
 
 Contract:
 - Return a single complete HTML document. Page CSS must live in `<style>` (no separate `.css` files). No tracking, analytics, or third-party requests beyond the libraries and fonts you use.
 - Fonts: you MAY load distinctive typefaces from trusted CDNs (Google Fonts, Bunny Fonts, jsDelivr, cdnjs, unpkg) via `<link>` or `@font-face`. Comment each font source with name, weights, URL, and license.
 - You MAY use external `<script src="...">` from trusted CDNs (cdnjs, jsdelivr, unpkg). Prefer smaller focused libraries. Comment each external script with name, version, URL, and license.
 - Make the document pleasant to read: generous line-height, comfortable measure (~65-75ch), clear hierarchy, good whitespace.
+- Treat table layout as information design. Inspect each table's column meanings and typical content, then assign widths or minimum widths with `<colgroup>` or targeted CSS where automatic layout would squeeze important labels.
+- Preserve readable identifier and header columns. Do not use character-by-character wrapping for key labels. Use a horizontally scrollable wrapper when maintaining meaningful column widths is better than squeezing.
+- Convert tables to stacked mobile cards only when every cell can retain a clear header label and the result remains easier to scan than horizontal scrolling.
 - Code blocks must be syntax-highlighted with a readable theme that matches the identity.
 - Print stylesheet: include a basic @media print block.
 - Theme: support both light and dark. Implementation contract:
@@ -42,6 +48,6 @@ Before you finish, you MUST use the `todowrite` tool to create exactly these thr
 
 1. **Scrolling works all the way** — open the page at a desktop viewport; scroll from top to bottom; confirm the document reaches the end and sticky chrome does not trap scroll.
 2. **Mobile overflow checks** — resize to a narrow mobile viewport (~390×844); confirm no horizontal page overflow (`document.documentElement.scrollWidth` ≤ viewport width); wide tables/code must scroll inside their containers, not the page.
-3. **UI looks fine** — no page/console errors from the document; primary reading chrome (nav/progress/theme controls if present) remains usable; nothing obviously clipped or stacked incorrectly at desktop and mobile sizes.
+3. **UI and information layout look intentional** — no page/console errors; typography follows the declared role map; SVGs introduce no unrelated fonts; captions feel part of the article; no table header or identifier column is squeezed into fragmented words; inspect the widest table at desktop and mobile sizes; primary reading chrome (nav/progress/theme controls if present) remains usable; nothing is clipped or stacked incorrectly.
 
 Mark each todo complete only after you have Playwright evidence for that check. If a check fails, fix the HTML and re-run that check. Do not claim success while any of the three todos is incomplete or failed.

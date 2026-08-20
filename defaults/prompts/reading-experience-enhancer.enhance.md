@@ -9,6 +9,8 @@ The HTML content to improve is provided in the `HTML document` context or attach
 Rules:
 - Preserve authored textual content and meaning. Do not rewrite, delete, paraphrase, reorder claims, change examples, or alter technical substance.
 - Stay inside the designer's identity: reuse existing CSS variables and `data-theme`. Do not introduce a new palette, type family, or signature.
+- Preserve the typography role map. Do not introduce fonts. Normalize accidental outliers—especially captions, table text, and SVG labels—to the existing role tokens when this can be done without re-theming.
+- Inspect tables for semantic readability, not only page overflow. Important headers and identifier columns must remain scannable without character-by-character wrapping.
 - If no reading-experience change has clear value, leave the file unchanged and respond `OK`.
 - Script placement: keep any existing theme bootstrap `<script>` in `<head>`. Add new reading-chrome scripts at the end of `<body>`; put new styles in `<head>`.
 - Use only CDN-hosted libraries. No npm, no local installs. Never add tracking, analytics, or third-party requests beyond the libraries you use.
@@ -25,7 +27,7 @@ How to work:
 Before you finish, you MUST use the `todowrite` tool to create exactly these three todos, then verify each with Playwright (and bash if you need a local static server for `file://`/`http://` access):
 
 1. **Scrolling works all the way** — open the page at a desktop viewport; scroll from top to bottom; confirm the document reaches the end and sticky chrome does not trap scroll.
-2. **Mobile overflow checks** — resize to a narrow mobile viewport (~390×844); confirm no horizontal page overflow (`document.documentElement.scrollWidth` ≤ viewport width); wide tables/code must scroll inside their containers, not the page.
+2. **Mobile and table readability checks** — resize to a narrow mobile viewport (~390×844); confirm no horizontal page overflow (`document.documentElement.scrollWidth` ≤ viewport width); wide tables/code scroll inside their containers, not the page; inspect the widest and most column-heavy table at desktop and mobile sizes; confirm headers and identifier columns remain readable and the chosen scroll/card behavior preserves meaning.
 3. **UI looks fine** — no page/console errors from the document; primary reading chrome (nav/progress/theme controls if present) remains usable; nothing obviously clipped or stacked incorrectly at desktop and mobile sizes.
 
 Mark each todo complete only after you have Playwright evidence for that check. If a check fails, fix the HTML and re-run that check. Do not claim success while any of the three todos is incomplete or failed.
