@@ -59,7 +59,10 @@ After resolving the findings, reread the complete article:
 
 - Does the correction feel written into the article rather than appended?
 - Did added precision create caveat accumulation or repeated explanation?
+- Did the revision convert an inferred reader gap into an imagined misconception?
 - Did revision introduce a curriculum-like structure?
+- Does any table, catalog, checklist, or recap repeat information already explained in prose? Choose one primary representation and remove the duplicate.
+- Inspect rhetorical negation across the complete article, including passages untouched by findings. Preserve necessary negative facts; rewrite contrast used mainly for emphasis or cadence.
 - Does each section retain a clear role in the throughline?
 - Can anything now be removed?
 
