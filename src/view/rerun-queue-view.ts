@@ -42,7 +42,7 @@ export function renderRerunQueueStrip(queue: RerunQueueSnapshot): string {
       </span>
     </summary>
     <div class="rerun-queue-header">
-      <p class="muted-note">${queue.paused ? "Paused — unattended reruns will not start." : "Unattended reuse and repair reruns, one at a time."}</p>
+      <p class="muted-note">${queue.paused ? "Paused — unattended reruns will not start." : "Unattended reuse and repair reruns fill free pipeline slots."}</p>
       <div class="rerun-queue-actions">
         <form class="run-action-form" method="POST" action="/api/rerun-queue/${pauseAction}">
           <button type="submit" class="btn btn-secondary">${pauseLabel}</button>

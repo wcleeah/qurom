@@ -10,6 +10,8 @@ import {
   createRunManager,
   resetRunManagerForTests,
 } from "../src/run-manager"
+import { pipelineAgentRoles } from "../src/role-registry"
+import { resetActiveRequestsForTests } from "../src/run-concurrency"
 import { testRuntimeConfig, unitTestDataDir } from "./test-env"
 
 const promptBundle = emptyPromptBundle()
@@ -75,6 +77,7 @@ describe("run manager instant start", () => {
 
   afterEach(async () => {
     resetRunManagerForTests()
+    resetActiveRequestsForTests()
     if (dataDir) {
       await rm(dataDir, { recursive: true, force: true })
       dataDir = ""
@@ -216,5 +219,59 @@ describe("run manager instant start", () => {
     gate.resolve(async () => {})
     await waitUntil(() => pipelineStarted && manager.status().active === null)
     expect(pipelineStarted).toBe(true)
+  })
+
+  test("Cursor cloud roles can start a second pipeline when maxConcurrentRuns > 1", async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "qurom-multi-run-"))
+    const config = testRuntimeConfig({
+      dataDir: unitTestDataDir(`multi-run-${Date.now()}`),
+      quorumOverrides: { maxConcurrentRuns: 2 },
+    })
+    config.roleBindings = Object.fromEntries(
+      pipelineAgentRoles(config).map((role) => [
+        role,
+        { provider: "cursor", model: "composer-2.5", options: { runtime: "cloud" } },
+      ]),
+    )
+    config.env.QUORUM_RUNS_DIR = join(dataDir, "runs")
+    await mkdir(config.env.QUORUM_RUNS_DIR, { recursive: true })
+
+    const gates = [deferred<void>(), deferred<void>()]
+    let started = 0
+    const manager = createRunManager({
+      getConfig: () => config,
+      lifecycle: createTestLifecycle(),
+      loadPromptBundleFn: async () => promptBundle,
+      validatePrerequisitesFn: async () => ({ providers: [] }),
+      runResearchPipelineFn: async () => {
+        const index = started
+        started += 1
+        await gates[index]?.promise
+        return { outcome: "completed" as const }
+      },
+    })
+
+    const first = await manager.startResearch({ inputMode: "topic", topic: "first" })
+    await waitUntil(() => started === 1)
+    const second = await manager.startResearch({ inputMode: "topic", topic: "second" })
+    await waitUntil(() => started === 2)
+
+    expect(manager.status().actives.map((run) => run.runId).sort()).toEqual(
+      [first.runId, second.runId].sort(),
+    )
+    expect(manager.status().active).not.toBeNull()
+
+    await expect(manager.startResearch({ inputMode: "topic", topic: "third" })).rejects.toMatchObject({
+      status: 409,
+    })
+
+    gates[0]!.resolve()
+    await waitUntil(() => manager.status().actives.length === 1)
+    const third = await manager.startResearch({ inputMode: "topic", topic: "third" })
+    expect(third.runId).toBeTruthy()
+
+    gates[1]!.resolve()
+    await manager.cancel(third.runId)
+    await waitUntil(() => manager.status().active === null)
   })
 })

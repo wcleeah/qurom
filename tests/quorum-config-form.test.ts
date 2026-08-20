@@ -13,6 +13,7 @@ describe("quorum config form", () => {
     })
 
     expect(html).toContain('name="maxRounds"')
+    expect(html).toContain('name="maxConcurrentRuns"')
     expect(html).toContain('name="researchTools.prefer"')
     expect(html).toContain('value="firecrawl"')
     expect(html).not.toContain('<textarea name="content"')
@@ -33,6 +34,7 @@ describe("quorum config form", () => {
     }))
 
     expect(parsed.maxRounds).toBe(5)
+    expect(parsed.maxConcurrentRuns).toBe(1)
     expect(parsed.designQuorum).toEqual({ enabled: true })
     expect(parsed.readerDiscovery?.maxTurns).toBe(4)
     expect(parsed.researchTools.prefer).toEqual(["exa"])

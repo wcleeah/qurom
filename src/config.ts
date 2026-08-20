@@ -24,6 +24,7 @@ const envSchema = z.object({
 export const quorumConfigSchema = z.object({
   maxRounds: z.number().int().positive(),
   maxRebuttalTurnsPerFinding: z.number().int().positive(),
+  maxConcurrentRuns: z.number().int().positive().max(8).default(1),
   recursionLimit: z.number().int().positive().default(80),
   requireUnanimousApproval: z.boolean(),
   researchTools: z.object({

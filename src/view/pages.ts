@@ -245,7 +245,10 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
 
   const manager = tryGetRunManager()
   const managerStatus = manager?.status()
-  const runActive = Boolean(managerStatus?.active)
+  const concurrency = manager ? await manager.concurrency().catch(() => undefined) : undefined
+  const maxConcurrent = concurrency?.maxConcurrent ?? managerStatus?.concurrency?.maxConcurrent ?? 1
+  const activeCount = managerStatus?.actives?.length ?? (managerStatus?.active ? 1 : 0)
+  const runActive = activeCount >= maxConcurrent
   const rerunQueue = manager
     ? await manager.listRerunQueue()
     : { paused: false, items: [] }
@@ -263,6 +266,9 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     : renderNewRunForm({
       runActive,
       activeRunId: managerStatus?.active?.runId,
+      activeCount,
+      maxConcurrent,
+      concurrencyReason: runActive ? concurrency?.reason : undefined,
       error: runError,
     })
 
@@ -308,7 +314,7 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
         .slice(0, 4)
         .map(([name, a]) => `${statusDot(a.status)} ${escapeHtml(name)}${a.tool ? ` · ${escapeHtml(a.tool)}` : ""}`)
         .join(" · ")
-      activeRunHtml = `<div class="card active-run-hero">
+      activeRunHtml += `<div class="card active-run-hero">
   <div class="active-run-header">
     <span class="badge badge-running">● Active</span>
   </div>
@@ -320,7 +326,6 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   </div>
   ${agentList ? `<div class="active-run-agents">${agentList}</div>` : ""}
 </div>`
-      break
     }
   }
 
@@ -625,7 +630,11 @@ export async function renderRun(name: string): Promise<Response> {
 
   const isRunning = liveStatus?.phase === "running"
   const runManager = tryGetRunManager()
-  const runActiveGlobally = Boolean(runManager?.status().active)
+  const managerStatus = runManager?.status()
+  const concurrency = runManager ? await runManager.concurrency().catch(() => undefined) : undefined
+  const maxConcurrent = concurrency?.maxConcurrent ?? managerStatus?.concurrency?.maxConcurrent ?? 1
+  const activeCount = managerStatus?.actives?.length ?? (managerStatus?.active ? 1 : 0)
+  const runActiveGlobally = activeCount >= maxConcurrent && !isRunning
   const rerunQueue = runManager
     ? await runManager.listRerunQueue()
     : { paused: false, items: [] }
@@ -657,6 +666,7 @@ export async function renderRun(name: string): Promise<Response> {
     completionHtml: "",
     resumeActions,
     runActiveGlobally,
+    maxConcurrent,
   })
 
   const filesLinkSection = `<div class="section"><p><a href="/runs/${encodeURIComponent(name)}/files">Browse all ${files.length} files →</a></p></div>`

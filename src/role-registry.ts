@@ -53,6 +53,23 @@ export function configuredAgentRoles(config: RuntimeConfig): AgentRole[] {
   return [...new Set(roles)]
 }
 
+/** Roles that participate in a research/design pipeline (not viewer-only Ask/Fix). */
+export function pipelineAgentRoles(config: RuntimeConfig): AgentRole[] {
+  const roles: AgentRole[] = [
+    DRAFTER_ROLE,
+    ...AUDITOR_ROLES,
+    SUMMARIZER_ROLE,
+    TAGGER_ROLE,
+    "reader-interviewer",
+    READER_PROFILE_REPAIRER_ROLE,
+    "json-fixer",
+  ]
+  if (config.quorumConfig.designQuorum?.enabled) {
+    roles.push(...DESIGN_QUORUM_ROLES)
+  }
+  return [...new Set(roles)]
+}
+
 export function requiredOpenCodeAgentRoles(config: RuntimeConfig): AgentRole[] {
   const roles: AgentRole[] = [DRAFTER_ROLE, ...AUDITOR_ROLES, SUMMARIZER_ROLE, TAGGER_ROLE]
   if (config.quorumConfig.designQuorum?.enabled) {

@@ -2181,6 +2181,9 @@ details.structured-card:not([open]) > summary.auditor-header {
   border-left: 2px solid var(--orange);
   background: var(--bg-card);
 }
+.active-run-hero + .active-run-hero {
+  margin-top: 0.75rem;
+}
 .active-run-header {
   display: flex;
   justify-content: space-between;

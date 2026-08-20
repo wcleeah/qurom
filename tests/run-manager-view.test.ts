@@ -230,6 +230,7 @@ describe("renderNewRunForm", () => {
     const html = renderNewRunForm({ runActive: true, activeRunId: "abc-123" })
     expect(html).toContain("disabled")
     expect(html).toContain("new-run-card")
+    expect(html).toContain("One active pipeline at a time")
     expect(html).toContain("form-input new-run-textarea")
   })
 
@@ -240,6 +241,13 @@ describe("renderNewRunForm", () => {
     expect(html).toContain("Advanced: server path")
     expect(html).toContain("data-new-run-submit-status")
     expect(html).toContain("Starting run…")
+  })
+
+  test("describes Cursor cloud multi-run when a higher cap is configured", () => {
+    const html = renderNewRunForm({ runActive: false, maxConcurrent: 3, activeCount: 1 })
+    expect(html).toContain("Up to 3 concurrent Cursor cloud pipelines")
+    expect(html).toContain("1 / 3 active")
+    expect(html).not.toContain("disabled")
   })
 
   test("does not render a separate design tab", () => {

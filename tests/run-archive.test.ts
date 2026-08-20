@@ -99,6 +99,7 @@ describe("POST /api/runs/:id/archive", () => {
     const originalStatus = manager.status.bind(manager)
     manager.status = () => ({
       active: { runId: "sample-run" },
+      actives: [{ runId: "sample-run" }],
       providers: originalStatus().providers,
     })
 

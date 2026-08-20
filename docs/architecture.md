@@ -1,6 +1,6 @@
 # Architecture
 
-> Last updated: 2026-07-04
+> Last updated: 2026-08-20
 >
 > A practical architecture guide for the research-qurom codebase: what the app does, how a run moves through the system, where each subsystem lives, and how to debug it when something goes wrong.
 
@@ -15,6 +15,7 @@ The app is intentionally file-backed and local-first. Runs produce durable artif
 At a high level:
 
 - The **web dashboard** (`bun run dev`) starts runs, shows live progress, hosts the reader interview, and browses artifacts.
+- The **run manager** allows one in-flight pipeline by default. When every pipeline role is Cursor cloud, `maxConcurrentRuns` can raise that cap. See [cursor-multi-run.md](./cursor-multi-run.md).
 - The **runner** starts the graph, agent runtime, event bridge, telemetry, and status writers.
 - The **LangGraph graph** owns the research state machine.
 - The **agent runtime** dispatches prompts to providers such as OpenCode or Cursor.

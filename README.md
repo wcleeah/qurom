@@ -175,7 +175,7 @@ Start runs from the index page, or via HTTP API:
 - `POST /api/runs/:id/cancel` — cancel active run
 - `POST /api/runs/:id/archive` — move an idle run into `{dataDir}/archive/`
 - `POST /api/runs/:id/unarchive` — restore an archived run back into `runs/`
-- `GET /api/status` — active run + provider lifecycle status
+- `GET /api/status` — active run(s) + provider lifecycle status (`active` is the first in-flight run; `actives` lists all). Cursor cloud role bindings can raise `maxConcurrentRuns` above 1; OpenCode and local Cursor stay serial.
 
 ## Static export
 
@@ -234,8 +234,8 @@ defaults in the admin UI opens a GitHub PR against `QUORUM_GITHUB_PR_BASE`
 ### Index (`/`)
 
 - Start a topic or document run, or resume a prior run from checkpoint
-- One active pipeline run at a time
-- Live refresh for the active-run hero when a run is in progress
+- One active pipeline by default; Cursor-cloud-only bindings can raise `maxConcurrentRuns`
+- Live refresh for active-run heroes when a run is in progress
 - OpenCode agent bootstrap controls when local agents differ from defaults
 - Filter tabs: Unread / Read / All / Archived (`/?archived=1` lists archived runs and can unarchive them)
 
@@ -294,6 +294,7 @@ Output is written to `<run-directory>/final.html`.
 |---|---|
 | [docs/architecture.md](./docs/architecture.md) | Deep dive: subsystems, data flow, debugging |
 | [docs/provider-integration.md](./docs/provider-integration.md) | Adding or changing agent providers |
+| [docs/cursor-multi-run.md](./docs/cursor-multi-run.md) | Concurrent pipelines when roles use Cursor cloud |
 | [docs/archive/recovery-router/](./docs/archive/recovery-router/) | Completed plan: structured-output recovery router |
 | [docs/archive/reader-discovery/](./docs/archive/reader-discovery/) | Reader interview plan (phases 1–2 shipped; 3–4 open) |
 | [docs/archive/v1-implementation/](./docs/archive/v1-implementation/) | Completed plan: original v1 build |
