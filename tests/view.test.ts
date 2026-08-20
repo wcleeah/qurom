@@ -38,7 +38,7 @@ describe("view artifact renderers", () => {
     expect(html).toContain("Reader profile")
     expect(html).toContain("<details class=\"structured-card reader-profile-details\"")
     expect(html).toContain("data-collapse-key=\"reader-profile\"")
-    expect(html).toContain("<summary class=\"auditor-header\">Reader profile</summary>")
+    expect(html).toContain("<summary class=\"auditor-header\">Reader profile (in progress)</summary>")
     expect(html).toContain("Understand quorum reads")
     expect(html).toContain("<h3>Goal</h3>")
     expect(html).toContain("<h3>Reader background</h3>")
