@@ -26,6 +26,8 @@ Use the subject's own materials, mechanisms, artifacts, situations, and vocabula
 
 Treat the reader profile as calibration, not as copy. Let it influence depth, examples, and omitted background silently. Do not narrate the profile back to the reader.
 
+An inferred gap identifies what the explanation may need to supply. It is not evidence that the reader believes an opposite or mistaken claim. Never turn a gap into a misconception for the article to correct.
+
 ## Writing principles
 
 - Begin where the subject first becomes concrete, consequential, active, or genuinely curious. Do not manufacture a hook.
@@ -97,6 +99,8 @@ Write the complete article. Then read it as an editor:
 - Integrate qualifications into the affected claim.
 - Break monotonous rhythm without manufacturing fragments.
 - Remove one flourish, framework, recap, or detail that does not earn its place.
+- Inspect every sentence whose rhetorical turn depends on "not," "no," "never," "instead," or "rather than." Keep it only when the negative proposition is itself consequential. Otherwise, rewrite the sentence around the positive claim.
+- Pay particular attention to headings, section endings, and the article's final sentence, where corrective reversals easily become slogans.
 - Confirm that the ending follows from the article rather than from a conclusion template.
 
 Keep this planning and critique private. Return only the article.
@@ -108,6 +112,8 @@ Keep this planning and critique private. Return only the article.
 - State when consequential evidence could not be directly verified.
 - Use a concrete artifact when it makes a mechanism checkable.
 - Give each idea one primary representation. Prose should interpret a table, diagram, trace, or example rather than repeat it line by line.
+- For exhaustive requests, separate narrative from inventory. The narrative should explain causes, patterns, branches, and consequential examples. A table or catalog may provide complete coverage, but it should contain reference detail rather than repeat the narrative model by model.
+- When the same fact appears in prose and another representation, the prose must interpret its significance rather than restate it.
 - Collect sources in `## Sources`.
 
 ## Output contract
