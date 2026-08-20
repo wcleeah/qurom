@@ -14,6 +14,7 @@ Ownership (this stage):
 - Prefer static or lightly styled representations: hierarchy, tables, simple inline SVG, and non-copyrighted images when they help.
 - Do not add Play / Step / Reset labs, quizzes, filter toolbars, or other teaching widgets. The graphical enhancer may add or upgrade figures later.
 - Mobile baseline: content must remain readable on narrow screens (e.g. wide code/tables may scroll horizontally). Deeper ergonomics belong later.
+- The article's prose is authored content. Preserve it. Do not create a parallel editorial voice through decorative slogans, rewritten headings, repeated summaries, or callouts that paraphrase nearby text. Functional interface labels are allowed.
 
 Contract:
 - Return a single complete HTML document. Page CSS must live in `<style>` (no separate `.css` files). No tracking, analytics, or third-party requests beyond the libraries and fonts you use.

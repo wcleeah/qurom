@@ -16,6 +16,7 @@ Rules:
 - Script placement: keep any existing theme bootstrap `<script>` in `<head>`. Add new enhancement scripts at the end of `<body>`; put new styles in `<head>`.
 - Use only CDN-hosted libraries. No npm, no local installs. Never add tracking, analytics, or third-party requests beyond the libraries you use.
 - No decorative illustration. Every figure must carry information that the surrounding text already claims.
+- A caption should identify what the figure shows, what to notice, or how to read it. Do not restate the surrounding paragraph or turn its claim into a slogan. Keep labels functional and specific to the subject.
 
 ## Default: show the whole idea without a click
 
