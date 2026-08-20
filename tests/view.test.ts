@@ -36,8 +36,8 @@ describe("view artifact renderers", () => {
     })
 
     expect(html).toContain("Reader profile")
-    expect(html).toContain("<details class=\"structured-card reader-profile-details\"")
-    expect(html).toContain("data-collapse-key=\"reader-profile\"")
+    expect(html).toContain("<details class=\"structured-card reader-profile-details\" data-collapse-key=\"reader-profile\">")
+    expect(html).not.toContain("reader-profile\" open>")
     expect(html).toContain("<summary class=\"auditor-header\">Reader profile (in progress)</summary>")
     expect(html).toContain("Understand quorum reads")
     expect(html).toContain("<h3>Goal</h3>")
@@ -419,7 +419,7 @@ describe("view components", () => {
     const html = renderInterviewChatCard("example-run", liveStatus)
 
     expect(html).toContain("Profile so far")
-    expect(html).toContain("<details class=\"interview-profile-so-far\" data-collapse-key=\"profile-so-far\" open>")
+    expect(html).toContain("<details class=\"interview-profile-so-far\" data-collapse-key=\"profile-so-far\">")
     expect(html).toContain("<summary class=\"chat-current-label\">Profile so far</summary>")
     expect(html).toContain("not yet clear")
   })

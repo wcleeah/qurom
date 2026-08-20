@@ -195,7 +195,7 @@ export function renderReaderProfileCard(data: unknown): string {
   const status = done
     ? "Reader profile"
     : "Reader profile (in progress)"
-  return `<details class="structured-card reader-profile-details" data-collapse-key="reader-profile" open>
+  return `<details class="structured-card reader-profile-details" data-collapse-key="reader-profile">
   <summary class="auditor-header">${status}</summary>
   ${summary}
 </details>`

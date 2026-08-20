@@ -104,7 +104,7 @@ function renderInterviewTurnBlock(
     <h3>Turn ${turn}</h3>
   </div>
   <div class="chat-transcript">${questionsHtml}${answerHtml}</div>
-  ${profileHtml ? `<details class="interview-profile-so-far" data-collapse-key="profile-after-turn-${turn}" open>
+  ${profileHtml ? `<details class="interview-profile-so-far" data-collapse-key="profile-after-turn-${turn}">
     <summary class="chat-current-label">Profile after turn ${turn}</summary>
     ${profileHtml}
   </details>` : ""}

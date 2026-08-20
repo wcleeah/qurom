@@ -34,7 +34,7 @@ export function renderRerunQueueStrip(queue: RerunQueueSnapshot): string {
   const summaryStatus = statusBits.join(" · ")
 
   return `<section id="rerun-queue-section" class="rerun-queue-section card" aria-labelledby="rerun-queue-heading">
-  <details class="rerun-queue-details" data-collapse-key="rerun-queue" open>
+  <details class="rerun-queue-details" data-collapse-key="rerun-queue">
     <summary class="rerun-queue-summary">
       <span class="rerun-queue-summary-main">
         <span class="rerun-queue-heading" id="rerun-queue-heading">Rerun playlist</span>
