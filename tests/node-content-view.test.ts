@@ -46,6 +46,8 @@ describe("node content view", () => {
       expect(html).toContain("What is your goal?")
       expect(html).toContain("understand select")
       expect(html).toContain("Reader profile")
+      expect(html).toContain("data-collapse-key=\"reader-profile\"")
+      expect(html).not.toContain("<h2>Reader profile</h2>")
       expect(html).not.toContain("<h2>Summary</h2>")
     } finally {
       await rm(runsRoot, { recursive: true, force: true })

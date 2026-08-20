@@ -26,24 +26,35 @@ export function renderRerunQueueStrip(queue: RerunQueueSnapshot): string {
 
   const pauseAction = queue.paused ? "resume" : "pause"
   const pauseLabel = queue.paused ? "Resume playlist" : "Pause playlist"
+  const countLabel = queue.items.length === 1 ? "1 queued" : `${queue.items.length} queued`
+  const statusBits = [
+    queue.items.length > 0 ? countLabel : "empty",
+    queue.paused ? "paused" : "",
+  ].filter(Boolean)
+  const summaryStatus = statusBits.join(" · ")
 
   return `<section id="rerun-queue-section" class="rerun-queue-section card" aria-labelledby="rerun-queue-heading">
-  <div class="rerun-queue-header">
-    <div>
-      <h2 id="rerun-queue-heading">Rerun playlist</h2>
+  <details class="rerun-queue-details" data-collapse-key="rerun-queue" open>
+    <summary class="rerun-queue-summary">
+      <span class="rerun-queue-summary-main">
+        <span class="rerun-queue-heading" id="rerun-queue-heading">Rerun playlist</span>
+        <span class="muted-note">${escapeHtml(summaryStatus)}</span>
+      </span>
+    </summary>
+    <div class="rerun-queue-header">
       <p class="muted-note">${queue.paused ? "Paused — unattended reruns will not start." : "Unattended reuse and repair reruns, one at a time."}</p>
+      <div class="rerun-queue-actions">
+        <form class="run-action-form" method="POST" action="/api/rerun-queue/${pauseAction}">
+          <button type="submit" class="btn btn-secondary">${pauseLabel}</button>
+        </form>
+        ${queue.items.length > 0
+          ? `<form class="run-action-form" method="POST" action="/api/rerun-queue/clear">
+          <button type="submit" class="btn btn-secondary">Clear</button>
+        </form>`
+          : ""}
+      </div>
     </div>
-    <div class="rerun-queue-actions">
-      <form class="run-action-form" method="POST" action="/api/rerun-queue/${pauseAction}">
-        <button type="submit" class="btn btn-secondary">${pauseLabel}</button>
-      </form>
-      ${queue.items.length > 0
-        ? `<form class="run-action-form" method="POST" action="/api/rerun-queue/clear">
-        <button type="submit" class="btn btn-secondary">Clear</button>
-      </form>`
-        : ""}
-    </div>
-  </div>
-  ${rows}
+    ${rows}
+  </details>
 </section>`
 }

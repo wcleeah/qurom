@@ -36,6 +36,9 @@ describe("view artifact renderers", () => {
     })
 
     expect(html).toContain("Reader profile")
+    expect(html).toContain("<details class=\"structured-card reader-profile-details\"")
+    expect(html).toContain("data-collapse-key=\"reader-profile\"")
+    expect(html).toContain("<summary class=\"auditor-header\">Reader profile (in progress)</summary>")
     expect(html).toContain("Understand quorum reads")
     expect(html).toContain("<h3>Goal</h3>")
     expect(html).toContain("<h3>Reader background</h3>")
@@ -214,6 +217,7 @@ describe("view assets and html helpers", () => {
     expect(POLLING_SCRIPT).toContain("Live refresh paused during interview")
     expect(POLLING_SCRIPT).toContain("preserveInFlightRead")
     expect(POLLING_SCRIPT).toContain("data-interview-reply-form")
+    expect(POLLING_SCRIPT).toContain("data-collapse-key")
   })
 
   test("renders small reusable card, section, and summary table fragments", () => {
@@ -415,6 +419,8 @@ describe("view components", () => {
     const html = renderInterviewChatCard("example-run", liveStatus)
 
     expect(html).toContain("Profile so far")
+    expect(html).toContain("<details class=\"interview-profile-so-far\" data-collapse-key=\"profile-so-far\" open>")
+    expect(html).toContain("<summary class=\"chat-current-label\">Profile so far</summary>")
     expect(html).toContain("not yet clear")
   })
 

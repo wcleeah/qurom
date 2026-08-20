@@ -126,10 +126,10 @@ export function renderInterviewChatCard(runName: string, liveStatus: LiveStatus 
       </div>`
   const currentTurn = awaiting.turn
   const profileSoFarHtml = awaiting.partialProfile
-    ? `<div class="interview-profile-so-far">
-        <div class="chat-current-label">Profile so far</div>
+    ? `<details class="interview-profile-so-far" data-collapse-key="profile-so-far" open>
+        <summary class="chat-current-label">Profile so far</summary>
         ${renderReaderProfileSummary(awaiting.partialProfile)}
-      </div>`
+      </details>`
     : ""
   return `<div class="section interview-card">
   <h2>Reader interview · turn ${currentTurn}</h2>
