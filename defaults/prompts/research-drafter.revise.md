@@ -1,27 +1,66 @@
-Revise the current draft to resolve the unresolved findings. Fix only what the findings identify — do not restructure the document into a greenfield rewrite. Return a clean standalone deep dive. Do not mention the review process in the document unless the request explicitly asks for it.
+Revise the current article to resolve the accepted findings while preserving its factual integrity and editorial purpose.
 
 Request: {requestLabel}
 
 {researchToolHint}
 
-Reader profile (use when adjusting explanation depth):
+Reader calibration:
 {readerContext}
 
-The current draft and the unresolved findings are provided with this prompt.
+The current article and unresolved findings are provided with this prompt.
 
-Surgical revision rules:
-- Use the unresolved findings as private rewrite instructions.
-- Do not mention reviewers, findings, rebuttals, revision history, or that this is a revised draft.
-- Do not include sections like `Revision Notes`, `Changes Made`, `Open Issues`, `Findings`, `Reviewer Feedback`, or `Changelog`.
-- Fix only the specific passages cited in the findings. Preserve all text that no finding criticized.
-- A finding about an undefined term → add a sentence defining it. Do not rewrite the surrounding section.
-- A finding about a contradictory statement → fix the contradiction. Leave the rest alone.
-- A finding about a missing source → add the source. Do not re-research the claim.
-- A finding about a confusing diagram → fix or clarify the diagram. Do not redraw the entire document.
-- If a finding exposes a genuine inferential gap, add the smallest possible explanation to close it — a sentence or two, not a new section.
-- Adding a concrete artifact is fine when a finding specifically calls for it.
-- Do not add new explanatory content beyond what the findings require.
-- Do not reorder sections, rename sections, or change the document's structure unless a finding explicitly demands it.
-- If two findings about the same topic conflict, prefer the more precise one.
-- If the draft was already correct and a finding is mistaken, preserve the original text.
-- When adjusting explanation depth, calibrate to the reader profile above; do not broaden the revision into a greenfield rewrite.
+## Revision stance
+
+You are the article's original author returning with better evidence and criticism. Preserve one authorial mind. Do not treat revision as a sequence of patches attached to existing prose.
+
+A successful revision may become shorter.
+
+## Process
+
+For each finding, identify the required outcome before changing text:
+
+- What must become correct?
+- What must become understandable?
+- What evidence must become traceable?
+- What reader consequence makes the finding material?
+
+Then revise the smallest coherent unit of thought. This may be a sentence, paragraph, example, figure, section, or transition.
+
+You may rewrite, compress, combine, relocate, or remove nearby material when doing so integrates the correction naturally. Preserve unaffected substance, not necessarily unaffected wording.
+
+Examples:
+
+- A missing definition may be solved by recasting the surrounding explanation or example.
+- An overstated claim should usually be replaced with an accurate claim rather than followed by a defensive caveat.
+- A missing distinction may require reorganizing the local explanation instead of adding a contrast paragraph.
+- A redundant example may be removed when a corrected example now performs both jobs.
+- A structural change is appropriate when the finding exposes a structural cause. Avoid unrelated greenfield rewriting.
+
+If two findings about the same topic conflict, prefer the more precise one. Rebut a finding only when direct evidence shows it is wrong or materially overstated.
+
+## Editorial integrity
+
+Retain the article's subject-specific form and voice unless a finding reveals that they obstruct understanding.
+
+Do not:
+
+- invent reader knowledge, thoughts, expectations, or misconceptions;
+- repair explanations through staged "not X, but Y" correction;
+- turn findings into new prerequisites, recap sections, or checklists by default;
+- preserve repetition merely because only one occurrence was cited;
+- add explanatory content beyond what resolving the findings requires;
+- mention reviewers, findings, rebuttals, revision history, or that this is a revised draft.
+
+Ordinary factual negation remains allowed when the negative fact matters.
+
+When a finding concerns a source, re-check the relevant evidence and make the claim no broader than the source supports. When adjusting explanation depth, use the reader calibration silently rather than narrating it back to the reader.
+
+After resolving the findings, reread the complete article:
+
+- Does the correction feel written into the article rather than appended?
+- Did added precision create caveat accumulation or repeated explanation?
+- Did revision introduce a curriculum-like structure?
+- Does each section retain a clear role in the throughline?
+- Can anything now be removed?
+
+Return a clean, standalone markdown article. Do not include revision notes, changes made, open issues, findings, reviewer feedback, or a changelog.

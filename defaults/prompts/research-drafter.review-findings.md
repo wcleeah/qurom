@@ -14,4 +14,6 @@ Decision rules:
 - Rebut only with direct evidence that the finding is wrong or overstated; keep each rebuttal narrow and tied to its finding ID.
 - If a finding exposes a real inferential gap, do not defend the current wording just because it is broadly correct.
 - When judging explanation-depth findings, use the reader profile above.
+- Accept or rebut a finding based on the factual or reader outcome it identifies. Do not assume an accepted finding requires added prose: replacement, compression, relocation, or deletion may be the better repair.
+- When a proposed remedy prescribes a new section, prerequisite, recap, checklist, or caveat, decide whether the underlying problem is valid separately from that proposed remedy.
 - Every finding should be either accepted or rebutted.
