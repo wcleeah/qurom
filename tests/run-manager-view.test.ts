@@ -191,7 +191,8 @@ describe("renderRerunQueueStrip", () => {
       ],
     })
     expect(html).toContain("Rerun playlist")
-    expect(html).toContain("<details class=\"rerun-queue-details\" data-collapse-key=\"rerun-queue\" open>")
+    expect(html).toContain("<details class=\"rerun-queue-details\" data-collapse-key=\"rerun-queue\">")
+    expect(html).not.toContain(" rerun-queue\" open>")
     expect(html).toContain("<summary class=\"rerun-queue-summary\">")
     expect(html).toContain("1 queued")
     expect(html).toContain("What is MLX?")
@@ -202,7 +203,8 @@ describe("renderRerunQueueStrip", () => {
 
   test("renders a collapsible paused-empty playlist", () => {
     const html = renderRerunQueueStrip({ paused: true, items: [] })
-    expect(html).toContain("<details class=\"rerun-queue-details\" data-collapse-key=\"rerun-queue\" open>")
+    expect(html).toContain("<details class=\"rerun-queue-details\" data-collapse-key=\"rerun-queue\">")
+    expect(html).not.toContain(" rerun-queue\" open>")
     expect(html).toContain("empty · paused")
     expect(html).toContain("Playlist paused — nothing queued.")
     expect(html).toContain("/api/rerun-queue/resume")
