@@ -11,6 +11,46 @@ import type { FileClass, LiveStatus, NodeHistoryEntry, RequestJson, RunMeta, Run
 import type { ReaderTranscriptEntry } from "../reader-transcript"
 import { resolveRunTelemetry, runElapsedMs } from "./telemetry-view"
 
+export function deriveResearchStatus(input: {
+  hasFinalMd: boolean
+  hasLatestDraft: boolean
+  hasFailureJson?: boolean
+  livePhase?: LiveStatus["phase"] | null
+}): RunStatus {
+  if (input.hasFinalMd) return "approved"
+  if (input.livePhase === "running") return "running"
+  if (input.hasLatestDraft || input.hasFailureJson) return "failed"
+  return "running"
+}
+
+export function deriveDesignStatus(input: {
+  hasFinalHtml: boolean
+  hasDesignFailure: boolean
+  designRoundCount: number
+  researchStatus: RunStatus
+}): RunStatus | null {
+  if (input.designRoundCount > 0 || input.hasFinalHtml || input.hasDesignFailure) {
+    if (input.hasDesignFailure) return "failed"
+    if (input.hasFinalHtml) return "approved"
+    return "running"
+  }
+  if (input.researchStatus === "approved") return "running"
+  return null
+}
+
+export function deriveOverallRunStatus(input: {
+  researchStatus: RunStatus
+  designStatus: RunStatus | null
+  livePhase?: LiveStatus["phase"] | null
+}): RunStatus {
+  if (input.livePhase === "running") return "running"
+  if (input.designStatus === "failed" || input.researchStatus === "failed") return "failed"
+  if (input.researchStatus === "approved" && (input.designStatus === "approved" || input.designStatus === null)) {
+    return "approved"
+  }
+  return "running"
+}
+
 export function resolveRunCreatedAtMs(input: {
   birthtimeMs?: number
   ctimeMs?: number
@@ -126,6 +166,7 @@ async function collectRunMetasFromDir(rootDir: string): Promise<RunMeta[]> {
     let hasFinalHtml = false
     let hasFinalMd = false
     let hasLatestDraft = false
+    let hasFailureJson = false
     let fileCount = 0
     let mtime = 0
     let createdAt = 0
@@ -151,6 +192,7 @@ async function collectRunMetasFromDir(rootDir: string): Promise<RunMeta[]> {
         if (file === "final.html") hasFinalHtml = true
         if (file === "final.md") hasFinalMd = true
         if (file === "latest-draft.md") hasLatestDraft = true
+        if (file === "failure.json") hasFailureJson = true
         if (file === "design-failure.json") hasDesignFailure = true
       }
       createdAt = resolveRunCreatedAtMs({
@@ -168,35 +210,18 @@ async function collectRunMetasFromDir(rootDir: string): Promise<RunMeta[]> {
       requestJson?.topic ??
       dir.name
 
-    // Research status
-    let researchStatus: RunStatus = "running"
-    if (hasFinalMd) researchStatus = "approved"
-    else if (hasLatestDraft) researchStatus = "failed"
-
-    // Design status
-    let designStatus: RunStatus | null = null
-    if (designRoundCount > 0 || hasFinalHtml || hasDesignFailure) {
-      if (hasDesignFailure) {
-        designStatus = "failed"
-      } else if (hasFinalHtml) {
-        designStatus = "approved"
-      } else if (designRoundCount > 0) {
-        designStatus = "running"
-      }
-    } else if (researchStatus === "approved") {
-      // Research passed but no design files yet — design is likely in-progress
-      designStatus = "running"
-    }
-
-    // Overall status: combine research + design
-    let status: RunStatus = "running"
-    if (designStatus === "failed" || researchStatus === "failed") {
-      status = "failed"
-    } else if (researchStatus === "approved" && (designStatus === "approved" || designStatus === null)) {
-      status = "approved"
-    } else if (researchStatus === "approved" && designStatus === "running") {
-      status = "running"
-    }
+    const researchStatus = deriveResearchStatus({
+      hasFinalMd,
+      hasLatestDraft,
+      hasFailureJson,
+    })
+    const designStatus = deriveDesignStatus({
+      hasFinalHtml,
+      hasDesignFailure,
+      designRoundCount,
+      researchStatus,
+    })
+    const status = deriveOverallRunStatus({ researchStatus, designStatus })
 
     metas.push({
       name: dir.name,
@@ -265,6 +290,17 @@ async function enrichRunIndexFields(meta: RunMeta): Promise<void> {
 
   const elapsedMs = runElapsedMs(liveStatus, nodeHistory)
   if (elapsedMs !== undefined) meta.elapsedMs = elapsedMs
+
+  const researchStatus = deriveResearchStatus({
+    hasFinalMd: meta.hasFinalMd,
+    hasLatestDraft: meta.hasLatestDraft,
+    livePhase: liveStatus?.phase,
+  })
+  meta.status = deriveOverallRunStatus({
+    researchStatus,
+    designStatus: meta.designStatus,
+    livePhase: liveStatus?.phase,
+  })
 
   const { usage, costAvailable, costEstimated } = resolveRunTelemetry(sessionTelemetry)
   if (costAvailable) {

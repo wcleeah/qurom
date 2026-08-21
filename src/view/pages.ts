@@ -11,7 +11,7 @@ import { renderRerunQueueStrip } from "./rerun-queue-view"
 import { renderStructuredJson } from "./artifact-renderers"
 import { renderJsonViewer } from "./json-viewer"
 import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard } from "./components"
-import { computeStats, filterRunsForIndex, getRunFiles, listArchivedRuns, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry, resolveRunCreatedAtMs } from "./data"
+import { computeStats, deriveResearchStatus, filterRunsForIndex, getRunFiles, listArchivedRuns, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry, resolveRunCreatedAtMs } from "./data"
 import { getNodeDefinition, isRebuttalsViewerNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
 import { renderNodeDashboard, renderGlobalResearchRoundStrip, renderNodeGrid, renderNodeMiniPipeline, nodePageRoundNumbers } from "./node-view"
 import { renderLiveStatusMeta, renderRoundStrip } from "./round-view"
@@ -520,10 +520,12 @@ export async function renderRun(name: string): Promise<Response> {
   // Live status (if run is active)
   const liveStatus = await readLiveStatus(name)
 
-  let researchStatus: RunStatus = "running"
-  if (hasFinalMd) researchStatus = "approved"
-  else if (liveStatus?.phase === "running") researchStatus = "running"
-  else if (hasLatestDraft || hasFailureJson) researchStatus = "failed"
+  const researchStatus = deriveResearchStatus({
+    hasFinalMd,
+    hasLatestDraft,
+    hasFailureJson,
+    livePhase: liveStatus?.phase,
+  })
 
   const topic =
     requestJson?.inputSummary?.title ??
