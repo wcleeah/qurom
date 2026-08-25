@@ -12,7 +12,8 @@ describe("quorum config form", () => {
       researchToolIds: ["context7", "firecrawl"],
     })
 
-    expect(html).toContain('name="maxRounds"')
+    expect(html).toContain('name="auditRestart.maxRestarts"')
+    expect(html).toContain('name="nodeRetry.maxRetries"')
     expect(html).toContain('name="maxConcurrentRuns"')
     expect(html).toContain('name="researchTools.prefer"')
     expect(html).toContain('value="firecrawl"')
@@ -25,6 +26,7 @@ describe("quorum config form", () => {
       maxRebuttalTurnsPerFinding: "3",
       recursionLimit: "90",
       "auditRestart.maxRestarts": "2",
+      "nodeRetry.maxRetries": "3",
       requireUnanimousApproval: "1",
       "designQuorum.enabled": "1",
       "readerDiscovery.enabled": "1",
@@ -34,6 +36,7 @@ describe("quorum config form", () => {
     }))
 
     expect(parsed.maxRounds).toBe(5)
+    expect(parsed.nodeRetry?.maxRetries).toBe(3)
     expect(parsed.maxConcurrentRuns).toBe(1)
     expect(parsed.designQuorum).toEqual({ enabled: true })
     expect(parsed.readerDiscovery?.maxTurns).toBe(4)

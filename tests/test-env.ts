@@ -46,6 +46,7 @@ export function testQuorumConfig(overrides: Record<string, unknown> = {}) {
     requireUnanimousApproval: true,
     researchTools: { prefer: ["exa"], webSearchProvider: "exa" },
     auditRestart: { maxRestarts: 1 },
+    nodeRetry: { maxRetries: 2 },
     readerDiscovery: { maxTurns: 2, enabled: true },
     ...overrides,
   })

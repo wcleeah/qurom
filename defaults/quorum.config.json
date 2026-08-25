@@ -4,6 +4,9 @@
   "maxConcurrentRuns": 1,
   "recursionLimit": 80,
   "requireUnanimousApproval": true,
+  "nodeRetry": {
+    "maxRetries": 2
+  },
   "researchTools": {
     "prefer": ["context7", "exa", "grepapp"],
     "webSearchProvider": "exa"

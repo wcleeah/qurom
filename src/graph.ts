@@ -14,6 +14,7 @@ import {
   writeRunJsonArtifact,
 } from "./output"
 import { auditWithRestart } from "./audit-restart"
+import { defaultNodeRetryDelayMs, runWithNodeRetry } from "./node-retry"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
 import type { AgentRunHandle } from "./providers/types"
 import type { PromptBundle } from "./prompt-assets"
@@ -2407,7 +2408,22 @@ export function createGraph(
     }
 
     try {
-      const result = await fn()
+      const result = await runWithNodeRetry({
+        node,
+        maxRetries: config.quorumConfig.nodeRetry?.maxRetries ?? 0,
+        delayMs: defaultNodeRetryDelayMs,
+        onRetry: ({ attempt, maxRetries, error }) => {
+          observer?.debugLog?.write("node.retry", {
+            node,
+            attempt,
+            maxRetries,
+            round,
+            status,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        },
+        run: fn,
+      })
       await graphTelemetry?.run.endObservation(observation, {
         output: summarizeNodeResult(result) ?? {
           node,

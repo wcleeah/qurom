@@ -267,12 +267,15 @@ Every recovery tier emits a standardized debug-log event. Grep `{dataDir}/runs/<
 | `session.recovery.reprompt` | A/B branches | Same-agent in-session reprompt with `kind` |
 | `session.repair.json_fixer` | C branch | `json-fixer` agent invoked |
 | `audit.restart_from_scratch` | `auditWithRestart` (R tier) | Auditor re-run on a fresh provider session (OpenCode today) |
+| `node.retry` | graph node wrapper | Graph node threw; re-running the node within `nodeRetry.maxRetries` |
 | `session.dual_output` | persistence | Agent wrote `outputFile` AND returned valid inline JSON that differs; file is preferred |
 | `recovery.systemic_drift` | drift detector | Same agent restarted across two distinct `requestId`s in one process |
 
 ### Kill-switch
 
 `auditRestart.maxRestarts` in the active SQLite quorum config (editable at `/config`) controls the R tier. Set it to `0` to disable fresh-session restarts. Default is `1`.
+
+`nodeRetry.maxRetries` re-runs a graph node after it throws (for example a Cursor cloud agent that ends with `ERROR`). Default is `2` extra attempts with backoff. Set it to `0` to fail the run on the first node throw. LangGraph interrupts and abort/cancel are never retried.
 
 ## Design Quorum
 

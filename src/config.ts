@@ -41,6 +41,11 @@ export const quorumConfigSchema = z.object({
       maxRestarts: z.number().int().nonnegative().default(1),
     })
     .default({ maxRestarts: 1 }),
+  nodeRetry: z
+    .object({
+      maxRetries: z.number().int().nonnegative().default(2),
+    })
+    .default({ maxRetries: 2 }),
   readerDiscovery: z
     .object({
       maxTurns: z.number().int().positive().default(6),
