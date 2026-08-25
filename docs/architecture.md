@@ -497,6 +497,7 @@ Agent files define model, variant, tool permissions, and write permissions only 
 Failures are handled at several levels:
 
 - Provider prompt failures can retry or surface typed errors.
+- Graph nodes can re-run after a throw (`nodeRetry.maxRetries`, default 2) so a flaky Cursor cloud agent does not fail the whole pipeline.
 - Structured JSON failures go through the recovery ladder.
 - Auditor structured-output failures can trigger fresh-session restart.
 - The runner attempts to recover latest checkpointed graph state.
@@ -519,7 +520,7 @@ Useful checks:
 jq . runs/<run>/debug-log.jsonl
 
 # Recovery events
-rg 'session.recovery|session.repair|audit.restart|systemic_drift' runs/<run>/debug-log.jsonl
+rg 'session.recovery|session.repair|audit.restart|node.retry|systemic_drift' runs/<run>/debug-log.jsonl
 
 # Pipeline lifecycle
 rg 'pipeline.start|pipeline.complete|pipeline.error' runs/<run>/debug-log.jsonl

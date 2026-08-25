@@ -59,6 +59,7 @@ export function renderQuorumConfigForm(options: QuorumConfigFormOptions): string
     ${field("Max concurrent runs", "maxConcurrentRuns", config.maxConcurrentRuns ?? 1, "number", "Cursor cloud only. OpenCode and local Cursor stay at 1.")}
     ${field("Recursion limit", "recursionLimit", config.recursionLimit, "number")}
     ${field("Audit restart limit", "auditRestart.maxRestarts", config.auditRestart?.maxRestarts ?? 1, "number")}
+    ${field("Node retry limit", "nodeRetry.maxRetries", config.nodeRetry?.maxRetries ?? 2, "number", "Extra attempts after a graph node throws. Helps with flaky Cursor cloud agents. 0 disables.")}
     ${checkbox("requireUnanimousApproval", "Require unanimous approval", config.requireUnanimousApproval)}
   </div>
   <div class="form-section">
@@ -135,6 +136,9 @@ export function parseQuorumConfigForm(params: URLSearchParams): QuorumConfig {
     designQuorum: designEnabled ? { enabled: true } : undefined,
     auditRestart: {
       maxRestarts: parseNonNegativeInt(params, "auditRestart.maxRestarts", 1),
+    },
+    nodeRetry: {
+      maxRetries: parseNonNegativeInt(params, "nodeRetry.maxRetries", 2),
     },
     readerDiscovery: {
       enabled: parseBoolean(params, "readerDiscovery.enabled"),

@@ -228,6 +228,7 @@ VALUES (?, 'interactiveEnhancerEnhance', 'old lab prompt', 1, ?, ?)
         maxRebuttalTurnsPerFinding: "2",
         recursionLimit: "80",
         "auditRestart.maxRestarts": "1",
+        "nodeRetry.maxRetries": "2",
         requireUnanimousApproval: "1",
         "designQuorum.enabled": "1",
         "readerDiscovery.enabled": "1",
