@@ -176,6 +176,8 @@ describe("html repair", () => {
     expect(prompt).toContain("Mobile overflow checks")
     expect(prompt).toContain("UI looks fine")
     expect(prompt).toContain("Playwright MCP")
+    expect(prompt).toContain("open every overlay/dialog/detail panel")
+    expect(prompt).toContain("left: 50%")
     expect(prompt).toContain("`HTML document` context or attached as a file")
     expect(prompt).toContain("by chunk, instead of one full write")
     expect(prompt).not.toContain("{htmlFile}")
@@ -190,6 +192,10 @@ describe("html repair", () => {
       expect(prompt).toContain("by chunk, instead of one full write")
       expect(prompt).not.toContain("The HTML document is provided with this prompt.")
     }
+    expect(graphical).toContain("open every overlay/dialog")
+    expect(reading).toContain("Fix overlay/dialog/detail-panel clipping")
+    const designer = await Bun.file(join(dir, "defaults", "prompts", "html-designer.design.md")).text()
+    expect(designer).toContain("open every overlay/dialog/detail panel")
   })
 
   test("shipped agent allows bash and todowrite", async () => {

@@ -32,7 +32,7 @@ Prefer a static figure the reader can understand with JavaScript disabled:
 - Dense code → annotated callouts or highlighted lines, not only syntax color
 - ASCII / markdown tables → real tables or simple charts
 - ASCII flows, sequences, and timelines → a visible SVG / Mermaid-style diagram of the **entire** sequence
-- Comparisons → side-by-side or a static table, not a button group that reveals one variant at a time
+- Comparisons → side-by-side or a static table, not a button group that reveals one variant at a time. If a comparison lives in an overlay or detail panel, keep the whole "A vs B" row (percentages, labels, source lines) inside the panel on ~390px screens: stack columns vertically rather than clipping. Do not center overlays with both `margin: auto` and `left: 50%` / `translate(-50%)`; size them with `width: min(<desktop-width>, calc(100vw - 2rem))` and `max-height: calc(100dvh - 2rem)`.
 
 If a process has N steps, draw all N steps. If a comparison has variants, show the variants together.
 
@@ -64,7 +64,7 @@ How to work:
 Before you finish, you MUST use the `todowrite` tool to create exactly these three todos, then verify each with Playwright (and bash if you need a local static server for `file://`/`http://` access):
 
 1. **Scrolling works all the way** — open the page at a desktop viewport; scroll from top to bottom; confirm the document reaches the end and sticky chrome does not trap scroll.
-2. **Mobile overflow checks** — resize to a narrow mobile viewport (~390×844); confirm no horizontal page overflow (`document.documentElement.scrollWidth` ≤ viewport width); wide tables/code must scroll inside their containers, not the page.
+2. **Mobile overflow checks** — resize to a narrow mobile viewport (~390×844); confirm no horizontal page overflow (`document.documentElement.scrollWidth` ≤ viewport width); wide tables/code must scroll inside their containers, not the page; open every overlay/dialog that contains a figure or comparison and confirm nothing clips.
 3. **Figures earn their space** — no page/console errors; every retained figure answers a distinct reader question; captions do not repeat nearby prose; figure typography matches the page; labels remain legible at desktop and mobile sizes; no figure is clipped or creates page-level overflow.
 
 Mark each todo complete only after you have Playwright evidence for that check. If a check fails, fix the HTML and re-run that check. Do not claim success while any of the three todos is incomplete or failed.
