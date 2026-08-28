@@ -3835,6 +3835,72 @@ body.html-viewer-body {
   margin-top: 0.15rem;
 }
 
+.offline-page .lede {
+  max-width: 42rem;
+  color: var(--muted);
+}
+
+.offline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.offline-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.offline-item-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+  flex: 1;
+}
+
+.offline-item-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.offline-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0;
+}
+
+.offline-item-delete {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+
+.offline-item-delete:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+.offline-capture-frame {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  z-index: -1;
+}
+
 .note-tags-editor {
   margin-top: 0.5rem;
 }

@@ -1,6 +1,6 @@
 import { escapeHtml } from "./utils"
 
-export type AppSection = "runs" | "library" | "config"
+export type AppSection = "runs" | "library" | "offline" | "config"
 
 export type AppNavbarOptions = {
   section: AppSection
@@ -16,6 +16,7 @@ export type AppNavbarOptions = {
 const SECTION_ITEMS: Array<{ id: AppSection; href: string; label: string }> = [
   { id: "runs", href: "/", label: "Runs" },
   { id: "library", href: "/library", label: "Library" },
+  { id: "offline", href: "/offline", label: "Offline" },
   { id: "config", href: "/config", label: "Config" },
 ]
 

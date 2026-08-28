@@ -1,4 +1,5 @@
 import { NAV_DROPDOWNS_SCRIPT, renderAppNavbar, type AppNavbarOptions } from "./app-nav"
+import { OFFLINE_SW_REGISTER_SCRIPT } from "./offline-sw"
 import { CSS } from "./styles"
 import { escapeHtml } from "./utils"
 import type { RunStatus } from "./types"
@@ -71,6 +72,7 @@ ${body}
 ${THEME_TOGGLE_SCRIPT}
 </script>
 ${NAV_DROPDOWNS_SCRIPT}
+${OFFLINE_SW_REGISTER_SCRIPT}
 </body>
 </html>`
 }
@@ -96,6 +98,7 @@ ${body}
 ${THEME_TOGGLE_SCRIPT}
 </script>
 ${NAV_DROPDOWNS_SCRIPT}
+${OFFLINE_SW_REGISTER_SCRIPT}
 </body>
 </html>`
 }
