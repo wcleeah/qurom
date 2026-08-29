@@ -37,6 +37,9 @@ import { resolveRunName, safeFilePath, HOST, PORT, safeRunPath } from "./paths"
 import { setRunRead } from "./read-store"
 import { viewServerAdminEnabled } from "./server-options"
 import { MARKED_UMD_PATH, MARKED_UMD_URL } from "./html-viewer-markdown"
+import { renderOfflinePage } from "./offline-page"
+import { serveOfflineServiceWorker } from "./offline-sw"
+import { OFFLINE_LIST_PATH, OFFLINE_SW_PATH } from "./offline-protocol"
 
 async function resolveRunDir(runName: string): Promise<{ runName: string; runDir: string }> {
   const resolved = await resolveRunName(runName)
@@ -55,6 +58,19 @@ export function startViewServer(): void {
     async fetch(req, server): Promise<Response> {
       const url = new URL(req.url)
       const path = url.pathname
+
+      if (path === OFFLINE_SW_PATH) {
+        return serveOfflineServiceWorker()
+      }
+
+      if (path === OFFLINE_LIST_PATH) {
+        try {
+          return renderOfflinePage()
+        } catch (e) {
+          console.error("GET /offline error:", e)
+          return new Response("Internal error", { status: 500 })
+        }
+      }
 
       if (path === MARKED_UMD_URL) {
         return new Response(Bun.file(MARKED_UMD_PATH), {

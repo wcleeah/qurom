@@ -14,6 +14,8 @@ import { highlightsToJson, HTML_HIGHLIGHTS_SCRIPT } from "./html-viewer-highligh
 import { HTML_PROGRESS_SCRIPT, progressToDataAttrs } from "./html-viewer-progress"
 import { appNavbarAction, appNavbarButton, renderAppNavbar } from "./app-nav"
 import { layoutHtmlViewer } from "./layout"
+import { HTML_OFFLINE_SAVE_SCRIPT } from "./offline-save-script"
+import { withOfflineCapture } from "./offline-protocol"
 import { TAG_FORMS_SCRIPT, type TagPickerOption } from "./tag-ui"
 import { escapeHtml } from "./utils"
 
@@ -199,8 +201,10 @@ export function renderHtmlViewerPage(
       <span class="app-navbar-action-label">Fix</span>
     </button>`,
   ].join("")
+  const captureUrl = withOfflineCapture(embedSrc)
   const navbarActions = [
     appNavbarButton("Hide panel", 'class="app-navbar-action html-viewer-sidebar-toggle" data-html-sidebar-toggle aria-expanded="true"'),
+    appNavbarButton("Save for offline", `data-offline-save data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-capture-url="${escapeHtml(captureUrl)}"`),
     appNavbarAction(`${rawHref}?source=1`, "View raw"),
     appNavbarAction(downloadHref, "Download", "html-viewer-download", `download="${escapeHtml(baseName)}"`),
   ].join("")
@@ -319,7 +323,8 @@ ${HTML_HIGHLIGHTS_SCRIPT}
 ${HTML_VIEWER_MARKDOWN_SCRIPT}
 ${HTML_ASK_SCRIPT}
 ${HTML_REPAIR_SCRIPT}
-${TAG_FORMS_SCRIPT}`
+${TAG_FORMS_SCRIPT}
+${HTML_OFFLINE_SAVE_SCRIPT}`
 
   return layoutHtmlViewer(`${baseName} — ${escapeHtml(runName)}`, body)
 }
