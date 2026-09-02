@@ -91,7 +91,7 @@ export function renderModelParameterBlocks(input: {
         !enabled,
       )
     })
-    return [`<div class="form-fields-grid" data-model-param-set="${escapeHtml(modelId)}"${selected ? "" : " hidden"}>${controls.join("\n")}</div>`]
+    return [`<div data-model-param-set="${escapeHtml(modelId)}"${selected ? "" : " hidden"}><div class="form-fields-grid">${controls.join("\n")}</div></div>`]
   })
   const selectedHasParams = (byModel[input.selectedModel] ?? []).length > 0
   const empty = input.descriptor.providerId === "cursor"

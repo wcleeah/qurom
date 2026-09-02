@@ -142,7 +142,7 @@ describe("provider-specific role forms", () => {
     expect(html).toContain("Opus 4.8")
     expect(html).toContain('data-role-binding-form')
     expect(html).toContain('data-autosave="true"')
-    expect(html).toContain('data-model-param-set="composer-2.5"')
+    expect(html).toContain('data-model-param-set="composer-2.5"><div class="form-fields-grid">')
     expect(html).toContain('data-model-param-set="claude-opus-4-8" hidden')
     expect(html).toContain('name="modelParam:fast"')
     expect(html).toContain('name="modelParam:thinking"')

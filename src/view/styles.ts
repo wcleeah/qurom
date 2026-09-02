@@ -2573,6 +2573,9 @@ details[open] > .markdown-preview summary::before {
   grid-template-columns: 1fr;
   gap: 0.6rem;
 }
+[data-model-param-set][hidden] {
+  display: none !important;
+}
 @media (min-width: 640px) {
   .form-fields-grid { grid-template-columns: repeat(2, 1fr); }
 }
