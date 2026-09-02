@@ -189,4 +189,130 @@ describe("createAgentRuntime", () => {
     expect(seenPrompt).toContain("name: frontend-design")
     expect(seenPrompt).toContain("Convert the draft.")
   })
+
+  test("resumes a ledger session and harvests a finished local artifact without prompting", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "qurom-runtime-harvest-"))
+    const outputFile = join(runDir, "draft-round-0.md")
+    await writeFile(outputFile, "# Harvested draft\n")
+    let created = 0
+    let prompted = 0
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["fileOutput", "plainTextOutput"]),
+      async createRunHandle(input) {
+        created += 1
+        return { id: `new:${created}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async resumeRunHandle(input) {
+        return { id: input.handleId, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt() {
+        prompted += 1
+        return { text: "should not run" }
+      },
+    }
+    const bus = createEventBus()
+    const runtime = createAgentRuntime(config, bus, { providerForRole: () => provider })
+    bus.emit({
+      kind: "graph.node",
+      node: "draftFullDraft",
+      phase: "start",
+      state: {
+        inputMode: "topic",
+        topic: "x",
+        requestId: "req-harvest",
+        round: 0,
+        outputPath: runDir,
+      } as never,
+    })
+
+    const first = await runtime.createHandle("research-drafter", "draft")
+    await runtime.prompt({
+      role: "research-drafter",
+      handle: first,
+      prompt: "Write the draft.",
+      outputFile,
+    })
+    expect(prompted).toBe(1)
+
+    const runtime2 = createAgentRuntime(config, bus, { providerForRole: () => provider })
+    bus.emit({
+      kind: "graph.node",
+      node: "draftFullDraft",
+      phase: "start",
+      state: {
+        inputMode: "topic",
+        topic: "x",
+        requestId: "req-harvest",
+        round: 0,
+        outputPath: runDir,
+      } as never,
+    })
+    const resumed = await runtime2.createHandle("research-drafter", "draft")
+    expect(resumed.id).toBe(first.id)
+    const result = await runtime2.prompt({
+      role: "research-drafter",
+      handle: resumed,
+      prompt: "Write the draft again.",
+      outputFile,
+    })
+    expect(prompted).toBe(1)
+    expect(result.harvested).toBe(true)
+    expect(result.harvestSource).toBe("local")
+    expect(result.text).toContain("Harvested draft")
+  })
+
+  test("reattaches to a live provider run instead of sending a new prompt", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "qurom-runtime-wait-"))
+    const outputFile = join(runDir, "draft-round-0.md")
+    let prompted = 0
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["fileOutput", "plainTextOutput"]),
+      async createRunHandle(input) {
+        return { id: "bc-live", providerId: "fake", role: input.role, title: input.title }
+      },
+      async resumeRunHandle(input) {
+        return { id: input.handleId, providerId: "fake", role: input.role, title: input.title }
+      },
+      async collectExistingOutput(input) {
+        await writeFile(input.outputFile!, "# From live run\n")
+        return {
+          status: "harvested",
+          source: "wait",
+          result: { text: "# From live run\n", outputSource: "file", harvested: true, harvestSource: "wait" },
+        }
+      },
+      async prompt() {
+        prompted += 1
+        return { text: "should not run" }
+      },
+    }
+    const bus = createEventBus()
+    const runtime = createAgentRuntime(config, bus, { providerForRole: () => provider })
+    bus.emit({
+      kind: "graph.node",
+      node: "draftFullDraft",
+      phase: "start",
+      state: {
+        inputMode: "topic",
+        topic: "x",
+        requestId: "req-wait",
+        round: 0,
+        outputPath: runDir,
+      } as never,
+    })
+    const handle = await runtime.createHandle("research-drafter", "draft")
+    handle.harvest = { ...handle.harvest!, resumed: true }
+    const result = await runtime.prompt({
+      role: "research-drafter",
+      handle,
+      prompt: "Write the draft.",
+      outputFile,
+    })
+    expect(prompted).toBe(0)
+    expect(result.harvested).toBe(true)
+    expect(result.harvestSource).toBe("wait")
+    expect(result.text).toContain("From live run")
+  })
 })

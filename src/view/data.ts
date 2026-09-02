@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { readSessionTelemetry, SESSION_TELEMETRY_FILENAME, type SessionTelemetryFile } from "../session-telemetry"
+import { SESSION_LEDGER_FILENAME } from "../session-ledger"
 import { readCursorUsageImport, CURSOR_USAGE_IMPORT_FILENAME, type CursorUsageImportFile } from "../cursor-usage-import"
 import { reconcileAwaitingReaderReplyWithDisk, readerInterviewStateFromRunDir } from "../reader-transcript"
 import { getArchiveDir, getRunsDir, safeFilePath, safeRunPath } from "./paths"
@@ -418,6 +419,7 @@ export function classifyFile(filename: string): FileClass {
   if (filename === "confidence.json") return { group: "Run Metadata", subGroup: "Summaries", label: "Confidence", description: "Final confidence and caveat metadata" }
   if (filename === "failure.json") return { group: "Run Metadata", subGroup: "Failures", label: "Failure details", description: "Research failure payload" }
   if (filename === "debug-log.jsonl") return { group: "Debug", subGroup: "Logs", label: "Debug log", description: "Chronological pipeline/recovery events" }
+  if (filename === SESSION_LEDGER_FILENAME) return { group: "Debug", subGroup: "Sessions", label: "Session ledger", description: "Durable provider session ids for harvest/resume" }
   if (filename === "node-history.json") return { group: "Debug", subGroup: "Timelines", label: "Node history", description: "Processed graph steps" }
   if (filename === SESSION_TELEMETRY_FILENAME) return { group: "Debug", subGroup: "Telemetry", label: "Session telemetry", description: "Model, parameters, and usage per agent session" }
   if (filename === CURSOR_USAGE_IMPORT_FILENAME) return { group: "Debug", subGroup: "Telemetry", label: "Cursor usage import", description: "CSV backfilled token usage for Cursor cloud calls" }

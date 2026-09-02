@@ -135,6 +135,7 @@ describe("createEventBus", () => {
       { kind: "session.created", sessionID: "s", role: "drafter" },
       { kind: "session.status", sessionID: "s", status: "active" },
       { kind: "session.error", sessionID: "s", name: "X" },
+      { kind: "session.harvest", sessionID: "s", role: "drafter", source: "wait" },
       { kind: "agent.metadata", agent: "research-drafter", sessionID: "s", model: "opencode/gpt-5.4", variant: "high" },
       { kind: "agent.message.start", sessionID: "s", messageID: "m" },
       { kind: "agent.reasoning", sessionID: "s", key: "part-1", text: "hmm" },

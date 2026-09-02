@@ -10,13 +10,33 @@ import type {
   AgentRunHandle,
   ProviderPromptInput,
   ProviderPromptResult,
+  SessionHarvestContext,
 } from "../providers/types"
 import type { PromptFileInput } from "../opencode"
 import { prependFrontendDesignSkill, usesFrontendDesignSkill } from "../frontend-design-skill"
+import {
+  findSessionLedgerEntry,
+  isHarvestableLedgerStatus,
+  upsertSessionLedgerEntry,
+} from "../session-ledger"
+import { artifactBasename, parseHarvestedResult, readHarvestableLocalFile } from "./harvest"
 
 const INLINE_ATTACHMENT_MAX_BYTES = 1024 * 1024
+const DESIGN_PHASE_NODES: Record<string, string> = {
+  drafting: "runDesignHtml",
+  enhancing: "graphicalEnhance",
+  reading: "readingExperienceEnhance",
+  finalizing: "finalizeDesign",
+}
 
 type OutputMode = "file" | "inline"
+
+type HarvestBusContext = {
+  node?: string
+  round: number
+  requestId?: string
+  runDir?: string
+}
 
 const inputContextLabels: Record<string, string> = {
   "draft.md": "draft",
@@ -164,33 +184,166 @@ export function createAgentRuntime(
   bus?: EventBus,
   options: AgentRuntimeOptions = {},
 ): AgentRuntime {
-  void bus
+  const harvestContext: HarvestBusContext = { round: 0 }
+
+  bus?.on((event) => {
+    if (event.kind === "graph.node" && event.phase === "start") {
+      const state = event.state && typeof event.state === "object"
+        ? event.state as Record<string, unknown>
+        : {}
+      harvestContext.node = event.node
+      harvestContext.round = typeof state.round === "number"
+        ? state.round
+        : typeof state.designRound === "number"
+          ? state.designRound
+          : 0
+      harvestContext.requestId = typeof state.requestId === "string" ? state.requestId : harvestContext.requestId
+      harvestContext.runDir = typeof state.outputPath === "string" ? state.outputPath : harvestContext.runDir
+      return
+    }
+    if (event.kind === "design.phase") {
+      harvestContext.node = DESIGN_PHASE_NODES[event.phase] ?? harvestContext.node
+      harvestContext.round = event.round
+    }
+  })
 
   function resolveProvider(role: AgentRole) {
     return options.providerForRole?.(role) ?? providerForRole(config, role)
   }
 
-  return {
+  function currentHarvest(handle?: AgentRunHandle): SessionHarvestContext | undefined {
+    if (handle?.harvest?.runDir) return handle.harvest
+    if (!harvestContext.runDir || !harvestContext.node) return undefined
+    return {
+      runDir: harvestContext.runDir,
+      node: harvestContext.node,
+      round: harvestContext.round,
+      requestId: harvestContext.requestId,
+    }
+  }
+
+  function attachHarvest(handle: AgentRunHandle, extras?: Partial<SessionHarvestContext>): AgentRunHandle {
+    const base = currentHarvest(handle)
+    if (!base && !extras?.runDir) return handle
+    handle.harvest = {
+      runDir: extras?.runDir ?? base?.runDir ?? "",
+      node: extras?.node ?? base?.node,
+      round: extras?.round ?? base?.round,
+      requestId: extras?.requestId ?? base?.requestId,
+      expectedArtifact: extras?.expectedArtifact ?? base?.expectedArtifact,
+      resumed: extras?.resumed ?? base?.resumed,
+      cursorRunId: extras?.cursorRunId ?? base?.cursorRunId,
+    }
+    return handle
+  }
+
+  function emitCreated(provider: AgentProvider, handle: AgentRunHandle, role: AgentRole) {
+    if (provider.capabilities.has("streamingEvents")) return
+    bus?.emit({ kind: "session.created", sessionID: handle.id, role })
+    if (handle.sessionBootstrap) {
+      bus?.emit({
+        kind: "session.telemetry",
+        sessionID: handle.id,
+        role,
+        provider: handle.providerId,
+        phase: "created",
+        requestedModel: handle.sessionBootstrap.requestedModel,
+        modelParams: handle.sessionBootstrap.modelParams,
+        variant: handle.sessionBootstrap.variant,
+        providerAgent: handle.providerAgent,
+        completedAt: Date.now(),
+      })
+    }
+  }
+
+  function emitHarvest(input: {
+    sessionID: string
+    role: string
+    source: "reattach" | "wait" | "artifacts" | "local" | "miss"
+    node?: string
+    reason?: string
+  }) {
+    bus?.emit({
+      kind: "session.harvest",
+      sessionID: input.sessionID,
+      role: input.role,
+      source: input.source,
+      node: input.node,
+      reason: input.reason,
+    })
+  }
+
+  async function recordLedger(
+    handle: AgentRunHandle,
+    patch: {
+      status?: "created" | "waiting" | "finished" | "error" | "harvested"
+      expectedArtifact?: string
+      cursorRunId?: string
+    },
+  ) {
+    const harvest = handle.harvest
+    if (!harvest?.runDir || !harvest.node) return
+    try {
+      await upsertSessionLedgerEntry(harvest.runDir, {
+        role: handle.role,
+        node: harvest.node,
+        round: harvest.round ?? 0,
+        requestId: harvest.requestId,
+        provider: handle.providerId,
+        handleId: handle.id,
+        expectedArtifact: patch.expectedArtifact ?? harvest.expectedArtifact,
+        cursorRunId: patch.cursorRunId ?? harvest.cursorRunId,
+        status: patch.status,
+      })
+    } catch {
+      // Ledger writes must not fail the prompt.
+    }
+  }
+
+  const runtime: AgentRuntime = {
     async createHandle(role, title, parentId) {
       const provider = resolveProvider(role)
-      const handle = await provider.createRunHandle({ config, role, title, parentId })
-      if (!provider.capabilities.has("streamingEvents")) {
-        bus?.emit({ kind: "session.created", sessionID: handle.id, role })
-        if (handle.sessionBootstrap) {
-          bus?.emit({
-            kind: "session.telemetry",
-            sessionID: handle.id,
-            role,
-            provider: handle.providerId,
-            phase: "created",
-            requestedModel: handle.sessionBootstrap.requestedModel,
-            modelParams: handle.sessionBootstrap.modelParams,
-            variant: handle.sessionBootstrap.variant,
-            providerAgent: handle.providerAgent,
-            completedAt: Date.now(),
-          })
+      const harvest = currentHarvest()
+      if (harvest?.runDir && harvest.node && provider.resumeRunHandle) {
+        const entry = await findSessionLedgerEntry(harvest.runDir, {
+          role,
+          node: harvest.node,
+          round: harvest.round ?? 0,
+        }).catch(() => undefined)
+        if (entry && isHarvestableLedgerStatus(entry.status) && entry.status !== "error") {
+          try {
+            const resumed = attachHarvest(
+              await provider.resumeRunHandle({ config, role, title, handleId: entry.handleId }),
+              {
+                ...harvest,
+                resumed: true,
+                cursorRunId: entry.cursorRunId,
+                expectedArtifact: entry.expectedArtifact,
+              },
+            )
+            emitCreated(provider, resumed, role)
+            emitHarvest({
+              sessionID: resumed.id,
+              role,
+              source: "reattach",
+              node: harvest.node,
+            })
+            return resumed
+          } catch {
+            emitHarvest({
+              sessionID: entry.handleId,
+              role,
+              source: "miss",
+              node: harvest.node,
+              reason: "resume failed",
+            })
+          }
         }
       }
+
+      const handle = attachHarvest(await provider.createRunHandle({ config, role, title, parentId }))
+      emitCreated(provider, handle, role)
+      await recordLedger(handle, { status: "created" })
       return handle
     },
     async resumeHandle(role, title, handleId) {
@@ -198,10 +351,46 @@ export function createAgentRuntime(
       if (!provider.resumeRunHandle) {
         throw new Error(`Provider ${provider.id} does not support resuming run handles`)
       }
-      return provider.resumeRunHandle({ config, role, title, handleId })
+      return attachHarvest(
+        await provider.resumeRunHandle({ config, role, title, handleId }),
+        { resumed: true },
+      )
     },
     async prompt(input) {
       const provider = resolveProvider(input.role)
+      const handle = attachHarvest(input.handle, {
+        expectedArtifact: artifactBasename(input.outputFile),
+      })
+      if (handle.harvest?.expectedArtifact === undefined && input.outputFile) {
+        handle.harvest = {
+          ...(handle.harvest ?? { runDir: "" }),
+          expectedArtifact: artifactBasename(input.outputFile),
+        }
+      }
+
+      const harvested = await tryHarvestPrompt({
+        provider,
+        handle,
+        role: input.role,
+        outputFile: input.outputFile,
+        schema: input.schema,
+        config,
+        bus,
+        telemetry: input.telemetry,
+        emitHarvest,
+        recordLedger,
+      })
+      if (harvested.status === "done") {
+        if (!handle.keepAlive) await handle.dispose?.()
+        return harvested.result
+      }
+      if (harvested.status === "replace") {
+        if (!handle.keepAlive) await handle.dispose?.()
+        const replacement = await runtime.createHandle(input.role, handle.title)
+        replacement.keepAlive = handle.keepAlive
+        return runtime.prompt({ ...input, handle: replacement })
+      }
+
       const outputMode = outputModeFor(provider, input.schema, input.outputFile)
       const workspaceDir = config.env.QUORUM_WORKSPACE_DIRECTORY || config.env.OPENCODE_DIRECTORY
       const taskPrompt = usesFrontendDesignSkill(input.role)
@@ -215,7 +404,7 @@ export function createAgentRuntime(
         providerInstructions: outputMode === "file" && input.outputFile
           ? provider.outputInstructions?.({
               config,
-              handle: input.handle,
+              handle,
               role: input.role,
               outputFile: input.outputFile,
               schema: input.schema,
@@ -223,14 +412,18 @@ export function createAgentRuntime(
           : undefined,
       })
       if (!provider.capabilities.has("streamingEvents")) {
-        bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "running" })
+        bus?.emit({ kind: "session.status", sessionID: handle.id, status: "running" })
       }
+      await recordLedger(handle, {
+        status: "waiting",
+        expectedArtifact: artifactBasename(input.outputFile),
+      })
       try {
         const promptInput = await renderPromptInputs(provider, prompt, input.inputFiles)
         const result = await provider.prompt({
           config,
           bus,
-          handle: input.handle,
+          handle,
           role: input.role,
           prompt: promptInput.prompt,
           schema: input.schema,
@@ -243,23 +436,25 @@ export function createAgentRuntime(
           telemetry: input.telemetry,
         })
         if (!provider.capabilities.has("streamingEvents")) {
-          bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "completed" })
+          bus?.emit({ kind: "session.status", sessionID: handle.id, status: "completed" })
         }
+        await recordLedger(handle, { status: "finished" })
         return result
       } catch (error) {
+        await recordLedger(handle, { status: "error" })
         if (!provider.capabilities.has("streamingEvents")) {
           bus?.emit({
             kind: "session.error",
-            sessionID: input.handle.id,
+            sessionID: handle.id,
             name: error instanceof Error ? error.name : "UnknownError",
             message: error instanceof Error ? error.message : String(error),
           })
-          bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "error" })
+          bus?.emit({ kind: "session.status", sessionID: handle.id, status: "error" })
         }
         throw error
       } finally {
-        if (!input.handle.keepAlive) {
-          await input.handle.dispose?.()
+        if (!handle.keepAlive) {
+          await handle.dispose?.()
         }
       }
     },
@@ -269,4 +464,124 @@ export function createAgentRuntime(
     },
     providerForRole: resolveProvider,
   }
+  return runtime
+}
+
+async function tryHarvestPrompt<T>(input: {
+  provider: AgentProvider
+  handle: AgentRunHandle
+  role: AgentRole
+  outputFile?: string
+  schema?: import("zod").ZodType<T>
+  config: RuntimeConfig
+  bus?: EventBus
+  telemetry?: ProviderPromptInput<T>["telemetry"]
+  emitHarvest: (event: {
+    sessionID: string
+    role: string
+    source: "reattach" | "wait" | "artifacts" | "local" | "miss"
+    node?: string
+    reason?: string
+  }) => void
+  recordLedger: (
+    handle: AgentRunHandle,
+    patch: { status?: "created" | "waiting" | "finished" | "error" | "harvested"; expectedArtifact?: string },
+  ) => Promise<void>
+}): Promise<{ status: "done"; result: ProviderPromptResult<T> } | { status: "continue" } | { status: "replace" }> {
+  const harvest = input.handle.harvest
+  if (!harvest?.runDir || !harvest.node) return { status: "continue" }
+
+  const entry = await findSessionLedgerEntry(harvest.runDir, {
+    role: input.handle.role,
+    node: harvest.node,
+    round: harvest.round ?? 0,
+  }).catch(() => undefined)
+
+  const allowLocal = entry?.status === "finished" || entry?.status === "harvested"
+    || (entry?.status === "waiting" && !input.provider.collectExistingOutput)
+  if (allowLocal && !input.handle.keepAlive) {
+    const local = await readHarvestableLocalFile({
+      outputFile: input.outputFile,
+      schema: input.schema,
+    })
+    if (local) {
+      input.emitHarvest({
+        sessionID: input.handle.id,
+        role: input.role,
+        source: "local",
+        node: harvest.node,
+      })
+      await input.recordLedger(input.handle, {
+        status: "harvested",
+        expectedArtifact: artifactBasename(input.outputFile),
+      })
+      if (!input.provider.capabilities.has("streamingEvents")) {
+        input.bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "completed" })
+      }
+      return { status: "done", result: local }
+    }
+  }
+
+  if (!input.provider.collectExistingOutput) return { status: "continue" }
+  const shouldCollect = harvest.resumed || entry?.status === "waiting"
+  if (!shouldCollect) return { status: "continue" }
+
+  const collected = await input.provider.collectExistingOutput({
+    config: input.config,
+    bus: input.bus,
+    handle: input.handle,
+    role: input.role,
+    outputFile: input.outputFile,
+    schema: input.schema,
+    telemetry: input.telemetry,
+  })
+
+  if (input.handle.keepAlive && (collected.status !== "harvested" || collected.source !== "wait")) {
+    return { status: "continue" }
+  }
+
+  if (collected.status === "harvested") {
+    const parsed = await parseHarvestedResult({
+      result: collected.result,
+      outputFile: input.outputFile,
+      schema: input.schema,
+    })
+    if (parsed) {
+      input.emitHarvest({
+        sessionID: input.handle.id,
+        role: input.role,
+        source: collected.source === "wait" ? "wait" : "artifacts",
+        node: harvest.node,
+      })
+      await input.recordLedger(input.handle, {
+        status: "harvested",
+        expectedArtifact: artifactBasename(input.outputFile),
+      })
+      if (!input.provider.capabilities.has("streamingEvents")) {
+        input.bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "completed" })
+      }
+      return { status: "done", result: parsed }
+    }
+    input.emitHarvest({
+      sessionID: input.handle.id,
+      role: input.role,
+      source: "miss",
+      node: harvest.node,
+      reason: "harvested output failed validation",
+    })
+    await input.recordLedger(input.handle, { status: "error" })
+    return input.handle.keepAlive ? { status: "continue" } : { status: "replace" }
+  }
+
+  if (collected.status === "idle") return { status: "continue" }
+
+  input.emitHarvest({
+    sessionID: input.handle.id,
+    role: input.role,
+    source: "miss",
+    node: harvest.node,
+    reason: collected.reason,
+  })
+  await input.recordLedger(input.handle, { status: "error" })
+  return input.handle.keepAlive ? { status: "continue" } : { status: "replace" }
 }
