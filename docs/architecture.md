@@ -388,6 +388,7 @@ Common artifacts:
 | `failure.json` | Failure details. |
 | `summary.json` | Run summary. |
 | `debug-log.jsonl` | Structured diagnostic log. |
+| `session-ledger.json` | Durable provider session ids (`bc-…` / OpenCode session) keyed by role, node, and round. Used to harvest a live or finished session on resume instead of creating a new agent. |
 | `reader-profile.json` | Reader discovery profile. |
 | `reader-reply-turn-N.json` | Archived human replies. |
 | `design-html-<role>.html` | Role-staged design HTML (`html-designer`, `graphical-enhancer`, `reading-experience-enhancer`). Older runs may still have `design-html-interactive-enhancer.html`. |

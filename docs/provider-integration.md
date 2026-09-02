@@ -44,6 +44,8 @@ Optional methods:
 |---|---|
 | `prepare(input)` | The provider must start a server, sync files, warm credentials, or allocate run-level resources before graph execution. |
 | `abort(config, handleId)` | The provider can cancel active work by handle/session id. |
+| `resumeRunHandle(input)` | Reattach a durable provider session after process restart. |
+| `collectExistingOutput(input)` | Wait on an in-flight run or download artifacts from a finished session without sending a new prompt. |
 | `createEventBridge(input)` | The provider emits streaming events that should flow into the runner event bus. |
 | `validate(input)` | The provider can validate credentials, model ids, role bindings, or local prerequisites. |
 | `configForm(input)` | The provider needs custom controls in the web config UI. |
@@ -157,6 +159,12 @@ Default to one-shot handles for:
 - design audit work.
 
 Use `keepAlive` only for flows that must preserve a provider conversation across graph interrupts. Today that means `reader-interviewer`.
+
+Pipeline roles persist a **session ledger** (`session-ledger.json`) at handle create, keyed by role + graph node + round. On resume, `createHandle` calls `resumeRunHandle` when a harvestable entry exists, and `prompt` calls `collectExistingOutput` when implemented:
+
+- **Reattach:** the provider run is still in flight. Wait for it, then download the expected artifact.
+- **Artifact pull:** the session already ended. Download the expected artifact (Cursor cloud `listArtifacts` / `downloadArtifact`) or, for file-output providers like OpenCode, reuse a complete local file.
+- **Miss:** the session ended without usable output. Mint a new handle and prompt as today. Same-session revitalize is intentionally not done yet.
 
 If a provider exposes durable remote sessions, choose one of these designs:
 

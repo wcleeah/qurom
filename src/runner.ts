@@ -35,6 +35,14 @@ export type RunnerEvent =
   | { kind: "session.created"; sessionID: string; role: string }
   | { kind: "session.status"; sessionID: string; status: string }
   | { kind: "session.error"; sessionID: string; name: string; message?: string }
+  | {
+      kind: "session.harvest"
+      sessionID: string
+      role: string
+      source: "reattach" | "wait" | "artifacts" | "local" | "miss"
+      node?: string
+      reason?: string
+    }
   | { kind: "agent.metadata"; agent: string; sessionID: string; model?: string; variant?: string }
   | {
       kind: "session.telemetry"
@@ -689,6 +697,16 @@ function attachResearchRunObservers(
     initialNodeHistory: opts?.initialNodeHistory,
   }, debugLog)
   const sessionTelemetryWriter = createSessionTelemetryWriter(runDir, bus)
+  bus.on((event) => {
+    if (event.kind !== "session.harvest") return
+    debugLog.write("session.harvest", {
+      sessionID: event.sessionID,
+      role: event.role,
+      source: event.source,
+      node: event.node,
+      reason: event.reason,
+    })
+  })
   if (opts?.logStart !== false) {
     debugLog.write("pipeline.start", {
       requestId,
@@ -1156,6 +1174,8 @@ export function describeRunnerEvent(event: RunnerEvent): string {
       return `session.status:${event.sessionID}:${event.status}`
     case "session.error":
       return `session.error:${event.sessionID}:${event.name}`
+    case "session.harvest":
+      return `session.harvest:${event.source}:${event.sessionID}`
     case "agent.metadata":
       return `agent.metadata:${event.sessionID}:${event.agent}`
     case "session.telemetry":

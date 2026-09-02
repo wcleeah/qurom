@@ -13,7 +13,8 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { basename, dirname } from "node:path"
 
 import { runProviderStructuredPrompt } from "../agent-runtime/provider-structured-output"
-import { awaitCursorRunCompletion } from "./cursor-run-wait"
+import { awaitCursorRunCompletion, isTerminalCursorRunStatus } from "./cursor-run-wait"
+import { upsertSessionLedgerEntry } from "../session-ledger"
 import type { RuntimeConfig } from "../config"
 import type { EventBus } from "../runner"
 import { estimateCursorCostUsd, resolveCursorPricingModelId } from "../cursor-pricing"
@@ -24,6 +25,7 @@ import type {
   AgentProvider,
   AgentRunHandle,
   AgentRole,
+  CollectExistingOutputResult,
   ProviderCapability,
   ProviderConfigFormDescriptor,
   ProviderConfigFormParameter,
@@ -239,20 +241,106 @@ async function completeCursorRun(input: {
   })
 }
 
+async function listCursorRuns(input: {
+  agentId: string
+  apiKey: string
+}): Promise<CursorRunHandle[]> {
+  const listRuns = Agent.listRuns?.bind(Agent) as
+    | ((agentId: string, options?: { runtime?: "cloud"; apiKey?: string; limit?: number }) => Promise<{ items?: CursorRunHandle[] } | CursorRunHandle[]>)
+    | undefined
+  if (typeof listRuns !== "function") return []
+  try {
+    const listed = await listRuns(input.agentId, { runtime: "cloud", apiKey: input.apiKey, limit: 5 })
+    return Array.isArray(listed) ? listed : listed.items ?? []
+  } catch {
+    return []
+  }
+}
+
+async function resolveExistingCursorRun(input: {
+  agentId: string
+  apiKey: string
+  preferredRunId?: string
+  activeRun?: CursorRunHandle
+}): Promise<CursorRunHandle | undefined> {
+  if (input.activeRun && !isTerminalCursorRunStatus(input.activeRun.status)) {
+    return input.activeRun
+  }
+
+  if (input.preferredRunId) {
+    try {
+      const getRun = Agent.getRun?.bind(Agent)
+      if (typeof getRun === "function") {
+        return await getRun(input.preferredRunId, {
+          runtime: "cloud",
+          apiKey: input.apiKey,
+          agentId: input.agentId,
+        }) as CursorRunHandle
+      }
+    } catch {
+      // Fall through to listRuns.
+    }
+  }
+
+  const items = await listCursorRuns({ agentId: input.agentId, apiKey: input.apiKey })
+  return items.find((run) => !isTerminalCursorRunStatus(run.status)) ?? items[0] ?? input.activeRun
+}
+
+async function persistCursorRunStarted(
+  handle: AgentRunHandle | undefined,
+  run: CursorRunHandle,
+  outputFile?: string,
+) {
+  const harvest = handle?.harvest
+  if (!handle || !harvest?.runDir || !harvest.node) return
+  harvest.cursorRunId = run.id
+  try {
+    await upsertSessionLedgerEntry(harvest.runDir, {
+      role: handle.role,
+      node: harvest.node,
+      round: harvest.round ?? 0,
+      requestId: harvest.requestId,
+      provider: "cursor",
+      handleId: handle.id,
+      cursorRunId: run.id,
+      expectedArtifact: outputFile ? basename(outputFile) : harvest.expectedArtifact,
+      status: "waiting",
+    })
+  } catch {
+    // Ledger persistence must not fail the in-flight prompt.
+  }
+}
+
 async function sendCursorRun(input: {
   active: { agent: CursorAgentHandle; run?: CursorRunHandle }
   prompt: string
   onDelta?: (args: { update: unknown }) => void
+  handle?: AgentRunHandle
+  outputFile?: string
+  apiKey?: string
 }): Promise<CursorRunHandle> {
   try {
     const run = await input.active.agent.send(input.prompt, {
       onDelta: input.onDelta,
     })
     input.active.run = run
+    await persistCursorRunStarted(input.handle, run, input.outputFile)
     return run
   } catch (error) {
-    if (error instanceof AgentBusyError && input.active.run) {
-      return input.active.run
+    if (error instanceof AgentBusyError) {
+      const existing = input.apiKey && input.handle
+        ? await resolveExistingCursorRun({
+            agentId: input.handle.id,
+            apiKey: input.apiKey,
+            preferredRunId: input.handle.harvest?.cursorRunId,
+            activeRun: input.active.run,
+          }).catch(() => input.active.run)
+        : input.active.run
+      if (existing && !isTerminalCursorRunStatus(existing.status)) {
+        input.active.run = existing
+        await persistCursorRunStarted(input.handle, existing, input.outputFile)
+        return existing
+      }
     }
     throw error
   }
@@ -688,7 +776,7 @@ async function endCursorGenerationObservation(
     statusMessage?: string
   },
 ) {
-  await telemetry?.run.endObservation(generation, {
+  await telemetry?.run?.endObservation?.(generation, {
     output: update.output,
     model: update.model,
     usageDetails: toUsageDetails(update.usage),
@@ -715,7 +803,7 @@ async function endCursorAgentObservation(
     statusMessage?: string
   },
 ) {
-  await telemetry?.run.endObservation(agent, {
+  await telemetry?.run?.endObservation?.(agent, {
     output: update.output,
     usageDetails: toUsageDetails(update.usage),
     costDetails: toCostDetails(update.usage),
@@ -726,6 +814,141 @@ async function endCursorAgentObservation(
       model: update.model,
     },
   })
+}
+
+async function collectCursorExistingOutput<T>(input: Parameters<NonNullable<AgentProvider["collectExistingOutput"]>>[0]): Promise<CollectExistingOutputResult<T>> {
+  if (!input.handle.id.startsWith("bc-")) {
+    return { status: "unavailable", reason: "cursor local agents cannot harvest cloud artifacts" }
+  }
+  const active = activeAgents.get(input.handle.id)
+  if (!active) {
+    return { status: "unavailable", reason: `cursor agent handle ${input.handle.id} is not active` }
+  }
+  const apiKey = cursorApiKey(input.config)
+  if (!apiKey) throw new Error("Cursor provider requires CURSOR_API_KEY")
+
+  const run = await resolveExistingCursorRun({
+    agentId: input.handle.id,
+    apiKey,
+    preferredRunId: input.handle.harvest?.cursorRunId,
+    activeRun: active.run,
+  })
+  if (run) active.run = run
+
+  async function downloadIfRequested(): Promise<{ text: string } | { missing: string }> {
+    if (!input.outputFile) return { missing: "no output file requested" }
+    try {
+      const artifacts = await active!.agent.listArtifacts()
+      await downloadCursorArtifact({
+        agent: active!.agent,
+        handle: input.handle,
+        outputFile: input.outputFile,
+        artifacts,
+      })
+      const text = await Bun.file(input.outputFile).text()
+      if (!text.trim()) return { missing: "cursor artifact was empty" }
+      return { text }
+    } catch (error) {
+      return { missing: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  if (run && !isTerminalCursorRunStatus(run.status)) {
+    input.bus?.emit({ kind: "session.status", sessionID: input.handle.id, status: "running" })
+    const { result } = await completeCursorRun({
+      run,
+      config: input.config,
+      handleId: input.handle.id,
+      debugLog: input.telemetry?.debugLog,
+    })
+    const status = result.status
+    if (status && status !== "finished") {
+      return { status: "unavailable", reason: `cursor run ended with status ${status}` }
+    }
+    const downloaded = await downloadIfRequested()
+    if ("text" in downloaded) {
+      return {
+        status: "harvested",
+        source: "wait",
+        result: {
+          text: downloaded.text,
+          outputSource: "file",
+          harvested: true,
+          harvestSource: "wait",
+          provider: "cursor",
+          model: cursorResolvedModel(result, roleConfig(input.config, input.role)?.model),
+          raw: { agentId: input.handle.id, runId: run.id, result },
+        },
+      }
+    }
+    const text = extractRunText(result)
+    if (text.trim() && text.trim() !== "OK") {
+      return {
+        status: "harvested",
+        source: "wait",
+        result: {
+          text,
+          outputSource: "inline",
+          harvested: true,
+          harvestSource: "wait",
+          provider: "cursor",
+          raw: { agentId: input.handle.id, runId: run.id, result },
+        },
+      }
+    }
+    return { status: "unavailable", reason: downloaded.missing }
+  }
+
+  if (run && (run.status === "error" || run.status === "cancelled")) {
+    return { status: "unavailable", reason: `cursor run status ${run.status}` }
+  }
+
+  const downloaded = await downloadIfRequested()
+  if ("text" in downloaded) {
+    return {
+      status: "harvested",
+      source: "artifacts",
+      result: {
+        text: downloaded.text,
+        outputSource: "file",
+        harvested: true,
+        harvestSource: "artifacts",
+        provider: "cursor",
+        raw: { agentId: input.handle.id, runId: run?.id },
+      },
+    }
+  }
+
+  if (run && isTerminalCursorRunStatus(run.status)) {
+    try {
+      const { result } = await completeCursorRun({
+        run,
+        config: input.config,
+        handleId: input.handle.id,
+        debugLog: input.telemetry?.debugLog,
+      })
+      const text = extractRunText(result)
+      if (text.trim() && text.trim() !== "OK") {
+        return {
+          status: "harvested",
+          source: "artifacts",
+          result: {
+            text,
+            outputSource: "inline",
+            harvested: true,
+            harvestSource: "artifacts",
+            provider: "cursor",
+            raw: { agentId: input.handle.id, runId: run.id, result },
+          },
+        }
+      }
+    } catch (error) {
+      return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) }
+    }
+    return { status: "unavailable", reason: downloaded.missing }
+  }
+
+  return { status: "idle", reason: downloaded.missing }
 }
 
 export const cursorProvider: AgentProvider = {
@@ -837,6 +1060,9 @@ export const cursorProvider: AgentProvider = {
       dispose: () => disposeAgent(agentId),
     }
   },
+  async collectExistingOutput(input) {
+    return collectCursorExistingOutput(input)
+  },
   async prompt(input) {
     const active = activeAgents.get(input.handle.id)
     if (!active) {
@@ -872,6 +1098,8 @@ export const cursorProvider: AgentProvider = {
             active,
             prompt: input.prompt,
             onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
+            handle: input.handle,
+            apiKey: cursorApiKey(input.config),
           })
           const { result } = await completeCursorRun({
             run,
@@ -1017,6 +1245,9 @@ export const cursorProvider: AgentProvider = {
                 active,
                 prompt,
                 onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
+                handle: input.handle,
+                outputFile,
+                apiKey: cursorApiKey(input.config),
               })
               const { result } = await completeCursorRun({
                 run,

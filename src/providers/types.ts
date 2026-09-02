@@ -24,6 +24,16 @@ export type ProviderCapability =
 
 export type StructuredOutputMode = "json_file" | "plain_json"
 
+export type SessionHarvestContext = {
+  runDir: string
+  requestId?: string
+  node?: string
+  round?: number
+  expectedArtifact?: string
+  resumed?: boolean
+  cursorRunId?: string
+}
+
 export type AgentRunHandle = {
   id: string
   providerId: AgentProviderId
@@ -32,6 +42,7 @@ export type AgentRunHandle = {
   providerAgent?: string
   keepAlive?: boolean
   dispose?: () => Promise<void>
+  harvest?: SessionHarvestContext
   sessionBootstrap?: {
     requestedModel?: string
     modelParams?: Array<{ id: string; value: string }>
@@ -98,8 +109,25 @@ export type ProviderPromptResult<T> = {
   provider?: string
   variant?: string
   outputSource?: "file" | "inline"
+  harvested?: boolean
+  harvestSource?: "wait" | "artifacts" | "local"
   raw?: unknown
 }
+
+export type CollectExistingOutputInput<T> = {
+  config: RuntimeConfig
+  bus?: EventBus
+  handle: AgentRunHandle
+  role: AgentRole
+  outputFile?: string
+  schema?: z.ZodType<T>
+  telemetry?: ProviderPromptInput<T>["telemetry"]
+}
+
+export type CollectExistingOutputResult<T> =
+  | { status: "harvested"; result: ProviderPromptResult<T>; source: "wait" | "artifacts" }
+  | { status: "idle"; reason?: string }
+  | { status: "unavailable"; reason: string }
 
 export type ProviderOutputInstructionInput = {
   config: RuntimeConfig
@@ -168,6 +196,13 @@ export interface AgentProvider {
   createRunHandle: (input: CreateRunHandleInput) => Promise<AgentRunHandle>
   /** Reattach a durable provider session after process restart when supported. */
   resumeRunHandle?: (input: ResumeRunHandleInput) => Promise<AgentRunHandle>
+  /**
+   * Reattach to an in-flight provider run or pull artifacts from a finished
+   * session without sending a new prompt. Idle means this handle never started
+   * a run and the original prompt may be sent. Unavailable means the session
+   * ended without usable output — callers should mint a new handle.
+   */
+  collectExistingOutput?: <T>(input: CollectExistingOutputInput<T>) => Promise<CollectExistingOutputResult<T>>
   prompt: <T>(input: ProviderPromptInput<T>) => Promise<ProviderPromptResult<T>>
   abort?: (config: RuntimeConfig, handleId: string) => Promise<void>
   createEventBridge?: (input: ProviderBridgeInput) => Bridge

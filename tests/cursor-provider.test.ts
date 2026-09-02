@@ -15,6 +15,7 @@ let waitResult: unknown = { status: "finished", result: "plain response" }
 let waitResults: unknown[] = []
 let waitErrors: unknown[] = []
 let sendErrors: unknown[] = []
+let listRunsItems: unknown[] = []
 let artifactPath = "artifacts/reader-profile.json"
 let artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
 let cancelCalled = false
@@ -116,6 +117,7 @@ mock.module("@cursor/sdk", () => {
           return waitResult
         },
       })),
+      listRuns: mock(async () => ({ items: listRunsItems })),
     },
   }
 
@@ -210,6 +212,7 @@ beforeEach(() => {
   waitResults = []
   waitErrors = []
   sendErrors = []
+  listRunsItems = []
   artifactPath = "artifacts/reader-profile.json"
   artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
   cancelCalled = false
@@ -846,5 +849,90 @@ describe("cursorProvider", () => {
       outputFile,
     })).rejects.toThrow(/agent_busy/)
     expect(sendCalls).toHaveLength(1)
+  })
+
+  test("collectExistingOutput waits on a live cloud run without sending", async () => {
+    const outputFile = await tempOutputFile("reader-profile.json")
+    artifactPath = "artifacts/reader-profile.json"
+    artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+    listRunsItems = [{
+      id: "cursor-run-live",
+      agentId: handle.id,
+      status: "running",
+      async wait() {
+        return { id: "cursor-run-live", status: "finished", result: "OK" }
+      },
+    }]
+
+    const collected = await cursorProvider.collectExistingOutput!({
+      config,
+      handle,
+      role: "research-drafter",
+      outputFile,
+    })
+
+    expect(sendCalls).toEqual([])
+    expect(collected).toMatchObject({ status: "harvested", source: "wait" })
+    if (collected.status === "harvested") {
+      expect(JSON.parse(collected.result.text ?? "")).toEqual({ ok: true })
+    }
+    expect(JSON.parse(await readFile(outputFile, "utf8"))).toEqual({ ok: true })
+  })
+
+  test("collectExistingOutput pulls artifacts from a finished cloud run without sending", async () => {
+    const outputFile = await tempOutputFile("reader-profile.json")
+    artifactPath = "artifacts/reader-profile.json"
+    artifactBytes = Buffer.from(JSON.stringify({ harvested: true }))
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+    listRunsItems = [{
+      id: "cursor-run-done",
+      agentId: handle.id,
+      status: "finished",
+      result: "OK",
+      async wait() {
+        return { id: "cursor-run-done", status: "finished", result: "OK" }
+      },
+    }]
+
+    const collected = await cursorProvider.collectExistingOutput!({
+      config,
+      handle,
+      role: "research-drafter",
+      outputFile,
+    })
+
+    expect(sendCalls).toEqual([])
+    expect(collected).toMatchObject({ status: "harvested", source: "artifacts" })
+    expect(JSON.parse(await readFile(outputFile, "utf8"))).toEqual({ harvested: true })
+  })
+
+  test("collectExistingOutput is idle when the resumed agent never started a run", async () => {
+    const outputFile = await tempOutputFile("reader-profile.json")
+    artifactPath = "artifacts/missing.json"
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+    listRunsItems = []
+
+    const collected = await cursorProvider.collectExistingOutput!({
+      config,
+      handle,
+      role: "research-drafter",
+      outputFile,
+    })
+
+    expect(collected.status).toBe("idle")
+    expect(sendCalls).toEqual([])
   })
 })

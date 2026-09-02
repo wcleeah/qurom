@@ -254,6 +254,7 @@ defaults in the admin UI opens a GitHub PR against `QUORUM_GITHUB_PR_BASE`
 - Run artifacts include the request, per-round drafts, audits, rebuttal reviews, aggregated findings, reader profile/transcript, and final or failure outputs.
 - Run cancellation aborts the pipeline; OpenCode sessions opened during the run are explicitly aborted.
 - Failed runs attempt to recover the latest checkpointed state and write failure artifacts when possible.
+- Resume of a Cursor cloud role **harvests** the previous provider session before creating a new one: reattach and wait if the cloud run is still in flight, or download the expected artifact if the session already ended. Durable ids live in `session-ledger.json`. Same-session revitalize (new prompt on a finished session that produced nothing usable) is not implemented yet.
 
 ## Recovery & Telemetry
 
@@ -268,6 +269,7 @@ Every recovery tier emits a standardized debug-log event. Grep `{dataDir}/runs/<
 | `session.repair.json_fixer` | C branch | `json-fixer` agent invoked |
 | `audit.restart_from_scratch` | `auditWithRestart` (R tier) | Auditor re-run on a fresh provider session (OpenCode today) |
 | `session.dual_output` | persistence | Agent wrote `outputFile` AND returned valid inline JSON that differs; file is preferred |
+| `session.harvest` | harvest step | Reattached to a live Cursor run, pulled finished artifacts, used a local file, or missed and minted a new handle |
 | `recovery.systemic_drift` | drift detector | Same agent restarted across two distinct `requestId`s in one process |
 
 ### Kill-switch
