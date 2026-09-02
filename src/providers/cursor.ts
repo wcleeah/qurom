@@ -120,9 +120,11 @@ function cursorModelParamsForRole(config: RuntimeConfig, role: AgentRole, model:
       .filter((entry) => entry && typeof entry.id === "string" && typeof entry.value === "string")
       .map((entry) => ({ id: entry.id, value: entry.value }))
     : []
-  const merged = new Map((model ? modelVariantParams(model) : []).map((entry) => [entry.id, entry.value]))
+  const defaults = model ? modelVariantParams(model) : []
+  const allowed = new Set(model ? cursorParameters(model).map((parameter) => parameter.id) : [])
+  const merged = new Map(defaults.map((entry) => [entry.id, entry.value]))
   for (const entry of saved) {
-    merged.set(entry.id, entry.value)
+    if (allowed.size === 0 || allowed.has(entry.id)) merged.set(entry.id, entry.value)
   }
   const valid = [...merged.entries()].map(([id, value]) => ({ id, value }))
   return valid.length > 0 ? valid : undefined

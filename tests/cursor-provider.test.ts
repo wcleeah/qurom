@@ -318,7 +318,7 @@ describe("cursorProvider", () => {
     })
   })
 
-  test("merges saved model params over the catalog default variant", async () => {
+  test("overlays saved form params onto the catalog default variant", async () => {
     const mcpConfig: RuntimeConfig = {
       ...config,
       roleBindings: {
@@ -351,7 +351,45 @@ describe("cursorProvider", () => {
           { id: "cyber", value: "false" },
           { id: "thinking", value: "true" },
           { id: "context", value: "300k" },
-          { id: "effort", value: "low" },
+          { id: "effort", value: "high" },
+          { id: "fast", value: "false" },
+        ],
+      },
+    })
+  })
+
+  test("does not send leftover params from a previous model", async () => {
+    const leftoverConfig: RuntimeConfig = {
+      ...config,
+      roleBindings: {
+        ...config.roleBindings,
+        "research-drafter": {
+          provider: "cursor",
+          model: "claude-opus-4-8",
+          options: {
+            modelParams: [
+              { id: "fast", value: "true" },
+              { id: "thinking", value: "false" },
+            ],
+          },
+        },
+      },
+    }
+
+    await cursorProvider.createRunHandle({
+      config: leftoverConfig,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    expect(createCalls[0]).toMatchObject({
+      model: {
+        id: "claude-opus-4-8",
+        params: [
+          { id: "cyber", value: "false" },
+          { id: "thinking", value: "false" },
+          { id: "context", value: "1m" },
+          { id: "effort", value: "high" },
           { id: "fast", value: "false" },
         ],
       },
