@@ -47,6 +47,24 @@ let cachedModels: { apiKey: string; models: CursorModel[] } | undefined
 const cursorTransportRetryAttempts = 2
 const cursorAgentNameMaxLength = 100
 
+export const cursorAgentBusyRetry = {
+  extraSendAttempts: 4,
+  initialDelayMs: 2_000,
+  maxDelayMs: 15_000,
+  sleep(ms: number) {
+    return new Promise<void>((resolve) => setTimeout(resolve, ms))
+  },
+}
+
+export function isCursorAgentBusyError(error: unknown): boolean {
+  if (error instanceof AgentBusyError) return true
+  if (error instanceof CursorSdkError && error.code === "agent_busy") return true
+  if (!(error instanceof Error)) return false
+  if (error.name === "AgentBusyError") return true
+  const message = error.message.toLowerCase()
+  return message.includes("[agent_busy]") || message.includes("already has an active run")
+}
+
 export function clampCursorAgentName(name: string): string {
   if (name.length <= cursorAgentNameMaxLength) return name
   const hash = createHash("sha256").update(name).digest("hex").slice(0, 8)
@@ -273,11 +291,12 @@ async function resolveExistingCursorRun(input: {
     try {
       const getRun = Agent.getRun?.bind(Agent)
       if (typeof getRun === "function") {
-        return await getRun(input.preferredRunId, {
+        const preferred = await getRun(input.preferredRunId, {
           runtime: "cloud",
           apiKey: input.apiKey,
           agentId: input.agentId,
         }) as CursorRunHandle
+        if (preferred && !isTerminalCursorRunStatus(preferred.status)) return preferred
       }
     } catch {
       // Fall through to listRuns.
@@ -285,7 +304,13 @@ async function resolveExistingCursorRun(input: {
   }
 
   const items = await listCursorRuns({ agentId: input.agentId, apiKey: input.apiKey })
-  return items.find((run) => !isTerminalCursorRunStatus(run.status)) ?? items[0] ?? input.activeRun
+  const live = items.find((run) => !isTerminalCursorRunStatus(run.status))
+  if (!live) return undefined
+  // Same id as a locally finished run: Cursor has not released it yet. Retry send.
+  if (input.activeRun && isTerminalCursorRunStatus(input.activeRun.status) && live.id === input.activeRun.id) {
+    return undefined
+  }
+  return live
 }
 
 async function persistCursorRunStarted(
@@ -320,32 +345,54 @@ async function sendCursorRun(input: {
   handle?: AgentRunHandle
   outputFile?: string
   apiKey?: string
+  debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
 }): Promise<CursorRunHandle> {
-  try {
-    const run = await input.active.agent.send(input.prompt, {
-      onDelta: input.onDelta,
-    })
-    input.active.run = run
-    await persistCursorRunStarted(input.handle, run, input.outputFile)
-    return run
-  } catch (error) {
-    if (error instanceof AgentBusyError) {
+  let delayMs = cursorAgentBusyRetry.initialDelayMs
+  let lastError: unknown
+  for (let attempt = 0; attempt <= cursorAgentBusyRetry.extraSendAttempts; attempt++) {
+    try {
+      const run = await input.active.agent.send(input.prompt, {
+        onDelta: input.onDelta,
+      })
+      input.active.run = run
+      await persistCursorRunStarted(input.handle, run, input.outputFile)
+      return run
+    } catch (error) {
+      lastError = error
+      if (!isCursorAgentBusyError(error)) throw error
+
       const existing = input.apiKey && input.handle
         ? await resolveExistingCursorRun({
             agentId: input.handle.id,
             apiKey: input.apiKey,
             preferredRunId: input.handle.harvest?.cursorRunId,
             activeRun: input.active.run,
-          }).catch(() => input.active.run)
-        : input.active.run
+          }).catch(() => undefined)
+        : (input.active.run && !isTerminalCursorRunStatus(input.active.run.status) ? input.active.run : undefined)
+
       if (existing && !isTerminalCursorRunStatus(existing.status)) {
+        input.debugLog?.write("cursor.prompt.busy_attach", {
+          agentId: input.handle?.id,
+          runId: existing.id,
+          status: existing.status,
+          attempt,
+        })
         input.active.run = existing
         await persistCursorRunStarted(input.handle, existing, input.outputFile)
         return existing
       }
+
+      if (attempt >= cursorAgentBusyRetry.extraSendAttempts) break
+      input.debugLog?.write("cursor.prompt.busy_retry", {
+        agentId: input.handle?.id,
+        attempt: attempt + 1,
+        delayMs,
+      })
+      await cursorAgentBusyRetry.sleep(delayMs)
+      delayMs = Math.min(Math.round(delayMs * 2), cursorAgentBusyRetry.maxDelayMs)
     }
-    throw error
   }
+  throw lastError
 }
 
 function logCursorPromptComplete(input: {
@@ -1102,6 +1149,7 @@ export const cursorProvider: AgentProvider = {
             onDelta: ({ update }) => emitCursorDelta({ event: update, providerInput: input, messageID }),
             handle: input.handle,
             apiKey: cursorApiKey(input.config),
+            debugLog: input.telemetry?.debugLog,
           })
           const { result } = await completeCursorRun({
             run,
@@ -1250,6 +1298,7 @@ export const cursorProvider: AgentProvider = {
                 handle: input.handle,
                 outputFile,
                 apiKey: cursorApiKey(input.config),
+                debugLog: input.telemetry?.debugLog,
               })
               const { result } = await completeCursorRun({
                 run,
