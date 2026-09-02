@@ -8,9 +8,16 @@ mock.module("@cursor/sdk", () => {
     readonly isRetryable = false
   }
   class CursorAgentError extends Error {}
+  class AgentBusyError extends CursorAgentError {
+    constructor(message = "[agent_busy] Agent already has an active run") {
+      super(message)
+      this.name = "AgentBusyError"
+    }
+  }
   return {
     CursorSdkError,
     CursorAgentError,
+    AgentBusyError,
     Cursor: {
       models: {
         list: mock(async () => [{
@@ -22,6 +29,34 @@ mock.module("@cursor/sdk", () => {
             values: [
               { value: "false", displayName: "Careful" },
               { value: "true", displayName: "Fast" },
+            ],
+          }],
+        }, {
+          id: "claude-opus-4-8",
+          name: "Opus 4.8",
+          parameters: [{
+            id: "thinking",
+            displayName: "Thinking",
+            values: [
+              { value: "false", displayName: "Off" },
+              { value: "true", displayName: "On" },
+            ],
+          }, {
+            id: "context",
+            displayName: "Context",
+            values: [
+              { value: "300k" },
+              { value: "1m" },
+            ],
+          }],
+          variants: [{
+            isDefault: true,
+            params: [
+              { id: "cyber", value: "false" },
+              { id: "thinking", value: "true" },
+              { id: "context", value: "1m" },
+              { id: "effort", value: "high" },
+              { id: "fast", value: "false" },
             ],
           }],
         }]),
@@ -36,6 +71,7 @@ mock.module("@cursor/sdk", () => {
 })
 
 const { renderConfigRoles, handleConfigPost } = await import("../src/view/config")
+const { modelParamsFromForm } = await import("../src/view/role-binding-form")
 const { ensureConfigInitialized, loadRoleBindingsFromStore, updateRoleBinding } = await import("../src/config-store")
 const { prepareTestDataDir, testRuntimeEnv } = await import("./test-env")
 
@@ -89,7 +125,6 @@ describe("provider-specific role forms", () => {
     expect(html).not.toContain("Edit .opencode/agents/")
     expect(html).not.toContain("drafter definition")
     expect(html).toContain("data-save-actions hidden")
-    expect(html).toContain("data-role-instructions hidden")
     expect(html).not.toContain('placeholder="composer-2.5"')
   })
 
@@ -104,7 +139,14 @@ describe("provider-specific role forms", () => {
 
     expect(html).toContain('<select class="form-input" name="model">')
     expect(html).toContain("Composer 2.5")
+    expect(html).toContain("Opus 4.8")
+    expect(html).toContain('data-role-binding-form')
+    expect(html).toContain('data-autosave="true"')
+    expect(html).toContain('data-model-param-set="composer-2.5"')
+    expect(html).toContain('data-model-param-set="claude-opus-4-8" hidden')
     expect(html).toContain('name="modelParam:fast"')
+    expect(html).toContain('name="modelParam:thinking"')
+    expect(html).toContain('name="modelParam:context"')
     expect(html).toContain("Reasoning")
     expect(html).toContain('<option value="true" selected>Fast</option>')
   })
@@ -127,5 +169,64 @@ describe("provider-specific role forms", () => {
       model: "composer-2.5",
       options: { modelParams: [{ id: "fast", value: "true" }] },
     })
+  })
+
+  test("drops leftover previous-model params when saving a different Cursor model", async () => {
+    const req = new Request("http://localhost/config/roles/source-auditor", {
+      method: "POST",
+      body: new URLSearchParams({
+        provider: "cursor",
+        model: "claude-opus-4-8",
+        "modelParam:fast": "true",
+        "modelParam:thinking": "false",
+      }),
+    })
+    const response = await handleConfigPost(req, "/config/roles/source-auditor")
+    const bindings = await loadRoleBindingsFromStore(env())
+
+    expect(response?.status).toBe(303)
+    expect(bindings["source-auditor"]).toMatchObject({
+      provider: "cursor",
+      model: "claude-opus-4-8",
+      options: { modelParams: [{ id: "thinking", value: "false" }] },
+    })
+    expect(bindings["source-auditor"]?.options?.modelParams).toEqual([
+      { id: "thinking", value: "false" },
+    ])
+  })
+
+  test("returns JSON for autosave posts instead of redirecting", async () => {
+    const req = new Request("http://localhost/config/roles/source-auditor", {
+      method: "POST",
+      headers: { accept: "application/json" },
+      body: new URLSearchParams({
+        provider: "cursor",
+        model: "composer-2.5",
+        "modelParam:fast": "false",
+      }),
+    })
+    const response = await handleConfigPost(req, "/config/roles/source-auditor")
+
+    expect(response?.status).toBe(200)
+    expect(await response?.json()).toEqual({ ok: true })
+    expect((await loadRoleBindingsFromStore(env()))["source-auditor"]).toMatchObject({
+      provider: "cursor",
+      model: "composer-2.5",
+      options: { modelParams: [{ id: "fast", value: "false" }] },
+    })
+  })
+
+  test("modelParamsFromForm keeps only ids advertised for the selected model", () => {
+    const params = new URLSearchParams({
+      model: "claude-opus-4-8",
+      "modelParam:fast": "true",
+      "modelParam:thinking": "false",
+    })
+    expect(modelParamsFromForm(params, {
+      providerId: "cursor",
+      parametersByModel: {
+        "claude-opus-4-8": [{ id: "thinking", label: "Thinking", values: [] }],
+      },
+    })).toEqual([{ id: "thinking", value: "false" }])
   })
 })

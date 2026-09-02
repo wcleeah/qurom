@@ -24,12 +24,21 @@ import { promptAssetDefs, promptAssetFiles, type PromptAssetKey } from "../promp
 import { defaultsConfigDbPath } from "../data-paths"
 import { availableProviderIds, configuredAgentRoles, providerConfigForm } from "../providers/registry"
 import { DEFAULT_PROVIDER } from "../role-registry"
-import type { AgentProviderId, ProviderConfigFormDescriptor, ProviderConfigFormParameter } from "../providers/types"
+import type { AgentProviderId, ProviderConfigFormDescriptor } from "../providers/types"
 import { card, section } from "./html"
 import { layout } from "./layout"
 import { configNavbarOptions } from "./config-nav"
 import { readDefaultsOpencodeAgent, renderOpencodeAgentReadonly } from "./opencode-agent-display"
 import { parseQuorumConfigForm, quorumConfigFormScript, renderQuorumConfigForm } from "./quorum-config-form"
+import {
+  bindingSelectField,
+  bindingTextField,
+  modelParamsFromForm,
+  renderModelParameterBlocks,
+  roleBindingFormScript,
+  roleBindingSaveActions,
+  savedModelParams,
+} from "./role-binding-form"
 import { escapeHtml } from "./utils"
 
 function parseOptionsJson(text: string | undefined) {
@@ -202,9 +211,6 @@ export async function renderConfigDefaultsBindings(options?: { defaultsPrUrl?: s
   const pending = await getPendingDefaultsPr()
   const bindingsChip = pendingPrChip(relativeDefaultsDb(workspaceDir), pending)
 
-  const field = (label: string, name: string, value: string, help: string, placeholder = "unset", disabled = false) =>
-    `<label class="form-field"><span>${label}</span><input class="form-input" name="${name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${disabled ? " disabled" : ""}><small>${escapeHtml(help)}</small></label>`
-
   const providerTabs = (role: string, current: string) => {
     const options = providerIds.includes(current) ? providerIds : [current, ...providerIds]
     const tabs = options
@@ -215,16 +221,6 @@ export async function renderConfigDefaultsBindings(options?: { defaultsPrUrl?: s
       })
       .join("")
     return `<div class="form-field"><span>Provider</span><div class="provider-tabs">${tabs}</div></div>`
-  }
-
-  const selectField = (label: string, name: string, value: string, options: Array<{ id: string; label: string }>, help: string, disabled = false) => {
-    const optionHtml = [
-      value && !options.some((option) => option.id === value)
-        ? `<option value="${escapeHtml(value)}" selected>${escapeHtml(value)} (saved)</option>`
-        : "",
-      ...options.map((option) => `<option value="${escapeHtml(option.id)}"${option.id === value ? " selected" : ""}>${escapeHtml(option.label)}</option>`),
-    ].join("")
-    return `<label class="form-field"><span>${label}</span><select class="form-input" name="${name}"${disabled ? " disabled" : ""}>${optionHtml}</select><small>${escapeHtml(help)}</small></label>`
   }
 
   const providerFields = (
@@ -248,45 +244,31 @@ export async function renderConfigDefaultsBindings(options?: { defaultsPrUrl?: s
 
     const fields = descriptor.fields ?? { providerAgent: true, model: "text", variant: true, outputMode: true }
     const options = binding?.options ?? {}
-    const savedParams = new Map(
-      (Array.isArray(options.modelParams) ? options.modelParams : [])
-        .filter((entry): entry is { id: string; value: string } =>
-          Boolean(entry) &&
-          typeof entry === "object" &&
-          typeof (entry as { id?: unknown }).id === "string" &&
-          typeof (entry as { value?: unknown }).value === "string")
-        .map((param) => [param.id, param.value]),
-    )
+    const savedParams = savedModelParams(options)
     const model = binding?.model ?? ""
-    const selectedModelParameters = descriptor.parametersByModel?.[model] ?? []
     const warnings = descriptor.warnings?.length
       ? `<div class="outcome-banner failed">${descriptor.warnings.map(escapeHtml).join("<br>")}</div>`
       : ""
 
     const controls: string[] = []
     if (fields.providerAgent !== false) {
-      controls.push(field("Provider agent / role label", "providerAgent", binding?.providerAgent ?? "", "OpenCode: agent name. Cursor: optional label only.", role, !active))
+      controls.push(bindingTextField("Provider agent / role label", "providerAgent", binding?.providerAgent ?? "", "OpenCode: agent name. Cursor: optional label only.", role, !active))
     }
     if (fields.model === "select" && descriptor.modelOptions?.length) {
-      controls.push(selectField("Model", "model", model, descriptor.modelOptions, "Loaded from the provider catalog for this account.", !active))
+      controls.push(bindingSelectField("Model", "model", model, descriptor.modelOptions, "Loaded from the provider catalog for this account.", !active))
     } else if (fields.model !== false) {
-      controls.push(field("Model", "model", model, "Provider model id. Cursor requires this for local runs.", "composer-2.5", !active))
+      controls.push(bindingTextField("Model", "model", model, "Provider model id. Cursor requires this for local runs.", "composer-2.5", !active))
     }
     if (fields.variant) {
-      controls.push(field("Variant", "variant", binding?.variant ?? "", "Provider-specific variant. Mostly used by OpenCode today.", "unset", !active))
+      controls.push(bindingTextField("Variant", "variant", binding?.variant ?? "", "Provider-specific variant. Mostly used by OpenCode today.", "unset", !active))
     }
 
-    const parameterControls = selectedModelParameters.map((parameter: ProviderConfigFormParameter) => {
-      const saved = savedParams.get(parameter.id) ?? parameter.values[0]?.value ?? ""
-      if (parameter.values.length === 0) {
-        return field(parameter.label, `modelParam:${parameter.id}`, saved, `Cursor model parameter ${parameter.id}.`, "unset", !active)
-      }
-      return selectField(parameter.label, `modelParam:${parameter.id}`, saved, parameter.values.map((value) => ({ id: value.value, label: value.label })), `Cursor model parameter ${parameter.id}.`, !active)
+    const parameterBlock = renderModelParameterBlocks({
+      descriptor,
+      savedParams,
+      selectedModel: model,
+      active,
     })
-
-    const parameterBlock = parameterControls.length
-      ? `<div class="form-fields-grid">${parameterControls.join("\n")}</div>`
-      : ""
 
     const help = "Cursor binding defaults. Behavioral prompts are edited under Defaults → Prompts."
 
@@ -316,11 +298,11 @@ export async function renderConfigDefaultsBindings(options?: { defaultsPrUrl?: s
     const providerFormBlocks = providerIds
       .map((id) => providerFields(role, binding, descriptors.get(id)!, id === currentProvider, opencodeAgentHtml))
       .join("\n")
-    const form = `<form class="config-form" method="POST" action="/config/defaults/bindings/${encodeURIComponent(role)}">
+    const form = `<form class="config-form" method="POST" action="/config/defaults/bindings/${encodeURIComponent(role)}" data-role-binding-form>
   <p class="tiny-text muted-text">Binding stored in <code>defaults/quorum-config.sqlite</code>${opencodeActive ? "; agent definition below from <code>defaults/opencode/agents/</code>" : ""}.</p>
   ${providerTabs(role, currentProvider)}
   ${providerFormBlocks}
-  <div class="form-actions" data-save-actions${opencodeActive ? " hidden" : ""}><button type="submit" class="btn btn-primary">Save default binding</button></div>
+  ${roleBindingSaveActions({ hidden: opencodeActive, submitLabel: "Save default binding" })}
   <div class="form-actions">${applyButton(`/config/defaults/apply/bindings/${encodeURIComponent(role)}`, "Apply to active")}</div>
 </form>`
     return card(`<div data-role-card><h3>${escapeHtml(role)} ${bindingsChip}</h3>${form}</div>`)
@@ -332,39 +314,8 @@ export async function renderConfigDefaultsBindings(options?: { defaultsPrUrl?: s
     section("Shipped provider bindings", cards.join("\n")),
   ].join("\n")
 
-  const roleFormScript = `<script>
-(function(){
-  function init(){
-  document.querySelectorAll("form.config-form").forEach(function(form){
-    if (!form.querySelector("input[name='provider']")) return;
-    var radios = form.querySelectorAll("input[name='provider']");
-    function sync(){
-      var checked = form.querySelector("input[name='provider']:checked");
-      var provider = checked ? checked.value : "";
-      form.querySelectorAll("[data-provider-fields]").forEach(function(block){
-        var active = block.getAttribute("data-provider-fields") === provider;
-        block.hidden = !active;
-        block.querySelectorAll("input,select,textarea").forEach(function(input){
-          input.disabled = !active;
-        });
-      });
-      var saveActions = form.querySelector("[data-save-actions]");
-      if (saveActions) saveActions.hidden = provider === "opencode";
-    }
-    radios.forEach(function(radio){ radio.addEventListener("change", sync); });
-    sync();
-  });
-  }
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
-})();
-</script>`
-
   return new Response(layout("Default role bindings", body, {
-    extraHead: roleFormScript,
+    extraHead: roleBindingFormScript,
     navbar: configNavbarOptions("Default role bindings", "defaults"),
   }), {
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -449,9 +400,8 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
       const provider = params.get("provider")?.trim() || undefined
       const options: Record<string, unknown> = {}
       if (provider === "cursor") {
-        const modelParams = [...params.entries()]
-          .filter(([key, value]) => key.startsWith("modelParam:") && value.trim())
-          .map(([key, value]) => ({ id: key.slice("modelParam:".length), value: value.trim() }))
+        const descriptor = await providerConfigForm(config, "cursor")
+        const modelParams = modelParamsFromForm(params, descriptor)
         if (modelParams.length > 0) options.modelParams = modelParams
       }
       await updateRoleBinding(config.env, role, {
@@ -513,9 +463,8 @@ export async function handleConfigDefaultsPost(req: Request, path: string): Prom
     const provider = params.get("provider")?.trim() || undefined
     const options: Record<string, unknown> = {}
     if (provider === "cursor") {
-      const modelParams = [...params.entries()]
-        .filter(([key, value]) => key.startsWith("modelParam:") && value.trim())
-        .map(([key, value]) => ({ id: key.slice("modelParam:".length), value: value.trim() }))
+      const descriptor = await providerConfigForm(config, "cursor")
+      const modelParams = modelParamsFromForm(params, descriptor)
       if (modelParams.length > 0) options.modelParams = modelParams
     }
     await updateDefaultsRoleBinding(workspaceDir, role, {

@@ -2581,6 +2581,16 @@ details[open] > .markdown-preview summary::before {
   align-items: center;
   gap: 0.5rem;
 }
+.role-binding-save-status {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.role-binding-save-status[data-state="saved"] {
+  color: var(--green);
+}
+.role-binding-save-status[data-state="error"] {
+  color: var(--red);
+}
 .status-chip {
   display: inline-block;
   font-size: 0.65rem;
