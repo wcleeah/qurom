@@ -177,8 +177,8 @@ mock.module("@cursor/sdk", () => {
   }
 })
 
-const { AgentBusyError } = await import("@cursor/sdk")
-const { cursorProvider, clampCursorAgentName } = await import("../src/providers/cursor")
+const { AgentBusyError, CursorSdkError } = await import("@cursor/sdk")
+const { cursorProvider, clampCursorAgentName, cursorAgentBusyRetry, isCursorAgentBusyError } = await import("../src/providers/cursor")
 
 const config: RuntimeConfig = {
   env: {
@@ -217,6 +217,8 @@ beforeEach(() => {
   artifactBytes = Buffer.from(JSON.stringify({ ok: true }))
   cancelCalled = false
   disposeCalled = false
+  cursorAgentBusyRetry.extraSendAttempts = 0
+  cursorAgentBusyRetry.sleep = async () => {}
   delete process.env.CURSOR_MCP_CONFIG_PATH
   delete process.env.CONTEXT7_API_KEY
   delete process.env.GENERIC_MCP_TOKEN
@@ -887,6 +889,84 @@ describe("cursorProvider", () => {
       outputFile,
     })).rejects.toThrow(/agent_busy/)
     expect(sendCalls).toHaveLength(1)
+  })
+
+  test("attaches to a live run when agent_busy is a CursorSdkError with code", async () => {
+    const outputFile = await tempOutputFile("message.txt")
+    artifactPath = "artifacts/message.txt"
+    artifactBytes = Buffer.from("recovered response")
+    waitResult = { status: "finished", result: "recovered response" }
+    sendErrors = [new CursorSdkError("[agent_busy] Agent already has an active run", {
+      isRetryable: false,
+      code: "agent_busy",
+      status: 409,
+    })]
+    listRunsItems = [{
+      id: "cursor-run-live",
+      agentId: "bc-cursor-agent-1",
+      status: "running",
+      supports() {
+        return false
+      },
+      async wait() {
+        return waitResult
+      },
+    }]
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    const result = await cursorProvider.prompt({
+      config,
+      handle,
+      role: "research-drafter",
+      prompt: "hello",
+      outputFile,
+    })
+
+    expect(sendCalls).toHaveLength(1)
+    expect(result.text).toBe("recovered response")
+    expect(result.raw).toMatchObject({ runId: "cursor-run-live" })
+  })
+
+  test("retries send after agent_busy when the previous run has already finished", async () => {
+    const outputFile = await tempOutputFile("message.txt")
+    artifactPath = "artifacts/message.txt"
+    artifactBytes = Buffer.from("follow-up response")
+    waitResult = { status: "finished", result: "follow-up response" }
+    cursorAgentBusyRetry.extraSendAttempts = 2
+    sendErrors = [new CursorSdkError("[agent_busy] Agent already has an active run", {
+      isRetryable: false,
+      code: "agent_busy",
+      status: 409,
+    })]
+    const handle = await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+    })
+
+    const result = await cursorProvider.prompt({
+      config,
+      handle,
+      role: "research-drafter",
+      prompt: "hello",
+      outputFile,
+    })
+
+    expect(sendCalls).toHaveLength(2)
+    expect(result.text).toBe("follow-up response")
+  })
+
+  test("isCursorAgentBusyError matches SDK code and message shapes", () => {
+    expect(isCursorAgentBusyError(new AgentBusyError())).toBe(true)
+    expect(isCursorAgentBusyError(new CursorSdkError("[agent_busy] Agent already has an active run", {
+      code: "agent_busy",
+      status: 409,
+    }))).toBe(true)
+    expect(isCursorAgentBusyError(new Error("NGHTTP2_REFUSED_STREAM"))).toBe(false)
   })
 
   test("collectExistingOutput waits on a live cloud run without sending", async () => {
