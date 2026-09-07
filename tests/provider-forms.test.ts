@@ -208,7 +208,7 @@ describe("provider-specific role forms", () => {
     const response = await handleConfigPost(req, "/config/roles/source-auditor")
 
     expect(response?.status).toBe(200)
-    expect(await response?.json()).toEqual({ ok: true })
+    expect(await response?.json()).toEqual({ ok: true, lastUsedSnapshot: null })
     expect((await loadRoleBindingsFromStore(env()))["source-auditor"]).toMatchObject({
       provider: "cursor",
       model: "composer-2.5",

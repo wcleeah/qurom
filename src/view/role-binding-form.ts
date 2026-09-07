@@ -111,10 +111,10 @@ export function roleBindingSaveActions(input: {
 </div>`
 }
 
-export function configFormSaveResponse(req: Request, location: string): Response {
+export function configFormSaveResponse(req: Request, location: string, extra?: Record<string, unknown>): Response {
   const accept = req.headers.get("accept") ?? ""
   if (accept.includes("application/json")) {
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ ok: true, ...extra }), {
       status: 200,
       headers: { "content-type": "application/json; charset=utf-8" },
     })
@@ -124,8 +124,34 @@ export function configFormSaveResponse(req: Request, location: string): Response
 
 export const roleBindingFormScript = `<script>
 (function(){
+  function cancelPendingAutosaves(){
+    document.querySelectorAll("form[data-role-binding-form]").forEach(function(form){
+      form.dispatchEvent(new Event("qurom:cancel-autosave"));
+    });
+  }
+  function updateSnapshotChip(lastUsed){
+    if (!lastUsed) return;
+    document.querySelectorAll("[data-snapshot-chip]").forEach(function(chip){
+      var card = chip.closest("[data-snapshot-id]");
+      if (!card || card.getAttribute("data-snapshot-id") !== String(lastUsed.id)) return;
+      if (lastUsed.matchesLive) {
+        chip.className = "status-chip matches";
+        chip.setAttribute("data-snapshot-chip", "matches");
+        chip.textContent = "Matches";
+        chip.title = "Live role bindings match this snapshot";
+      } else {
+        chip.className = "status-chip diverted";
+        chip.setAttribute("data-snapshot-chip", "diverted");
+        chip.textContent = "Modified from snapshot";
+        chip.title = "Live role bindings have changed since this snapshot was last saved or applied";
+      }
+    });
+  }
   function init(){
     document.querySelectorAll("form[data-role-binding-form]").forEach(initForm);
+    document.querySelectorAll("form[data-snapshot-form]").forEach(function(form){
+      form.addEventListener("submit", cancelPendingAutosaves);
+    });
   }
   function initForm(form){
     var autosave = form.getAttribute("data-autosave") === "true";
@@ -229,6 +255,7 @@ export const roleBindingFormScript = `<script>
         if (!resp.ok || !data || !data.ok) throw new Error("save failed");
         lastSaved = body;
         setSaveState("saved", "Saved");
+        if (data.lastUsedSnapshot) updateSnapshotChip(data.lastUsedSnapshot);
       } catch {
         setSaveState("error", "Save failed");
       } finally {
@@ -274,6 +301,12 @@ export const roleBindingFormScript = `<script>
       event.preventDefault();
       lastSaved = "";
       save();
+    });
+
+    form.addEventListener("qurom:cancel-autosave", function(){
+      autosave = false;
+      queued = false;
+      clearTimeout(timer);
     });
 
     syncProvider();
