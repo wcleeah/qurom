@@ -124,8 +124,16 @@ export function configFormSaveResponse(req: Request, location: string): Response
 
 export const roleBindingFormScript = `<script>
 (function(){
+  function cancelPendingAutosaves(){
+    document.querySelectorAll("form[data-role-binding-form]").forEach(function(form){
+      form.dispatchEvent(new Event("qurom:cancel-autosave"));
+    });
+  }
   function init(){
     document.querySelectorAll("form[data-role-binding-form]").forEach(initForm);
+    document.querySelectorAll("form[data-snapshot-form]").forEach(function(form){
+      form.addEventListener("submit", cancelPendingAutosaves);
+    });
   }
   function initForm(form){
     var autosave = form.getAttribute("data-autosave") === "true";
@@ -274,6 +282,12 @@ export const roleBindingFormScript = `<script>
       event.preventDefault();
       lastSaved = "";
       save();
+    });
+
+    form.addEventListener("qurom:cancel-autosave", function(){
+      autosave = false;
+      queued = false;
+      clearTimeout(timer);
     });
 
     syncProvider();

@@ -2719,6 +2719,48 @@ button.status-chip:hover {
 .form-actions .btn + .inline-form {
   margin-left: 0.5rem;
 }
+.binding-snapshot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+.binding-snapshot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.binding-snapshot-heading h3 {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+}
+.binding-snapshot-heading .tiny-text {
+  margin: 0.2rem 0 0;
+}
+.binding-snapshot-actions {
+  flex-wrap: wrap;
+}
+.binding-snapshot-save,
+.binding-snapshot-rename {
+  margin-top: 0.35rem;
+}
+@media (min-width: 640px) {
+  .binding-snapshot-save,
+  .binding-snapshot-rename {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 0.6rem;
+  }
+  .binding-snapshot-save .form-actions,
+  .binding-snapshot-rename .form-actions {
+    margin: 0;
+    padding-bottom: 0.15rem;
+  }
+}
 .provider-tabs {
   display: inline-flex;
   flex-wrap: wrap;

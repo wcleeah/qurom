@@ -8,7 +8,7 @@ import {
 } from "../opencode-usage-import"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { deleteMcpServer, listConfigSummary, loadMcpRegistryFromStore, normalizeQuorumConfig, saveMcpServer, setEnabledMcpServers, updatePromptAsset, updatePromptAssets, updateQuorumConfig, updateRoleBinding } from "../config-store"
+import { applyRoleBindingSnapshot, deleteMcpServer, deleteRoleBindingSnapshot, listConfigSummary, listRoleBindingSnapshots, loadMcpRegistryFromStore, normalizeQuorumConfig, overwriteRoleBindingSnapshot, renameRoleBindingSnapshot, saveMcpServer, saveRoleBindingSnapshot, setEnabledMcpServers, updatePromptAsset, updatePromptAssets, updateQuorumConfig, updateRoleBinding } from "../config-store"
 import { listDefaultsPrompts, updateDefaultsPrompt } from "../defaults-store"
 import { openDefaultsPullRequest } from "../github-defaults-pr"
 import { promptAssetDefs, promptAssetFiles, type PromptAssetKey } from "../prompt-asset-defs"
@@ -34,6 +34,7 @@ import {
   roleBindingSaveActions,
   savedModelParams,
 } from "./role-binding-form"
+import { renderRoleBindingSnapshotsSection } from "./role-binding-snapshots"
 import { viewServerAdminEnabled } from "./server-options"
 import { escapeHtml } from "./utils"
 import { mcpServerSchema, type McpServer } from "../mcp-config"
@@ -205,9 +206,12 @@ export async function renderConfigIndex(options?: {
   })
 }
 
-export async function renderConfigRoles(): Promise<Response> {
+export async function renderConfigRoles(options?: { error?: string }): Promise<Response> {
   const config = await loadRuntimeConfig()
-  const summary = await listConfigSummary(config.env)
+  const [summary, snapshots] = await Promise.all([
+    listConfigSummary(config.env),
+    listRoleBindingSnapshots(config.env),
+  ])
   const bindingByRole = new Map(summary.bindings.map((b) => [b.role, b]))
   const providerIds = availableProviderIds()
   const roles = configuredAgentRoles(config)
@@ -305,6 +309,7 @@ export async function renderConfigRoles(): Promise<Response> {
 
   const body = [
     `<div class="header-bar"><div class="header-main"><h1>Roles</h1></div></div>`,
+    renderRoleBindingSnapshotsSection({ snapshots, error: options?.error }),
     section("Role provider bindings", cards.join("\n")),
   ].join("\n")
 
@@ -494,6 +499,33 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
         draftConfig = config.quorumConfig
       }
       return renderConfigIndex({ error: message, draftConfig })
+    }
+  }
+
+  if (path === "/config/roles/snapshots" || path.startsWith("/config/roles/snapshots/")) {
+    try {
+      if (path === "/config/roles/snapshots") {
+        const params = new URLSearchParams(await req.text())
+        await saveRoleBindingSnapshot(config.env, params.get("name") ?? "")
+        return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
+      }
+      const snapshotMatch = path.match(/^\/config\/roles\/snapshots\/(\d+)\/(apply|overwrite|rename|delete)$/)
+      if (!snapshotMatch) {
+        return renderConfigRoles({ error: "Unknown snapshot action" })
+      }
+      const snapshotId = Number(snapshotMatch[1])
+      const action = snapshotMatch[2]
+      if (action === "apply") await applyRoleBindingSnapshot(config.env, snapshotId)
+      else if (action === "overwrite") await overwriteRoleBindingSnapshot(config.env, snapshotId)
+      else if (action === "delete") await deleteRoleBindingSnapshot(config.env, snapshotId)
+      else {
+        const params = new URLSearchParams(await req.text())
+        await renameRoleBindingSnapshot(config.env, snapshotId, params.get("name") ?? "")
+      }
+      return new Response(null, { status: 303, headers: { Location: "/config/roles" } })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return renderConfigRoles({ error: message })
     }
   }
 

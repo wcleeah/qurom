@@ -193,6 +193,8 @@ VALUES (?, 'interactiveEnhancerEnhance', 'old lab prompt', 1, ?, ?)
     const rolesHtml = await renderConfigRoles().then((r) => r.text())
     expect(rolesHtml).toContain("source-auditor")
     expect(rolesHtml).toContain(".opencode/agents/")
+    expect(rolesHtml).toContain("Binding snapshots")
+    expect(rolesHtml).toContain("No snapshots. Save the current bindings to switch back later.")
     expect(rolesHtml).not.toContain("edited file definition")
 
     configureViewServer({ admin: false })
