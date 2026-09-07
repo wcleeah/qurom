@@ -198,6 +198,24 @@ describe("role binding snapshots", () => {
     const html = await renderConfigRoles().then((response) => response.text())
     expect(html).toContain("Matches")
     expect(html).toContain("data-snapshot-form")
+    expect(html).toContain(`data-snapshot-id="${snapshots[0].id}"`)
+    expect(html).toContain('data-snapshot-chip="matches"')
+
+    const autosave = await handleConfigPost(
+      new Request("http://localhost/config/roles/source-auditor", {
+        method: "POST",
+        headers: { accept: "application/json" },
+        body: new URLSearchParams({
+          provider: "cursor",
+          model: "composer-2.5",
+        }),
+      }),
+      "/config/roles/source-auditor",
+    )
+    expect(await autosave?.json()).toEqual({
+      ok: true,
+      lastUsedSnapshot: { id: snapshots[0].id, matchesLive: false },
+    })
 
     const duplicate = await postRoles("/config/roles/snapshots", { name: "cheap mix" })
     expect(duplicate?.status).toBe(200)

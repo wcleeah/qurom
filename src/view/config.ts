@@ -547,7 +547,12 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
       outputMode: params.get("outputMode")?.trim() || undefined,
       options,
     })
-    return configFormSaveResponse(req, "/config/roles")
+    const lastUsed = (await listRoleBindingSnapshots(config.env)).find((snapshot) => snapshot.isLastUsed)
+    return configFormSaveResponse(req, "/config/roles", {
+      lastUsedSnapshot: lastUsed
+        ? { id: lastUsed.id, matchesLive: lastUsed.matchesLive }
+        : null,
+    })
   }
 
   if (path === "/config/prompts") {

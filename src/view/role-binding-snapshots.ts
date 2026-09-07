@@ -9,9 +9,9 @@ function confirmSubmit(message: string) {
 function snapshotChip(snapshot: RoleBindingSnapshotSummary) {
   if (!snapshot.isLastUsed) return ""
   if (snapshot.matchesLive) {
-    return `<span class="status-chip matches" title="Live role bindings match this snapshot">Matches</span>`
+    return `<span class="status-chip matches" data-snapshot-chip="matches" title="Live role bindings match this snapshot">Matches</span>`
   }
-  return `<span class="status-chip diverted" title="Live role bindings have changed since this snapshot was last saved or applied">Modified from snapshot</span>`
+  return `<span class="status-chip diverted" data-snapshot-chip="diverted" title="Live role bindings have changed since this snapshot was last saved or applied">Modified from snapshot</span>`
 }
 
 function snapshotAction(input: {
@@ -52,7 +52,7 @@ ${saveForm}`)
     const renamePath = `/config/roles/snapshots/${id}/rename`
     const deletePath = `/config/roles/snapshots/${id}/delete`
     const roleLabel = snapshot.roleCount === 1 ? "1 role" : `${snapshot.roleCount} roles`
-    return card(`<div class="binding-snapshot-card">
+    return card(`<div class="binding-snapshot-card" data-snapshot-id="${escapeHtml(id)}"${snapshot.isLastUsed ? " data-snapshot-last-used" : ""}>
   <div class="binding-snapshot-heading">
     <h3>${escapeHtml(snapshot.name)} ${snapshotChip(snapshot)}</h3>
     <p class="tiny-text muted-text">${escapeHtml(roleLabel)}</p>
