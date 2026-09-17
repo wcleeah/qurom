@@ -28,6 +28,7 @@ describe("resolveRunResumeActions", () => {
     expect(actions.showRerunFreshInterview).toBe(true)
     expect(actions.showRerunReuseProfile).toBe(false)
     expect(actions.showRerunRepairProfile).toBe(false)
+    expect(actions.showReadabilityReview).toBe(false)
   })
 
   test("offers resume when research approved without final html", () => {
@@ -45,6 +46,7 @@ describe("resolveRunResumeActions", () => {
     expect(actions.showRerunReuseProfile).toBe(true)
     expect(actions.showRerunRepairProfile).toBe(true)
     expect(actions.showRerunFreshInterview).toBe(true)
+    expect(actions.showReadabilityReview).toBe(true)
   })
 
   test("hides actions while running", () => {
@@ -62,6 +64,7 @@ describe("resolveRunResumeActions", () => {
     expect(actions.showRerunReuseProfile).toBe(false)
     expect(actions.showRerunRepairProfile).toBe(false)
     expect(actions.showRerunFreshInterview).toBe(false)
+    expect(actions.showReadabilityReview).toBe(false)
   })
 
   test("hides resume when design is complete but still offers rerun", () => {
@@ -78,6 +81,22 @@ describe("resolveRunResumeActions", () => {
     expect(actions.showRerunReuseProfile).toBe(true)
     expect(actions.showRerunRepairProfile).toBe(true)
     expect(actions.showRerunFreshInterview).toBe(true)
+    expect(actions.showReadabilityReview).toBe(true)
+  })
+
+  test("offers a post-run review when a draft exists without final.md", () => {
+    const actions = resolveRunResumeActions({
+      isRunning: false,
+      hasFinalMd: false,
+      hasFinalHtml: false,
+      hasInputMd: false,
+      hasTopic: true,
+      hasReaderProfile: false,
+      hasReviewableMarkdown: true,
+      designStatus: null,
+    })
+    expect(actions.showReadabilityReview).toBe(true)
+    expect(actions.showResume).toBe(true)
   })
 })
 
@@ -89,6 +108,7 @@ describe("renderRunActionStrip", () => {
       showRerunReuseProfile: false,
       showRerunRepairProfile: false,
       showRerunFreshInterview: false,
+      showReadabilityReview: false,
     })
     expect(html).toContain("/api/runs/my-run-abc/resume")
     expect(html).toContain("Resume run")
@@ -101,6 +121,7 @@ describe("renderRunActionStrip", () => {
       showRerunReuseProfile: false,
       showRerunRepairProfile: false,
       showRerunFreshInterview: false,
+      showReadabilityReview: false,
     })
     expect(html).toContain("/api/runs/my-run-abc/restart-from-source")
     expect(html).toContain("New run from source document")
@@ -113,6 +134,7 @@ describe("renderRunActionStrip", () => {
       showRerunReuseProfile: true,
       showRerunRepairProfile: true,
       showRerunFreshInterview: true,
+      showReadabilityReview: false,
     })
     expect(html).toContain("/api/runs/my-run-abc/rerun")
     expect(html).toContain('name="interview" value="reuse"')
@@ -133,6 +155,7 @@ describe("renderRunActionStrip", () => {
         showRerunReuseProfile: true,
         showRerunRepairProfile: true,
         showRerunFreshInterview: true,
+        showReadabilityReview: false,
       },
       { runActiveGlobally: true },
     )
@@ -155,11 +178,37 @@ describe("renderRunActionStrip", () => {
         showRerunReuseProfile: false,
         showRerunRepairProfile: false,
         showRerunFreshInterview: false,
+        showReadabilityReview: false,
       },
       { showArchive: true },
     )
     expect(html).toContain("/api/runs/my-run-abc/archive")
     expect(html).toContain("Archive run")
+  })
+
+  test("renders a post-run readability review button", () => {
+    const html = renderRunActionStrip("my-run-abc", {
+      showResume: false,
+      showRestartFromSource: false,
+      showRerunReuseProfile: false,
+      showRerunRepairProfile: false,
+      showRerunFreshInterview: false,
+      showReadabilityReview: true,
+    }, { hasExistingReadabilityReview: false })
+    expect(html).toContain("/api/runs/my-run-abc/readability-review")
+    expect(html).toContain("Review readability (Jev)")
+    expect(html).toContain("Inspect this run")
+    expect(html).toContain("Does not rewrite the draft")
+
+    const again = renderRunActionStrip("my-run-abc", {
+      showResume: false,
+      showRestartFromSource: false,
+      showRerunReuseProfile: false,
+      showRerunRepairProfile: false,
+      showRerunFreshInterview: false,
+      showReadabilityReview: true,
+    }, { hasExistingReadabilityReview: true })
+    expect(again).toContain("Re-score readability (Jev)")
   })
 })
 

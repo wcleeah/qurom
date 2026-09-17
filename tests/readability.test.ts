@@ -10,6 +10,13 @@ import { formatReadabilityHints } from "../src/readability/hints"
 import { deriveHotspots, scoreDraftReadability } from "../src/readability/score"
 import { segmentDraft } from "../src/readability/segment"
 import type { ReadabilityHotspot, ReadabilityUnit } from "../src/readability/schema"
+import { POSTHOC_RAW_FILENAME, POSTHOC_REPORT_FILENAME } from "../src/readability/schema"
+import {
+  hasReviewableMarkdown,
+  pickReviewableMarkdownFilename,
+  PosthocReviewError,
+  scoreCompletedRun,
+} from "../src/readability/posthoc"
 import { DEFAULT_READABILITY_THRESHOLDS, READABILITY_AUDIENCE, READABILITY_REGISTER, buildReadabilityQuestions, type ReadabilityQuestions } from "../src/readability/criteria"
 import {
   readabilityReviewPrompt,
@@ -537,6 +544,137 @@ describe("reviseReadability graph node", () => {
       expect(next.draft).toContain("framing bit")
       expect(await Bun.file(join(dir, "draft-round-0-readability-1.md")).text()).toContain("framing bit")
       expect(await Bun.file(join(dir, "draft-round-0.md")).text()).toContain("framing bit")
+    })
+  })
+})
+
+describe("pickReviewableMarkdownFilename", () => {
+  test("prefers final.md, then latest-draft.md, then the highest draft round", () => {
+    expect(pickReviewableMarkdownFilename(["final.md", "latest-draft.md", "draft-round-9.md"])).toBe("final.md")
+    expect(pickReviewableMarkdownFilename(["latest-draft.md", "draft-round-9.md"])).toBe("latest-draft.md")
+    expect(pickReviewableMarkdownFilename(["draft-round-1.md", "draft-round-9.md", "draft-round-2.md"])).toBe("draft-round-9.md")
+    expect(pickReviewableMarkdownFilename(["request.json", "reader-profile.json"])).toBeUndefined()
+    expect(hasReviewableMarkdown(["draft-round-0.md"])).toBe(true)
+    expect(hasReviewableMarkdown(["request.json"])).toBe(false)
+  })
+})
+
+describe("scoreCompletedRun", () => {
+  async function withDir<T>(fn: (dir: string) => Promise<T>) {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-posthoc-"))
+    try {
+      return await fn(dir)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  const article = [
+    "This opening paragraph is long enough to count as prose for the readability reviewer.",
+    "",
+    "Another substantial paragraph that should be scored because it carries a complete idea.",
+  ].join("\n")
+
+  test("scores the finished article into sidecar files without rewriting drafts", async () => {
+    await withDir(async (dir) => {
+      await Bun.write(join(dir, "final.md"), article)
+      await Bun.write(join(dir, "draft-round-0.md"), "Original draft that must not change.\n")
+      await Bun.write(join(dir, "request.json"), JSON.stringify({ topic: "How framing works" }))
+      const config = testRuntimeConfig({
+        dataDir: join(dir, "data"),
+        quorumOverrides: { readability: { enabled: true } },
+      })
+      const result = await scoreCompletedRun({
+        runDir: dir,
+        config,
+        systemOne: mockSystemOne(0.2),
+      })
+      expect(result.sourceFile).toBe("final.md")
+      expect(result.report.kind).toBe("posthoc")
+      expect(result.report.passed).toBe(true)
+      expect(result.report.sourceFile).toBe("final.md")
+      expect(result.report.round).toBe(0)
+      const report = await Bun.file(join(dir, POSTHOC_REPORT_FILENAME)).json() as { kind: string; sourceFile: string }
+      expect(report.kind).toBe("posthoc")
+      expect(report.sourceFile).toBe("final.md")
+      expect(await Bun.file(join(dir, POSTHOC_RAW_FILENAME)).exists()).toBe(true)
+      expect(await Bun.file(join(dir, "final.md")).text()).toBe(article)
+      expect(await Bun.file(join(dir, "draft-round-0.md")).text()).toBe("Original draft that must not change.\n")
+      expect(await Bun.file(join(dir, "draft-round-0-readability-0.md")).exists()).toBe(false)
+    })
+  })
+
+  test("fails instead of writing a skipped pass when readability is disabled", async () => {
+    await withDir(async (dir) => {
+      await Bun.write(join(dir, "final.md"), article)
+      const config = testRuntimeConfig({
+        dataDir: join(dir, "data"),
+        quorumOverrides: { readability: { enabled: false } },
+      })
+      const error = await scoreCompletedRun({ runDir: dir, config }).catch((err) => err)
+      expect(error).toBeInstanceOf(PosthocReviewError)
+      expect(error).toMatchObject({ status: 400 })
+      expect(String(error)).toContain("disabled")
+      expect(await Bun.file(join(dir, POSTHOC_REPORT_FILENAME)).exists()).toBe(false)
+    })
+  })
+
+  test("fails instead of writing a skipped pass when the API key is missing", async () => {
+    await withDir(async (dir) => {
+      await Bun.write(join(dir, "final.md"), article)
+      const config = testRuntimeConfig({
+        dataDir: join(dir, "data"),
+        quorumOverrides: { readability: { enabled: true } },
+      })
+      const error = await scoreCompletedRun({ runDir: dir, config }).catch((err) => err)
+      expect(error).toBeInstanceOf(PosthocReviewError)
+      expect(error).toMatchObject({ status: 400 })
+      expect(String(error)).toContain("TYPESAFE_API_KEY")
+      expect(await Bun.file(join(dir, POSTHOC_REPORT_FILENAME)).exists()).toBe(false)
+    })
+  })
+
+  test("returns 404 when the run has no markdown article", async () => {
+    await withDir(async (dir) => {
+      await Bun.write(join(dir, "request.json"), JSON.stringify({ topic: "How framing works" }))
+      const config = testRuntimeConfig({
+        dataDir: join(dir, "data"),
+        quorumOverrides: { readability: { enabled: true } },
+      })
+      const error = await scoreCompletedRun({
+        runDir: dir,
+        config,
+        systemOne: mockSystemOne(0.2),
+      }).catch((err) => err)
+      expect(error).toBeInstanceOf(PosthocReviewError)
+      expect(error).toMatchObject({ status: 404 })
+    })
+  })
+
+  test("returns 409 when a review is already running", async () => {
+    await withDir(async (dir) => {
+      await Bun.write(join(dir, "final.md"), article)
+      const config = testRuntimeConfig({
+        dataDir: join(dir, "data"),
+        quorumOverrides: { readability: { enabled: true } },
+      })
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      let started!: () => void
+      const startedAt = new Promise<void>((resolve) => { started = resolve })
+      const hanging = async (request: Parameters<NonNullable<ReadabilityGraphDeps["systemOne"]>>[0]) => {
+        started()
+        await gate
+        return mockSystemOne(0.2)!(request)
+      }
+      const first = scoreCompletedRun({ runDir: dir, config, systemOne: hanging })
+      await startedAt
+      const second = await scoreCompletedRun({ runDir: dir, config, systemOne: mockSystemOne(0.2) }).catch((err) => err)
+      expect(second).toBeInstanceOf(PosthocReviewError)
+      expect(second).toMatchObject({ status: 409 })
+      release()
+      const result = await first
+      expect(result.report.kind).toBe("posthoc")
     })
   })
 })

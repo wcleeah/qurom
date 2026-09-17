@@ -66,12 +66,17 @@ export const readabilityThresholdsSchema = z.object({
   noulVeto: z.number(),
 })
 
+export const readabilityReportKindSchema = z.enum(["gate", "posthoc"])
+
 export const readabilityReportSchema = z.object({
   round: z.number().int().nonnegative(),
   try: z.number().int().nonnegative(),
   model: z.string().min(1),
   passed: z.boolean(),
   fused: z.boolean().optional(),
+  kind: readabilityReportKindSchema.optional(),
+  sourceFile: z.string().optional(),
+  reviewedAt: z.string().optional(),
   skipped: z
     .object({
       reason: readabilitySkipReasonSchema,
@@ -98,4 +103,25 @@ export function readabilityRawFilename(round: number, tryIndex: number) {
 
 export function readabilityDraftFilename(round: number, tryIndex: number) {
   return `draft-round-${round}-readability-${tryIndex}.md`
+}
+
+export const POSTHOC_REPORT_FILENAME = "readability-review.json"
+export const POSTHOC_RAW_FILENAME = "readability-review.jev.json"
+export const POSTHOC_STATUS_FILENAME = "readability-review-status.json"
+
+export const READABILITY_GATE_REPORT_RE = /^readability-round-\d+-try-\d+\.json$/
+export const READABILITY_GATE_RAW_RE = /^readability-round-\d+-try-\d+\.jev\.json$/
+
+export function isPosthocReadabilityReport(filename: string) {
+  return filename === POSTHOC_REPORT_FILENAME
+}
+
+export function isReadabilityReportFilename(filename: string) {
+  return READABILITY_GATE_REPORT_RE.test(filename) || isPosthocReadabilityReport(filename)
+}
+
+export function isPosthocReadabilityArtifact(filename: string) {
+  return filename === POSTHOC_REPORT_FILENAME
+    || filename === POSTHOC_RAW_FILENAME
+    || filename === POSTHOC_STATUS_FILENAME
 }

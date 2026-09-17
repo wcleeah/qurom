@@ -211,6 +211,8 @@ The designated drafter writes `draft-round-N.md`.
 
 Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review. Not an auditor: no vote, no findings, no rebuttal. Jev state includes a constant `audience`: the reader is fluent but not a native English speaker. See [readability-review-plan.md](./readability-review-plan.md).
 
+Finished runs can also request a **score-only post-run review** (`POST /api/runs/:id/readability-review`). That path does not resume the graph or rewrite `final.md`. It writes sidecar artifacts `readability-review.json`, `readability-review.jev.json`, and `readability-review-status.json` using the current quorum thresholds and model. If readability is disabled or `TYPESAFE_API_KEY` is missing, the request fails instead of writing a skipped-pass report.
+
 ### `runParallelAudits`
 
 Runs all configured auditors in parallel. Each auditor receives the current draft, the shared audit prompt, the reader context, and a structured JSON schema.
@@ -389,6 +391,8 @@ Common artifacts:
 | `rebuttals-{agent}-round-N.json` | Rebuttals sent to each auditor. |
 | `auditor-rebuttal-responses-round-N-turn-M.json` | Auditor responses. |
 | `aggregated-findings-round-N.json` | Consensus output. |
+| `readability-round-N-try-M.json` | In-run Jev readability report. |
+| `readability-review.json` | Score-only post-run Jev review of the finished article. |
 | `final.md` | Approved research document. |
 | `failure.json` | Failure details. |
 | `summary.json` | Run summary. |

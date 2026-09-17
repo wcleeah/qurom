@@ -20,6 +20,9 @@ import {
   renderRoundAuditVoteTable,
 } from "./audit-view"
 import { renderConsensusRound, renderDrafterReview, renderRebuttalsRound, renderReadabilityReport, type RebuttalsRoundData, type RebuttalReviewTurnData } from "./artifact-renderers"
+import { renderReadabilityReviewForm } from "./run-controls"
+import { hasReviewableMarkdown, type PosthocReviewStatus } from "../readability/posthoc"
+import { POSTHOC_REPORT_FILENAME, POSTHOC_STATUS_FILENAME, READABILITY_GATE_REPORT_RE } from "../readability/schema"
 import type { AggregatedFindings } from "./types"
 import {
   renderNodeSessionUsageTable,
@@ -269,6 +272,44 @@ async function loadRebuttalTurnData(
   return turnData
 }
 
+async function renderPosthocReadabilityScope(
+  runName: string,
+  files: string[],
+  liveStatus: LiveStatus | null,
+): Promise<string> {
+  const idle = liveStatus?.phase !== "running"
+  const canReview = idle && hasReviewableMarkdown(files)
+  const hasReport = files.includes(POSTHOC_REPORT_FILENAME)
+  let html = ""
+
+  if (canReview) {
+    html += `<div class="section readability-posthoc-actions">
+  <p class="muted-note dim-text">Score the finished article with the current Jev thresholds. The draft is not rewritten.</p>
+  ${renderReadabilityReviewForm(runName, { existing: hasReport })}
+</div>`
+  }
+
+  if (files.includes(POSTHOC_STATUS_FILENAME) && !hasReport) {
+    try {
+      const status = await Bun.file(safeFilePath(runName, POSTHOC_STATUS_FILENAME)).json() as PosthocReviewStatus
+      if (status.phase === "running") {
+        html += `<div class="section"><p class="empty-inline dim-text">Scoring ${escapeHtml(status.sourceFile ?? "the article")}…</p></div>`
+      } else if (status.phase === "error" && status.error) {
+        html += `<div class="section"><p class="danger-text">${escapeHtml(status.error)}</p></div>`
+      }
+    } catch { /* skip unreadable status */ }
+  }
+
+  if (hasReport) {
+    try {
+      const raw = await Bun.file(safeFilePath(runName, POSTHOC_REPORT_FILENAME)).text()
+      html += renderReadabilityReport(POSTHOC_REPORT_FILENAME, JSON.parse(raw))
+    } catch { /* skip unreadable report */ }
+  }
+
+  return html
+}
+
 async function renderNodeScopeBody(
   scope: NodeScope,
   runName: string,
@@ -297,8 +338,9 @@ async function renderNodeScopeBody(
   }
 
   if (resolvedId === "readabilityGate") {
+    content += await renderPosthocReadabilityScope(runName, files, liveStatus)
     const reports = files
-      .filter((f) => /^readability-round-\d+-try-\d+\.json$/.test(f))
+      .filter((f) => READABILITY_GATE_REPORT_RE.test(f))
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     const scoped = scope === "total"
       ? reports
@@ -307,10 +349,13 @@ async function renderNodeScopeBody(
       const live = liveStatus?.phase === "running" && (
         resolveLiveNode(liveStatus) === "readabilityGate"
       ) && (scope === "total" || liveStatus.round === scope)
-      content += `<div class="section"><h2>${scope === "total" ? "Readability review" : `Round ${scope} readability`}</h2>`
-      content += live
-        ? `<p class="empty-inline dim-text">Scoring the current draft…</p></div>`
-        : `<p class="empty-inline dim-text">No readability review yet.</p></div>`
+      const hasPosthoc = files.includes(POSTHOC_REPORT_FILENAME)
+      if (live || !hasPosthoc) {
+        content += `<div class="section"><h2>${scope === "total" ? "Readability review" : `Round ${scope} readability`}</h2>`
+        content += live
+          ? `<p class="empty-inline dim-text">Scoring the current draft…</p></div>`
+          : `<p class="empty-inline dim-text">No in-run readability review yet.</p></div>`
+      }
     } else {
       const latest = scoped[scoped.length - 1]
       content += `<div class="section">`
