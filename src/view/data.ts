@@ -434,6 +434,18 @@ export function classifyFile(filename: string): FileClass {
   if (filename === "final.md") return { group: "Final Outputs", subGroup: "Published", label: "Final markdown", description: "Approved research document" }
   if (filename === "latest-draft.md") return { group: "Final Outputs", subGroup: "Fallbacks", label: "Latest draft", description: "Most recent research draft" }
   if (/^draft-round-\d+\.md$/.test(filename)) return { group: "Research Rounds", subGroup: "Drafts", label: `Draft round ${round}`, description: "Research draft submitted to auditors" }
+  if (/^draft-round-\d+-readability-\d+\.md$/.test(filename)) {
+    const tryIndex = filename.match(/readability-(\d+)/)?.[1]
+    return { group: "Research Rounds", subGroup: "Readability", label: `Readability draft round ${round} try ${tryIndex}`, description: "Draft after a readability review" }
+  }
+  if (/^readability-round-\d+-try-\d+\.json$/.test(filename)) {
+    const tryIndex = filename.match(/try-(\d+)/)?.[1]
+    return { group: "Research Rounds", subGroup: "Readability", label: `Readability review round ${round} try ${tryIndex}`, description: "Jev readability scores and hotspots" }
+  }
+  if (/^readability-round-\d+-try-\d+\.jev\.json$/.test(filename)) {
+    const tryIndex = filename.match(/try-(\d+)/)?.[1]
+    return { group: "Research Rounds", subGroup: "Readability", label: `Readability raw round ${round} try ${tryIndex}`, description: "Raw TypeSafe responses" }
+  }
   if (/^audits-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Audit Bundles", label: `Audit bundle round ${round}`, description: "Combined auditor results" }
   if (/^audit-[\w-]+-round-\d+\.json$/.test(filename)) {
     const agent = agentFrom(filename, "audit")

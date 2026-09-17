@@ -544,7 +544,7 @@ describe("reader profile threaded to prompt-contract functions", () => {
     const prompt = fullDraftPrompt(testConfig, promptBundle, profileState())
     expect(prompt).toContain("Must ground once in the throughline (true priors / unknown concepts): autograd")
     expect(prompt).toContain("Desired depth: evaluation")
-    expect(prompt).toContain("When the reader profile lists secondary goals")
+    expect(prompt).toContain("Reader primary goal")
     expect(prompt).not.toContain("Include a Prerequisites section covering")
   })
 

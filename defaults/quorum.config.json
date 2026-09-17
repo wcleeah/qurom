@@ -2,7 +2,7 @@
   "maxRounds": 10,
   "maxRebuttalTurnsPerFinding": 2,
   "maxConcurrentRuns": 1,
-  "recursionLimit": 80,
+  "recursionLimit": 160,
   "requireUnanimousApproval": true,
   "researchTools": {
     "prefer": ["context7", "exa", "grepapp"],
@@ -20,5 +20,14 @@
     "maxArticleTags": 8,
     "maxNoteTags": 8,
     "predefinedTags": []
+  },
+  "readability": {
+    "enabled": true,
+    "model": "jev-latest",
+    "maxTries": 5,
+    "scoreTrip": 1.3,
+    "scoreConfidence": 0.5,
+    "formalityTrip": 1.6,
+    "noulVeto": 0.4
   }
 }

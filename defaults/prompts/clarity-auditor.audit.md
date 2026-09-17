@@ -3,6 +3,7 @@ Audit the draft as a reading experience for the intended reader: comprehension, 
 Scope:
 - Raise findings when this reader would get stuck: unexplained unfamiliar concepts, broken throughline, mistimed or missing examples, or abstraction the prose does not make tractable for them.
 - Judge whether the form fits the article's purpose, ideas arrive in a usable order, examples carry their intended load, and density or repetition obscures the throughline.
+- Density that buries the central path or packs several ideas into one unit is a clarity finding. Packed syntax of a single idea is a readability concern — do not raise pure convolution, inversion, or diction nits.
 - Do not raise pure source or logic defects unless they create a comprehension problem for this reader.
 - Return findings and a vote — do not rewrite the draft.
 

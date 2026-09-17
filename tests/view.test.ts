@@ -168,6 +168,79 @@ describe("view artifact renderers", () => {
     expect(html).toContain("nested")
   })
 
+  test("renders a readability report instead of a raw JSON tree", () => {
+    const html = renderStructuredJson("readability-round-0-try-0.json", {
+      round: 0,
+      try: 0,
+      model: "jev-latest",
+      passed: false,
+      thresholds: { scoreTrip: 1.3, scoreConfidence: 0.5, formalityTrip: 1.6, noulVeto: 0.4 },
+      units: [{
+        id: "s1-p1",
+        section: "Wire format",
+        quote: "The framing bit chooses the decoder.",
+        scores: {
+          convolution: { score: 1.8, confidence: 0.74, probabilities: { 2: 0.8 }, legend: { 2: "nested" } },
+          inversion: { score: 0.2, confidence: 0.9, probabilities: { 0: 0.9 }, legend: { 0: "canonical" } },
+          diction: { score: 0.2, confidence: 0.9, probabilities: { 0: 0.9 }, legend: { 0: "plain" } },
+          formality: { score: 0.2, confidence: 0.9, probabilities: { 0: 0.9 }, legend: { 0: "natural" } },
+          density: { score: 0.2, confidence: 0.9, probabilities: { 0: 0.9 }, legend: { 0: "one move" } },
+        },
+        gates: { inversionEarned: 0.1, densityIsOneMove: 0.2, dictionIsDomainTerm: 0.1 },
+        remedy: { choice: "unnest", confidence: 0.8, probabilities: { unnest: 0.8, keep: 0.2 } },
+      }],
+      hotspots: [{
+        unitId: "s1-p1",
+        section: "Wire format",
+        quote: "The framing bit chooses the decoder.",
+        criterion: "convolution",
+        score: 1.8,
+        confidence: 0.74,
+        remedy: "unnest",
+      }],
+    })
+    expect(html).toContain("Readability review")
+    expect(html).toContain("s1-p1")
+    expect(html).toContain("unnest")
+    expect(html).toContain("readability-heatmap")
+    expect(html).toContain("readability-score dim")
+    expect(html).toContain("inversion earned")
+    expect(html).not.toContain("json-tree")
+  })
+
+  test("renders skipped and fused readability reports", () => {
+    const skipped = renderStructuredJson("readability-round-0-try-0.json", {
+      round: 0,
+      try: 0,
+      model: "jev-latest",
+      passed: true,
+      skipped: { reason: "no_api_key" },
+      units: [],
+      hotspots: [],
+    })
+    expect(skipped).toContain("Skipped (no TypeSafe API key)")
+
+    const fused = renderStructuredJson("readability-round-0-try-4.json", {
+      round: 0,
+      try: 4,
+      model: "jev-latest",
+      passed: false,
+      fused: true,
+      units: [],
+      hotspots: [{
+        unitId: "s1-p1",
+        section: "Wire format",
+        quote: "Nested clause.",
+        criterion: "convolution",
+        score: 1.9,
+        confidence: 0.8,
+        remedy: "unnest",
+      }],
+    })
+    expect(fused).toContain("leftover hotspot")
+    expect(fused).toContain("Max tries reached")
+  })
+
   test("renders uniform object arrays as data tables", () => {
     const html = renderStructuredJson("metrics.json", [
       { name: "latency", value: 12 },
@@ -207,7 +280,8 @@ describe("view artifact renderers", () => {
 
 describe("view assets and html helpers", () => {
   test("keeps styles and client script split into focused modules", () => {
-    expect(CSS).toContain(".table-wrap")
+    expect(CSS).toContain(".readability-heatmap")
+    expect(CSS).toContain(".readability-score.dim")
     expect(CSS).toContain("overflow-x: auto")
     expect(CSS).not.toContain("<script>")
     expect(POLLING_SCRIPT).toContain("<script>")
@@ -484,6 +558,7 @@ describe("view components", () => {
     const html = renderNodeMiniPipeline("example-run", "runDesignHtml", ["design-html-html-designer.html"])
     expect(html).toContain("/runs/example-run/node/discoverReader")
     expect(html).toContain("/runs/example-run/node/draftFullDraft")
+    expect(html).toContain("/runs/example-run/node/readabilityGate")
     expect(html).toContain("/runs/example-run/node/runParallelAudits")
     expect(html).toContain("/runs/example-run/node/runDesignHtml")
     expect(html).toContain("/runs/example-run/node/graphicalEnhance")

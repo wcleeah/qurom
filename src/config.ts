@@ -13,6 +13,7 @@ const envSchema = z.object({
   QUORUM_CAPTURE_OPENCODE_EVENTS: z.enum(["0", "1"]).default("0"),
   QUORUM_CAPTURE_SYNC_HISTORY: z.enum(["0", "1"]).default("0"),
   CURSOR_API_KEY: z.string().min(1).optional(),
+  TYPESAFE_API_KEY: z.string().min(1).optional(),
   CONTEXT7_API_KEY: z.string().min(1).optional(),
   EXA_API_KEY: z.string().min(1).optional(),
   LANGFUSE_PUBLIC_KEY: z.string().optional(),
@@ -25,7 +26,7 @@ export const quorumConfigSchema = z.object({
   maxRounds: z.number().int().positive(),
   maxRebuttalTurnsPerFinding: z.number().int().positive(),
   maxConcurrentRuns: z.number().int().positive().max(8).default(1),
-  recursionLimit: z.number().int().positive().default(80),
+  recursionLimit: z.number().int().positive().default(160),
   requireUnanimousApproval: z.boolean(),
   researchTools: z.object({
     prefer: z.array(z.string().min(1)).min(1),
@@ -61,6 +62,25 @@ export const quorumConfigSchema = z.object({
       maxArticleTags: 8,
       maxNoteTags: 8,
       predefinedTags: [],
+    }),
+  readability: z
+    .object({
+      enabled: z.boolean().default(true),
+      model: z.string().min(1).default("jev-latest"),
+      maxTries: z.number().int().positive().default(5),
+      scoreTrip: z.number().min(0).max(2).default(1.3),
+      scoreConfidence: z.number().min(0).max(1).default(0.5),
+      formalityTrip: z.number().min(0).max(2).default(1.6),
+      noulVeto: z.number().min(0).max(1).default(0.4),
+    })
+    .default({
+      enabled: true,
+      model: "jev-latest",
+      maxTries: 5,
+      scoreTrip: 1.3,
+      scoreConfidence: 0.5,
+      formalityTrip: 1.6,
+      noulVeto: 0.4,
     }),
 })
 

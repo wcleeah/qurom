@@ -64,6 +64,14 @@ function inferScopeFromArtifact(artifact: string, role: string): CursorCallScope
     return { node: "discoverReader", round: 0 }
   }
 
+  if ((match = artifact.match(/^draft-round-(\d+)-readability-(\d+)\.md$/))) {
+    return { node: "reviseReadability", round: Number.parseInt(match[1]!, 10) }
+  }
+
+  if ((match = artifact.match(/^readability-round-(\d+)-try-(\d+)\.json$/))) {
+    return { node: "scoreReadability", round: Number.parseInt(match[1]!, 10) }
+  }
+
   if ((match = artifact.match(/^draft-round-(\d+)\.md$/))) {
     const draftRound = Number.parseInt(match[1]!, 10)
     if (draftRound === 0) return { node: "draftFullDraft", round: 0 }

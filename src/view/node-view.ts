@@ -19,7 +19,7 @@ import {
   renderAuditVoteTable,
   renderRoundAuditVoteTable,
 } from "./audit-view"
-import { renderConsensusRound, renderDrafterReview, renderRebuttalsRound, type RebuttalsRoundData, type RebuttalReviewTurnData } from "./artifact-renderers"
+import { renderConsensusRound, renderDrafterReview, renderRebuttalsRound, renderReadabilityReport, type RebuttalsRoundData, type RebuttalReviewTurnData } from "./artifact-renderers"
 import type { AggregatedFindings } from "./types"
 import {
   renderNodeSessionUsageTable,
@@ -296,6 +296,44 @@ async function renderNodeScopeBody(
     content += await renderDraftFullDraftScope(runName, files, scope, liveStatus)
   }
 
+  if (resolvedId === "readabilityGate") {
+    const reports = files
+      .filter((f) => /^readability-round-\d+-try-\d+\.json$/.test(f))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    const scoped = scope === "total"
+      ? reports
+      : reports.filter((f) => parseInt(f.match(/round-(\d+)/)?.[1] ?? "-1", 10) === scope)
+    if (scoped.length === 0) {
+      const live = liveStatus?.phase === "running" && (
+        resolveLiveNode(liveStatus) === "readabilityGate"
+      ) && (scope === "total" || liveStatus.round === scope)
+      content += `<div class="section"><h2>${scope === "total" ? "Readability review" : `Round ${scope} readability`}</h2>`
+      content += live
+        ? `<p class="empty-inline dim-text">Scoring the current draft…</p></div>`
+        : `<p class="empty-inline dim-text">No readability review yet.</p></div>`
+    } else {
+      const latest = scoped[scoped.length - 1]
+      content += `<div class="section">`
+      if (scoped.length > 1) {
+        content += `<p class="dim-text readability-try-list">${scoped.length} tries · latest selected</p>`
+      }
+      for (const file of scoped) {
+        try {
+          const raw = await Bun.file(safeFilePath(runName, file)).text()
+          const reportHtml = renderReadabilityReport(file, JSON.parse(raw))
+          if (scoped.length === 1) {
+            content += reportHtml
+          } else {
+            const tryIndex = file.match(/try-(\d+)/)?.[1] ?? "?"
+            const open = file === latest ? " open" : ""
+            content += `<details class="readability-try"${open}><summary>Try ${escapeHtml(tryIndex)}${file === latest ? " (latest)" : ""}</summary>${reportHtml}</details>`
+          }
+        } catch { /* skip unreadable reports */ }
+      }
+      content += `</div>`
+    }
+  }
+
   if (resolvedId === "runDesignHtml") {
     content += await renderDesignHtmlScope(runName, files, scope, liveStatus)
   }
@@ -508,6 +546,7 @@ export async function renderNodeDashboard(
 const MINI_PIPELINE_NODE_IDS = [
   "discoverReader",
   "draftFullDraft",
+  "readabilityGate",
   "runParallelAudits",
   "reviewFindingsByDrafter",
   REBUTTALS_VIEWER_NODE_ID,
