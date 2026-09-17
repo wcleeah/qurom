@@ -8,6 +8,14 @@ import {
   presentDesignHtmlArtifact,
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "../design-artifacts"
+import {
+  POSTHOC_RAW_FILENAME,
+  POSTHOC_REPORT_FILENAME,
+  POSTHOC_STATUS_FILENAME,
+  READABILITY_GATE_RAW_RE,
+  READABILITY_GATE_REPORT_RE,
+  isReadabilityReportFilename,
+} from "../readability/schema"
 import { indexRunArtifacts, roundHasRebuttals, type RoundArtifacts, type RunArtifactIndex } from "./run-artifacts"
 import type { LiveStatus, RunStatus } from "./types"
 
@@ -58,9 +66,12 @@ export const GRAPH_NODES: NodeDefinition[] = [
     phase: "research",
     liveNodeAliases: ["scoreReadability", "reviseReadability"],
     filePatterns: [
-      /^readability-round-\d+-try-\d+\.json$/,
-      /^readability-round-\d+-try-\d+\.jev\.json$/,
+      READABILITY_GATE_REPORT_RE,
+      READABILITY_GATE_RAW_RE,
       /^draft-round-\d+-readability-\d+\.md$/,
+      new RegExp(`^${POSTHOC_REPORT_FILENAME.replace(/\./g, "\\.")}$`),
+      new RegExp(`^${POSTHOC_RAW_FILENAME.replace(/\./g, "\\.")}$`),
+      new RegExp(`^${POSTHOC_STATUS_FILENAME.replace(/\./g, "\\.")}$`),
     ],
     roundScoped: true,
   },
@@ -353,7 +364,7 @@ export function nodeKpis(nodeId: string, files: string[], index?: RunArtifactInd
       break
     }
     case "readabilityGate": {
-      const reports = files.filter((f) => /^readability-round-\d+-try-\d+\.json$/.test(f))
+      const reports = files.filter((f) => isReadabilityReportFilename(f))
       kpis.push({ label: "Reviews", value: String(reports.length) })
       break
     }
@@ -424,7 +435,7 @@ export function isNodeComplete(
     case "draftFullDraft":
       return hasFile(/^draft-round-\d+\.md$/)
     case "readabilityGate":
-      return hasFile(/^readability-round-\d+-try-\d+\.json$/)
+      return files.some((f) => isReadabilityReportFilename(f))
     case "runParallelAudits":
       return currentRound >= 0
         && roundArtifactExists(files, /^audits-round-(\d+)\.json$/, currentRound)

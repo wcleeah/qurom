@@ -174,6 +174,20 @@ describe("node-registry file assignment", () => {
     expect(reviewFiles).toContain("drafter-rebuttal-review-round-1-turn-1.json")
     expect(reviewFiles).toContain("disputed-round-1.json")
   })
+
+  test("assigns post-run readability sidecars to the readability node", () => {
+    const files = [
+      "final.md",
+      "readability-review.json",
+      "readability-review.jev.json",
+      "readability-review-status.json",
+    ]
+    const nodeFiles = filesForNode("readabilityGate", files)
+    expect(nodeFiles).toContain("readability-review.json")
+    expect(nodeFiles).toContain("readability-review.jev.json")
+    expect(nodeFiles).toContain("readability-review-status.json")
+    expect(isNodeComplete("readabilityGate", files, "approved", null)).toBe(true)
+  })
 })
 
 describe("classifyFile rebuttal artifacts", () => {

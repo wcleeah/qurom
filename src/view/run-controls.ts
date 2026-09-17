@@ -7,6 +7,7 @@ export type RunResumeActions = {
   showRerunReuseProfile: boolean
   showRerunRepairProfile: boolean
   showRerunFreshInterview: boolean
+  showReadabilityReview: boolean
 }
 
 export function resolveRunResumeActions(input: {
@@ -16,6 +17,7 @@ export function resolveRunResumeActions(input: {
   hasInputMd: boolean
   hasTopic: boolean
   hasReaderProfile: boolean
+  hasReviewableMarkdown?: boolean
   designStatus?: RunStatus | "running" | null
 }): RunResumeActions {
   if (input.isRunning) {
@@ -25,6 +27,7 @@ export function resolveRunResumeActions(input: {
       showRerunReuseProfile: false,
       showRerunRepairProfile: false,
       showRerunFreshInterview: false,
+      showReadabilityReview: false,
     }
   }
 
@@ -33,6 +36,8 @@ export function resolveRunResumeActions(input: {
     || (input.hasFinalMd && !input.hasFinalHtml && input.designStatus !== "approved")
 
   const canRerun = input.hasTopic || input.hasInputMd
+  const hasReviewableMarkdown = input.hasReviewableMarkdown
+    ?? (input.hasFinalMd)
 
   return {
     showResume,
@@ -40,6 +45,7 @@ export function resolveRunResumeActions(input: {
     showRerunReuseProfile: canRerun && input.hasReaderProfile,
     showRerunRepairProfile: canRerun && input.hasReaderProfile,
     showRerunFreshInterview: canRerun,
+    showReadabilityReview: hasReviewableMarkdown,
   }
 }
 
@@ -82,6 +88,13 @@ function renderRerunFreshForm(runName: string, disabled: boolean): string {
 </form>`
 }
 
+export function renderReadabilityReviewForm(runName: string, options?: { existing?: boolean }) {
+  const label = options?.existing ? "Re-score readability (Jev)" : "Review readability (Jev)"
+  return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/readability-review">
+  <button type="submit" class="btn btn-secondary">${label}</button>
+</form>`
+}
+
 function renderArchiveForm(runName: string): string {
   return `<form class="run-action-form" method="POST" action="/api/runs/${encodeURIComponent(runName)}/archive">
   <button type="submit" class="btn btn-secondary">Archive run</button>
@@ -97,11 +110,11 @@ export function renderUnarchiveForm(runName: string): string {
 export function renderRunActionStrip(
   runName: string,
   actions: RunResumeActions,
-  options?: { runActiveGlobally?: boolean; showArchive?: boolean; maxConcurrent?: number },
+  options?: { runActiveGlobally?: boolean; showArchive?: boolean; maxConcurrent?: number; hasExistingReadabilityReview?: boolean },
 ): string {
   const showArchive = options?.showArchive === true
   const hasRerun = actions.showRerunReuseProfile || actions.showRerunRepairProfile || actions.showRerunFreshInterview
-  if (!actions.showResume && !actions.showRestartFromSource && !hasRerun && !showArchive) return ""
+  if (!actions.showResume && !actions.showRestartFromSource && !hasRerun && !actions.showReadabilityReview && !showArchive) return ""
 
   const blocked = options?.runActiveGlobally === true
   const hasUnattendedRerun = actions.showRerunReuseProfile || actions.showRerunRepairProfile
@@ -123,6 +136,10 @@ export function renderRunActionStrip(
     actions.showRerunFreshInterview ? renderRerunFreshForm(runName, blocked) : "",
   ].filter(Boolean).join("\n")
 
+  const reviewButtons = actions.showReadabilityReview
+    ? renderReadabilityReviewForm(runName, { existing: options?.hasExistingReadabilityReview })
+    : ""
+
   const archiveButtons = showArchive ? renderArchiveForm(runName) : ""
 
   const sections: string[] = []
@@ -135,6 +152,11 @@ export function renderRunActionStrip(
     sections.push(`<span class="run-actions-label">Start a new run</span>
   <div class="run-actions-buttons">${rerunButtons}</div>
   ${continueButtons ? "" : busyNote}`)
+  }
+  if (reviewButtons) {
+    sections.push(`<span class="run-actions-label">Inspect this run</span>
+  <div class="run-actions-buttons">${reviewButtons}</div>
+  <p class="muted-note dim-text run-actions-note">Scores the finished article. Does not rewrite the draft.</p>`)
   }
   if (archiveButtons) {
     sections.push(`<span class="run-actions-label">Manage</span>
@@ -154,6 +176,7 @@ export function renderRunControlsSection(input: {
   resumeActions: RunResumeActions
   runActiveGlobally: boolean
   maxConcurrent?: number
+  hasExistingReadabilityReview?: boolean
 }): string {
   const cancelHtml = input.isRunning ? renderRunCancelButton(input.runName) : ""
   const actionsHtml = input.isRunning
@@ -162,6 +185,7 @@ export function renderRunControlsSection(input: {
       runActiveGlobally: input.runActiveGlobally,
       maxConcurrent: input.maxConcurrent,
       showArchive: true,
+      hasExistingReadabilityReview: input.hasExistingReadabilityReview,
     })
   const completionHtml = input.showCompletion ? input.completionHtml : ""
 

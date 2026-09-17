@@ -4,6 +4,7 @@ import { readSessionTelemetry, SESSION_TELEMETRY_FILENAME, type SessionTelemetry
 import { SESSION_LEDGER_FILENAME } from "../session-ledger"
 import { readCursorUsageImport, CURSOR_USAGE_IMPORT_FILENAME, type CursorUsageImportFile } from "../cursor-usage-import"
 import { reconcileAwaitingReaderReplyWithDisk, readerInterviewStateFromRunDir } from "../reader-transcript"
+import { POSTHOC_RAW_FILENAME, POSTHOC_REPORT_FILENAME, POSTHOC_STATUS_FILENAME } from "../readability/schema"
 import { getArchiveDir, getRunsDir, safeFilePath, safeRunPath } from "./paths"
 import { isRunManagedActive } from "../run-manager"
 import { listReadRunNames, listRunAccessTimes } from "./read-store"
@@ -445,6 +446,15 @@ export function classifyFile(filename: string): FileClass {
   if (/^readability-round-\d+-try-\d+\.jev\.json$/.test(filename)) {
     const tryIndex = filename.match(/try-(\d+)/)?.[1]
     return { group: "Research Rounds", subGroup: "Readability", label: `Readability raw round ${round} try ${tryIndex}`, description: "Raw TypeSafe responses" }
+  }
+  if (filename === POSTHOC_REPORT_FILENAME) {
+    return { group: "Research Rounds", subGroup: "Readability", label: "Post-run readability review", description: "Score-only Jev review of the finished article" }
+  }
+  if (filename === POSTHOC_RAW_FILENAME) {
+    return { group: "Research Rounds", subGroup: "Readability", label: "Post-run readability raw", description: "Raw TypeSafe responses for the post-run review" }
+  }
+  if (filename === POSTHOC_STATUS_FILENAME) {
+    return { group: "Research Rounds", subGroup: "Readability", label: "Post-run readability status", description: "In-flight or last post-run review status" }
   }
   if (/^audits-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Audit Bundles", label: `Audit bundle round ${round}`, description: "Combined auditor results" }
   if (/^audit-[\w-]+-round-\d+\.json$/.test(filename)) {

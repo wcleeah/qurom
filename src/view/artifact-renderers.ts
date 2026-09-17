@@ -2,6 +2,7 @@ import { escapeHtml, renderJsonCard } from "./utils"
 import { renderJsonViewer } from "./json-viewer"
 import { summaryTable } from "./html"
 import { renderReadabilityReport } from "./readability-view"
+import { isReadabilityReportFilename } from "../readability/schema"
 import type { AggregatedFindings, AuditFinding, AuditRecord, RebuttalEntry, RebuttalResponseEntry } from "./types"
 
 export { renderReadabilityReport }
@@ -641,7 +642,7 @@ export function renderRebuttalResponses(filename: string, data: unknown): string
 // ── Dispatcher ──
 
 export function renderStructuredJson(filename: string, data: unknown): string {
-  if (/^readability-round-\d+-try-\d+\.json$/.test(filename)) return renderReadabilityReport(filename, data)
+  if (isReadabilityReportFilename(filename)) return renderReadabilityReport(filename, data)
   if (filename === "request.json") return renderRequestCard(data)
   if (/^reader-profile(?:-\d+)?\.json$/.test(filename)) return renderReaderProfileCard(data)
   if (filename === "summary.json") return renderSummaryCard(data)
