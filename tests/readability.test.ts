@@ -7,10 +7,9 @@ import type { SystemOneResult } from "@typesafe-ai/sdk"
 
 import type { AgentRuntime } from "../src/agent-runtime/runtime"
 import { formatReadabilityHints } from "../src/readability/hints"
-import { deriveHotspots, scoreDraftReadability } from "../src/readability/score"
+import { deriveHotspots, scoreDraftReadability, takeUnchangedPassedUnit } from "../src/readability/score"
 import { segmentDraft } from "../src/readability/segment"
-import type { ReadabilityHotspot, ReadabilityUnit } from "../src/readability/schema"
-import { POSTHOC_RAW_FILENAME, POSTHOC_REPORT_FILENAME } from "../src/readability/schema"
+import { readabilityReportSchema, POSTHOC_RAW_FILENAME, POSTHOC_REPORT_FILENAME, type ReadabilityHotspot, type ReadabilityReport, type ReadabilityUnit } from "../src/readability/schema"
 import {
   hasReviewableMarkdown,
   pickReviewableMarkdownFilename,
@@ -230,6 +229,161 @@ describe("scoreDraftReadability", () => {
     expect(String(seen[0]?.register)).toContain("non-native English reader")
     expect(raw[0]?.state.audience).toBe(READABILITY_AUDIENCE)
   })
+
+  test("reuses unchanged passed units and only scores the rest", async () => {
+    const passedQuote = "This opening paragraph is long enough to count as prose for the readability reviewer."
+    const hotspotQuote = "Another substantial paragraph that should be scored because it carries a complete idea."
+    const rewritten = "The framing bit chooses the decoder before any payload is interpreted in this rewrite."
+    const previousUnits = [
+      unit({
+        id: "s1-p1",
+        quote: passedQuote,
+        remedy: { choice: "keep", confidence: 0.9, probabilities: { keep: 0.9 } },
+      }),
+      unit({
+        id: "s1-p2",
+        quote: hotspotQuote,
+        scores: { ...unit().scores, convolution: scoreAnswer(1.8) },
+      }),
+    ]
+    const previous = readabilityReportSchema.parse({
+      round: 0,
+      try: 0,
+      model: "jev-latest",
+      passed: false,
+      thresholds: DEFAULT_READABILITY_THRESHOLDS,
+      units: previousUnits,
+      hotspots: deriveHotspots(previousUnits, DEFAULT_READABILITY_THRESHOLDS),
+    })
+    const seen: string[] = []
+    const inner = mockSystemOne(0.2)!
+    const { report, raw } = await scoreDraftReadability({
+      units: [
+        { id: "s1-p1", section: "Intro", quote: passedQuote, before: "", after: rewritten },
+        { id: "s1-p2", section: "Intro", quote: rewritten, before: passedQuote, after: "" },
+      ],
+      context: { articleJob: "Explain framing", reader: { familiar: [], unfamiliar: [] } },
+      model: "jev-latest",
+      thresholds: DEFAULT_READABILITY_THRESHOLDS,
+      systemOne: async (request) => {
+        seen.push(String(request.state.unit))
+        return inner(request)
+      },
+      round: 0,
+      tryIndex: 1,
+      previous,
+    })
+    expect(seen).toEqual([rewritten])
+    expect(raw).toHaveLength(1)
+    expect(report.units[0]?.cached).toBe(true)
+    expect(report.units[0]?.quote).toBe(passedQuote)
+    expect(report.units[0]?.id).toBe("s1-p1")
+    expect(report.units[1]?.cached).toBeUndefined()
+    expect(report.units[1]?.quote).toBe(rewritten)
+  })
+
+  test("re-scores a previous hotspot even when the quote did not change", async () => {
+    const quote = "Another substantial paragraph that should be scored because it carries a complete idea."
+    const previousUnits = [
+      unit({
+        id: "s1-p1",
+        quote,
+        scores: { ...unit().scores, convolution: scoreAnswer(1.8) },
+      }),
+    ]
+    const previous = readabilityReportSchema.parse({
+      round: 0,
+      try: 0,
+      model: "jev-latest",
+      passed: false,
+      thresholds: DEFAULT_READABILITY_THRESHOLDS,
+      units: previousUnits,
+      hotspots: deriveHotspots(previousUnits, DEFAULT_READABILITY_THRESHOLDS),
+    })
+    let calls = 0
+    const { report } = await scoreDraftReadability({
+      units: [{ id: "s1-p1", section: "Intro", quote, before: "", after: "" }],
+      context: { articleJob: "Explain framing", reader: { familiar: [], unfamiliar: [] } },
+      model: "jev-latest",
+      thresholds: DEFAULT_READABILITY_THRESHOLDS,
+      systemOne: async (request) => {
+        calls += 1
+        return mockSystemOne(0.2)!(request)
+      },
+      round: 0,
+      tryIndex: 1,
+      previous,
+    })
+    expect(calls).toBe(1)
+    expect(report.units[0]?.cached).toBeUndefined()
+    expect(report.passed).toBe(true)
+  })
+
+  test("consumes duplicate passed quotes one at a time", async () => {
+    const quote = "This opening paragraph is long enough to count as prose for the readability reviewer."
+    const previousUnits = [
+      unit({
+        id: "s1-p1",
+        quote,
+        remedy: { choice: "keep", confidence: 0.9, probabilities: { keep: 0.9 } },
+      }),
+    ]
+    const previous = readabilityReportSchema.parse({
+      round: 0,
+      try: 0,
+      model: "jev-latest",
+      passed: true,
+      thresholds: DEFAULT_READABILITY_THRESHOLDS,
+      units: previousUnits,
+      hotspots: [],
+    })
+    let calls = 0
+    const { report } = await scoreDraftReadability({
+      units: [
+        { id: "s1-p1", section: "Intro", quote, before: "", after: quote },
+        { id: "s1-p2", section: "Intro", quote, before: quote, after: "" },
+      ],
+      context: { articleJob: "Explain framing", reader: { familiar: [], unfamiliar: [] } },
+      model: "jev-latest",
+      thresholds: DEFAULT_READABILITY_THRESHOLDS,
+      systemOne: async (request) => {
+        calls += 1
+        return mockSystemOne(0.2)!(request)
+      },
+      round: 0,
+      tryIndex: 1,
+      previous,
+    })
+    expect(calls).toBe(1)
+    expect(report.units[0]?.cached).toBe(true)
+    expect(report.units[1]?.cached).toBeUndefined()
+  })
+})
+
+describe("takeUnchangedPassedUnit", () => {
+  test("skips hotspot units and already consumed ids", () => {
+    const passed = unit({
+      id: "s1-p1",
+      quote: "same quote",
+      remedy: { choice: "keep", confidence: 0.9, probabilities: { keep: 0.9 } },
+    })
+    const hotspot = unit({
+      id: "s1-p2",
+      quote: "same quote",
+      scores: { ...unit().scores, convolution: scoreAnswer(1.8) },
+    })
+    const previous: ReadabilityReport = readabilityReportSchema.parse({
+      round: 0,
+      try: 0,
+      model: "jev-latest",
+      passed: false,
+      units: [hotspot, passed],
+      hotspots: deriveHotspots([hotspot, passed], DEFAULT_READABILITY_THRESHOLDS),
+    })
+    const consumed = new Set<string>()
+    expect(takeUnchangedPassedUnit(previous, "same quote", consumed)?.id).toBe("s1-p1")
+    expect(takeUnchangedPassedUnit(previous, "same quote", consumed)).toBeUndefined()
+  })
 })
 
 describe("buildReadabilityQuestions", () => {
@@ -376,6 +530,57 @@ describe("scoreReadability graph node", () => {
           throw new Error("TypeSafe unavailable")
         },
       })).rejects.toThrow("TypeSafe unavailable")
+    })
+  })
+
+  test("skips Jev for unchanged passed paragraphs from the previous try", async () => {
+    await withDir(async (dir) => {
+      const passed = "This opening paragraph is long enough to count as prose for the readability reviewer."
+      const rewritten = "The framing bit chooses the decoder before any payload is interpreted in this rewrite."
+      const previousUnits = [
+        unit({
+          id: "s1-p1",
+          section: "Untitled",
+          quote: passed,
+          remedy: { choice: "keep", confidence: 0.9, probabilities: { keep: 0.9 } },
+        }),
+        unit({
+          id: "s1-p2",
+          section: "Untitled",
+          quote: "Another substantial paragraph that should be scored because it carries a complete idea.",
+          scores: { ...unit().scores, convolution: scoreAnswer(1.8) },
+        }),
+      ]
+      await Bun.write(join(dir, "readability-round-0-try-0.json"), JSON.stringify({
+        round: 0,
+        try: 0,
+        model: "jev-latest",
+        passed: false,
+        thresholds: DEFAULT_READABILITY_THRESHOLDS,
+        units: previousUnits,
+        hotspots: deriveHotspots(previousUnits, DEFAULT_READABILITY_THRESHOLDS),
+      }))
+      const seen: string[] = []
+      const config = testRuntimeConfig({
+        dataDir: join(dir, "data"),
+        quorumOverrides: { readability: { enabled: true } },
+      })
+      const next = await scoreReadability(config, state(dir, {
+        readabilityTry: 1,
+        draft: `${passed}\n\n${rewritten}`,
+      }), {
+        systemOne: async (request) => {
+          seen.push(String(request.state.unit))
+          return mockSystemOne(0.2)!(request)
+        },
+      })
+      expect(next.status).toBe("auditing")
+      expect(seen).toEqual([rewritten])
+      const report = await Bun.file(join(dir, "readability-round-0-try-1.json")).json() as {
+        units: Array<{ quote: string; cached?: boolean }>
+      }
+      expect(report.units[0]?.cached).toBe(true)
+      expect(report.units[1]?.cached).toBeUndefined()
     })
   })
 })
@@ -675,6 +880,47 @@ describe("scoreCompletedRun", () => {
       release()
       const result = await first
       expect(result.report.kind).toBe("posthoc")
+    })
+  })
+
+  test("does not reuse in-run scores when scoring a completed run", async () => {
+    await withDir(async (dir) => {
+      await Bun.write(join(dir, "final.md"), article)
+      const previousUnits = [
+        unit({
+          id: "s1-p1",
+          quote: "This opening paragraph is long enough to count as prose for the readability reviewer.",
+          remedy: { choice: "keep", confidence: 0.9, probabilities: { keep: 0.9 } },
+        }),
+        unit({
+          id: "s1-p2",
+          quote: "Another substantial paragraph that should be scored because it carries a complete idea.",
+          remedy: { choice: "keep", confidence: 0.9, probabilities: { keep: 0.9 } },
+        }),
+      ]
+      await Bun.write(join(dir, "readability-round-0-try-0.json"), JSON.stringify({
+        round: 0,
+        try: 0,
+        model: "jev-latest",
+        passed: true,
+        thresholds: DEFAULT_READABILITY_THRESHOLDS,
+        units: previousUnits,
+        hotspots: [],
+      }))
+      let calls = 0
+      const config = testRuntimeConfig({
+        dataDir: join(dir, "data"),
+        quorumOverrides: { readability: { enabled: true } },
+      })
+      await scoreCompletedRun({
+        runDir: dir,
+        config,
+        systemOne: async (request) => {
+          calls += 1
+          return mockSystemOne(0.2)!(request)
+        },
+      })
+      expect(calls).toBe(2)
     })
   })
 })

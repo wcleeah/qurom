@@ -119,6 +119,33 @@ async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T, inde
   return results
 }
 
+function reusedUnit(segmented: SegmentedUnit, previous: ReadabilityUnit): ReadabilityUnit {
+  return {
+    ...previous,
+    id: segmented.id,
+    section: segmented.section,
+    quote: segmented.quote,
+    cached: true,
+  }
+}
+
+export function takeUnchangedPassedUnit(
+  previous: ReadabilityReport | undefined,
+  quote: string,
+  consumed: Set<string>,
+): ReadabilityUnit | undefined {
+  if (!previous) return undefined
+  const hotspotIds = new Set(previous.hotspots.map((hotspot) => hotspot.unitId))
+  for (const unit of previous.units) {
+    if (consumed.has(unit.id)) continue
+    if (hotspotIds.has(unit.id)) continue
+    if (unit.quote !== quote) continue
+    consumed.add(unit.id)
+    return unit
+  }
+  return undefined
+}
+
 function unitFromAnswers(
   segmented: SegmentedUnit,
   result: SystemOneResult<ReadabilityQuestions>,
@@ -157,11 +184,25 @@ export async function scoreDraftReadability(input: {
   round: number
   tryIndex: number
   pool?: number
+  previous?: ReadabilityReport
 }): Promise<{ report: ReadabilityReport; raw: RawReadabilityCall[] }> {
   const questions = buildReadabilityQuestions()
   const raw: RawReadabilityCall[] = []
+  const consumed = new Set<string>()
+  const pending: Array<{ index: number; segmented: SegmentedUnit }> = []
+  const units: ReadabilityUnit[] = new Array(input.units.length)
 
-  const scored = await mapPool(input.units, input.pool ?? DEFAULT_POOL, async (segmented) => {
+  for (const [index, segmented] of input.units.entries()) {
+    const previous = takeUnchangedPassedUnit(input.previous, segmented.quote, consumed)
+    if (previous) {
+      units[index] = reusedUnit(segmented, previous)
+    } else {
+      pending.push({ index, segmented })
+    }
+  }
+
+  const scored = await mapPool(pending, input.pool ?? DEFAULT_POOL, async (item) => {
+    const segmented = item.segmented
     const state = {
       unit: segmented.quote,
       section: segmented.section,
@@ -179,6 +220,7 @@ export async function scoreDraftReadability(input: {
     } satisfies SystemOneRequest<ReadabilityQuestions>
     const result = await input.systemOne(request)
     return {
+      index: item.index,
       unit: unitFromAnswers(segmented, result),
       raw: {
         unitId: segmented.id,
@@ -189,8 +231,11 @@ export async function scoreDraftReadability(input: {
     }
   })
 
-  const units = scored.map((item) => item.unit)
-  raw.push(...scored.map((item) => item.raw))
+  for (const item of scored) {
+    units[item.index] = item.unit
+    raw.push(item.raw)
+  }
+
   const hotspots = deriveHotspots(units, input.thresholds)
   const report = readabilityReportSchema.parse({
     round: input.round,
