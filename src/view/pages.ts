@@ -5,6 +5,8 @@ import { listArticleTags, listAllTags, listNoteTags } from "../tags-store"
 import { renderArticleTagsSection, TAG_FORMS_SCRIPT } from "./tag-ui"
 import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
 import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
+import { hasReviewableMarkdown } from "../readability/posthoc"
+import { POSTHOC_REPORT_FILENAME } from "../readability/schema"
 import { renderRunControlsSection, renderUnarchiveForm, resolveRunResumeActions } from "./run-controls"
 import { tryGetRunManager } from "../run-manager"
 import { renderRerunQueueStrip } from "./rerun-queue-view"
@@ -659,6 +661,7 @@ export async function renderRun(name: string): Promise<Response> {
     hasInputMd: files.includes("input.md"),
     hasTopic: Boolean(requestJson?.topic?.trim()),
     hasReaderProfile: files.includes("reader-profile.json"),
+    hasReviewableMarkdown: hasReviewableMarkdown(files),
     designStatus: design?.status ?? null,
   })
   const runControlsHtml = renderRunControlsSection({
@@ -669,6 +672,7 @@ export async function renderRun(name: string): Promise<Response> {
     resumeActions,
     runActiveGlobally,
     maxConcurrent,
+    hasExistingReadabilityReview: files.includes(POSTHOC_REPORT_FILENAME),
   })
 
   const filesLinkSection = `<div class="section"><p><a href="/runs/${encodeURIComponent(name)}/files">Browse all ${files.length} files →</a></p></div>`

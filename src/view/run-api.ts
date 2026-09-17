@@ -1,6 +1,8 @@
 import { inputRequestSchema } from "../schema"
 import { readRunSourceDocument } from "../document-input"
 import { parseRerunInterviewMode } from "../run-rerun"
+import { scoreCompletedRun } from "../readability/posthoc"
+import { loadRuntimeConfig } from "../config"
 import {
   RunManagerError,
   getRunManager,
@@ -205,6 +207,39 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
         url,
         `/runs/${encodeURIComponent(result.runId)}`,
         { ok: true, runId: result.runId },
+      )
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
+  const readabilityReviewMatch = path.match(/^\/api\/runs\/(.+?)\/readability-review$/)
+  if (readabilityReviewMatch && req.method === "POST") {
+    try {
+      const runRef = decodeURIComponent(readabilityReviewMatch[1])
+      const runName = await resolveRunName(runRef)
+      if (!runName) {
+        throw new RunManagerError(`Run not found: ${runRef}`, 404)
+      }
+      if (isRunManagedActive(runName) || isRunManagedActive(runRef)) {
+        throw new RunManagerError("Cannot score readability while this run's pipeline is active.", 409)
+      }
+      const config = await loadRuntimeConfig()
+      const result = await scoreCompletedRun({
+        runDir: safeRunPath(runName),
+        config,
+      })
+      return redirectOrJson(
+        req,
+        url,
+        `/runs/${encodeURIComponent(runName)}/node/readabilityGate`,
+        {
+          ok: true,
+          runName,
+          sourceFile: result.sourceFile,
+          passed: result.report.passed,
+          hotspotCount: result.report.hotspots.length,
+        },
       )
     } catch (error) {
       return errorResponse(error, req, url)

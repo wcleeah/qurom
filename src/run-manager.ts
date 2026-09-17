@@ -2,6 +2,7 @@ import { basename } from "node:path"
 
 import type { RuntimeConfig } from "./config"
 import { normalizeDocumentRequest, DocumentInputError } from "./document-input"
+import { PosthocReviewError } from "./readability/posthoc"
 import { loadPromptBundle, type PromptBundle } from "./prompt-assets"
 import { ZodError } from "zod"
 import { getProviderLifecycle, type ProviderLifecycle, type ProviderLifecycleStatus } from "./providers/lifecycle"
@@ -637,6 +638,7 @@ export class RunManagerError extends Error {
 export function toRunManagerError(error: unknown): RunManagerError {
   if (error instanceof RunManagerError) return error
   if (error instanceof RerunLoadError) return new RunManagerError(error.message, error.status)
+  if (error instanceof PosthocReviewError) return new RunManagerError(error.message, error.status)
   if (error instanceof DocumentInputError) return new RunManagerError(error.message, 400)
   if (error instanceof ZodError) {
     const message = error.issues[0]?.message ?? "Invalid request"

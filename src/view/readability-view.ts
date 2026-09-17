@@ -1,5 +1,5 @@
 import type { ReadabilityReport, ReadabilityUnit, ScoreCriterion } from "../readability/schema"
-import { SCORE_CRITERIA } from "../readability/schema"
+import { isPosthocReadabilityReport, SCORE_CRITERIA } from "../readability/schema"
 import {
   DEFAULT_READABILITY_THRESHOLDS,
   tripThresholdFor,
@@ -127,20 +127,26 @@ export function renderReadabilityReport(filename: string, data: unknown): string
       : report.passed
         ? "passed"
         : "needs-edit"
-  const tryLabel = typeof report.try === "number" ? `Try ${report.try}` : ""
+  const isPosthoc = report.kind === "posthoc" || isPosthocReadabilityReport(filename)
+  const tryLabel = !isPosthoc && typeof report.try === "number" ? `Try ${report.try}` : ""
   const roundMatch = filename.match(/round-(\d+)/)
-  const roundLabel = roundMatch ? `Round ${roundMatch[1]}` : ""
+  const roundLabel = !isPosthoc && roundMatch ? `Round ${roundMatch[1]}` : ""
+  const title = isPosthoc
+    ? "Post-run review"
+    : `Readability review${roundLabel ? ` — ${roundLabel}` : ""}${tryLabel ? `, ${tryLabel}` : ""}`
   const thresholds = reportThresholds(report)
   const units = (report.units ?? []).map((unit) => renderUnit(unit, thresholds)).join("")
 
   return `<div class="section readability-report">
-  <h2>Readability review — ${escapeHtml(roundLabel)}${tryLabel ? `, ${escapeHtml(tryLabel)}` : ""}</h2>
+  <h2>${escapeHtml(title)}</h2>
   <div class="readability-summary">
     <span class="readability-status ${statusClass}">${escapeHtml(status)}</span>
     ${report.model ? `<span class="dim-text">${escapeHtml(report.model)}</span>` : ""}
+    ${report.sourceFile ? `<span class="dim-text">Source: ${escapeHtml(report.sourceFile)}</span>` : ""}
     <span class="dim-text">${report.units.length} unit${report.units.length === 1 ? "" : "s"}</span>
-    ${typeof report.try === "number" ? `<span class="dim-text">Try ${report.try}</span>` : ""}
+    ${!isPosthoc && typeof report.try === "number" ? `<span class="dim-text">Try ${report.try}</span>` : ""}
   </div>
+  ${isPosthoc ? `<p class="muted-note dim-text">Score only — the article was not rewritten.</p>` : ""}
   ${report.fused ? `<p class="readability-fuse-note">Max tries reached. The draft continues to audits with leftover hotspots.</p>` : ""}
   ${report.skipped?.detail ? `<p class="dim-text">${escapeHtml(report.skipped.detail)}</p>` : ""}
   ${renderHotspot(report)}

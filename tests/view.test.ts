@@ -208,6 +208,25 @@ describe("view artifact renderers", () => {
     expect(html).not.toContain("json-tree")
   })
 
+  test("renders a post-run readability review with a distinct title", () => {
+    const html = renderStructuredJson("readability-review.json", {
+      round: 0,
+      try: 0,
+      model: "jev-latest",
+      passed: true,
+      kind: "posthoc",
+      sourceFile: "final.md",
+      reviewedAt: "2026-09-17T00:00:00.000Z",
+      units: [],
+      hotspots: [],
+    })
+    expect(html).toContain("Post-run review")
+    expect(html).toContain("Source: final.md")
+    expect(html).toContain("Score only")
+    expect(html).not.toContain("Round 0")
+    expect(html).not.toContain("Try 0")
+  })
+
   test("renders skipped and fused readability reports", () => {
     const skipped = renderStructuredJson("readability-round-0-try-0.json", {
       round: 0,
@@ -341,6 +360,16 @@ describe("view file browser classification", () => {
       group: "Design",
       subGroup: "HTML Drafts",
       label: "HTML · graphical-enhancer",
+    })
+    expect(classifyFile("readability-review.json")).toMatchObject({
+      group: "Research Rounds",
+      subGroup: "Readability",
+      label: "Post-run readability review",
+    })
+    expect(classifyFile("readability-review.jev.json")).toMatchObject({
+      group: "Research Rounds",
+      subGroup: "Readability",
+      label: "Post-run readability raw",
     })
   })
 })

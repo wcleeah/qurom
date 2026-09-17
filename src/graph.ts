@@ -34,7 +34,7 @@ import {
 } from "./readability/schema"
 import { scoreDraftReadability, skippedReadabilityReport } from "./readability/score"
 import { segmentDraft } from "./readability/segment"
-import { createTypeSafeClient, systemOneFromClient, type ReadabilitySystemOne } from "./typesafe/client"
+import { resolveReadabilitySystemOne, type ReadabilitySystemOne } from "./typesafe/client"
 import {
   designHtmlArtifactName,
   GRAPHICAL_ENHANCER_ROLE,
@@ -1111,21 +1111,6 @@ async function loadReadabilityReport(state: ResearchState): Promise<ReadabilityR
   const path = `${state.outputPath}/${readabilityReportFilename(state.round, state.readabilityTry ?? 0)}`
   if (!(await fileExists(path))) return undefined
   return readabilityReportSchema.parse(await Bun.file(path).json())
-}
-
-function resolveReadabilitySystemOne(
-  config: RuntimeConfig,
-  deps?: ReadabilityGraphDeps,
-): { systemOne?: ReadabilitySystemOne; skipReason?: "disabled" | "no_api_key" } {
-  if (deps?.systemOne) return { systemOne: deps.systemOne }
-  if (!config.quorumConfig.readability.enabled) return { skipReason: "disabled" }
-  const apiKey = config.env.TYPESAFE_API_KEY?.trim()
-  if (!apiKey) return { skipReason: "no_api_key" }
-  const client = createTypeSafeClient({
-    apiKey,
-    defaultModel: config.quorumConfig.readability.model,
-  })
-  return { systemOne: systemOneFromClient(client) }
 }
 
 export async function scoreReadability(
