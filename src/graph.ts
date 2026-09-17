@@ -22,6 +22,19 @@ import { buildResearchToolHint } from "./research-tools"
 import { summarizeMarkdown } from "./summarizer"
 import { tagOutputArtifact } from "./tagger"
 import { formatReaderProfileForPrompt, readerContextBlock as buildReaderContextBlock, applyIntentOnlyRepair } from "./reader-profile"
+import { readabilityContextFromState } from "./readability/context"
+import { readabilityThresholds } from "./readability/criteria"
+import { formatReadabilityHints } from "./readability/hints"
+import {
+  readabilityDraftFilename,
+  readabilityRawFilename,
+  readabilityReportFilename,
+  readabilityReportSchema,
+  type ReadabilityReport,
+} from "./readability/schema"
+import { scoreDraftReadability, skippedReadabilityReport } from "./readability/score"
+import { segmentDraft } from "./readability/segment"
+import { createTypeSafeClient, systemOneFromClient, type ReadabilitySystemOne } from "./typesafe/client"
 import {
   designHtmlArtifactName,
   GRAPHICAL_ENHANCER_ROLE,
@@ -650,6 +663,7 @@ export async function ingestRequest(input: GraphInput) {
     unresolvedFindings: [],
     approvedAgents: [],
     status: "drafting" as const,
+    readabilityTry: 0,
     failureReason: undefined,
     lastUnresolvedSignature: undefined,
     ...seededInterview,
@@ -1049,8 +1063,202 @@ async function draftFullDraft(
   return researchStateSchema.parse({
     ...state,
     draft,
-    status: "auditing",
+    status: "scoring_readability",
+    readabilityTry: 0,
   })
+}
+
+export function readabilityReviewPrompt(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  hints: string,
+) {
+  return renderPromptTemplate(promptBundle.assets.researchDrafterReadabilityRevise, {
+    researchToolHint: buildResearchToolHint(config),
+    readerContext: readerContextBlock(state),
+    requestLabel: requestLabel(state),
+    readabilityHints: hints,
+  })
+}
+
+export type ReadabilityGraphDeps = {
+  systemOne?: ReadabilitySystemOne
+}
+
+async function persistReadabilityReport(
+  state: ResearchState,
+  report: ReadabilityReport,
+  raw?: unknown,
+) {
+  if (!state.outputPath) return
+  await writeRunJsonArtifact(
+    state.outputPath,
+    readabilityReportFilename(report.round, report.try),
+    report,
+  )
+  if (raw !== undefined) {
+    await writeRunJsonArtifact(
+      state.outputPath,
+      readabilityRawFilename(report.round, report.try),
+      raw,
+    )
+  }
+}
+
+async function loadReadabilityReport(state: ResearchState): Promise<ReadabilityReport | undefined> {
+  if (!state.outputPath) return undefined
+  const path = `${state.outputPath}/${readabilityReportFilename(state.round, state.readabilityTry ?? 0)}`
+  if (!(await fileExists(path))) return undefined
+  return readabilityReportSchema.parse(await Bun.file(path).json())
+}
+
+function resolveReadabilitySystemOne(
+  config: RuntimeConfig,
+  deps?: ReadabilityGraphDeps,
+): { systemOne?: ReadabilitySystemOne; skipReason?: "disabled" | "no_api_key" } {
+  if (deps?.systemOne) return { systemOne: deps.systemOne }
+  if (!config.quorumConfig.readability.enabled) return { skipReason: "disabled" }
+  const apiKey = config.env.TYPESAFE_API_KEY?.trim()
+  if (!apiKey) return { skipReason: "no_api_key" }
+  const client = createTypeSafeClient({
+    apiKey,
+    defaultModel: config.quorumConfig.readability.model,
+  })
+  return { systemOne: systemOneFromClient(client) }
+}
+
+export async function scoreReadability(
+  config: RuntimeConfig,
+  state: ResearchState,
+  deps?: ReadabilityGraphDeps,
+) {
+  assertStatus(state, "scoring_readability", "scoreReadability")
+  if (!state.outputPath) throw new Error("Missing outputPath during scoreReadability")
+
+  const tryIndex = state.readabilityTry ?? 0
+  const settings = config.quorumConfig.readability
+  const resolved = resolveReadabilitySystemOne(config, deps)
+
+  let report: ReadabilityReport
+  let raw: unknown
+  if (!resolved.systemOne) {
+    report = skippedReadabilityReport({
+      round: state.round,
+      tryIndex,
+      model: settings.model,
+      reason: resolved.skipReason ?? "no_api_key",
+    })
+  } else {
+    const units = segmentDraft(state.draft)
+    if (units.length === 0) {
+      report = readabilityReportSchema.parse({
+        round: state.round,
+        try: tryIndex,
+        model: settings.model,
+        passed: true,
+        thresholds: readabilityThresholds(config.quorumConfig),
+        units: [],
+        hotspots: [],
+      })
+    } else {
+      const scored = await scoreDraftReadability({
+        units,
+        context: readabilityContextFromState(state),
+        model: settings.model,
+        thresholds: readabilityThresholds(config.quorumConfig),
+        systemOne: resolved.systemOne,
+        round: state.round,
+        tryIndex,
+      })
+      report = scored.report
+      raw = scored.raw
+    }
+  }
+
+  const fuse = report.hotspots.length > 0 && tryIndex + 1 >= settings.maxTries
+  if (fuse) {
+    report = readabilityReportSchema.parse({ ...report, fused: true })
+  }
+  await persistReadabilityReport(state, report, raw)
+
+  const passed = report.hotspots.length === 0 || fuse
+  return researchStateSchema.parse({
+    ...state,
+    status: passed ? "auditing" : "revising_readability",
+  })
+}
+
+export async function reviseReadability(
+  config: RuntimeConfig,
+  runtime: AgentRuntime,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
+  assertStatus(state, "revising_readability", "reviseReadability")
+  if (!state.outputPath) throw new Error("Missing outputPath during reviseReadability")
+
+  const report = await loadReadabilityReport(state)
+  if (!report || report.hotspots.length === 0) {
+    return researchStateSchema.parse({
+      ...state,
+      status: "auditing",
+    })
+  }
+
+  const hints = formatReadabilityHints(report.hotspots)
+  const nextTry = (state.readabilityTry ?? 0) + 1
+  const snapshotFile = `${state.outputPath}/${readabilityDraftFilename(state.round, nextTry)}`
+  const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
+
+  const handle = await createObservedHandle({
+    runtime,
+    role: DRAFTER_ROLE,
+    title: `research-drafter:${state.requestId}:readability:${state.round}:try:${nextTry}`,
+    requestId: state.requestId,
+    observer,
+    displayRole: "drafter",
+  })
+
+  const response = await runtime.prompt({
+    role: DRAFTER_ROLE,
+    handle,
+    prompt: readabilityReviewPrompt(config, promptBundle, state, hints),
+    outputFile: snapshotFile,
+    inputFiles: [
+      { path: draftFile, mime: "text/plain", filename: "draft.md" },
+    ],
+    telemetry: graphAgentTelemetry({
+      telemetry,
+      state,
+      name: "agent.reviseReadability",
+      agentName: DRAFTER_ROLE,
+      sessionId: handle.id,
+      input: {
+        requestId: state.requestId,
+        round: state.round,
+        readabilityTry: nextTry,
+        hotspotCount: report.hotspots.length,
+      },
+    }),
+  })
+  const draft = await ensureTextArtifact(snapshotFile, response.text, "readability revision")
+  await Bun.write(draftFile, draft)
+
+  return researchStateSchema.parse({
+    ...state,
+    draft,
+    readabilityTry: nextTry,
+    status: "scoring_readability",
+  })
+}
+
+export function routeAfterReadabilityScore(state: ResearchState) {
+  if (state.status === "revising_readability") return "reviseReadability"
+  if (state.status === "auditing") return "runParallelAudits"
+  throw new Error(`Invalid routeAfterReadabilityScore status: ${state.status}`)
 }
 
 function graphAgentTelemetry(input: {
@@ -1986,7 +2194,8 @@ async function reviseDraft(
     currentRebuttalResponsesByFinding: {},
     approvedAgents: [],
     round: nextRound,
-    status: "auditing",
+    readabilityTry: 0,
+    status: "scoring_readability",
     failureReason: undefined,
   })
 
@@ -2371,6 +2580,7 @@ export function createGraph(
     observer?: RunObserver
     telemetry?: GraphTelemetry
     runtime?: AgentRuntime
+    readability?: ReadabilityGraphDeps
   },
 ) {
   const observer = input?.observer
@@ -2467,6 +2677,14 @@ export function createGraph(
         draftFullDraft(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
+    .addNode("scoreReadability", async (state) =>
+      withNodeTelemetry("scoreReadability", state, () => scoreReadability(config, state, input?.readability)),
+    )
+    .addNode("reviseReadability", async (state) =>
+      withNodeTelemetry("reviseReadability", state, () =>
+        reviseReadability(config, runtime, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addNode("runParallelAudits", async (state) =>
       withNodeTelemetry("runParallelAudits", state, () =>
         runParallelAudits(config, runtime, promptBundle, state, graphTelemetry, observer),
@@ -2544,7 +2762,12 @@ export function createGraph(
       "draftFullDraft",
     ])
     .addEdge("discoverReaderResume", "discoverReaderPrompt")
-    .addEdge("draftFullDraft", "runParallelAudits")
+    .addEdge("draftFullDraft", "scoreReadability")
+    .addConditionalEdges("scoreReadability", (state) => routeAfterReadabilityScore(state), [
+      "reviseReadability",
+      "runParallelAudits",
+    ])
+    .addEdge("reviseReadability", "scoreReadability")
     .addEdge("runParallelAudits", "reviewFindingsByDrafter")
     .addConditionalEdges("reviewFindingsByDrafter", (state) => routeAfterDrafterReview(config, state), [
       "runTargetedRebuttals",
@@ -2561,7 +2784,7 @@ export function createGraph(
       "reviseDraft",
       "finalizeFailedRun",
     ])
-    .addEdge("reviseDraft", "runParallelAudits")
+    .addEdge("reviseDraft", "scoreReadability")
     .addEdge("finalizeApprovedDraft", "enrichApprovedOutput")
     .addEdge("finalizeFailedRun", "summarizeOutputArtifact")
     .addConditionalEdges("enrichApprovedOutput", (state) => routeAfterSummarize(config, state), [

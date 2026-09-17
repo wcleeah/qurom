@@ -50,8 +50,8 @@ describe("inferCursorCallScope", () => {
 
     expect(inferCursorCallScope({
       role: "research-drafter",
-      artifact: "draft-round-4.md",
-    })).toEqual({ node: "reviseDraft", round: 3 })
+      artifact: "draft-round-0-readability-1.md",
+    })).toEqual({ node: "reviseReadability", round: 0 })
   })
 
   test("maps audit and review artifacts", () => {

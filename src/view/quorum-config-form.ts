@@ -81,6 +81,18 @@ export function renderQuorumConfigForm(options: QuorumConfigFormOptions): string
       ${field("Predefined tag slugs", "tagging.predefinedTags", predefinedTags, "text", "Comma-separated lowercase slugs, e.g. machine-learning, systems")}
     </div>
   </div>
+  <div class="form-section" data-readability-config>
+    <h3>Readability review</h3>
+    ${checkbox("readability.enabled", "Enable readability review (Jev gate before audits)", config.readability?.enabled ?? true)}
+    <div data-readability-fields${(config.readability?.enabled ?? true) ? "" : " hidden"}>
+      ${field("Model", "readability.model", config.readability?.model ?? "jev-latest")}
+      ${field("Max tries", "readability.maxTries", config.readability?.maxTries ?? 5, "number", "Score + revise loops per round before continuing to audits")}
+      ${field("Score trip", "readability.scoreTrip", config.readability?.scoreTrip ?? 1.3, "text", "Score at or above this trips (except formality)")}
+      ${field("Formality trip", "readability.formalityTrip", config.readability?.formalityTrip ?? 1.6, "text", "Higher bar; research prose may be stiff")}
+      ${field("Score confidence", "readability.scoreConfidence", config.readability?.scoreConfidence ?? 0.5, "text", "Ignore scores below this confidence")}
+      ${field("Noul veto", "readability.noulVeto", config.readability?.noulVeto ?? 0.4, "text", "Justification noul at or above this saves the unit")}
+    </div>
+  </div>
   ${researchToolsSection(config, options.researchToolIds)}
   <div class="form-actions">
     <button type="submit" class="btn btn-primary">${escapeHtml(options.submitLabel)}</button>
@@ -98,6 +110,16 @@ function parsePositiveInt(params: URLSearchParams, name: string, fallback: numbe
   if (!raw) return fallback
   const value = Number(raw)
   if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`)
+  return value
+}
+
+function parseUnitInterval(params: URLSearchParams, name: string, fallback: number, max: number) {
+  const raw = params.get(name)?.trim()
+  if (!raw) return fallback
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < 0 || value > max) {
+    throw new Error(`${name} must be a number between 0 and ${max}`)
+  }
   return value
 }
 
@@ -126,7 +148,7 @@ export function parseQuorumConfigForm(params: URLSearchParams): QuorumConfig {
       if (value > 8) throw new Error("maxConcurrentRuns must be between 1 and 8")
       return value
     })(),
-    recursionLimit: parsePositiveInt(params, "recursionLimit", 80),
+    recursionLimit: parsePositiveInt(params, "recursionLimit", 160),
     requireUnanimousApproval: parseBoolean(params, "requireUnanimousApproval"),
     researchTools: {
       prefer,
@@ -155,6 +177,15 @@ export function parseQuorumConfigForm(params: URLSearchParams): QuorumConfig {
           return slug
         }),
     },
+    readability: {
+      enabled: parseBoolean(params, "readability.enabled"),
+      model: params.get("readability.model")?.trim() || "jev-latest",
+      maxTries: parsePositiveInt(params, "readability.maxTries", 5),
+      scoreTrip: parseUnitInterval(params, "readability.scoreTrip", 1.3, 2),
+      formalityTrip: parseUnitInterval(params, "readability.formalityTrip", 1.6, 2),
+      scoreConfidence: parseUnitInterval(params, "readability.scoreConfidence", 0.5, 1),
+      noulVeto: parseUnitInterval(params, "readability.noulVeto", 0.4, 1),
+    },
   }
 }
 
@@ -177,6 +208,19 @@ export const quorumConfigFormScript = `<script>
     document.querySelectorAll("[data-tagging-config]").forEach(function(section){
       var enabled = section.querySelector("input[name='tagging.enabled']");
       var fields = section.querySelector("[data-tagging-fields]");
+      if (!enabled || !fields) return;
+      function sync(){
+        fields.hidden = !enabled.checked;
+        fields.querySelectorAll("input,select,textarea").forEach(function(input){
+          input.disabled = fields.hidden;
+        });
+      }
+      enabled.addEventListener("change", sync);
+      sync();
+    });
+    document.querySelectorAll("[data-readability-config]").forEach(function(section){
+      var enabled = section.querySelector("input[name='readability.enabled']");
+      var fields = section.querySelector("[data-readability-fields]");
       if (!enabled || !fields) return;
       function sync(){
         fields.hidden = !enabled.checked;

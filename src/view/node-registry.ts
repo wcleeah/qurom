@@ -51,9 +51,23 @@ export const GRAPH_NODES: NodeDefinition[] = [
     roundScoped: true,
   },
   {
+    id: "readabilityGate",
+    label: "Readability review",
+    miniLabel: "Readability",
+    order: 6,
+    phase: "research",
+    liveNodeAliases: ["scoreReadability", "reviseReadability"],
+    filePatterns: [
+      /^readability-round-\d+-try-\d+\.json$/,
+      /^readability-round-\d+-try-\d+\.jev\.json$/,
+      /^draft-round-\d+-readability-\d+\.md$/,
+    ],
+    roundScoped: true,
+  },
+  {
     id: "runParallelAudits",
     label: "Parallel audits",
-    order: 6,
+    order: 7,
     phase: "research",
     filePatterns: [/^audits-round-\d+\.json$/, /^audit-[\w-]+-round-\d+\.json$/],
     roundScoped: true,
@@ -62,7 +76,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
     id: "reviewFindingsByDrafter",
     label: "Review Findings",
     miniLabel: "Review Findings",
-    order: 7,
+    order: 8,
     phase: "research",
     filePatterns: [/^drafter-finding-review-round-\d+\.json$/],
     roundScoped: true,
@@ -70,7 +84,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
   {
     id: "runTargetedRebuttals",
     label: "Write Rebuttals",
-    order: 8,
+    order: 9,
     phase: "research",
     filePatterns: [
       /^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/,
@@ -84,7 +98,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
     id: "reviewRebuttalResponses",
     label: "Rebuttals",
     miniLabel: "Rebuttals",
-    order: 9,
+    order: 10,
     phase: "research",
     liveNodeAliases: ["runTargetedRebuttals"],
     filePatterns: [/^drafter-rebuttal-review-round-\d+-turn-\d+\.json$/, /^disputed-round-\d+\.json$/],
@@ -95,7 +109,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
     id: "aggregateConsensus",
     label: "Aggregate Consensus",
     miniLabel: "Aggregate Consensus",
-    order: 10,
+    order: 11,
     phase: "research",
     filePatterns: [/^aggregated-findings-round-\d+\.json$/],
     roundScoped: true,
@@ -103,7 +117,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
   {
     id: "computeConfidence",
     label: "Compute confidence",
-    order: 11,
+    order: 12,
     phase: "research",
     filePatterns: [/^confidence\.json$/],
     roundScoped: false,
@@ -111,7 +125,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
   {
     id: "reviseDraft",
     label: "Revise draft",
-    order: 12,
+    order: 13,
     phase: "research",
     filePatterns: [/^unresolved-findings-round-\d+\.json$/],
     roundScoped: true,
@@ -119,7 +133,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
   {
     id: "finalizeApprovedDraft",
     label: "Finalize approved",
-    order: 13,
+    order: 14,
     phase: "research",
     liveNodeAliases: ["finalizeFailedRun"],
     filePatterns: [/^final\.md$/, /^latest-draft\.md$/, /^failure\.json$/],
@@ -128,7 +142,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
   {
     id: "summarizeOutputArtifact",
     label: "Summarize output",
-    order: 14,
+    order: 15,
     phase: "research",
     filePatterns: [/^summary\.json$/],
     roundScoped: false,
@@ -137,7 +151,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
     id: "runDesignHtml",
     label: "Design HTML",
     miniLabel: "Design",
-    order: 15,
+    order: 16,
     phase: "design",
     filePatterns: [
       new RegExp(`^${designHtmlArtifactName(DESIGNER_ROLE).replace(/\./g, "\\.")}$`),
@@ -149,7 +163,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
     id: "graphicalEnhance",
     label: "Graphical enhance",
     miniLabel: "Graphics",
-    order: 16,
+    order: 17,
     phase: "design",
     liveNodeAliases: ["interactiveEnhance"],
     filePatterns: designHtmlArtifactNames(GRAPHICAL_ENHANCER_ROLE).map(
@@ -161,7 +175,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
     id: "readingExperienceEnhance",
     label: "Reading experience",
     miniLabel: "Reading",
-    order: 17,
+    order: 18,
     phase: "design",
     filePatterns: [new RegExp(`^${designHtmlArtifactName(READING_EXPERIENCE_ENHANCER_ROLE).replace(/\./g, "\\.")}$`)],
     roundScoped: false,
@@ -169,7 +183,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
   {
     id: "finalizeDesign",
     label: "Finalize design",
-    order: 18,
+    order: 19,
     phase: "design",
     filePatterns: [/^final\.html$/, /^design-failure\.json$/],
     roundScoped: false,
@@ -338,6 +352,11 @@ export function nodeKpis(nodeId: string, files: string[], index?: RunArtifactInd
       kpis.push({ label: "Rounds", value: String(drafts.length) })
       break
     }
+    case "readabilityGate": {
+      const reports = files.filter((f) => /^readability-round-\d+-try-\d+\.json$/.test(f))
+      kpis.push({ label: "Reviews", value: String(reports.length) })
+      break
+    }
     case "runParallelAudits": {
       const bundles = files.filter((f) => /^audits-round-\d+\.json$/.test(f))
       kpis.push({ label: "Audit rounds", value: String(bundles.length) })
@@ -404,6 +423,8 @@ export function isNodeComplete(
       return hasReaderProfile && !isNodeActive(liveStatus, "discoverReader")
     case "draftFullDraft":
       return hasFile(/^draft-round-\d+\.md$/)
+    case "readabilityGate":
+      return hasFile(/^readability-round-\d+-try-\d+\.json$/)
     case "runParallelAudits":
       return currentRound >= 0
         && roundArtifactExists(files, /^audits-round-(\d+)\.json$/, currentRound)

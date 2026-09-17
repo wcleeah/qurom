@@ -3960,6 +3960,62 @@ body.html-viewer-body {
   margin-top: 0.5rem;
 }
 
+.readability-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.85rem;
+  margin-bottom: 1rem;
+}
+.readability-status {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.readability-status.passed { color: var(--green); background: var(--green-bg); }
+.readability-status.needs-edit { color: var(--orange); background: var(--orange-bg); }
+.readability-status.skipped { color: var(--muted); }
+.readability-status.fused { color: var(--orange); background: var(--orange-bg); }
+.readability-chip, .readability-remedy {
+  display: inline-flex;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--accent-dim);
+}
+.readability-fuse-note { font-size: 0.85rem; color: var(--orange); margin: 0 0 1rem; }
+.readability-try-list { margin-bottom: 0.75rem; }
+.readability-try { margin-bottom: 0.85rem; border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.45rem 0.7rem; }
+.readability-try summary { cursor: pointer; font-weight: 600; }
+.readability-hotspot-list { list-style: none; padding: 0; margin: 0 0 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.readability-hotspot-meta { display: flex; flex-wrap: wrap; gap: 0.4rem 0.65rem; align-items: baseline; margin-bottom: 0.35rem; }
+.readability-hotspot blockquote, .readability-unit blockquote {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+.readability-unit { margin-bottom: 0.65rem; border: 1px solid var(--border); border-radius: 0.45rem; padding: 0.45rem 0.7rem; }
+.readability-unit summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 0.4rem 0.65rem; align-items: baseline; }
+.readability-heatmap { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.65rem 0 0.4rem; }
+.readability-score { display: grid; grid-template-columns: 7.5rem 1fr 2.4rem; gap: 0.4rem; align-items: center; font-size: 0.75rem; }
+.readability-score.dim .readability-score-fill { opacity: 0.35; }
+.readability-score-track { height: 0.45rem; background: var(--code-bg); border-radius: 999px; overflow: hidden; }
+.readability-score-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.readability-score-value { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.readability-gates { font-size: 0.75rem; }
+.readability-score-detail { margin: 0.45rem 0; }
+.readability-score-detail h4, .readability-unit h4 { font-size: 0.75rem; margin: 0.4rem 0 0.2rem; }
+.readability-probs, .readability-legend { list-style: none; padding: 0; margin: 0 0 0.35rem; font-size: 0.75rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+
 /* ── Mobile fixes ── */
 @media (max-width: 400px) {
   .run-card-top { flex-direction: column; }

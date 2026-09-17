@@ -18,6 +18,8 @@ const failureReasonSchema = z.enum([
 ])
 const researchStatusSchema = z.enum([
   "drafting",
+  "scoring_readability",
+  "revising_readability",
   "auditing",
   "reviewing_findings",
   "awaiting_auditor_rebuttal",
@@ -433,6 +435,7 @@ export const researchStateObjectSchema = z.object({
   inputSummary: runDisplaySummarySchema.optional(),
   artifactSummary: runDisplaySummarySchema.optional(),
   round: z.number().int().nonnegative(),
+  readabilityTry: z.number().int().nonnegative().default(0),
   draft: z.string(),
   audits: z.array(auditResultRecordSchema),
   activeRebuttals: z.record(findingKeySchema, activeRebuttalSchema),

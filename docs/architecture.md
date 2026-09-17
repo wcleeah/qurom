@@ -65,6 +65,7 @@ PromptScreen
       -> prepareOutputPath
       -> discoverReaderPrompt / discoverReaderResume
       -> draftFullDraft
+      -> scoreReadability / reviseReadability (readability gate)
       -> runParallelAudits
       -> reviewFindingsByDrafter
       -> runTargetedRebuttals
@@ -124,7 +125,7 @@ Important config sections:
   "summarizerAgent": "markdown-summarizer",
   "maxRounds": 10,
   "maxRebuttalTurnsPerFinding": 2,
-  "recursionLimit": 80,
+  "recursionLimit": 160,
   "requireUnanimousApproval": true,
   "artifactDir": "runs",
   "promptAssetsDir": "assets/prompts",
@@ -148,7 +149,7 @@ OpenCode agent files live under `.opencode/agents/` (frontmatter only: model, va
 `ResearchState` is the central object passed through the graph. It contains:
 
 - Request identity: `requestId`, `inputMode`, `topic`, `documentPath`, `documentText`.
-- Run progress: `round`, `status`, `outputPath`.
+- Run progress: `round`, `readabilityTry`, `status`, `outputPath`.
 - Current content: `draft`, `inputSummary`, `artifactSummary`.
 - Review state: `audits`, `unresolvedFindings`, `approvedAgents`.
 - Rebuttal state: `activeRebuttals`, `rebuttalTurnCounts`, `rebuttalHistory`, `rebuttalResponseHistory`.
@@ -205,6 +206,10 @@ Builds the full drafting prompt from:
 - `draft-full-draft.md`
 
 The designated drafter writes `draft-round-N.md`.
+
+### `scoreReadability` / `reviseReadability`
+
+Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review. Not an auditor: no vote, no findings, no rebuttal. See [readability-review-plan.md](./readability-review-plan.md).
 
 ### `runParallelAudits`
 

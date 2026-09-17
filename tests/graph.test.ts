@@ -9,6 +9,7 @@ import {
   prepareOutputPath,
   routeAfterAggregate,
   routeAfterDrafterReview,
+  routeAfterReadabilityScore,
   routeAfterRebuttalResponses,
   summarizeInputDocument,
   summarizeOutputArtifact,
@@ -81,6 +82,7 @@ function baseState(overrides: Partial<ResearchState> = {}): ResearchState {
     unresolvedFindings: [],
     approvedAgents: [],
     status: "aggregating",
+    readabilityTry: 0,
     ...overrides,
   }
 }
@@ -156,6 +158,11 @@ describe("graph helpers", () => {
     expect(result.status).toBe("approved")
     expect(result.unresolvedFindings).toHaveLength(0)
     expect(result.approvedAgents).toEqual([...AUDITOR_ROLES])
+  })
+
+  test("routeAfterReadabilityScore sends clean scores to audits", () => {
+    expect(routeAfterReadabilityScore(baseState({ status: "auditing" }))).toBe("runParallelAudits")
+    expect(routeAfterReadabilityScore(baseState({ status: "revising_readability" }))).toBe("reviseReadability")
   })
 
   test("aggregateConsensus fails on stagnation when unresolved signature repeats", async () => {
