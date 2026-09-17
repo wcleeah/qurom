@@ -10,7 +10,7 @@ import { formatReadabilityHints } from "../src/readability/hints"
 import { deriveHotspots, scoreDraftReadability } from "../src/readability/score"
 import { segmentDraft } from "../src/readability/segment"
 import type { ReadabilityHotspot, ReadabilityUnit } from "../src/readability/schema"
-import { DEFAULT_READABILITY_THRESHOLDS, type ReadabilityQuestions } from "../src/readability/criteria"
+import { DEFAULT_READABILITY_THRESHOLDS, READABILITY_AUDIENCE, READABILITY_REGISTER, buildReadabilityQuestions, type ReadabilityQuestions } from "../src/readability/criteria"
 import {
   readabilityReviewPrompt,
   reviseReadability,
@@ -194,6 +194,44 @@ describe("scoreDraftReadability", () => {
     })
     expect(report.passed).toBe(true)
     expect(report.hotspots).toEqual([])
+  })
+
+  test("tells Jev the reader is fluent but not a native English speaker", async () => {
+    const seen: Array<Record<string, unknown>> = []
+    const inner = mockSystemOne(0.4)!
+    const { raw } = await scoreDraftReadability({
+      units: [{
+        id: "s1-p1",
+        section: "Intro",
+        quote: "A substantial paragraph about the framing bit and how the decoder is chosen.",
+        before: "",
+        after: "",
+      }],
+      context: { articleJob: "Explain framing", reader: { familiar: ["framing"], unfamiliar: [] } },
+      model: "jev-latest",
+      thresholds: DEFAULT_READABILITY_THRESHOLDS,
+      systemOne: async (request) => {
+        seen.push(request.state)
+        return inner(request)
+      },
+      round: 0,
+      tryIndex: 0,
+    })
+    expect(seen[0]?.audience).toBe(READABILITY_AUDIENCE)
+    expect(seen[0]?.register).toBe(READABILITY_REGISTER)
+    expect(String(seen[0]?.audience)).toContain("not a native English speaker")
+    expect(String(seen[0]?.register)).toContain("non-native English reader")
+    expect(raw[0]?.state.audience).toBe(READABILITY_AUDIENCE)
+  })
+})
+
+describe("buildReadabilityQuestions", () => {
+  test("names audience on convolution, diction, formality, and the domain-term gate", () => {
+    const questions = buildReadabilityQuestions()
+    expect(questions.convolution.instructions).toContain("`audience`")
+    expect(questions.diction.instructions).toContain("`audience`")
+    expect(questions.formality.instructions).toContain("`audience`")
+    expect(questions.dictionIsDomainTerm.instructions).toContain("`audience`")
   })
 })
 

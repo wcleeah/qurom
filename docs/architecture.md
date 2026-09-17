@@ -209,7 +209,7 @@ The designated drafter writes `draft-round-N.md`.
 
 ### `scoreReadability` / `reviseReadability`
 
-Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review. Not an auditor: no vote, no findings, no rebuttal. See [readability-review-plan.md](./readability-review-plan.md).
+Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review. Not an auditor: no vote, no findings, no rebuttal. Jev state includes a constant `audience`: the reader is fluent but not a native English speaker. See [readability-review-plan.md](./readability-review-plan.md).
 
 ### `runParallelAudits`
 

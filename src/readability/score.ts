@@ -3,6 +3,7 @@ import type { ChoiceResponse, ScoreResponse, SystemOneRequest, SystemOneResult }
 import type { ReadabilitySystemOne } from "../typesafe/client"
 import {
   buildReadabilityQuestions,
+  READABILITY_AUDIENCE,
   READABILITY_REGISTER,
   tripThresholdFor,
   type ReadabilityQuestions,
@@ -168,6 +169,7 @@ export async function scoreDraftReadability(input: {
       after: segmented.after,
       article_job: input.context.articleJob,
       reader: input.context.reader,
+      audience: READABILITY_AUDIENCE,
       register: READABILITY_REGISTER,
     }
     const request = {
