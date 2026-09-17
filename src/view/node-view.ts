@@ -20,6 +20,7 @@ import {
   renderRoundAuditVoteTable,
 } from "./audit-view"
 import { renderConsensusRound, renderDrafterReview, renderRebuttalsRound, renderReadabilityReport, type RebuttalsRoundData, type RebuttalReviewTurnData } from "./artifact-renderers"
+import { renderReadabilityInterpretationGuide } from "./readability-view"
 import { renderReadabilityReviewForm } from "./run-controls"
 import { hasReviewableMarkdown, type PosthocReviewStatus } from "../readability/posthoc"
 import { POSTHOC_REPORT_FILENAME, POSTHOC_STATUS_FILENAME, READABILITY_GATE_REPORT_RE } from "../readability/schema"
@@ -524,6 +525,7 @@ export async function renderNodeDashboard(
     ? nodePageRoundNumbers(resolvedId, files, liveStatus, nodeHistory)
     : []
 
+  const guide = resolvedId === "readabilityGate" ? renderReadabilityInterpretationGuide() : ""
   let body = ""
   let live = ""
 
@@ -556,9 +558,9 @@ export async function renderNodeDashboard(
       )}</div>`
     }
 
-    body = `<div class="node-scope-panels">${panels}</div>`
+    body = `${guide}<div class="node-scope-panels">${panels}</div>`
   } else {
-    body = await renderNodeScopeBody(
+    body = `${guide}${await renderNodeScopeBody(
       "total",
       runName,
       nodeName,
@@ -569,7 +571,7 @@ export async function renderNodeDashboard(
       nodeHistory,
       sessionTelemetry,
       def?.roundScoped ?? false,
-    )
+    )}`
   }
 
   if (active && liveStatus) {

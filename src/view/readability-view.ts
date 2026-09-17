@@ -56,6 +56,10 @@ function renderScoreBar(criterion: ScoreCriterion, unit: ReadabilityUnit, thresh
 </div>`
 }
 
+function renderQuote(quote: string) {
+  return `<blockquote class="readability-quote">${escapeHtml(quote)}</blockquote>`
+}
+
 function renderHotspot(report: ReadabilityReport) {
   if (report.hotspots.length === 0) return ""
   const items = report.hotspots.map((hotspot) => {
@@ -68,7 +72,7 @@ function renderHotspot(report: ReadabilityReport) {
     <span class="readability-chip">conf ${escapeHtml(formatScore(hotspot.confidence))}</span>
     <span class="readability-remedy">${escapeHtml(hotspot.remedy)}</span>
   </div>
-  <blockquote>${escapeHtml(hotspot.quote)}</blockquote>
+  ${renderQuote(hotspot.quote)}
 </li>`
   }).join("")
   return `<h3>Hotspots (${report.hotspots.length})</h3>
@@ -91,19 +95,33 @@ function renderUnit(unit: ReadabilityUnit, thresholds: ReadabilityThresholds) {
     unit.gates.dictionIsDomainTerm !== undefined ? `domain term ${formatScore(unit.gates.dictionIsDomainTerm)}` : "",
   ].filter(Boolean)
   const section = unit.section.trim() || "Untitled"
-  return `<details class="readability-unit">
-  <summary>
+  const cached = unit.cached ? `<span class="readability-chip">cached</span>` : ""
+  return `<article class="readability-unit">
+  <div class="readability-unit-meta">
     <code>${escapeHtml(unit.id)}</code>
     <span>${escapeHtml(section)}</span>
     <span class="readability-remedy">${escapeHtml(unit.remedy.choice)}</span>
-  </summary>
-  <div class="readability-heatmap">${bars}</div>
-  ${gates.length ? `<p class="dim-text readability-gates">${escapeHtml(gates.join(" · "))}</p>` : ""}
-  ${scoreDetails}
-  <h4>Remedy probabilities</h4>
-  ${probabilityList(unit.remedy.probabilities)}
-  <blockquote>${escapeHtml(unit.quote)}</blockquote>
-</details>`
+    ${cached}
+  </div>
+  ${renderQuote(unit.quote)}
+  <details>
+    <summary>Scores and details</summary>
+    <div class="readability-heatmap">${bars}</div>
+    ${gates.length ? `<p class="dim-text readability-gates">${escapeHtml(gates.join(" · "))}</p>` : ""}
+    ${scoreDetails}
+    <h4>Remedy probabilities</h4>
+    ${probabilityList(unit.remedy.probabilities)}
+  </details>
+</article>`
+}
+
+export function renderReadabilityInterpretationGuide() {
+  return `<div class="section readability-guide">
+  <h2>How to read these results</h2>
+  <p>Each unit is one paragraph. Jev scores it 0–2 on convolution, inversion, diction, formality, and density. Higher means more first-pass processing cost for a fluent non-native English reader. Dim bars sit below the trip threshold (1.3, or 1.6 for formality).</p>
+  <p>A paragraph becomes a <strong>hotspot</strong> only when a score trips with enough confidence, any matching justification gate does not save it, and the suggested remedy is not <code>keep</code>. Pass means zero hotspots. Cached units reused a previous passing score for the same unchanged paragraph and were not sent to Jev again.</p>
+  <p class="dim-text">Remedies: <code>unnest</code> flatten clauses; <code>split</code> more than one move; <code>uninvert</code> restore subject–verb order; <code>simplify_words</code> same claim, plainer diction; <code>lower_register</code> drop performative formality only.</p>
+</div>`
 }
 
 export function renderReadabilityReport(filename: string, data: unknown): string {

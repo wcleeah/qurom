@@ -47,6 +47,7 @@ export const readabilityUnitSchema = z.object({
     dictionIsDomainTerm: z.number().min(0).max(1).optional(),
   }),
   remedy: choiceAnswerSchema,
+  cached: z.boolean().optional(),
 })
 
 export const readabilityHotspotSchema = z.object({

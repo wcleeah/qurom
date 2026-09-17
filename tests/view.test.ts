@@ -4,7 +4,8 @@ import { renderDebugLogHtml } from "../src/view/debug-log-viewer.ts"
 import { renderStructuredJson, renderConsensusRound, renderRebuttalsRound, renderRebuttalReviewRound, renderTargetedRebuttalsRound } from "../src/view/artifact-renderers.ts"
 import { POLLING_SCRIPT } from "../src/view/client-script.ts"
 import { renderFailureBanner, renderInterviewChatCard } from "../src/view/components.ts"
-import { renderNodeGrid, renderGlobalResearchRoundStrip, renderNodeMiniPipeline, researchRoundNumbers } from "../src/view/node-view.ts"
+import { renderNodeDashboard, renderNodeGrid, renderGlobalResearchRoundStrip, renderNodeMiniPipeline, researchRoundNumbers } from "../src/view/node-view.ts"
+import { renderReadabilityInterpretationGuide } from "../src/view/readability-view.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 import { classifyFile } from "../src/view/file-browser.ts"
 import { card, section, summaryRow, summaryTable } from "../src/view/html.ts"
@@ -205,7 +206,41 @@ describe("view artifact renderers", () => {
     expect(html).toContain("readability-heatmap")
     expect(html).toContain("readability-score dim")
     expect(html).toContain("inversion earned")
+    expect(html).toContain("class=\"readability-quote\"")
+    expect(html).toContain("The framing bit chooses the decoder.")
+    expect(html).toMatch(/readability-quote">The framing bit chooses the decoder\.<\/blockquote>[\s\S]*<details>/)
     expect(html).not.toContain("json-tree")
+  })
+
+  test("shows the full paragraph on a unit item, not a truncated preview", () => {
+    const quote = "The framing bit chooses the decoder before any payload is interpreted, and that decision has to stay visible on the first read even when the surrounding machinery is long enough that a 180-character preview would have clipped it."
+    expect(quote.length).toBeGreaterThan(180)
+    const html = renderStructuredJson("readability-round-0-try-0.json", {
+      round: 0,
+      try: 0,
+      model: "jev-latest",
+      passed: true,
+      units: [{
+        id: "s1-p1",
+        section: "Wire format",
+        quote,
+        cached: true,
+        scores: {
+          convolution: { score: 0.2, confidence: 0.9, probabilities: { 0: 0.9 }, legend: { 0: "direct" } },
+          inversion: { score: 0.2, confidence: 0.9, probabilities: { 0: 0.9 }, legend: { 0: "canonical" } },
+          diction: { score: 0.2, confidence: 0.9, probabilities: { 0: 0.9 }, legend: { 0: "plain" } },
+          formality: { score: 0.2, confidence: 0.9, probabilities: { 0: 0.9 }, legend: { 0: "natural" } },
+          density: { score: 0.2, confidence: 0.9, probabilities: { 0: 0.9 }, legend: { 0: "one move" } },
+        },
+        gates: { inversionEarned: 0.1, densityIsOneMove: 0.2, dictionIsDomainTerm: 0.1 },
+        remedy: { choice: "keep", confidence: 0.9, probabilities: { keep: 0.9 } },
+      }],
+      hotspots: [],
+    })
+    expect(html).toContain(quote)
+    expect(html).not.toContain(`${quote.slice(0, 180).trimEnd()}…`)
+    expect(html).toContain("cached")
+    expect(html).toContain("<article class=\"readability-unit\">")
   })
 
   test("renders a post-run readability review with a distinct title", () => {
@@ -581,6 +616,17 @@ describe("view components", () => {
     const html = renderInterviewChatCard("example-run", liveStatus)
 
     expect(html).toBe("")
+  })
+
+  test("readability node detail starts with a result interpretation guide", async () => {
+    const guide = renderReadabilityInterpretationGuide()
+    expect(guide).toContain("How to read these results")
+    expect(guide).toContain("hotspot")
+    expect(guide).toContain("Cached units")
+    const { body } = await renderNodeDashboard("example-run", "readabilityGate", [], new Map(), null)
+    expect(body.indexOf("How to read these results")).toBeGreaterThanOrEqual(0)
+    expect(body.indexOf("How to read these results")).toBeLessThan(body.indexOf("No in-run readability review yet."))
+    expect(body.split("How to read these results")).toHaveLength(2)
   })
 
   test("node mini pipeline is one continuous graph strip", () => {

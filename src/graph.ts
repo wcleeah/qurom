@@ -1113,6 +1113,18 @@ async function loadReadabilityReport(state: ResearchState): Promise<ReadabilityR
   return readabilityReportSchema.parse(await Bun.file(path).json())
 }
 
+async function loadPreviousReadabilityReport(state: ResearchState): Promise<ReadabilityReport | undefined> {
+  const tryIndex = state.readabilityTry ?? 0
+  if (tryIndex <= 0 || !state.outputPath) return undefined
+  const path = `${state.outputPath}/${readabilityReportFilename(state.round, tryIndex - 1)}`
+  if (!(await fileExists(path))) return undefined
+  try {
+    return readabilityReportSchema.parse(await Bun.file(path).json())
+  } catch {
+    return undefined
+  }
+}
+
 export async function scoreReadability(
   config: RuntimeConfig,
   state: ResearchState,
@@ -1155,6 +1167,7 @@ export async function scoreReadability(
         systemOne: resolved.systemOne,
         round: state.round,
         tryIndex,
+        previous: await loadPreviousReadabilityReport(state),
       })
       report = scored.report
       raw = scored.raw

@@ -72,7 +72,9 @@ Code-only. A paragraph is a hotspot iff **all** of:
 
 `@typesafe-ai/sdk`, one `systemOne` per paragraph, all questions in that call. Client once per run.
 
-**State:** `{ unit, section, before, after, article_job, reader, register }`
+**State:** `{ unit, section, before, after, article_job, reader, audience, register }`
+
+`audience` is a constant: the reader is fluent but not a native English speaker. `register` is technical research prose for that reader.
 
 **Scores:** convolution, inversion, diction, formality, density (levels 0–2)
 

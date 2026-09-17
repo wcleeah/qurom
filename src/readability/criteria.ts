@@ -18,7 +18,10 @@ export const DEFAULT_READABILITY_THRESHOLDS: ReadabilityThresholds = {
 }
 
 export const READABILITY_REGISTER =
-  "Technical research prose. Domain terms are allowed. Flag nested syntax and ornamental diction, not necessary terminology."
+  "Technical research prose for a fluent non-native English reader. Domain terms are allowed. Flag nested syntax and ornamental diction, not necessary terminology."
+
+export const READABILITY_AUDIENCE =
+  "The reader is fluent but not a native English speaker. Judge first-pass processing cost for that reader."
 
 const CONVOLUTION_LEVELS = [
   "Direct: canonical order, one move per sentence",
@@ -67,7 +70,7 @@ export function tripThresholdFor(criterion: ScoreCriterion, thresholds: Readabil
 export function buildReadabilityQuestions() {
   return {
     convolution: score(
-      "How syntactically convoluted is `unit` for a reader of this article? Judge clause nesting and re-reading cost, not whether the idea is advanced. Use `register`.",
+      "How syntactically convoluted is `unit` for `audience`? Judge clause nesting and re-reading cost, not whether the idea is advanced. Use `register` and `audience`.",
       CONVOLUTION_LEVELS,
     ),
     inversion: score(
@@ -75,11 +78,11 @@ export function buildReadabilityQuestions() {
       INVERSION_LEVELS,
     ),
     diction: score(
-      "Does `unit` use a fancier word where a simpler one would carry the same idea? Domain terms listed in `reader` are not padding.",
+      "Does `unit` use a fancier word where a simpler one would carry the same idea for `audience`? Domain terms listed in `reader` are not padding.",
       DICTION_LEVELS,
     ),
     formality: score(
-      "How performatively formal is `unit` relative to `register` and `reader`? Stiff academic cadence, not complete sentences.",
+      "How performatively formal is `unit` relative to `register`, `reader`, and `audience`? Stiff academic cadence, not complete sentences.",
       FORMALITY_LEVELS,
     ),
     density: score(
@@ -95,7 +98,7 @@ export function buildReadabilityQuestions() {
     ),
     densityIsOneMove: noul("Despite long syntax, `unit` is still one mechanism or claim."),
     dictionIsDomainTerm: noul(
-      "Hard words in `unit` are necessary domain terms for this reader, not ornamental synonyms.",
+      "Hard words in `unit` are necessary domain terms for `audience`, not ornamental synonyms.",
     ),
     remedy: choice(
       "If `unit` should be edited for processing cost, which single class of edit is the right one? Choose `keep` if the marked style is earned.",

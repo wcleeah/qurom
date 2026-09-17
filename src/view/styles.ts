@@ -3993,17 +3993,23 @@ body.html-viewer-body {
 .readability-try-list { margin-bottom: 0.75rem; }
 .readability-try { margin-bottom: 0.85rem; border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.45rem 0.7rem; }
 .readability-try summary { cursor: pointer; font-weight: 600; }
+.readability-guide { margin-bottom: 1.25rem; }
+.readability-guide p { margin: 0 0 0.65rem; max-width: 52rem; }
+.readability-guide p:last-child { margin-bottom: 0; }
 .readability-hotspot-list { list-style: none; padding: 0; margin: 0 0 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
-.readability-hotspot-meta { display: flex; flex-wrap: wrap; gap: 0.4rem 0.65rem; align-items: baseline; margin-bottom: 0.35rem; }
-.readability-hotspot blockquote, .readability-unit blockquote {
-  margin: 0;
-  padding: 0.5rem 0.7rem;
+.readability-hotspot-meta, .readability-unit-meta { display: flex; flex-wrap: wrap; gap: 0.4rem 0.65rem; align-items: baseline; margin-bottom: 0.45rem; }
+.readability-quote {
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.75rem;
   border-left: 3px solid var(--border);
-  color: var(--muted);
-  font-size: 0.85rem;
+  color: var(--fg);
+  font-size: 0.9rem;
+  line-height: 1.55;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: none;
 }
-.readability-unit { margin-bottom: 0.65rem; border: 1px solid var(--border); border-radius: 0.45rem; padding: 0.45rem 0.7rem; }
+.readability-unit { margin-bottom: 0.65rem; border: 1px solid var(--border); border-radius: 0.45rem; padding: 0.55rem 0.75rem; }
 .readability-unit summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 0.4rem 0.65rem; align-items: baseline; }
 .readability-heatmap { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.65rem 0 0.4rem; }
 .readability-score { display: grid; grid-template-columns: 7.5rem 1fr 2.4rem; gap: 0.4rem; align-items: center; font-size: 0.75rem; }

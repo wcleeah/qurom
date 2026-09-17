@@ -209,7 +209,7 @@ The designated drafter writes `draft-round-N.md`.
 
 ### `scoreReadability` / `reviseReadability`
 
-Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review. Not an auditor: no vote, no findings, no rebuttal. See [readability-review-plan.md](./readability-review-plan.md).
+Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review. Not an auditor: no vote, no findings, no rebuttal. Jev state includes a constant `audience`: the reader is fluent but not a native English speaker. See [readability-review-plan.md](./readability-review-plan.md).
 
 Finished runs can also request a **score-only post-run review** (`POST /api/runs/:id/readability-review`). That path does not resume the graph or rewrite `final.md`. It writes sidecar artifacts `readability-review.json`, `readability-review.jev.json`, and `readability-review-status.json` using the current quorum thresholds and model. If readability is disabled or `TYPESAFE_API_KEY` is missing, the request fails instead of writing a skipped-pass report.
 
