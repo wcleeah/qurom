@@ -100,6 +100,7 @@ describe("html ask context", () => {
     expect(bootstrap.prompt).toContain("What is this about?")
     expect(bootstrap.prompt).toContain("Research tool preferences:")
     expect(bootstrap.prompt).toContain("Prefer context7")
+    expect(bootstrap.prompt).toContain("Do not use Exa Agent")
 
     const followup = await buildAskPrompt({
       scope: "page",

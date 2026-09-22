@@ -9,6 +9,7 @@ export function buildResearchToolHint(config: RuntimeConfig): string {
 
   lines.push(
     `- Preferred web search provider: ${config.quorumConfig.researchTools.webSearchProvider}. Favor online sources over local files when gathering evidence.`,
+    "- Do not use Exa Agent or other Exa subagent/delegation tools. Use Exa only for direct search or fetch.",
   )
   return lines.join("\n")
 }
