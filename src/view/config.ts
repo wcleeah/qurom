@@ -1,4 +1,9 @@
 import { loadRuntimeConfig, type QuorumConfig } from "../config"
+import {
+  currentCursorPricingSyncedAt,
+  launchCursorPricingSyncAgent,
+  type CursorPricingSyncLaunch,
+} from "../cursor-pricing-sync-agent"
 import { applyCursorUsageImport, parseCursorUsageCsv, type CursorUsageImportSummary } from "../cursor-usage-import"
 import { defaultOpenCodeDbPath } from "../data-paths"
 import {
@@ -51,6 +56,7 @@ function parseOptionsJson(text: string | undefined) {
 let lastProviderValidation: { ok: boolean; message: string } | undefined
 let lastCursorUsageImport: CursorUsageImportSummary | undefined
 let lastOpenCodeUsageImport: OpenCodeUsageImportSummary | undefined
+let lastCursorPricingSync: CursorPricingSyncLaunch | undefined
 let lastMcpError: string | undefined
 
 function parsePairs(value: string) {
@@ -121,6 +127,27 @@ function mcpServerFromParams(params: URLSearchParams): McpServer {
   })
 }
 
+function renderCursorPricingSyncSection(input?: {
+  launch?: CursorPricingSyncLaunch
+  error?: string
+}) {
+  const launch = input?.launch ?? lastCursorPricingSync
+  const syncedAt = currentCursorPricingSyncedAt()
+  const syncedLabel = syncedAt
+    ? `Last synced ${escapeHtml(syncedAt)}.`
+    : "No sync timestamp is stored yet."
+  const statusHtml = input?.error
+    ? `<div class="outcome-banner failed">${escapeHtml(input.error)}</div>`
+    : launch
+      ? `<div class="outcome-banner approved">Launched Cursor agent <a href="${escapeHtml(launch.agentUrl)}" target="_blank" rel="noopener">${escapeHtml(launch.agentId)}</a> against ${escapeHtml(launch.repoUrl)}. It will refresh the pricing map and open a PR.</div>`
+      : `<p class="tiny-text muted-text">${syncedLabel} Launch a Cursor cloud agent against this repository to regenerate <code>defaults/cursor-model-pricing.json</code> from Cursor docs and open a pull request.</p>`
+
+  return section("Cursor model pricing", `${statusHtml}
+<form class="config-form" method="POST" action="/config/cursor-pricing-sync">
+  <div class="form-actions"><button type="submit" class="btn btn-primary">Update Cursor pricing</button></div>
+</form>`)
+}
+
 function renderCursorUsageImportSection(importSummary?: CursorUsageImportSummary) {
   const summary = importSummary ?? lastCursorUsageImport
   const summaryHtml = summary
@@ -157,6 +184,8 @@ export async function renderConfigIndex(options?: {
   draftConfig?: QuorumConfig
   importSummary?: CursorUsageImportSummary
   opencodeImportSummary?: OpenCodeUsageImportSummary
+  pricingSync?: CursorPricingSyncLaunch
+  pricingSyncError?: string
 }): Promise<Response> {
   const config = await loadRuntimeConfig()
   const summary = await listConfigSummary(config.env)
@@ -193,6 +222,7 @@ export async function renderConfigIndex(options?: {
     `<div class="header-bar"><div class="header-main"><h1>Configuration</h1><div class="meta-row"><span class="meta-item">Active profile: <strong>${escapeHtml(summary.profile.name)}</strong></span></div></div></div>`,
     section("Status", statusCard),
     `<form class="config-form" method="POST" action="/config/validate"><div class="form-actions"><button type="submit" class="btn btn-primary">Validate providers</button></div></form>`,
+    renderCursorPricingSyncSection({ launch: options?.pricingSync, error: options?.pricingSyncError }),
     renderCursorUsageImportSection(options?.importSummary),
     renderOpenCodeUsageImportSection(options?.opencodeImportSummary),
     section("Quorum policy", quorumConfigForm),
@@ -415,6 +445,21 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
     } catch (error) {
       lastMcpError = error instanceof Error ? error.message : String(error)
       return renderConfigMcp(lastMcpError)
+    }
+  }
+
+  if (path === "/config/cursor-pricing-sync") {
+    try {
+      const launch = await launchCursorPricingSyncAgent({
+        apiKey: config.env.CURSOR_API_KEY,
+        githubRepo: process.env.QUORUM_GITHUB_REPO,
+        workspaceDir: config.env.QUORUM_WORKSPACE_DIRECTORY,
+      })
+      lastCursorPricingSync = launch
+      return renderConfigIndex({ pricingSync: launch })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return renderConfigIndex({ pricingSyncError: message, error: message })
     }
   }
 
