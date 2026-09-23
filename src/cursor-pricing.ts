@@ -41,16 +41,19 @@ export function getCursorModelPricingTable(): CursorModelPricingFile {
 
 export function resolveCursorPricingModelId(modelId: string | undefined): string | undefined {
   if (!modelId || modelId === "default") return "auto"
-
+  if (modelId === "auto") return "auto"
   if (modelId in table.models) return modelId
 
+  const wantsFast = modelId.split("-").includes("fast")
   let candidate = modelId
   while (candidate.includes("-")) {
     candidate = candidate.replace(/-[^-]+$/, "")
+    const fastId = `${candidate}-fast`
+    if (wantsFast && fastId in table.models) return fastId
     if (candidate in table.models) return candidate
   }
 
-  return modelId === "auto" ? "auto" : undefined
+  return undefined
 }
 
 function pricingEntryForModel(modelId: string | undefined): CursorModelPricingEntry | undefined {
