@@ -1,4 +1,5 @@
 import { NAV_DROPDOWNS_SCRIPT, renderAppNavbar, type AppNavbarOptions } from "./app-nav"
+import { IFRAME_EXTERNAL_LINKS_SCRIPT } from "./iframe-external-links"
 import { OFFLINE_SW_REGISTER_SCRIPT } from "./offline-sw"
 import { CSS } from "./styles"
 import { escapeHtml } from "./utils"
@@ -72,6 +73,7 @@ ${body}
 ${THEME_TOGGLE_SCRIPT}
 </script>
 ${NAV_DROPDOWNS_SCRIPT}
+${IFRAME_EXTERNAL_LINKS_SCRIPT}
 ${OFFLINE_SW_REGISTER_SCRIPT}
 </body>
 </html>`
@@ -98,6 +100,7 @@ ${body}
 ${THEME_TOGGLE_SCRIPT}
 </script>
 ${NAV_DROPDOWNS_SCRIPT}
+${IFRAME_EXTERNAL_LINKS_SCRIPT}
 ${OFFLINE_SW_REGISTER_SCRIPT}
 </body>
 </html>`

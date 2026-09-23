@@ -85,6 +85,8 @@ describe("html viewer page", () => {
     expect(html).toContain("data-html-nav-ask")
     expect(html).toContain("app-navbar-section-menu")
     expect(html).toContain("app-navbar-overflow-toggle")
+    expect(html).toContain(".html-viewer-frame, .design-preview-frame")
+    expect(html).toContain('anchor.setAttribute("target", "_blank")')
   })
 })
 
