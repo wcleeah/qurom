@@ -57,6 +57,7 @@ let lastProviderValidation: { ok: boolean; message: string } | undefined
 let lastCursorUsageImport: CursorUsageImportSummary | undefined
 let lastOpenCodeUsageImport: OpenCodeUsageImportSummary | undefined
 let lastCursorPricingSync: CursorPricingSyncLaunch | undefined
+let lastCursorPricingSyncError: string | undefined
 let lastMcpError: string | undefined
 
 function parsePairs(value: string) {
@@ -131,13 +132,14 @@ function renderCursorPricingSyncSection(input?: {
   launch?: CursorPricingSyncLaunch
   error?: string
 }) {
-  const launch = input?.launch ?? lastCursorPricingSync
+  const error = input?.error ?? lastCursorPricingSyncError
+  const launch = error ? undefined : (input?.launch ?? lastCursorPricingSync)
   const syncedAt = currentCursorPricingSyncedAt()
   const syncedLabel = syncedAt
     ? `Last synced ${escapeHtml(syncedAt)}.`
     : "No sync timestamp is stored yet."
-  const statusHtml = input?.error
-    ? `<div class="outcome-banner failed">${escapeHtml(input.error)}</div>`
+  const statusHtml = error
+    ? `<div class="outcome-banner failed">${escapeHtml(error)}</div>`
     : launch
       ? `<div class="outcome-banner approved">Launched Cursor agent <a href="${escapeHtml(launch.agentUrl)}" target="_blank" rel="noopener">${escapeHtml(launch.agentId)}</a> against ${escapeHtml(launch.repoUrl)}. It will refresh the pricing map and open a PR.</div>`
       : `<p class="tiny-text muted-text">${syncedLabel} Launch a Cursor cloud agent against this repository to regenerate <code>defaults/cursor-model-pricing.json</code> from Cursor docs and open a pull request.</p>`
@@ -456,10 +458,11 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
         workspaceDir: config.env.QUORUM_WORKSPACE_DIRECTORY,
       })
       lastCursorPricingSync = launch
-      return renderConfigIndex({ pricingSync: launch })
+      lastCursorPricingSyncError = undefined
+      return new Response(null, { status: 303, headers: { Location: "/config" } })
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      return renderConfigIndex({ pricingSyncError: message, error: message })
+      lastCursorPricingSyncError = error instanceof Error ? error.message : String(error)
+      return new Response(null, { status: 303, headers: { Location: "/config" } })
     }
   }
 

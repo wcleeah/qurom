@@ -126,7 +126,9 @@ describe("config pricing sync button", () => {
       new Request("http://localhost/config/cursor-pricing-sync", { method: "POST" }),
       "/config/cursor-pricing-sync",
     )
-    const html = await response?.text()
+    expect(response?.status).toBe(303)
+    expect(response?.headers.get("Location")).toBe("/config")
+    const html = await renderConfigIndex().then((r) => r.text())
     expect(html).toContain("bc-pricing-sync")
     expect(html).toContain("https://cursor.com/agents/bc-pricing-sync")
     expect(html).toContain("https://github.com/wcleeah/qurom")
