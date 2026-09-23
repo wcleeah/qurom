@@ -105,6 +105,25 @@ describe("cursor pricing", () => {
   test("maps default and composite csv slugs to pricing entries", () => {
     expect(resolveCursorPricingModelId("default")).toBe("auto")
     expect(resolveCursorPricingModelId("gpt-5.5-low")).toBe("gpt-5.5")
+    expect(resolveCursorPricingModelId("grok-4.7-high")).toBe("grok-4.7")
+    expect(resolveCursorPricingModelId("grok-4.7-high-fast")).toBe("grok-4.7-fast")
+    expect(resolveCursorPricingModelId("gpt-5.6-sol-medium")).toBe("gpt-5.6-sol")
+    expect(resolveCursorPricingModelId("claude-fable-5-1-thinking-high")).toBe("claude-fable-5-1")
+  })
+
+  test("estimates grok-4.7 and claude sonnet 5 at current docs rates", () => {
+    expect(estimateCursorCostUsd("grok-4.7", {
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    }).costUsd).toBeCloseTo(2)
+    expect(estimateCursorCostUsd("claude-sonnet-5", {
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    }).costUsd).toBeCloseTo(2)
   })
 })
 
