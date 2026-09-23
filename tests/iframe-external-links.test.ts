@@ -44,7 +44,8 @@ describe("iframe external links script", () => {
     for (const html of [viewer, app, viewerLayout]) {
       expect(html).toContain(IFRAME_EXTERNAL_LINKS_SCRIPT)
       expect(html).toContain(".html-viewer-frame, .design-preview-frame")
-      expect(html).toContain('opener.open(url, "_blank", "noopener,noreferrer")')
+      expect(html).toContain('anchor.setAttribute("target", "_blank")')
+      expect(html).toContain("elementFromEventTarget")
     }
   })
 })
