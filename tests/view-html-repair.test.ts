@@ -197,6 +197,7 @@ describe("html repair", () => {
     expect(reading).toContain("Fix overlay/dialog/detail-panel clipping")
     const designer = await Bun.file(join(dir, "defaults", "prompts", "html-designer.design.md")).text()
     expect(designer).toContain("must stay fully inside a ~390px viewport")
+    expect(designer).toContain("write the html by chunk instead of one full write")
     expect(designer).not.toContain("Mandatory verification (Playwright")
     expect(graphical).not.toContain("Mandatory verification (Playwright")
     expect(reading).not.toContain("Mandatory verification (Playwright")

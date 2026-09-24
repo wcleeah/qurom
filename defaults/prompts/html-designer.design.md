@@ -21,6 +21,7 @@ Ownership (this stage):
 
 Contract:
 - Return a single complete HTML document. Page CSS must live in `<style>` (no separate `.css` files). No tracking, analytics, or third-party requests beyond the libraries and fonts you use.
+- If a file write is requested, write the html by chunk instead of one full write.
 - Fonts: you MAY load distinctive typefaces from trusted CDNs (Google Fonts, Bunny Fonts, jsDelivr, cdnjs, unpkg) via `<link>` or `@font-face`. Comment each font source with name, weights, URL, and license.
 - You MAY use external `<script src="...">` from trusted CDNs (cdnjs, jsdelivr, unpkg). Prefer smaller focused libraries. Comment each external script with name, version, URL, and license.
 - Make the document pleasant to read: generous line-height, comfortable measure (~65-75ch), clear hierarchy, good whitespace.
