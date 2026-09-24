@@ -7,6 +7,7 @@ import {
   renderDiscoverReaderScope,
   renderDraftFullDraftScope,
   renderDesignHtmlScope,
+  renderRelatedNodeArtifacts,
   designRoundNumbers,
 } from "../src/view/node-content-view.ts"
 
@@ -128,10 +129,29 @@ describe("node content view", () => {
 
       const html = await renderDesignHtmlScope(runName, ["design-html-html-designer.html"], "total", null)
 
-      expect(html).toContain("Design HTML")
+      expect(html).toContain("HTML designer")
+      expect(html).not.toContain("Round ? HTML")
       expect(html).toContain("design-html-html-designer.html")
       expect(html).toContain("design-preview-frame")
       expect(html).toContain("Open in viewer")
+    } finally {
+      await rm(runsRoot, { recursive: true, force: true })
+      delete process.env.QUORUM_RUNS_DIR
+    }
+  })
+
+  test("renderRelatedNodeArtifacts shows request.json content", async () => {
+    await setupRun()
+    try {
+      await writeFile(join(runsRoot, runName, "request.json"), JSON.stringify({
+        requestId: "req-1",
+        topic: "Linearizability",
+        inputMode: "topic",
+      }))
+      const html = await renderRelatedNodeArtifacts(runName, ["request.json"])
+      expect(html).toContain("Request")
+      expect(html).toContain("Linearizability")
+      expect(html).toContain("req-1")
     } finally {
       await rm(runsRoot, { recursive: true, force: true })
       delete process.env.QUORUM_RUNS_DIR

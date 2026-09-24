@@ -317,16 +317,38 @@ export function sessionTotalsForLiveNode(
   }
 }
 
-export function runElapsedMs(liveStatus: LiveStatus | null, nodeHistory: NodeHistoryEntry[]): number | undefined {
+function graphClockMs(liveStatus: LiveStatus | null, nodeHistory: NodeHistoryEntry[], now = Date.now()): number {
+  if (liveStatus?.phase === "running") {
+    if (liveStatus.awaitingReaderReply || liveStatus.pausedAt != null) {
+      return liveStatus.pausedAt
+        ?? liveStatus.nodeStartedAt
+        ?? liveStatus.runStartedAt
+        ?? now
+    }
+    return now
+  }
+  const last = (liveStatus?.nodeHistory ?? nodeHistory).at(-1)
+  return last?.completedAt ?? liveStatus?.runStartedAt ?? now
+}
+
+/** Elapsed time the graph was moving: wall clock minus interview / idle waits. */
+export function runElapsedMs(
+  liveStatus: LiveStatus | null,
+  nodeHistory: NodeHistoryEntry[],
+  now = Date.now(),
+): number | undefined {
   const startedAt = liveStatus?.runStartedAt
     ?? (nodeHistory.length > 0 ? nodeHistory[0]!.startedAt : undefined)
   if (!startedAt) return undefined
 
-  if (liveStatus?.phase === "running") return Date.now() - startedAt
+  const pausedMs = liveStatus?.pausedMs ?? 0
+  return Math.max(0, graphClockMs(liveStatus, nodeHistory, now) - startedAt - pausedMs)
+}
 
-  const last = nodeHistory.at(-1)
-  if (last) return last.completedAt - startedAt
-  return undefined
+export function nodeActiveElapsedMs(liveStatus: LiveStatus | null, now = Date.now()): number | undefined {
+  if (!liveStatus?.nodeStartedAt) return undefined
+  const clock = graphClockMs(liveStatus, liveStatus.nodeHistory ?? [], now)
+  return Math.max(0, clock - liveStatus.nodeStartedAt)
 }
 
 export function resolveRunTelemetry(
@@ -644,10 +666,10 @@ export function renderNodeTelemetryMeta(
   const activeRound = active && round !== undefined && liveStatus!.round === round
 
   if (activeRound && liveStatus) {
-    const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : undefined
+    const elapsed = nodeActiveElapsedMs(liveStatus)
     const totals = sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, nodeName, round)
     const parts: string[] = []
-    if (elapsed) parts.push(`${elapsed} elapsed`)
+    if (elapsed !== undefined) parts.push(`${formatElapsed(elapsed)} elapsed`)
     const usageLabel = formatTelemetryUsageLabel(totals.usage, totals.usageAvailable || totals.costAvailable)
     if (usageLabel) parts.push(usageLabel)
     if (parts.length === 0) return ""
@@ -655,10 +677,10 @@ export function renderNodeTelemetryMeta(
   }
 
   if (active && round === undefined && liveStatus) {
-    const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : undefined
+    const elapsed = nodeActiveElapsedMs(liveStatus)
     const totals = sessionTotalsForLiveNode(sessionTelemetry, liveStatus)
     const parts: string[] = []
-    if (elapsed) parts.push(`${elapsed} elapsed`)
+    if (elapsed !== undefined) parts.push(`${formatElapsed(elapsed)} elapsed`)
     const usageLabel = formatTelemetryUsageLabel(totals.usage, totals.usageAvailable || totals.costAvailable)
     if (usageLabel) parts.push(usageLabel)
     if (parts.length === 0) return ""

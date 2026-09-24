@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { renderFailureBanner } from "../src/view/components.ts"
 import { listArchivedRuns } from "../src/view/data.ts"
-import { renderIndex } from "../src/view/pages.ts"
+import { renderIndex, renderRun } from "../src/view/pages.ts"
 import {
   archiveRunDirectory,
   getArchiveDir,
@@ -206,7 +206,25 @@ describe("archived index", () => {
     expect(html).toContain("Sample")
     expect(html).toContain("/api/runs/sample-run/unarchive")
     expect(html).toContain("Unarchive")
-    expect(html).not.toContain('href="/runs/sample-run"')
+    expect(html).toContain('href="/runs/sample-run"')
+  })
+
+  test("archived run detail is clickable and hides Jev plus findings MCP", async () => {
+    await writeFile(join(dir, "runs", "sample-run", "final.md"), "# Done")
+    await archiveRunDirectory("sample-run")
+
+    expect(safeRunPath("sample-run")).toBe(join(getArchiveDir(), "sample-run"))
+    expect(await resolveArchiveRunName("sample-run")).toBe("sample-run")
+
+    const page = await (await renderRun("sample-run")).text()
+    expect(page).toContain("Sample")
+    expect(page).toContain("/api/runs/sample-run/unarchive")
+    expect(page).toContain("Unarchive")
+    expect(page).not.toContain("Check findings MCP")
+    expect(page).not.toContain("Review readability (Jev)")
+    expect(page).not.toContain("Re-score readability (Jev)")
+    expect(page).not.toContain("Create share link")
+    expect(page).not.toContain("Re-tag")
   })
 
   test("renderUnarchiveForm posts to unarchive endpoint", () => {

@@ -110,11 +110,18 @@ export function renderUnarchiveForm(runName: string): string {
 export function renderRunActionStrip(
   runName: string,
   actions: RunResumeActions,
-  options?: { runActiveGlobally?: boolean; showArchive?: boolean; maxConcurrent?: number; hasExistingReadabilityReview?: boolean },
+  options?: {
+    runActiveGlobally?: boolean
+    showArchive?: boolean
+    showUnarchive?: boolean
+    maxConcurrent?: number
+    hasExistingReadabilityReview?: boolean
+  },
 ): string {
   const showArchive = options?.showArchive === true
+  const showUnarchive = options?.showUnarchive === true
   const hasRerun = actions.showRerunReuseProfile || actions.showRerunRepairProfile || actions.showRerunFreshInterview
-  if (!actions.showResume && !actions.showRestartFromSource && !hasRerun && !actions.showReadabilityReview && !showArchive) return ""
+  if (!actions.showResume && !actions.showRestartFromSource && !hasRerun && !actions.showReadabilityReview && !showArchive && !showUnarchive) return ""
 
   const blocked = options?.runActiveGlobally === true
   const hasUnattendedRerun = actions.showRerunReuseProfile || actions.showRerunRepairProfile
@@ -140,7 +147,7 @@ export function renderRunActionStrip(
     ? renderReadabilityReviewForm(runName, { existing: options?.hasExistingReadabilityReview })
     : ""
 
-  const archiveButtons = showArchive ? renderArchiveForm(runName) : ""
+  const archiveButtons = showArchive ? renderArchiveForm(runName) : showUnarchive ? renderUnarchiveForm(runName) : ""
 
   const sections: string[] = []
   const summaryBits: string[] = []
@@ -163,7 +170,7 @@ export function renderRunActionStrip(
   <p class="muted-note dim-text run-actions-note">Scores the finished article. Does not rewrite the draft.</p>`)
   }
   if (archiveButtons) {
-    summaryBits.push("archive")
+    summaryBits.push(showUnarchive ? "unarchive" : "archive")
     sections.push(`<span class="run-actions-label">Manage</span>
   <div class="run-actions-buttons">${archiveButtons}</div>`)
   }
@@ -192,6 +199,7 @@ export function renderRunControlsSection(input: {
   runActiveGlobally: boolean
   maxConcurrent?: number
   hasExistingReadabilityReview?: boolean
+  archived?: boolean
 }): string {
   const cancelHtml = input.isRunning ? renderRunCancelButton(input.runName) : ""
   const actionsHtml = input.isRunning
@@ -199,7 +207,8 @@ export function renderRunControlsSection(input: {
     : renderRunActionStrip(input.runName, input.resumeActions, {
       runActiveGlobally: input.runActiveGlobally,
       maxConcurrent: input.maxConcurrent,
-      showArchive: true,
+      showArchive: input.archived !== true,
+      showUnarchive: input.archived === true,
       hasExistingReadabilityReview: input.hasExistingReadabilityReview,
     })
   const completionHtml = input.showCompletion ? input.completionHtml : ""

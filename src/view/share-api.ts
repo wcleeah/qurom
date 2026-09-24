@@ -1,7 +1,7 @@
 import { access } from "node:fs/promises"
 import { constants as fsConstants } from "node:fs"
 
-import { resolveRunName, safeFilePath } from "./paths"
+import { isArchivedRun, resolveRunName, safeFilePath } from "./paths"
 import {
   ensureShareLink,
   getShareLinkByRun,
@@ -41,6 +41,9 @@ export async function handleShareApi(req: Request, path: string): Promise<Respon
   }
 
   if (req.method === "POST") {
+    if (isArchivedRun(runName)) {
+      return json({ error: "Share links on archived runs are view-only" }, 409)
+    }
     if (!(await hasFinalHtml(runName))) {
       return json({ error: "final.html is required before creating a share link" }, 400)
     }
@@ -49,6 +52,9 @@ export async function handleShareApi(req: Request, path: string): Promise<Respon
   }
 
   if (req.method === "DELETE") {
+    if (isArchivedRun(runName)) {
+      return json({ error: "Share links on archived runs are view-only" }, 409)
+    }
     const revoked = await revokeShareLink(runName)
     return json({ ok: true, revoked })
   }

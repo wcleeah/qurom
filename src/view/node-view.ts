@@ -1,5 +1,4 @@
 import {
-  designRoundNumbers,
   renderDesignHtmlScope,
   renderDiscoverReaderScope,
   readerInterviewArtifactFiles,
@@ -7,9 +6,10 @@ import {
   renderGraphicalEnhanceScope,
   renderReadingExperienceEnhanceScope,
   renderHtmlReviewScope,
+  renderRelatedNodeArtifacts,
 } from "./node-content-view"
 import { renderFileBrowser } from "./file-browser"
-import { GRAPH_NODES, filesForNode, filesForNodeRound, filesForRebuttalsViewer, getNodeDefinition, isNodeActive, isNodeComplete, isRebuttalsViewerNode, nodeKpis, rebuttalsTelemetryNodeId, resolveLiveNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
+import { GRAPH_NODES, filesForNode, filesForNodeRound, filesForRebuttalsViewer, getNodeDefinition, isDesignPhaseNode, isNodeActive, isNodeComplete, isRebuttalsViewerNode, nodeKpis, rebuttalsTelemetryNodeId, resolveLiveNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
 import { indexRunArtifacts, roundHasRebuttalActivity, type RoundArtifacts } from "./run-artifacts"
 import { renderAgentActivity } from "./components"
 import {
@@ -32,9 +32,11 @@ import {
   sessionTotalsForLiveNode,
   sessionTotalsForNode,
   sessionUsageForHistoryEntry,
+  nodeActiveElapsedMs,
 } from "./telemetry-view"
-import { safeFilePath } from "./paths"
+import { isArchivedRun, safeFilePath } from "./paths"
 import type { SessionTelemetryFile } from "../session-telemetry"
+import { livePipelineLabel } from "./round-view"
 import { escapeHtml, formatDurationMs, formatElapsed, formatUsagePair } from "./utils"
 import type { LiveStatus, NodeHistoryEntry, RebuttalEntry, RebuttalResponseEntry, RunStatus } from "./types"
 
@@ -151,11 +153,12 @@ export function renderNodeExecutionHistory(
       ? ` · ${formatUsagePair(usage, true)}`
       : ""
     const icon = entry.status === "completed" ? "✓" : "✗"
+    const showRound = !isDesignPhaseNode(entry.node)
     html += `<div class="node-history-row">
   <span class="node-history-icon ${entry.status === "completed" ? "success-text" : "danger-text"}">${icon}</span>
   <span class="node-history-link">${escapeHtml(entry.node)}</span>
   <span class="node-history-meta">${elapsedStr}${usageStr}</span>
-  ${entry.round > 0 || entry.round === 0 ? `<span class="node-history-extra">· round ${entry.round}</span>` : ""}
+  ${showRound && (entry.round > 0 || entry.round === 0) ? `<span class="node-history-extra">· round ${entry.round}</span>` : ""}
   ${entry.rebuttalTurn ? `<span class="node-history-extra">· turn ${entry.rebuttalTurn}</span>` : ""}
   ${entry.summary ? `<span class="node-history-extra">· ${escapeHtml(formatSummary(entry.summary))}</span>` : ""}
   ${entry.error ? `<span class="node-history-error">${escapeHtml(entry.error.slice(0, 80))}</span>` : ""}
@@ -280,7 +283,7 @@ async function renderPosthocReadabilityScope(
   liveStatus: LiveStatus | null,
 ): Promise<string> {
   const idle = liveStatus?.phase !== "running"
-  const canReview = idle && hasReviewableMarkdown(files)
+  const canReview = idle && hasReviewableMarkdown(files) && !isArchivedRun(runName)
   const hasReport = files.includes(POSTHOC_REPORT_FILENAME)
   let html = ""
 
@@ -496,6 +499,32 @@ ${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, isCurrentRound)
     content += `<p class="muted-note dim-text">This step applies to the full run.</p>`
   }
 
+  const specializedContent = new Set([
+    "discoverReader",
+    "draftFullDraft",
+    "readabilityGate",
+    "runDesignHtml",
+    "graphicalEnhance",
+    "interactiveEnhance",
+    "readingExperienceEnhance",
+    "htmlReview",
+    "runParallelAudits",
+    "reviewFindingsByDrafter",
+    "aggregateConsensus",
+    REBUTTALS_VIEWER_NODE_ID,
+    "runTargetedRebuttals",
+  ])
+  const relatedFiles = resolvedId === "discoverReader"
+    ? []
+    : isRebuttalsViewerNode(resolvedId)
+      ? []
+      : round !== undefined
+        ? filesForNodeRound(resolvedId, files, index, round)
+        : filesForNode(resolvedId, files, index)
+  if (!specializedContent.has(resolvedId) && relatedFiles.length > 0) {
+    content += await renderRelatedNodeArtifacts(runName, relatedFiles)
+  }
+
   const telemetryNode = isRebuttalsViewerNode(resolvedId) ? rebuttalsTelemetryNodeId() : resolvedId
   const telemetryHtml = renderNodeTelemetryMeta(liveStatus, nodeHistory, telemetryNode, sessionTelemetry, round)
   let body = telemetryHtml ?? ""
@@ -506,9 +535,7 @@ ${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, isCurrentRound)
     ? await readerInterviewArtifactFiles(runName, files)
     : isRebuttalsViewerNode(resolvedId)
       ? filesForRebuttalsViewer(files, index, round)
-      : round !== undefined
-        ? filesForNodeRound(resolvedId, files, index, round)
-        : filesForNode(resolvedId, files, index)
+      : relatedFiles
   body += renderArtifactsSection(runName, nodeFiles, fileSizes)
 
   return body
@@ -584,13 +611,14 @@ export async function renderNodeDashboard(
 
   if (active && liveStatus) {
     const totals = sessionTotalsForLiveNode(sessionTelemetry, liveStatus)
-    const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : ""
+    const elapsedMs = nodeActiveElapsedMs(liveStatus)
+    const elapsed = elapsedMs !== undefined ? formatElapsed(elapsedMs) : ""
     const usageLabel = totals.usageAvailable || totals.costAvailable
       ? ` · ${formatUsagePair(totals.usage, true)}`
       : ""
     live += `<div class="card active-run-hero">
   <span class="badge badge-running">● Running</span>
-  <span class="dim-text">${escapeHtml(resolvedId)} · ${escapeHtml(elapsed)}${escapeHtml(usageLabel)}</span>
+  <span class="dim-text">${escapeHtml(livePipelineLabel(liveStatus))} · ${escapeHtml(elapsed)}${escapeHtml(usageLabel)}</span>
 </div>`
     live += renderAgentActivity(liveStatus, sessionTelemetry)
   }
@@ -656,8 +684,6 @@ export function nodePageRoundNumbers(
   liveStatus: LiveStatus | null,
   nodeHistory: NodeHistoryEntry[] = [],
 ): number[] {
-  if (nodeId === "runDesignHtml") {
-    return designRoundNumbers(files, liveStatus)
-  }
+  if (isDesignPhaseNode(nodeId) || nodeId === "runDesignHtml") return []
   return researchRoundNumbers(files, liveStatus, nodeHistory)
 }

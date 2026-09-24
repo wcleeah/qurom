@@ -49,35 +49,41 @@ export function renderArticleTagsSection(input: {
   tags: ArticleTagRecord[]
   allTags: TagPickerOption[]
   canRetag: boolean
+  viewOnly?: boolean
 }): string {
+  const viewOnly = input.viewOnly === true
   const chips = input.tags.length
     ? input.tags.map((tag) => renderTagChip(
       tag.slug,
       tag.label,
-      tag.articleSource === "user",
+      !viewOnly && tag.articleSource === "user",
       tag.articleSource,
     )).join("")
     : `<span class="muted-text tiny-text">No tags yet.</span>`
 
-  return `<div class="tags-section card" data-article-tags data-run-name="${escapeHtml(input.runName)}">
-  <div class="tags-section-header">
-    <h2>Tags</h2>
-    <div class="tags-section-actions">
+  const actions = viewOnly
+    ? ""
+    : `<div class="tags-section-actions">
       ${input.canRetag ? `<form class="inline-form" method="POST" action="/api/runs/${encodeURIComponent(input.runName)}/retag"><button type="submit" class="btn btn-secondary">Re-tag</button></form>` : ""}
       <form class="inline-form" method="POST" action="/api/runs/${encodeURIComponent(input.runName)}/tags/propagate">
         <button type="submit" class="btn btn-secondary">Apply tags to notes</button>
       </form>
-    </div>
+    </div>`
+
+  return `<div class="tags-section card" data-article-tags data-run-name="${escapeHtml(input.runName)}">
+  <div class="tags-section-header">
+    <h2>Tags</h2>
+    ${actions}
   </div>
   <div class="tag-chip-list">${chips}</div>
-  ${renderTagPicker({
+  ${viewOnly ? "" : renderTagPicker({
     allTags: input.allTags,
     runName: input.runName,
     label: "Add tags",
     placeholder: "Search or create article tags…",
   })}
 </div>
-${TAG_FORMS_SCRIPT}`
+${viewOnly ? "" : TAG_FORMS_SCRIPT}`
 }
 
 export function renderNoteTagsEditor(input: {
