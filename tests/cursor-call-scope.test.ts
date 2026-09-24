@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { inferCursorCallScope } from "../src/cursor-call-scope.ts"
+import { inferCursorCallScope, inferScopeFromNodeHistory } from "../src/cursor-call-scope.ts"
 
 describe("inferCursorCallScope", () => {
   test("maps design artifacts by role filename", () => {
@@ -59,19 +59,28 @@ describe("inferCursorCallScope", () => {
     })).toEqual({})
   })
 
-  test("does not uniquely map working files reused across nodes", () => {
+  test("maps summarizer artifacts and role", () => {
+    expect(inferCursorCallScope({
+      role: "markdown-summarizer",
+      artifact: "artifact-summary.json",
+    })).toEqual({ node: "summarizeOutputArtifact", round: 0 })
+    expect(inferCursorCallScope({ role: "markdown-summarizer" }))
+      .toEqual({ node: "summarizeOutputArtifact", round: 0 })
+  })
+
+  test("maps working design files by role because metadata is per stage", () => {
     expect(inferCursorCallScope({
       role: "html-designer",
       artifact: "design.html",
-    })).toEqual({})
+    })).toEqual({ node: "runDesignHtml", round: 0 })
     expect(inferCursorCallScope({
       role: "graphical-enhancer",
       artifact: "design.html",
-    })).toEqual({})
+    })).toEqual({ node: "graphicalEnhance", round: 0 })
     expect(inferCursorCallScope({
       role: "reading-experience-enhancer",
       artifact: "design.html",
-    })).toEqual({})
+    })).toEqual({ node: "readingExperienceEnhance", round: 0 })
   })
 
   test("maps audit and review artifacts", () => {
@@ -97,5 +106,16 @@ describe("inferCursorCallScope", () => {
       .toEqual({ node: "readingExperienceEnhance", round: 0 })
     expect(inferCursorCallScope({ role: "html-reviewer" }))
       .toEqual({ node: "htmlReview", round: 0 })
+    expect(inferCursorCallScope({ role: "markdown-summarizer" }))
+      .toEqual({ node: "summarizeOutputArtifact", round: 0 })
+  })
+})
+
+describe("inferScopeFromNodeHistory", () => {
+  test("maps a completed call onto the longest overlapping node", () => {
+    expect(inferScopeFromNodeHistory(500, [
+      { node: "draftFullDraft", round: 0, startedAt: 1, completedAt: 400, durationMs: 399 },
+      { node: "reviseReadability", round: 0, startedAt: 450, completedAt: 800, durationMs: 350 },
+    ])).toEqual({ node: "reviseReadability", round: 0 })
   })
 })

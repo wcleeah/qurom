@@ -55,9 +55,8 @@ function callMatchesNodeRound(
   }
 
   if (roundEntries.length === 0
-    && session.round === round
-    && session.node
-    && aliases.has(session.node)) {
+    && ((call.node && aliases.has(call.node) && (call.round === round || call.round == null))
+      || (session.round === round && session.node && aliases.has(session.node)))) {
     return true
   }
 
@@ -118,37 +117,25 @@ function sessionMatchesDraftScope(
   return nodeEntries.some((entry) => entry.round === session.round)
 }
 
-function sessionMatchesNodeScopeEntries(
+function callBelongsToNode(
+  call: SessionCall,
   session: SessionRecord,
-  entries: NodeHistoryEntry[],
-): boolean {
-  if (sessionMatchesDraftScope(session, entries)) return true
-
-  for (const call of session.calls) {
-    if (!call.usage) continue
-    for (const entry of entries) {
-      if (callMatchesNodeEntry(call, entry)) return true
-    }
-  }
-  return false
-}
-
-function sessionMatchesNode(
-  session: SessionTelemetryFile["sessions"][number],
   aliases: Set<string>,
-  nodeEntries: NodeHistoryEntry[],
+  entries: NodeHistoryEntry[],
+  nodeId: string,
 ): boolean {
-  if (session.node && aliases.has(session.node)) return true
+  if (!call.usage) return false
 
-  for (const entry of nodeEntries) {
-    for (const call of session.calls) {
-      if (!call.completedAt) continue
-      const timestamp = Date.parse(call.completedAt)
-      if (Number.isFinite(timestamp) && timestamp >= entry.startedAt && timestamp <= entry.completedAt) {
-        return true
-      }
-    }
+  if (call.node) return aliases.has(call.node)
+
+  if (nodeId === "draftFullDraft") {
+    return sessionMatchesDraftScope(session, entries)
+      || entries.some((entry) => callMatchesNodeEntry(call, entry))
   }
+
+  if (entries.some((entry) => callMatchesNodeEntry(call, entry))) return true
+
+  if (entries.length === 0 && session.node && aliases.has(session.node)) return true
 
   return false
 }
@@ -217,21 +204,11 @@ export function sessionTotalsForNode(
   }
 
   const nodeId = getNodeDefinition(nodeName)?.id ?? nodeName
-  const matchSession = nodeId === "draftFullDraft"
-    ? (session: SessionRecord) => sessionMatchesNodeScopeEntries(session, entries)
-    : (session: SessionRecord) => sessionMatchesNode(session, aliases, entries)
 
   for (const session of sessionTelemetry.sessions) {
-    if (!matchSession(session)) continue
-
     const agent = usageByAgent[session.role] ?? { ...emptyUsage(), usageAvailable: false }
     for (const call of session.calls) {
-      if (!call.usage) continue
-      if (nodeId === "draftFullDraft") {
-        const inScope = sessionMatchesDraftScope(session, entries)
-          || entries.some((entry) => callMatchesNodeEntry(call, entry))
-        if (!inScope) continue
-      }
+      if (!callBelongsToNode(call, session, aliases, entries, nodeId)) continue
       usageAvailable = true
       addSessionCallUsage(usage, call)
       addSessionCallUsage(agent, call)
@@ -434,9 +411,6 @@ export function sessionsForNodeScope(
   const active = liveStatus?.phase === "running"
     && (resolveLiveNode(liveStatus) === nodeId || (liveStatus.node !== undefined && aliases.has(liveStatus.node)))
 
-  const hasUsage = (session: SessionTelemetryFile["sessions"][number]) =>
-    session.calls.some((call) => call.usage)
-
   if (round !== undefined) {
     const roundEntries = nodeHistoryEntriesForNodeScope(nodeHistory, nodeName, round)
     return sessionTelemetry.sessions
@@ -444,30 +418,16 @@ export function sessionsForNodeScope(
       .filter((session): session is SessionRecord => session !== null)
   }
 
-  if (active && liveStatus) {
-    return sessionTelemetry.sessions.filter(
-      (session) => session.node !== undefined && aliases.has(session.node) && hasUsage(session),
-    )
-  }
-
-  if (nodeId === "draftFullDraft") {
-    return sessionTelemetry.sessions
-      .map((session) => {
-        const calls = session.calls.filter((call) =>
-          call.usage && (
-            sessionMatchesDraftScope(session, scopeEntries)
-            || scopeEntries.some((entry) => callMatchesNodeEntry(call, entry))
-          ),
-        )
-        if (calls.length === 0) return null
-        return { ...session, calls }
+  return sessionTelemetry.sessions
+    .map((session) => {
+      const calls = session.calls.filter((call) => {
+        if (active && call.usage && session.node && aliases.has(session.node)) return true
+        return callBelongsToNode(call, session, aliases, scopeEntries, nodeId)
       })
-      .filter((session): session is SessionRecord => session !== null)
-  }
-
-  return sessionTelemetry.sessions.filter(
-    (session) => sessionMatchesNode(session, aliases, scopeEntries) && hasUsage(session),
-  )
+      if (calls.length === 0) return null
+      return { ...session, calls }
+    })
+    .filter((session): session is SessionRecord => session !== null)
 }
 
 function renderSessionUsageTableBody(sessions: SessionTelemetryFile["sessions"]): string {
@@ -581,9 +541,16 @@ export function sessionUsageForHistoryEntry(
   for (const session of sessionTelemetry.sessions) {
     for (const call of session.calls) {
       if (!call.usage || !call.completedAt) continue
+      if (call.node && call.node !== entry.node) {
+        const aliases = nodeAliases(entry.node)
+        if (!aliases.has(call.node)) continue
+      }
       const timestamp = Date.parse(call.completedAt)
       if (!Number.isFinite(timestamp) || timestamp < entry.startedAt || timestamp > entry.completedAt) continue
-      if (session.node && session.node !== entry.node) continue
+      if (!call.node && session.node && session.node !== entry.node) {
+        const aliases = nodeAliases(entry.node)
+        if (!aliases.has(session.node)) continue
+      }
       usageAvailable = true
       addSessionCallUsage(usage, call)
     }

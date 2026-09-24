@@ -10,7 +10,7 @@ import {
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "./design-artifacts"
 import { DRAFT_WORKING_FILENAME } from "./draft-artifacts"
-import { DESIGNER_ROLE } from "./role-registry"
+import { DESIGNER_ROLE, SUMMARIZER_ROLE } from "./role-registry"
 
 const SHARED_WORKING_FILES = new Set([DRAFT_WORKING_FILENAME, DESIGN_WORKING_FILENAME])
 
@@ -19,19 +19,44 @@ export type CursorCallScope = {
   round?: number
 }
 
+export type CursorCallHistoryEntry = {
+  node: string
+  round?: number
+  startedAt: number
+  completedAt: number
+  durationMs?: number
+}
+
 /** Infer graph node + round from a Cursor call's output artifact and agent role. */
 export function inferCursorCallScope(input: {
   role: string
   artifact?: string
 }): CursorCallScope {
   const artifact = basename((input.artifact ?? "").trim())
-  // Live working files are reused across nodes, so they cannot name a call site.
-  if (SHARED_WORKING_FILES.has(artifact)) return {}
+  // Working files are reused across nodes. Role still uniquely names design
+  // stages; drafter keep-alive calls fall through so node-history can decide.
+  if (SHARED_WORKING_FILES.has(artifact)) return inferScopeFromRole(input.role)
   if (artifact) {
     const fromArtifact = inferScopeFromArtifact(artifact, input.role)
     if (fromArtifact.node) return fromArtifact
   }
   return inferScopeFromRole(input.role)
+}
+
+/** Map a finished call onto the graph node that was running when it completed. */
+export function inferScopeFromNodeHistory(
+  completedAtMs: number | undefined,
+  history: CursorCallHistoryEntry[],
+): CursorCallScope {
+  if (completedAtMs == null || !Number.isFinite(completedAtMs) || history.length === 0) return {}
+  const hits = history.filter((entry) => completedAtMs >= entry.startedAt && completedAtMs <= entry.completedAt)
+  if (hits.length === 0) return {}
+  const preferred = hits.reduce((best, entry) => {
+    const bestDuration = best.durationMs ?? (best.completedAt - best.startedAt)
+    const entryDuration = entry.durationMs ?? (entry.completedAt - entry.startedAt)
+    return entryDuration > bestDuration ? entry : best
+  })
+  return { node: preferred.node, round: preferred.round }
 }
 
 function designNodeForRole(role: string): string | undefined {
@@ -107,6 +132,10 @@ function inferScopeFromArtifact(artifact: string, role: string): CursorCallScope
     return { node: "reviewRebuttalResponses", round: Number.parseInt(match[1]!, 10) }
   }
 
+  if (artifact === "artifact-summary.json" || artifact === "summary.json") {
+    return { node: "summarizeOutputArtifact", round: 0 }
+  }
+
   return {}
 }
 
@@ -124,6 +153,8 @@ function inferScopeFromRole(role: string): CursorCallScope {
       return { node: "readingExperienceEnhance", round: 0 }
     case HTML_REVIEWER_ROLE:
       return { node: "htmlReview", round: 0 }
+    case SUMMARIZER_ROLE:
+      return { node: "summarizeOutputArtifact", round: 0 }
     case "source-auditor":
     case "logic-auditor":
     case "clarity-auditor":
