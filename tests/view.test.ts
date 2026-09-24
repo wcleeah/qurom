@@ -7,7 +7,7 @@ import { renderFailureBanner, renderInterviewChatCard } from "../src/view/compon
 import { renderNodeDashboard, renderNodeGrid, renderGlobalResearchRoundStrip, renderNodeMiniPipeline, researchRoundNumbers } from "../src/view/node-view.ts"
 import { renderReadabilityInterpretationGuide } from "../src/view/readability-view.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
-import { classifyFile } from "../src/view/file-browser.ts"
+import { classifyFile, renderFileBrowser } from "../src/view/file-browser.ts"
 import { card, section, summaryRow, summaryTable } from "../src/view/html.ts"
 import { getRunsDir, safeFilePath, safeRunPath } from "../src/view/paths.ts"
 import { CSS } from "../src/view/styles.ts"
@@ -391,10 +391,20 @@ describe("view file browser classification", () => {
       subGroup: "HTML Drafts",
       label: "HTML · interactive-enhancer",
     })
-    expect(classifyFile("design-html-graphical-enhancer.html")).toMatchObject({
+    expect(classifyFile("draft.md")).toMatchObject({
+      group: "Research Rounds",
+      subGroup: "Drafts",
+      label: "Working draft",
+    })
+    expect(classifyFile("design.html")).toMatchObject({
       group: "Design",
       subGroup: "HTML Drafts",
-      label: "HTML · graphical-enhancer",
+      label: "Working HTML",
+    })
+    expect(classifyFile("design-html-html-reviewer.html")).toMatchObject({
+      group: "Design",
+      subGroup: "HTML Drafts",
+      label: "HTML · html-reviewer",
     })
     expect(classifyFile("readability-review.json")).toMatchObject({
       group: "Research Rounds",
@@ -406,6 +416,22 @@ describe("view file browser classification", () => {
       subGroup: "Readability",
       label: "Post-run readability raw",
     })
+  })
+
+  test("lists working HTML in the Design file group", () => {
+    const html = renderFileBrowser({
+      runName: "sample-run",
+      files: ["design.html", "design-html-html-designer.html", "design-failure.json"],
+      fileSizes: new Map([
+        ["design.html", 12],
+        ["design-html-html-designer.html", 20],
+        ["design-failure.json", 8],
+      ]),
+    })
+    expect(html).toContain("Working HTML")
+    expect(html).toContain("design.html")
+    expect(html).toContain("HTML · html-designer")
+    expect(html).toContain("Design failure details")
   })
 })
 
@@ -638,8 +664,10 @@ describe("view components", () => {
     expect(html).toContain("/runs/example-run/node/runDesignHtml")
     expect(html).toContain("/runs/example-run/node/graphicalEnhance")
     expect(html).toContain("/runs/example-run/node/readingExperienceEnhance")
+    expect(html).toContain("/runs/example-run/node/htmlReview")
     expect(html).toContain("/runs/example-run/node/finalizeDesign")
     expect(html).toContain(">Reading<")
+    expect(html).toContain(">Review<")
   })
 })
 

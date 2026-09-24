@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { readdir } from "node:fs/promises"
+import { readdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { START, StateGraph, interrupt } from "@langchain/langgraph"
 
@@ -15,8 +15,10 @@ import {
 } from "./output"
 import { auditWithRestart } from "./audit-restart"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
+import { KeepAliveSessionDeadError } from "./agent-runtime/keep-alive"
 import { InvalidInputContextError, isNonEmptyTextFile } from "./agent-runtime/input-context"
-import type { AgentRunHandle } from "./providers/types"
+import type { AgentRunHandle, ProviderPromptResult } from "./providers/types"
+import type { PromptFileInput } from "./opencode"
 import type { PromptBundle } from "./prompt-assets"
 import { auditorAuditPromptKey, auditorRebuttalPromptKey } from "./prompt-asset-defs"
 import { buildResearchToolHint } from "./research-tools"
@@ -37,13 +39,33 @@ import { scoreDraftReadability, skippedReadabilityReport } from "./readability/s
 import { segmentDraft } from "./readability/segment"
 import { resolveReadabilitySystemOne, type ReadabilitySystemOne } from "./typesafe/client"
 import {
+  draftRoundFilename,
+  draftWorkingPath,
+  restoreWorkingDraftFromLatestSnapshot,
+  snapshotWorkingDraft,
+} from "./draft-artifacts"
+import {
   designHtmlArtifactName,
+  designWorkingPath,
   GRAPHICAL_ENHANCER_ROLE,
+  HTML_REVIEWER_ROLE,
   latestDesignHtmlArtifact,
   previousDesignHtmlArtifact,
   READING_EXPERIENCE_ENHANCER_ROLE,
+  restoreWorkingDesignFromPreviousSnapshot,
+  snapshotWorkingDesign,
+  type DesignHtmlPipelineRole,
 } from "./design-artifacts"
 import { AUDITOR_ROLES, DESIGNER_ROLE, DRAFTER_ROLE } from "./role-registry"
+import {
+  deadWritingHandleIds,
+  findLatestDesignerWritingEntry,
+  findLatestDrafterWritingEntry,
+  findSessionLedgerEntry,
+  isHarvestableLedgerStatus,
+  readSessionLedger,
+  upsertSessionLedgerEntry,
+} from "./session-ledger"
 import { formatReaderTranscriptForPrompt, resolveReaderInterviewQuestions } from "./reader-transcript"
 import {
   aggregatedFindingSchema,
@@ -75,7 +97,7 @@ import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 import type { DebugLog } from "./debug-log"
 
-export type DesignPhase = "drafting" | "enhancing" | "reading" | "finalizing"
+export type DesignPhase = "drafting" | "enhancing" | "reading" | "reviewing" | "finalizing"
 
 export type RunObserver = {
   debugLog?: DebugLog
@@ -104,6 +126,104 @@ async function disposeReaderInterviewerSession(requestId: string) {
   const handle = readerInterviewerSessions.get(requestId)
   readerInterviewerSessions.delete(requestId)
   await handle?.dispose?.().catch(() => {})
+}
+
+// One keepAlive writing session for draft / readability / revise. Audits, JSON
+// reviews, and html-reviewer still mint fresh sessions. Disposed when research ends.
+const drafterWritingSessions = new Map<string, AgentRunHandle>()
+
+export async function disposeDrafterWritingSession(requestId: string) {
+  const handle = drafterWritingSessions.get(requestId)
+  drafterWritingSessions.delete(requestId)
+  await handle?.dispose?.().catch(() => {})
+}
+
+// One keepAlive session for html-designer → graphical → reading-experience.
+// Bound to the html-designer runtime (model / OpenCode agent / Cursor MCP).
+// html-reviewer stays separate so it can attach Playwright.
+const designerWritingSessions = new Map<string, AgentRunHandle>()
+
+export async function disposeDesignerWritingSession(requestId: string) {
+  const handle = designerWritingSessions.get(requestId)
+  designerWritingSessions.delete(requestId)
+  await handle?.dispose?.().catch(() => {})
+}
+
+type DrafterWritingNode = "draftFullDraft" | "reviseReadability" | "reviseDraft"
+type DesignerWritingNode = "runDesignHtml" | "graphicalEnhance" | "interactiveEnhance" | "readingExperienceEnhance"
+
+function designerRoleForNode(node: DesignerWritingNode): DesignHtmlPipelineRole {
+  switch (node) {
+    case "runDesignHtml":
+      return DESIGNER_ROLE
+    case "graphicalEnhance":
+    case "interactiveEnhance":
+      return GRAPHICAL_ENHANCER_ROLE
+    case "readingExperienceEnhance":
+      return READING_EXPERIENCE_ENHANCER_ROLE
+  }
+}
+
+async function resetWorkingFileForNewWritingSession(input: {
+  kind: "drafter" | "designer"
+  outputPath: string
+  node: DrafterWritingNode | DesignerWritingNode
+}) {
+  if (input.kind === "drafter") {
+    const restored = await restoreWorkingDraftFromLatestSnapshot(input.outputPath)
+    if (!restored && input.node === "draftFullDraft") {
+      await unlink(draftWorkingPath(input.outputPath)).catch(() => {})
+    }
+    return
+  }
+  const restored = await restoreWorkingDesignFromPreviousSnapshot(
+    input.outputPath,
+    designerRoleForNode(input.node as DesignerWritingNode),
+  )
+  if (!restored && input.node === "runDesignHtml") {
+    await unlink(designWorkingPath(input.outputPath)).catch(() => {})
+  }
+}
+
+async function composeWritingInputFiles(input: {
+  handle: AgentRunHandle
+  workingFile: string
+  contextFilename: "draft.md" | "document.html"
+  extra?: PromptFileInput[]
+}): Promise<PromptFileInput[] | undefined> {
+  const files = [...(input.extra ?? [])]
+  if (input.handle.keepAliveFresh && await isNonEmptyTextFile(input.workingFile)) {
+    files.unshift({
+      path: input.workingFile,
+      mime: "text/plain",
+      filename: input.contextFilename,
+    })
+  }
+  return files.length > 0 ? files : undefined
+}
+
+async function persistWorkingFile(
+  path: string,
+  responseText: string | undefined,
+  label: string,
+) {
+  if (await fileExists(path)) {
+    const text = await Bun.file(path).text()
+    if (text.trim()) return text
+  }
+  if (responseText && responseText.trim() && responseText.trim() !== "OK") {
+    await Bun.write(path, responseText)
+    return responseText
+  }
+  throw new Error(`Missing ${label} at ${path}`)
+}
+
+async function persistWorkingDraft(
+  outputPath: string,
+  responseText: string | undefined,
+  label: string,
+) {
+  return persistWorkingFile(draftWorkingPath(outputPath), responseText, label)
 }
 
 function observeNode(observer: RunObserver | undefined, node: string, state: ResearchState | GraphInput) {
@@ -170,15 +290,6 @@ export function readerContextBlock(state: ResearchState): string {
 
 async function fileExists(path: string) {
   return Bun.file(path).exists()
-}
-
-async function ensureTextArtifact(path: string, text: string | undefined, label: string) {
-  if (await fileExists(path)) return Bun.file(path).text()
-  if (text && text.trim() && text.trim() !== "OK") {
-    await Bun.write(path, text)
-    return text
-  }
-  throw new Error(`Missing ${label} artifact at ${path}; provider returned no inline content to persist`)
 }
 
 async function ensureJsonArtifact(path: string, data: unknown, label: string) {
@@ -1021,7 +1132,7 @@ function routeAfterReaderPrompt(state: ResearchState): string {
   return "draftFullDraft"
 }
 
-async function draftFullDraft(
+export async function draftFullDraft(
   config: RuntimeConfig,
   runtime: AgentRuntime,
   promptBundle: PromptBundle,
@@ -1030,37 +1141,32 @@ async function draftFullDraft(
   observer?: RunObserver,
 ) {
   assertStatus(state, "drafting", "draftFullDraft")
+  if (!state.outputPath) throw new Error("Missing outputPath during draftFullDraft")
 
-  const outputFile = `${state.outputPath}/draft-round-${state.round}.md`
-  const handle = await createObservedHandle({
-    runtime,
-    role: DRAFTER_ROLE,
-    title: `research-drafter:${state.requestId}:draft:${state.round}`,
-    requestId: state.requestId,
-    observer,
-    displayRole: "drafter",
-  })
-
+  const workingFile = draftWorkingPath(state.outputPath)
   const prompt = fullDraftPrompt(config, promptBundle, state)
-  const response = await runtime.prompt({
+  const response = await promptWritingSession({
+    kind: "drafter",
+    runtime,
+    state,
+    node: "draftFullDraft",
+    title: `research-drafter:${state.requestId}:draft:${state.round}`,
+    observer,
     role: DRAFTER_ROLE,
-    handle,
     prompt,
-    outputFile,
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.draftFullDraft",
-      agentName: DRAFTER_ROLE,
-      sessionId: handle.id,
-      input: {
-        requestId: state.requestId,
-        round: state.round,
-        inputMode: state.inputMode,
-      },
-    }),
+    outputFile: workingFile,
+    contextFilename: "draft.md",
+    telemetry,
+    telemetryName: "agent.draftFullDraft",
+    telemetryAgentName: DRAFTER_ROLE,
+    telemetryInput: {
+      requestId: state.requestId,
+      round: state.round,
+      inputMode: state.inputMode,
+    },
   })
-  const draft = await ensureTextArtifact(outputFile, response.text, "draft")
+  const draft = await persistWorkingDraft(state.outputPath, response.text, "draft")
+  await snapshotWorkingDraft(state.outputPath, draftRoundFilename(state.round))
 
   return researchStateSchema.parse({
     ...state,
@@ -1210,42 +1316,33 @@ export async function reviseReadability(
 
   const hints = formatReadabilityHints(report.hotspots)
   const nextTry = (state.readabilityTry ?? 0) + 1
-  const snapshotFile = `${state.outputPath}/${readabilityDraftFilename(state.round, nextTry)}`
-  const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
+  const workingFile = draftWorkingPath(state.outputPath)
 
-  const handle = await createObservedHandle({
+  const response = await promptWritingSession({
+    kind: "drafter",
     runtime,
-    role: DRAFTER_ROLE,
+    state,
+    node: "reviseReadability",
     title: `research-drafter:${state.requestId}:readability:${state.round}:try:${nextTry}`,
-    requestId: state.requestId,
     observer,
-    displayRole: "drafter",
-  })
-
-  const response = await runtime.prompt({
     role: DRAFTER_ROLE,
-    handle,
     prompt: readabilityReviewPrompt(config, promptBundle, state, hints),
-    outputFile: snapshotFile,
-    inputFiles: [
-      { path: draftFile, mime: "text/plain", filename: "draft.md" },
-    ],
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.reviseReadability",
-      agentName: DRAFTER_ROLE,
-      sessionId: handle.id,
-      input: {
-        requestId: state.requestId,
-        round: state.round,
-        readabilityTry: nextTry,
-        hotspotCount: report.hotspots.length,
-      },
-    }),
+    outputFile: workingFile,
+    outputAction: "edit",
+    contextFilename: "draft.md",
+    telemetry,
+    telemetryName: "agent.reviseReadability",
+    telemetryAgentName: DRAFTER_ROLE,
+    telemetryInput: {
+      requestId: state.requestId,
+      round: state.round,
+      readabilityTry: nextTry,
+      hotspotCount: report.hotspots.length,
+    },
   })
-  const draft = await ensureTextArtifact(snapshotFile, response.text, "readability revision")
-  await Bun.write(draftFile, draft)
+  const draft = await persistWorkingDraft(state.outputPath, response.text, "readability revision")
+  await snapshotWorkingDraft(state.outputPath, readabilityDraftFilename(state.round, nextTry))
+  await snapshotWorkingDraft(state.outputPath, draftRoundFilename(state.round))
 
   return researchStateSchema.parse({
     ...state,
@@ -1313,6 +1410,236 @@ async function createObservedHandle(input: {
     requestId: input.requestId,
   })
   return handle
+}
+
+async function getOrCreateDrafterWritingHandle(input: {
+  runtime: AgentRuntime
+  state: ResearchState
+  node: DrafterWritingNode
+  title: string
+  observer?: RunObserver
+}): Promise<AgentRunHandle> {
+  const cached = drafterWritingSessions.get(input.state.requestId)
+  if (cached) {
+    cached.keepAlive = true
+    return cached
+  }
+
+  const outputPath = input.state.outputPath
+  if (outputPath) {
+    const current = await findSessionLedgerEntry(outputPath, {
+      role: DRAFTER_ROLE,
+      node: input.node,
+      round: input.state.round,
+    }).catch(() => undefined)
+    const prior = current && isHarvestableLedgerStatus(current.status)
+      ? current
+      : await findLatestDrafterWritingEntry(outputPath, input.state.requestId).catch(() => undefined)
+
+    const deadIds = await readSessionLedger(outputPath).then(deadWritingHandleIds).catch(() => new Set<string>())
+    if (
+      prior
+      && isHarvestableLedgerStatus(prior.status)
+      && !deadIds.has(prior.handleId)
+      && input.runtime.resumeHandle
+    ) {
+      try {
+        const resumed = await input.runtime.resumeHandle(DRAFTER_ROLE, input.title, prior.handleId)
+        resumed.keepAlive = true
+        resumed.keepAliveFresh = false
+        drafterWritingSessions.set(input.state.requestId, resumed)
+        observeSession(input.observer, {
+          sessionID: resumed.id,
+          role: "drafter",
+          requestId: input.state.requestId,
+        })
+        return resumed
+      } catch {
+        // Fall through and mint a new writing session.
+      }
+    }
+  }
+
+  if (outputPath) {
+    await resetWorkingFileForNewWritingSession({
+      kind: "drafter",
+      outputPath,
+      node: input.node,
+    })
+  }
+
+  const handle = await createObservedHandle({
+    runtime: input.runtime,
+    role: DRAFTER_ROLE,
+    title: input.title,
+    requestId: input.state.requestId,
+    observer: input.observer,
+    displayRole: "drafter",
+  })
+  handle.keepAlive = true
+  handle.keepAliveFresh = true
+  drafterWritingSessions.set(input.state.requestId, handle)
+  return handle
+}
+
+async function getOrCreateDesignerWritingHandle(input: {
+  runtime: AgentRuntime
+  state: ResearchState
+  node: DesignerWritingNode
+  title: string
+  observer?: RunObserver
+}): Promise<AgentRunHandle> {
+  const cached = designerWritingSessions.get(input.state.requestId)
+  if (cached) {
+    cached.keepAlive = true
+    return cached
+  }
+
+  const outputPath = input.state.outputPath
+  if (outputPath) {
+    const current = await findSessionLedgerEntry(outputPath, {
+      role: DESIGNER_ROLE,
+      node: input.node,
+      round: input.state.round,
+    }).catch(() => undefined)
+    const prior = current && isHarvestableLedgerStatus(current.status)
+      ? current
+      : await findLatestDesignerWritingEntry(outputPath, input.state.requestId).catch(() => undefined)
+
+    const deadIds = await readSessionLedger(outputPath).then(deadWritingHandleIds).catch(() => new Set<string>())
+    if (
+      prior
+      && isHarvestableLedgerStatus(prior.status)
+      && !deadIds.has(prior.handleId)
+      && input.runtime.resumeHandle
+    ) {
+      try {
+        const resumed = await input.runtime.resumeHandle(DESIGNER_ROLE, input.title, prior.handleId)
+        resumed.keepAlive = true
+        resumed.keepAliveFresh = false
+        designerWritingSessions.set(input.state.requestId, resumed)
+        observeSession(input.observer, {
+          sessionID: resumed.id,
+          role: DESIGNER_ROLE,
+          requestId: input.state.requestId,
+        })
+        return resumed
+      } catch {
+        // Fall through and mint a new writing session.
+      }
+    }
+  }
+
+  if (outputPath) {
+    await resetWorkingFileForNewWritingSession({
+      kind: "designer",
+      outputPath,
+      node: input.node,
+    })
+  }
+
+  const handle = await createObservedHandle({
+    runtime: input.runtime,
+    role: DESIGNER_ROLE,
+    title: input.title,
+    requestId: input.state.requestId,
+    observer: input.observer,
+    displayRole: DESIGNER_ROLE,
+  })
+  handle.keepAlive = true
+  handle.keepAliveFresh = true
+  designerWritingSessions.set(input.state.requestId, handle)
+  return handle
+}
+
+async function promptWritingSession(input: {
+  kind: "drafter" | "designer"
+  runtime: AgentRuntime
+  state: ResearchState
+  node: DrafterWritingNode | DesignerWritingNode
+  title: string
+  observer?: RunObserver
+  role: string
+  prompt: string
+  outputFile: string
+  outputAction?: "write" | "edit"
+  extraInputFiles?: PromptFileInput[]
+  contextFilename: "draft.md" | "document.html"
+  telemetry?: GraphTelemetry
+  telemetryName: string
+  telemetryAgentName: string
+  telemetryInput?: unknown
+}): Promise<ProviderPromptResult<unknown>> {
+  const attempt = async () => {
+    const handle = input.kind === "drafter"
+      ? await getOrCreateDrafterWritingHandle({
+          runtime: input.runtime,
+          state: input.state,
+          node: input.node as DrafterWritingNode,
+          title: input.title,
+          observer: input.observer,
+        })
+      : await getOrCreateDesignerWritingHandle({
+          runtime: input.runtime,
+          state: input.state,
+          node: input.node as DesignerWritingNode,
+          title: input.title,
+          observer: input.observer,
+        })
+    const inputFiles = await composeWritingInputFiles({
+      handle,
+      workingFile: input.outputFile,
+      contextFilename: input.contextFilename,
+      extra: input.extraInputFiles,
+    })
+    const result = await input.runtime.prompt({
+      role: input.role,
+      handle,
+      prompt: input.prompt,
+      outputFile: input.outputFile,
+      outputAction: input.outputAction,
+      inputFiles,
+      telemetry: graphAgentTelemetry({
+        telemetry: input.telemetry,
+        state: input.state,
+        name: input.telemetryName,
+        agentName: input.telemetryAgentName,
+        sessionId: handle.id,
+        input: input.telemetryInput,
+      }),
+    })
+    handle.keepAliveFresh = false
+    return result
+  }
+
+  try {
+    return await attempt()
+  } catch (error) {
+    if (!(error instanceof KeepAliveSessionDeadError)) throw error
+    input.observer?.debugLog?.write("session.keepalive.replace", {
+      handleId: error.handleId,
+      reason: error.reason,
+      kind: input.kind,
+      node: input.node,
+      requestId: input.state.requestId,
+    })
+    if (input.state.outputPath) {
+      await upsertSessionLedgerEntry(input.state.outputPath, {
+        role: input.kind === "drafter" ? DRAFTER_ROLE : DESIGNER_ROLE,
+        node: input.node,
+        round: input.kind === "designer" ? (input.state.designRound ?? 0) : input.state.round,
+        requestId: input.state.requestId,
+        handleId: error.handleId,
+        status: "error",
+      }).catch(() => {})
+    }
+    if (input.kind === "drafter") {
+      await disposeDrafterWritingSession(input.state.requestId)
+    } else {
+      await disposeDesignerWritingSession(input.state.requestId)
+    }
+    return await attempt()
+  }
 }
 
 async function runParallelAudits(
@@ -2146,45 +2473,38 @@ async function reviseDraft(
 
   await ensureRunDirPath(state.outputPath)
 
-  const handle = await createObservedHandle({
-    runtime,
-    role: DRAFTER_ROLE,
-    title: `research-drafter:${state.requestId}:revise:${state.round}`,
-    requestId: state.requestId,
-    observer,
-    displayRole: "drafter",
-  })
-
   // Write unresolved findings to a temp JSON file for attachment
   const findingsFile = `${state.outputPath}/unresolved-findings-round-${state.round}.json`
   await writeRunJsonArtifact(state.outputPath, `unresolved-findings-round-${state.round}.json`, state.unresolvedFindings)
-  const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
+  const workingFile = draftWorkingPath(state.outputPath)
   const nextRound = state.round + 1
-  const outputFile = `${state.outputPath}/draft-round-${nextRound}.md`
 
-  const response = await runtime.prompt({
+  const response = await promptWritingSession({
+    kind: "drafter",
+    runtime,
+    state,
+    node: "reviseDraft",
+    title: `research-drafter:${state.requestId}:revise:${state.round}`,
+    observer,
     role: DRAFTER_ROLE,
-    handle,
     prompt: revisionPrompt(config, promptBundle, state),
-    outputFile,
-    inputFiles: [
-      { path: draftFile, mime: "text/plain", filename: "draft.md" },
+    outputFile: workingFile,
+    outputAction: "edit",
+    extraInputFiles: [
       { path: findingsFile, mime: "text/plain", filename: "findings.json" },
     ],
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.reviseDraft",
-      agentName: DRAFTER_ROLE,
-      sessionId: handle.id,
-      input: {
-        requestId: state.requestId,
-        round: state.round,
-        unresolvedFindings: state.unresolvedFindings.length,
-      },
-    }),
+    contextFilename: "draft.md",
+    telemetry,
+    telemetryName: "agent.reviseDraft",
+    telemetryAgentName: DRAFTER_ROLE,
+    telemetryInput: {
+      requestId: state.requestId,
+      round: state.round,
+      unresolvedFindings: state.unresolvedFindings.length,
+    },
   })
-  const draft = await ensureTextArtifact(outputFile, response.text, "revised draft")
+  const draft = await persistWorkingDraft(state.outputPath, response.text, "revised draft")
+  await snapshotWorkingDraft(state.outputPath, draftRoundFilename(nextRound))
 
   const nextState = researchStateSchema.parse({
     ...state,
@@ -2206,6 +2526,7 @@ async function finalizeApprovedDraft(_config: RuntimeConfig, state: ResearchStat
   assertStatus(state, "approved", "finalizeApprovedDraft")
   if (!state.outputPath) throw new Error("Missing outputPath during finalizeApprovedDraft")
 
+  await disposeDrafterWritingSession(state.requestId)
   await writeApprovedArtifacts(state.outputPath, {
     draft: state.draft,
     summary: buildRunSummary(state, "approved"),
@@ -2218,6 +2539,7 @@ async function finalizeFailedRun(_config: RuntimeConfig, state: ResearchState) {
   assertStatus(state, "failed", "finalizeFailedRun")
   if (!state.outputPath) throw new Error("Missing outputPath during finalizeFailedRun")
 
+  await disposeDrafterWritingSession(state.requestId)
   await writeFailedArtifacts(state.outputPath, {
     draft: state.draft,
     summary: buildRunSummary(state, "failed_non_convergent"),
@@ -2229,16 +2551,6 @@ async function finalizeFailedRun(_config: RuntimeConfig, state: ResearchState) {
 // ---------------------------------------------------------------------------
 // Design nodes (part of the main graph when designQuorum.enabled)
 // ---------------------------------------------------------------------------
-
-async function ensureDesignTextArtifact(path: string, text: string | undefined, label: string) {
-  const file = Bun.file(path)
-  if (await file.exists()) return file.text()
-  if (text && text.trim() && text.trim() !== "OK") {
-    await Bun.write(path, text)
-    return text
-  }
-  throw new Error(`Missing ${label} artifact at ${path}; provider returned no inline content to persist`)
-}
 
 async function listRunBasenames(outputPath: string): Promise<string[]> {
   try {
@@ -2258,6 +2570,9 @@ export async function resolveDesignMarkdownPath(input: {
   const latestPath = `${input.outputPath}/latest-draft.md`
   if (await isNonEmptyTextFile(latestPath)) return latestPath
 
+  const workingPath = draftWorkingPath(input.outputPath)
+  if (await isNonEmptyTextFile(workingPath)) return workingPath
+
   if (input.draft?.trim()) {
     await Bun.write(latestPath, input.draft)
     return latestPath
@@ -2266,7 +2581,7 @@ export async function resolveDesignMarkdownPath(input: {
   throw new InvalidInputContextError("html-designer has no markdown document to convert")
 }
 
-async function designHtmlNode(
+export async function designHtmlNode(
   config: RuntimeConfig,
   runtime: AgentRuntime,
   promptBundle: PromptBundle,
@@ -2277,11 +2592,10 @@ async function designHtmlNode(
   if (!state.outputPath) throw new Error("Missing outputPath during designHtml")
   if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
 
-  const draftPath = await resolveDesignMarkdownPath({
-    outputPath: state.outputPath,
-    draft: state.draft,
-  })
+  await disposeDrafterWritingSession(state.requestId)
 
+  const workingFile = designWorkingPath(state.outputPath)
+  observer?.onDesignPhase?.("drafting", state.designRound ?? 0)
   const topic = state.inputMode === "topic"
     ? state.topic ?? ""
     : state.documentText ?? state.documentPath ?? ""
@@ -2289,39 +2603,34 @@ async function designHtmlNode(
     throw new InvalidInputContextError("html-designer topic context is empty")
   }
 
-  const htmlBasename = designHtmlArtifactName(DESIGNER_ROLE)
-  const htmlFile = `${state.outputPath}/${htmlBasename}`
-
-  observer?.onDesignPhase?.("drafting", state.designRound ?? 0)
-  const handle = await createObservedHandle({
-    runtime,
-    role: DESIGNER_ROLE,
-    title: "html-designer",
-    requestId: state.requestId,
-    observer,
-    displayRole: "html-designer",
+  const draftPath = await resolveDesignMarkdownPath({
+    outputPath: state.outputPath,
+    draft: state.draft,
   })
 
   const prompt = renderPromptTemplate(promptBundle.assets.htmlDesignerDesign, { topic })
-  const response = await runtime.prompt({
+  const response = await promptWritingSession({
+    kind: "designer",
+    runtime,
+    state,
+    node: "runDesignHtml",
+    title: `html-designer:${state.requestId}`,
+    observer,
     role: DESIGNER_ROLE,
-    handle,
     prompt,
-    outputFile: htmlFile,
-    inputFiles: [
+    outputFile: workingFile,
+    extraInputFiles: [
       { path: draftPath, mime: "text/plain", filename: "content.md" },
     ],
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.designHtml",
-      agentName: DESIGNER_ROLE,
-      sessionId: handle.id,
-      input: { topic },
-    }),
+    contextFilename: "document.html",
+    telemetry,
+    telemetryName: "agent.designHtml",
+    telemetryAgentName: DESIGNER_ROLE,
+    telemetryInput: { topic },
   })
 
-  const html = await ensureDesignTextArtifact(htmlFile, response.text, "design HTML")
+  const html = await persistWorkingFile(workingFile, response.text, "design HTML")
+  await snapshotWorkingDesign(state.outputPath, designHtmlArtifactName(DESIGNER_ROLE))
 
   return researchStateSchema.parse({
     ...state,
@@ -2331,48 +2640,99 @@ async function designHtmlNode(
   })
 }
 
-async function runDesignHtmlTransformNode(input: {
+async function runGenerativeDesignTransformNode(input: {
   config: RuntimeConfig
   runtime: AgentRuntime
-  promptBundle: PromptBundle
   state: ResearchState
   telemetry?: GraphTelemetry
   observer?: RunObserver
   role: typeof GRAPHICAL_ENHANCER_ROLE | typeof READING_EXPERIENCE_ENHANCER_ROLE
   phase: DesignPhase
-  nodeName: string
+  nodeName: DesignerWritingNode
   prompt: string
 }) {
-  const { config, runtime, promptBundle: _promptBundle, state, telemetry, observer, role, phase, nodeName, prompt } = input
+  const { config, runtime, state, telemetry, observer, role, phase, nodeName, prompt } = input
   if (!state.outputPath) throw new Error(`Missing outputPath during ${nodeName}`)
   if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
 
+  const workingFile = designWorkingPath(state.outputPath)
+  if (!(await isNonEmptyTextFile(workingFile))) {
+    const files = await listRunBasenames(state.outputPath)
+    const inputBasename = previousDesignHtmlArtifact(role, files)
+    if (!inputBasename) {
+      throw new Error(`Missing upstream design HTML for ${role}`)
+    }
+    await Bun.write(workingFile, await Bun.file(`${state.outputPath}/${inputBasename}`).text())
+  }
+
+  const round = state.designRound ?? 0
+  observer?.onDesignPhase?.(phase, round)
+  const response = await promptWritingSession({
+    kind: "designer",
+    runtime,
+    state,
+    node: nodeName,
+    title: `${role}:${state.requestId}:round:${round}`,
+    observer,
+    role,
+    prompt,
+    outputFile: workingFile,
+    outputAction: "edit",
+    contextFilename: "document.html",
+    telemetry,
+    telemetryName: `agent.${nodeName}`,
+    telemetryAgentName: role,
+  })
+
+  const html = await persistWorkingFile(workingFile, response.text, `${role} HTML`)
+  await snapshotWorkingDesign(state.outputPath, designHtmlArtifactName(role))
+  return researchStateSchema.parse({
+    ...state,
+    designHtml: html,
+  })
+}
+
+async function runHtmlReviewNode(input: {
+  config: RuntimeConfig
+  runtime: AgentRuntime
+  state: ResearchState
+  telemetry?: GraphTelemetry
+  observer?: RunObserver
+  prompt: string
+}) {
+  const { config, runtime, state, telemetry, observer, prompt } = input
+  if (!state.outputPath) throw new Error("Missing outputPath during htmlReview")
+  if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  await disposeDesignerWritingSession(state.requestId)
+
   const files = await listRunBasenames(state.outputPath)
-  const inputBasename = previousDesignHtmlArtifact(role, files)
+  const workingPath = designWorkingPath(state.outputPath)
+  const inputBasename = previousDesignHtmlArtifact(HTML_REVIEWER_ROLE, files)
+    ?? (await isNonEmptyTextFile(workingPath) ? "design.html" : undefined)
   if (!inputBasename) {
-    throw new Error(`Missing upstream design HTML for ${role}`)
+    throw new Error(`Missing upstream design HTML for ${HTML_REVIEWER_ROLE}`)
   }
   const inputFile = `${state.outputPath}/${inputBasename}`
-  const outputBasename = designHtmlArtifactName(role)
+  const outputBasename = designHtmlArtifactName(HTML_REVIEWER_ROLE)
   const outputFile = `${state.outputPath}/${outputBasename}`
 
-  // Seed the role artifact from the previous stage so "OK" / no-op still leaves a stage file.
   if (!(await Bun.file(outputFile).exists())) {
     await Bun.write(outputFile, await Bun.file(inputFile).text())
   }
 
   const round = state.designRound ?? 0
-  observer?.onDesignPhase?.(phase, round)
+  observer?.onDesignPhase?.("reviewing", round)
   const handle = await createObservedHandle({
     runtime,
-    role,
-    title: `${role}:${state.requestId}:round:${round}`,
+    role: HTML_REVIEWER_ROLE,
+    title: `${HTML_REVIEWER_ROLE}:${state.requestId}:round:${round}`,
     requestId: state.requestId,
     observer,
   })
 
   const response = await runtime.prompt({
-    role,
+    role: HTML_REVIEWER_ROLE,
     handle,
     prompt,
     outputFile,
@@ -2382,8 +2742,8 @@ async function runDesignHtmlTransformNode(input: {
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
-      name: `agent.${nodeName}`,
-      agentName: role,
+      name: "agent.htmlReview",
+      agentName: HTML_REVIEWER_ROLE,
       sessionId: handle.id,
     }),
   })
@@ -2398,7 +2758,7 @@ async function runDesignHtmlTransformNode(input: {
   })
 }
 
-async function graphicalEnhanceNode(
+export async function graphicalEnhanceNode(
   config: RuntimeConfig,
   runtime: AgentRuntime,
   promptBundle: PromptBundle,
@@ -2406,10 +2766,9 @@ async function graphicalEnhanceNode(
   telemetry?: GraphTelemetry,
   observer?: RunObserver,
 ) {
-  return runDesignHtmlTransformNode({
+  return runGenerativeDesignTransformNode({
     config,
     runtime,
-    promptBundle,
     state,
     telemetry,
     observer,
@@ -2420,7 +2779,7 @@ async function graphicalEnhanceNode(
   })
 }
 
-async function readingExperienceEnhanceNode(
+export async function readingExperienceEnhanceNode(
   config: RuntimeConfig,
   runtime: AgentRuntime,
   promptBundle: PromptBundle,
@@ -2428,10 +2787,9 @@ async function readingExperienceEnhanceNode(
   telemetry?: GraphTelemetry,
   observer?: RunObserver,
 ) {
-  return runDesignHtmlTransformNode({
+  return runGenerativeDesignTransformNode({
     config,
     runtime,
-    promptBundle,
     state,
     telemetry,
     observer,
@@ -2439,6 +2797,24 @@ async function readingExperienceEnhanceNode(
     phase: "reading",
     nodeName: "readingExperienceEnhance",
     prompt: promptBundle.assets.readingExperienceEnhancerEnhance,
+  })
+}
+
+export async function htmlReviewNode(
+  config: RuntimeConfig,
+  runtime: AgentRuntime,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
+  return runHtmlReviewNode({
+    config,
+    runtime,
+    state,
+    telemetry,
+    observer,
+    prompt: promptBundle.assets.htmlReviewerReview,
   })
 }
 
@@ -2452,6 +2828,7 @@ async function finalizeDesignNode(
   if (!state.outputPath) throw new Error("Missing outputPath during finalizeDesign")
   if (!_config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
 
+  await disposeDesignerWritingSession(state.requestId)
   _observer?.onDesignPhase?.("finalizing", state.designRound ?? 0)
 
   // Write the latest stage HTML as final.html.
@@ -2464,6 +2841,12 @@ async function finalizeDesignNode(
       if (await fallback.exists()) {
         html = await fallback.text()
       }
+    }
+  }
+  if (!html?.trim()) {
+    const working = designWorkingPath(state.outputPath)
+    if (await isNonEmptyTextFile(working)) {
+      html = await Bun.file(working).text()
     }
   }
 
@@ -2765,6 +3148,11 @@ export function createGraph(
         readingExperienceEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
+    .addNode("htmlReview", async (state) =>
+      withNodeTelemetry("htmlReview", state, () =>
+        htmlReviewNode(config, runtime, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addNode("finalizeDesign", async (state) =>
       withNodeTelemetry("finalizeDesign", state, () =>
         finalizeDesignNode(config, promptBundle, state, graphTelemetry, observer),
@@ -2818,7 +3206,8 @@ export function createGraph(
     ])
     .addEdge("graphicalEnhance", "readingExperienceEnhance")
     .addEdge("interactiveEnhance", "readingExperienceEnhance")
-    .addEdge("readingExperienceEnhance", "finalizeDesign")
+    .addEdge("readingExperienceEnhance", "htmlReview")
+    .addEdge("htmlReview", "finalizeDesign")
     .addEdge("finalizeDesign", "__end__")
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),

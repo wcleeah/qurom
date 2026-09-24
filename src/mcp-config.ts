@@ -31,13 +31,27 @@ export const mcpServerSchema = z.discriminatedUnion("type", [localSchema, remote
 export type McpServer = z.infer<typeof mcpServerSchema>
 export type McpRegistry = { servers: McpServer[]; enabled: string[] }
 
-/** Shipped Playwright MCP used by the html-repair agent for browser verification. */
+/** Shipped Playwright MCP used by html-repair and html-reviewer for browser verification. */
 export const DEFAULT_PLAYWRIGHT_MCP_SERVER: McpServer = {
   name: "playwright",
   type: "local",
   command: "npx",
   args: ["-y", "@playwright/mcp@latest", "--headless"],
   env: {},
+}
+
+const PLAYWRIGHT_MCP_ROLES = new Set(["html-repair", "html-reviewer"])
+
+export function roleMayUsePlaywrightMcp(role: string): boolean {
+  return PLAYWRIGHT_MCP_ROLES.has(role)
+}
+
+export function mcpRegistryForRole(registry: McpRegistry, role?: string): McpRegistry {
+  if (!role || roleMayUsePlaywrightMcp(role)) return registry
+  return {
+    servers: registry.servers,
+    enabled: registry.enabled.filter((name) => name !== DEFAULT_PLAYWRIGHT_MCP_SERVER.name),
+  }
 }
 
 export function validateMcpRegistry(input: McpRegistry): McpRegistry {
@@ -78,8 +92,12 @@ function enabledServers(registry: McpRegistry, env: Record<string, string | unde
   return registry.servers.filter((server) => enabled.has(server.name)).map((server) => interpolateMcpEnv(server, env))
 }
 
-export function toCursorMcpServers(registry: McpRegistry, env: Record<string, string | undefined>): Record<string, CursorMcpServerConfig> | undefined {
-  const entries = enabledServers(validateMcpRegistry(registry), env).map((server): [string, CursorMcpServerConfig] => {
+export function toCursorMcpServers(
+  registry: McpRegistry,
+  env: Record<string, string | undefined>,
+  role?: string,
+): Record<string, CursorMcpServerConfig> | undefined {
+  const entries = enabledServers(mcpRegistryForRole(validateMcpRegistry(registry), role), env).map((server): [string, CursorMcpServerConfig] => {
     if (server.type === "local") {
       return [server.name, {
         command: server.command,

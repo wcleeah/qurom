@@ -20,9 +20,9 @@ describe("inferCursorCallScope", () => {
     })).toEqual({ node: "graphicalEnhance", round: 0 })
 
     expect(inferCursorCallScope({
-      role: "reading-experience-enhancer",
-      artifact: "design-html-reading-experience-enhancer.html",
-    })).toEqual({ node: "readingExperienceEnhance", round: 0 })
+      role: "html-reviewer",
+      artifact: "design-html-html-reviewer.html",
+    })).toEqual({ node: "htmlReview", round: 0 })
   })
 
   test("maps legacy design-html-round artifacts by role", () => {
@@ -52,6 +52,26 @@ describe("inferCursorCallScope", () => {
       role: "research-drafter",
       artifact: "draft-round-0-readability-1.md",
     })).toEqual({ node: "reviseReadability", round: 0 })
+
+    expect(inferCursorCallScope({
+      role: "research-drafter",
+      artifact: "draft.md",
+    })).toEqual({})
+  })
+
+  test("does not uniquely map working files reused across nodes", () => {
+    expect(inferCursorCallScope({
+      role: "html-designer",
+      artifact: "design.html",
+    })).toEqual({})
+    expect(inferCursorCallScope({
+      role: "graphical-enhancer",
+      artifact: "design.html",
+    })).toEqual({})
+    expect(inferCursorCallScope({
+      role: "reading-experience-enhancer",
+      artifact: "design.html",
+    })).toEqual({})
   })
 
   test("maps audit and review artifacts", () => {
@@ -75,5 +95,7 @@ describe("inferCursorCallScope", () => {
       .toEqual({ node: "graphicalEnhance", round: 0 })
     expect(inferCursorCallScope({ role: "reading-experience-enhancer" }))
       .toEqual({ node: "readingExperienceEnhance", round: 0 })
+    expect(inferCursorCallScope({ role: "html-reviewer" }))
+      .toEqual({ node: "htmlReview", round: 0 })
   })
 })

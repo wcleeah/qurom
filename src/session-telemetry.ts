@@ -259,6 +259,7 @@ const DESIGN_PHASE_NODES: Record<string, string> = {
   drafting: "runDesignHtml",
   enhancing: "graphicalEnhance",
   reading: "readingExperienceEnhance",
+  reviewing: "htmlReview",
   finalizing: "finalizeDesign",
 }
 

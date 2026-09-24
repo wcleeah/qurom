@@ -3,6 +3,7 @@ import {
   designHtmlArtifactNames,
   DESIGNER_ROLE,
   GRAPHICAL_ENHANCER_ROLE,
+  HTML_REVIEWER_ROLE,
   isDesignHtmlArtifact,
   LEGACY_DESIGN_HTML_ROUND_RE,
   presentDesignHtmlArtifact,
@@ -192,9 +193,18 @@ export const GRAPH_NODES: NodeDefinition[] = [
     roundScoped: false,
   },
   {
+    id: "htmlReview",
+    label: "HTML review",
+    miniLabel: "Review",
+    order: 19,
+    phase: "design",
+    filePatterns: [new RegExp(`^${designHtmlArtifactName(HTML_REVIEWER_ROLE).replace(/\./g, "\\.")}$`)],
+    roundScoped: false,
+  },
+  {
     id: "finalizeDesign",
     label: "Finalize design",
-    order: 19,
+    order: 20,
     phase: "design",
     filePatterns: [/^final\.html$/, /^design-failure\.json$/],
     roundScoped: false,
@@ -205,6 +215,7 @@ const DESIGN_PHASE_NODE: Record<string, string> = {
   drafting: "runDesignHtml",
   enhancing: "graphicalEnhance",
   reading: "readingExperienceEnhance",
+  reviewing: "htmlReview",
   finalizing: "finalizeDesign",
 }
 
@@ -232,6 +243,7 @@ export function resolveLiveNode(liveStatus: LiveStatus | null): string | undefin
     if (raw.includes("drafting")) return "runDesignHtml"
     if (raw.includes("enhancing") || raw.includes("graphical")) return "graphicalEnhance"
     if (raw.includes("reading")) return "readingExperienceEnhance"
+    if (raw.includes("reviewing") || raw.includes("htmlReview")) return "htmlReview"
     if (raw.includes("finalizing")) return "finalizeDesign"
   }
   const def = getNodeDefinition(raw)
@@ -474,6 +486,8 @@ export function isNodeComplete(
         || files.some((f) => LEGACY_DESIGN_HTML_ROUND_RE.test(f))
     case "readingExperienceEnhance":
       return files.includes(designHtmlArtifactName(READING_EXPERIENCE_ENHANCER_ROLE))
+    case "htmlReview":
+      return files.includes(designHtmlArtifactName(HTML_REVIEWER_ROLE))
     case "finalizeDesign":
       return hasFile(/^final\.html$/)
     default:

@@ -95,6 +95,11 @@ export const promptAssetDefs = {
     role: "reading-experience-enhancer",
     label: "Enhance",
   },
+  htmlReviewerReview: {
+    file: "html-reviewer.review.md",
+    role: "html-reviewer",
+    label: "Review HTML",
+  },
   htmlReadingCompanionAskPage: {
     file: "html-reading-companion.ask-page.md",
     role: "html-reading-companion",

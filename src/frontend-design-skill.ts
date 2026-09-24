@@ -1,12 +1,12 @@
 import { join } from "node:path"
 
 import { defaultsOpencodeSkillsDir, opencodeSkillsDir } from "./data-paths"
-import { DESIGN_QUORUM_ROLES } from "./role-registry"
+import { FRONTEND_DESIGN_SKILL_ROLES } from "./role-registry"
 
 export const FRONTEND_DESIGN_SKILL_NAME = "frontend-design"
 
 export function usesFrontendDesignSkill(role: string): boolean {
-  return (DESIGN_QUORUM_ROLES as readonly string[]).includes(role)
+  return (FRONTEND_DESIGN_SKILL_ROLES as readonly string[]).includes(role)
 }
 
 export async function readFrontendDesignSkill(workspaceDir?: string): Promise<string> {

@@ -1017,6 +1017,16 @@ export const cursorProvider: AgentProvider = {
         "Do not include the JSON in your response.",
       ].join("\n")
     }
+    if (input.outputAction === "edit") {
+      return [
+        "## Output instructions",
+        `Update the existing downloadable Cursor Cloud artifact named \`${name}\` at \`/opt/cursor/artifacts/${name}\`.`,
+        "Edit that file in place. Do not rewrite the entire document unless a change is global.",
+        "Do not create a differently named artifact.",
+        "Respond with only `OK` after the artifact is saved.",
+        "Do not include the output content in your response.",
+      ].join("\n")
+    }
     return [
       "## Output instructions",
       `Write the downloadable Cursor Cloud artifact to \`/opt/cursor/artifacts/${name}\`.`,
@@ -1034,7 +1044,7 @@ export const cursorProvider: AgentProvider = {
     const options = cursorOptionsForRole(input.config, input.role)
     const catalogModel = (await listCursorModels(apiKey, model)).find((entry) => entry.id === model)
     const modelParams = cursorModelParamsForRole(input.config, input.role, catalogModel)
-    const mcpServers = toCursorMcpServers(input.config.mcpRegistry, input.config.env)
+    const mcpServers = toCursorMcpServers(input.config.mcpRegistry, input.config.env, input.role)
     const agent = await Agent.create({
       apiKey,
       name: clampCursorAgentName(input.title),
@@ -1086,7 +1096,7 @@ export const cursorProvider: AgentProvider = {
     const options = cursorOptionsForRole(input.config, input.role)
     const catalogModel = (await listCursorModels(apiKey, model)).find((entry) => entry.id === model)
     const modelParams = cursorModelParamsForRole(input.config, input.role, catalogModel)
-    const mcpServers = toCursorMcpServers(input.config.mcpRegistry, input.config.env)
+    const mcpServers = toCursorMcpServers(input.config.mcpRegistry, input.config.env, input.role)
     // Inline MCP servers are not persisted across resume; pass them again.
     const agent = await Agent.resume(input.handleId, {
       apiKey,

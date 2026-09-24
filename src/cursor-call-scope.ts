@@ -1,13 +1,18 @@
 import { basename } from "node:path"
 
 import {
+  DESIGN_WORKING_FILENAME,
   designHtmlRoleFromFilename,
   GRAPHICAL_ENHANCER_ROLE,
+  HTML_REVIEWER_ROLE,
   LEGACY_DESIGN_HTML_ROUND_RE,
   LEGACY_INTERACTIVE_ENHANCER_ROLE,
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "./design-artifacts"
+import { DRAFT_WORKING_FILENAME } from "./draft-artifacts"
 import { DESIGNER_ROLE } from "./role-registry"
+
+const SHARED_WORKING_FILES = new Set([DRAFT_WORKING_FILENAME, DESIGN_WORKING_FILENAME])
 
 export type CursorCallScope = {
   node?: string
@@ -20,6 +25,8 @@ export function inferCursorCallScope(input: {
   artifact?: string
 }): CursorCallScope {
   const artifact = basename((input.artifact ?? "").trim())
+  // Live working files are reused across nodes, so they cannot name a call site.
+  if (SHARED_WORKING_FILES.has(artifact)) return {}
   if (artifact) {
     const fromArtifact = inferScopeFromArtifact(artifact, input.role)
     if (fromArtifact.node) return fromArtifact
@@ -36,6 +43,8 @@ function designNodeForRole(role: string): string | undefined {
       return "graphicalEnhance"
     case READING_EXPERIENCE_ENHANCER_ROLE:
       return "readingExperienceEnhance"
+    case HTML_REVIEWER_ROLE:
+      return "htmlReview"
     default:
       return undefined
   }
@@ -113,6 +122,8 @@ function inferScopeFromRole(role: string): CursorCallScope {
       return { node: "graphicalEnhance", round: 0 }
     case READING_EXPERIENCE_ENHANCER_ROLE:
       return { node: "readingExperienceEnhance", round: 0 }
+    case HTML_REVIEWER_ROLE:
+      return { node: "htmlReview", round: 0 }
     case "source-auditor":
     case "logic-auditor":
     case "clarity-auditor":

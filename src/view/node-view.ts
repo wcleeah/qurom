@@ -6,6 +6,7 @@ import {
   renderDraftFullDraftScope,
   renderGraphicalEnhanceScope,
   renderReadingExperienceEnhanceScope,
+  renderHtmlReviewScope,
 } from "./node-content-view"
 import { renderFileBrowser } from "./file-browser"
 import { GRAPH_NODES, filesForNode, filesForNodeRound, filesForRebuttalsViewer, getNodeDefinition, isNodeActive, isNodeComplete, isRebuttalsViewerNode, nodeKpis, rebuttalsTelemetryNodeId, resolveLiveNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
@@ -396,6 +397,12 @@ async function renderNodeScopeBody(
     }
   }
 
+  if (resolvedId === "htmlReview") {
+    if (scope === "total") {
+      content += await renderHtmlReviewScope(runName, files, liveStatus)
+    }
+  }
+
   if (resolvedId === "runParallelAudits") {
     if (scope === "total") {
       const roundsWithAudits = index.rounds.filter((r) => r.audits)
@@ -484,6 +491,7 @@ ${await renderAuditRoundPanelBody(runName, roundArt, liveStatus, isCurrentRound)
     && resolvedId !== "graphicalEnhance"
     && resolvedId !== "interactiveEnhance"
     && resolvedId !== "readingExperienceEnhance"
+    && resolvedId !== "htmlReview"
   ) {
     content += `<p class="muted-note dim-text">This step applies to the full run.</p>`
   }
@@ -602,6 +610,7 @@ const MINI_PIPELINE_NODE_IDS = [
   "runDesignHtml",
   "graphicalEnhance",
   "readingExperienceEnhance",
+  "htmlReview",
   "finalizeDesign",
 ] as const
 

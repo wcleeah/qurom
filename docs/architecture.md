@@ -1,6 +1,6 @@
 # Architecture
 
-> Last updated: 2026-08-20
+> Last updated: 2026-09-24
 >
 > A practical architecture guide for the research-qurom codebase: what the app does, how a run moves through the system, where each subsystem lives, and how to debug it when something goes wrong.
 
@@ -73,6 +73,7 @@ PromptScreen
       -> aggregateConsensus
       -> reviseDraft, or finalize
       -> optional design quorum
+        -> runDesignHtml -> graphicalEnhance -> readingExperienceEnhance -> htmlReview -> finalizeDesign
 ```
 
 The app supports two research inputs:
@@ -98,8 +99,9 @@ There is no hardcoded topic whitelist. The current prompts bias the system towar
 | Provider registry | `src/providers/registry.ts` | Registers providers and resolves the provider for a role. |
 | OpenCode provider | `src/providers/opencode.ts` | Default provider implementation. |
 | Cursor provider | `src/providers/cursor.ts` | Cursor SDK provider implementation with inline JSON support. |
-| Design quorum | `src/design-quorum.ts` | Markdown-to-HTML design loop, design audits, revision, and final HTML writing. |
-| Design skill | `src/frontend-design-skill.ts` | Loads Anthropic's `frontend-design` skill and inlines it for design quorum roles. |
+| Design artifacts | `src/design-artifacts.ts` | Live `design.html` plus role-staged HTML snapshots. |
+| Working draft | `src/draft-artifacts.ts` | Live `draft.md` plus round/readability snapshots. |
+| Design skill | `src/frontend-design-skill.ts` | Loads Anthropic's `frontend-design` skill and inlines it for the three generative design roles. |
 | Output/artifacts | `src/output.ts` | Run directory creation, slug generation, approved/failed artifact writing. |
 | Checkpointing | `src/checkpointer.ts` | `BunSqliteSaver`, the custom LangGraph SQLite checkpointer. |
 | Debug log | `src/debug-log.ts` | Structured JSONL log writer. |
@@ -199,17 +201,16 @@ Suspends the graph with LangGraph `interrupt()`. The runner detects the interrup
 
 Builds the full drafting prompt from:
 
-- `deepDiveContract`
 - research tool hints
 - request context
 - reader context
-- `draft-full-draft.md`
+- `research-drafter.draft.md`
 
-The designated drafter writes `draft-round-N.md`.
+The designated drafter writes the live working file `draft.md` on a keepAlive writing session. The graph snapshots that file to `draft-round-N.md`. Finding review and rebuttal review still mint independent one-shot sessions.
 
 ### `scoreReadability` / `reviseReadability`
 
-Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review. Not an auditor: no vote, no findings, no rebuttal. Jev state includes a constant `audience`: the reader is fluent but not a native English speaker. See [readability-review-plan.md](./readability-review-plan.md).
+Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review on the same writing session. The drafter edits `draft.md` in place; the graph snapshots `draft-round-N-readability-M.md` and refreshes `draft-round-N.md`. Not an auditor: no vote, no findings, no rebuttal. Jev state includes a constant `audience`: the reader is fluent but not a native English speaker. See [readability-review-plan.md](./readability-review-plan.md).
 
 Finished runs can also request a **score-only post-run review** (`POST /api/runs/:id/readability-review`). That path does not resume the graph or rewrite `final.md`. It writes sidecar artifacts `readability-review.json`, `readability-review.jev.json`, and `readability-review-status.json` using the current quorum thresholds and model. If readability is disabled or `TYPESAFE_API_KEY` is missing, the request fails instead of writing a skipped-pass report.
 
@@ -265,7 +266,7 @@ The graph also computes a signature of unresolved findings to detect stagnation 
 
 ### `reviseDraft`
 
-When consensus requires revision, the drafter gets the current draft and unresolved findings. The revision prompt is intentionally surgical: fix only what findings identify, preserve uncriticized text, and avoid mentioning the review process.
+When consensus requires revision, the same keepAlive writing session edits `draft.md` in place from the unresolved findings (attached as JSON). The graph snapshots the next `draft-round-N.md`. The revision prompt is intentionally surgical: fix only what findings identify, preserve uncriticized text, and avoid mentioning the review process.
 
 ---
 
@@ -384,7 +385,8 @@ Common artifacts:
 | Artifact | Purpose |
 |---|---|
 | `request.json` | Original request and metadata. |
-| `draft-round-N.md` | Draft for each revision round. |
+| `draft.md` | Live working article the research drafter edits through draft, readability, and revise. |
+| `draft-round-N.md` | Snapshot of `draft.md` after each writing step. |
 | `audit-{agent}-round-N.json` | Individual audit result. |
 | `audits-round-N.json` | Combined audit result for a round. |
 | `drafter-finding-review-round-N.json` | Drafter's accept/rebuttal decision. |
@@ -400,7 +402,8 @@ Common artifacts:
 | `session-ledger.json` | Durable provider session ids (`bc-…` / OpenCode session) keyed by role, node, and round. Used to harvest a live or finished session on resume instead of creating a new agent. |
 | `reader-profile.json` | Reader discovery profile. |
 | `reader-reply-turn-N.json` | Archived human replies. |
-| `design-html-<role>.html` | Role-staged design HTML (`html-designer`, `graphical-enhancer`, `reading-experience-enhancer`). Older runs may still have `design-html-interactive-enhancer.html`. |
+| `design.html` | Live working HTML the three generative design roles edit. |
+| `design-html-<role>.html` | Snapshot of `design.html` after each design stage (`html-designer`, `graphical-enhancer`, `reading-experience-enhancer`, `html-reviewer`). Older runs may still have `design-html-interactive-enhancer.html`. |
 | `design-html-round-N.html` | Legacy design quorum draft HTML. |
 | `design-audit-{agent}-round-N.json` | Design audit result. |
 | `final.html` | Approved HTML output. |
@@ -418,21 +421,20 @@ Agents:
 | Agent | Role |
 |---|---|
 | `html-designer` | Converts approved markdown into a self-contained HTML page. |
-| `visual-layout-auditor` | Reviews visual hierarchy, layout, typography, and aesthetic coherence. |
-| `technical-html-auditor` | Reviews HTML structure, accessibility, self-containedness, and technical correctness. |
-| `script-security-auditor` | Reviews inline scripts and security risks. |
 | `graphical-enhancer` | Adds visible comprehension figures after drafting. |
 | `reading-experience-enhancer` | Improves on-screen reading ergonomics after graphical enhance. |
+| `html-reviewer` | Playwright-checks the staged HTML and applies surgical layout fixes. |
 
-Design quorum roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped to `.opencode/skills/`). The skill is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme.
+The three generative design roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped to `.opencode/skills/`). The skill is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright or computer-use. They share one keepAlive provider session bound to the `html-designer` runtime and edit `design.html` in place; the graph snapshots each role file. If that session dies (`error` / `cancelled`), the graph restores the last role snapshot, mints a new `html-designer` keepAlive session, and attaches the HTML as context. `html-reviewer` starts a fresh session so it can attach Playwright.
 
-The design loop mirrors the research loop:
+The design loop is linear:
 
 ```text
-designHtml
-  -> runDesignAudits
-  -> aggregateDesignConsensus
-  -> reviseDesignHtml, or final.html
+runDesignHtml
+  -> graphicalEnhance
+  -> readingExperienceEnhance
+  -> htmlReview
+  -> finalizeDesign (final.html)
 ```
 
 The implementation also guards against malformed HTML:
@@ -464,7 +466,7 @@ This file-mediated separation is deliberate: the runner does not need to host HT
 
 ## Prompt Assets
 
-Prompt assets are loaded from the SQLite config store (seeded from `defaults/prompts/`). Each asset is the full prompt for one call site, named `<role>.<task>.md` (for example `research-drafter.draft.md`, `source-auditor.audit.md`, `graphical-enhancer.enhance.md`).
+Prompt assets are loaded from the SQLite config store (seeded from `defaults/prompts/`). Each asset is the full prompt for one call site, named `<role>.<task>.md` (for example `research-drafter.draft.md`, `source-auditor.audit.md`, `html-reviewer.review.md`).
 
 Structured JSON output instructions are appended by code instead of hardcoded into prompt assets. That keeps task prompts focused on behavior and lets providers choose file output or inline JSON based on capability.
 
@@ -492,11 +494,9 @@ Design agents:
 | Agent | Responsibility |
 |---|---|
 | `html-designer` | Produces design HTML from approved markdown. |
-| `visual-layout-auditor` | Reviews visual design. |
-| `technical-html-auditor` | Reviews technical HTML quality. |
-| `script-security-auditor` | Reviews inline JavaScript/security behavior. |
 | `graphical-enhancer` | Adds visible comprehension figures. |
 | `reading-experience-enhancer` | Improves reading progress, overflow, and mobile ergonomics. |
+| `html-reviewer` | Playwright-checks HTML and applies surgical layout fixes. |
 
 Agent files define model, variant, tool permissions, and write permissions only (no behavioral prompt body). Most agents are allowed to write only their expected artifact file under `runs/**`.
 

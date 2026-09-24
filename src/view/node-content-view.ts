@@ -4,6 +4,7 @@ import {
   designHtmlArtifacts,
   DESIGNER_ROLE,
   GRAPHICAL_ENHANCER_ROLE,
+  HTML_REVIEWER_ROLE,
   LEGACY_DESIGN_HTML_ROUND_RE,
   presentDesignHtmlArtifact,
   READING_EXPERIENCE_ENHANCER_ROLE,
@@ -47,6 +48,7 @@ export function designRoundNumbers(files: string[], liveStatus: LiveStatus | nul
       || liveNode === "graphicalEnhance"
       || liveNode === "interactiveEnhance"
       || liveNode === "readingExperienceEnhance"
+      || liveNode === "htmlReview"
       || liveNode === "finalizeDesign"
     ) {
       const designRound = liveStatus.round ?? 0
@@ -404,5 +406,23 @@ export async function renderReadingExperienceEnhanceScope(
     emptyLabel: "No reading-experience HTML artifact yet.",
     liveLabel: "Reading-experience enhancer is updating the HTML…",
     note: `The reading-experience-enhancer agent reads the graphical HTML and writes <code>${escapeHtml(designHtmlArtifactName(READING_EXPERIENCE_ENHANCER_ROLE))}</code>.`,
+  })
+}
+
+export async function renderHtmlReviewScope(
+  runName: string,
+  files: string[],
+  liveStatus: LiveStatus | null,
+): Promise<string> {
+  return renderDesignStageScope({
+    runName,
+    files,
+    liveStatus,
+    nodeId: "htmlReview",
+    role: HTML_REVIEWER_ROLE,
+    title: "HTML review",
+    emptyLabel: "No HTML review artifact yet.",
+    liveLabel: "HTML reviewer is checking the page in Playwright…",
+    note: `The html-reviewer agent Playwright-checks the reading-experience HTML and writes <code>${escapeHtml(designHtmlArtifactName(HTML_REVIEWER_ROLE))}</code>.`,
   })
 }

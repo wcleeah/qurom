@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -18,6 +18,7 @@ import {
 } from "../src/readability/posthoc"
 import { DEFAULT_READABILITY_THRESHOLDS, READABILITY_AUDIENCE, READABILITY_REGISTER, buildReadabilityQuestions, type ReadabilityQuestions } from "../src/readability/criteria"
 import {
+  disposeDrafterWritingSession,
   readabilityReviewPrompt,
   reviseReadability,
   routeAfterReadabilityScore,
@@ -634,6 +635,10 @@ describe("readability review prompt", () => {
 })
 
 describe("reviseReadability graph node", () => {
+  afterEach(async () => {
+    await disposeDrafterWritingSession("req-1")
+  })
+
   async function withDir<T>(fn: (dir: string) => Promise<T>) {
     const dir = await mkdtemp(join(tmpdir(), "qurom-readability-revise-"))
     try {
@@ -692,6 +697,7 @@ describe("reviseReadability graph node", () => {
   test("rewrites the draft from all hotspot hints and returns to scoring", async () => {
     await withDir(async (dir) => {
       const original = "This opening paragraph is long enough to count as prose for the readability reviewer."
+      await Bun.write(join(dir, "draft.md"), original)
       await Bun.write(join(dir, "draft-round-0.md"), original)
       await Bun.write(join(dir, "readability-round-0-try-0.json"), JSON.stringify({
         round: 0,
@@ -710,11 +716,16 @@ describe("reviseReadability graph node", () => {
         }],
       }))
       let promptText = ""
+      let outputAction: string | undefined
       const runtime = {
         createHandle: async () => ({ id: "h1", providerId: "opencode", role: "research-drafter", title: "x" }),
-        prompt: async (input: { prompt: string }) => {
+        prompt: async (input: { prompt: string; outputFile?: string; outputAction?: string }) => {
           promptText = input.prompt
-          return { text: "The framing bit chooses the decoder before any payload is interpreted.\n" }
+          outputAction = input.outputAction
+          if (input.outputFile) {
+            await Bun.write(input.outputFile, "The framing bit chooses the decoder before any payload is interpreted.\n")
+          }
+          return { text: "OK" }
         },
       } as unknown as AgentRuntime
       const next = await reviseReadability(
@@ -744,6 +755,7 @@ describe("reviseReadability graph node", () => {
       )
       expect(promptText).toContain("[s1-p1]")
       expect(promptText).toContain("unnest")
+      expect(outputAction).toBe("edit")
       expect(next.status).toBe("scoring_readability")
       expect(next.readabilityTry).toBe(1)
       expect(next.draft).toContain("framing bit")

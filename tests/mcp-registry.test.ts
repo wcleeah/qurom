@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { deleteMcpServer, ensureConfigInitialized, getConfigStore, loadMcpRegistryFromStore, saveMcpServer, setEnabledMcpServers } from "../src/config-store"
-import { DEFAULT_PLAYWRIGHT_MCP_SERVER, toCursorMcpServers, toOpenCodeMcp, validateMcpRegistry } from "../src/mcp-config"
+import { DEFAULT_PLAYWRIGHT_MCP_SERVER, mcpRegistryForRole, roleMayUsePlaywrightMcp, toCursorMcpServers, toOpenCodeMcp, validateMcpRegistry } from "../src/mcp-config"
 import { ensureOpenCodeServer } from "../src/opencode-server"
 import { managedOpenCodeConfig } from "../src/providers/opencode"
 import { handleConfigPost, renderConfigMcp } from "../src/view/config"
@@ -145,6 +145,28 @@ describe("MCP registry", () => {
     expect(await loadMcpRegistryFromStore(env)).toEqual({
       servers: [DEFAULT_PLAYWRIGHT_MCP_SERVER],
       enabled: ["playwright"],
+    })
+  })
+
+  test("Playwright MCP is attached only for html-repair and html-reviewer", () => {
+    const registry = {
+      servers: [
+        DEFAULT_PLAYWRIGHT_MCP_SERVER,
+        { name: "search", type: "remote" as const, url: "https://mcp.example/search", headers: {} },
+      ],
+      enabled: ["playwright", "search"],
+    }
+    expect(roleMayUsePlaywrightMcp("html-repair")).toBe(true)
+    expect(roleMayUsePlaywrightMcp("html-reviewer")).toBe(true)
+    expect(roleMayUsePlaywrightMcp("html-designer")).toBe(false)
+    expect(mcpRegistryForRole(registry, "html-designer").enabled).toEqual(["search"])
+    expect(mcpRegistryForRole(registry, "html-reviewer").enabled).toEqual(["playwright", "search"])
+    expect(toCursorMcpServers(registry, {}, "html-designer")).toEqual({
+      search: { url: "https://mcp.example/search" },
+    })
+    expect(toCursorMcpServers(registry, {}, "html-reviewer")).toEqual({
+      playwright: { command: "npx", args: ["-y", "@playwright/mcp@latest", "--headless"] },
+      search: { url: "https://mcp.example/search" },
     })
   })
 })

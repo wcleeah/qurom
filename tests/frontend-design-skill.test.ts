@@ -11,7 +11,7 @@ import {
 } from "../src/frontend-design-skill"
 import { applyOpencodeSkillsBootstrap } from "../src/opencode-bootstrap"
 import type { AgentProvider } from "../src/providers/types"
-import { DESIGN_QUORUM_ROLES } from "../src/role-registry"
+import { FRONTEND_DESIGN_SKILL_ROLES } from "../src/role-registry"
 import { listDefaultsOpencodeAgents, listDefaultsPrompts } from "../src/defaults-store"
 import { prepareTestDataDir, testRuntimeConfig } from "./test-env"
 
@@ -29,14 +29,15 @@ describe("frontend-design skill", () => {
   })
 
   test("is limited to design quorum roles", () => {
-    expect(DESIGN_QUORUM_ROLES).toEqual([
+    expect(FRONTEND_DESIGN_SKILL_ROLES).toEqual([
       "html-designer",
       "graphical-enhancer",
       "reading-experience-enhancer",
     ])
-    for (const role of DESIGN_QUORUM_ROLES) {
+    for (const role of FRONTEND_DESIGN_SKILL_ROLES) {
       expect(usesFrontendDesignSkill(role)).toBe(true)
     }
+    expect(usesFrontendDesignSkill("html-reviewer")).toBe(false)
     expect(usesFrontendDesignSkill("html-repair")).toBe(false)
     expect(usesFrontendDesignSkill("research-drafter")).toBe(false)
   })
@@ -79,10 +80,11 @@ describe("frontend-design skill", () => {
     const agents = await listDefaultsOpencodeAgents(dir)
     const byRole = Object.fromEntries(agents.map((agent) => [agent.role, agent.content]))
 
-    for (const role of DESIGN_QUORUM_ROLES) {
+    for (const role of FRONTEND_DESIGN_SKILL_ROLES) {
       expect(byRole[role]).toContain("frontend-design: allow")
       expect(byRole[role]).toContain("\"*\": deny")
     }
+    expect(byRole["html-reviewer"]).toContain("skill: deny")
     expect(byRole["html-repair"]).toContain("skill: deny")
     expect(byRole["research-drafter"]).toContain("skill: deny")
   })

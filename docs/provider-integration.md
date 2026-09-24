@@ -151,20 +151,19 @@ If a provider has low prompt-size limits, add explicit tests around attachment i
 
 Default to one-shot handles for:
 
-- drafting,
 - auditing,
 - finding review,
 - rebuttal response,
-- revision,
-- design audit work.
+- html-reviewer (Playwright session).
 
-Use `keepAlive` only for flows that must preserve a provider conversation across graph interrupts. Today that means `reader-interviewer`.
+Use `keepAlive` for flows that must preserve a provider conversation across graph nodes or interrupts. Today that means `reader-interviewer`, the research-drafter writing session (`draftFullDraft`, `reviseReadability`, `reviseDraft`), and the generative design session (`runDesignHtml`, `graphicalEnhance`, `readingExperienceEnhance`).
 
 Pipeline roles persist a **session ledger** (`session-ledger.json`) at handle create, keyed by role + graph node + round. On resume, `createHandle` calls `resumeRunHandle` when a harvestable entry exists, and `prompt` calls `collectExistingOutput` when implemented:
 
 - **Reattach:** the provider run is still in flight. Wait for it, then download the expected artifact.
 - **Artifact pull:** the session already ended. Download the expected artifact (Cursor cloud `listArtifacts` / `downloadArtifact`) or, for file-output providers like OpenCode, reuse a complete local file.
-- **Miss:** the session ended without usable output. Mint a new handle and prompt as today. Same-session revitalize is intentionally not done yet.
+- **Miss (one-shot):** the session ended without usable output. Mint a new handle and prompt as today.
+- **keepAlive death:** `error` / `cancelled` / handle not active. Do not reattach that session id. Restore `draft.md` / `design.html` from the last committed snapshot, mint a new keepAlive session, and attach that document as context on the first prompt. In-flight wait harvest is unchanged.
 
 If a provider exposes durable remote sessions, choose one of these designs:
 

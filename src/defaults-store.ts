@@ -50,11 +50,9 @@ function createDefaultsProfile(store: ReturnType<typeof openConfigStore>) {
 
 export async function ensureDefaultsConfigDb(workspaceDir: string) {
   const dbPath = defaultsConfigDbPath(workspaceDir)
-  if (await Bun.file(dbPath).exists()) return dbPath
-
   const store = openConfigStore(dbPath)
   try {
-    const profileId = createDefaultsProfile(store)
+    const profileId = defaultsActiveProfileId(store) ?? createDefaultsProfile(store)
     const ts = nowIso()
     const agents = await listDefaultsOpencodeAgents(workspaceDir)
     for (const agent of agents) {
@@ -62,6 +60,7 @@ export async function ensureDefaultsConfigDb(workspaceDir: string) {
         .query(`
 INSERT INTO role_provider_bindings (profile_id, role, provider, provider_agent, model, variant, output_mode, options_json, created_at, updated_at)
 VALUES (?, ?, 'opencode', ?, NULL, NULL, NULL, '{}', ?, ?)
+ON CONFLICT(profile_id, role) DO NOTHING
         `)
         .run(profileId, agent.role, agent.role, ts, ts)
     }

@@ -184,18 +184,48 @@ describe("html repair", () => {
     expect(prompt).not.toContain("also attached as `document.html`")
   })
 
-  test("enhancer prompts restore chunked local-file write guidance", async () => {
+  test("enhancer prompts edit the shared working HTML instead of attaching a document", async () => {
     const graphical = await Bun.file(join(dir, "defaults", "prompts", "graphical-enhancer.enhance.md")).text()
     const reading = await Bun.file(join(dir, "defaults", "prompts", "reading-experience-enhancer.enhance.md")).text()
     for (const prompt of [graphical, reading]) {
-      expect(prompt).toContain("`HTML document` context or attached as a file")
-      expect(prompt).toContain("by chunk, instead of one full write")
+      expect(prompt).toContain("The current HTML is the working file from the previous design step")
+      expect(prompt).toContain("Edit that file in place")
+      expect(prompt).not.toContain("`HTML document` context or attached as a file")
       expect(prompt).not.toContain("The HTML document is provided with this prompt.")
     }
-    expect(graphical).toContain("open every overlay/dialog")
+    expect(graphical).toContain("overlay or detail panel")
     expect(reading).toContain("Fix overlay/dialog/detail-panel clipping")
     const designer = await Bun.file(join(dir, "defaults", "prompts", "html-designer.design.md")).text()
-    expect(designer).toContain("open every overlay/dialog/detail panel")
+    expect(designer).toContain("must stay fully inside a ~390px viewport")
+    expect(designer).not.toContain("Mandatory verification (Playwright")
+    expect(graphical).not.toContain("Mandatory verification (Playwright")
+    expect(reading).not.toContain("Mandatory verification (Playwright")
+    for (const prompt of [designer, graphical, reading]) {
+      expect(prompt).toContain("Do not use Playwright")
+    }
+  })
+
+  test("html-reviewer prompt owns Playwright verification", async () => {
+    const prompt = await Bun.file(join(dir, "defaults", "prompts", "html-reviewer.review.md")).text()
+    expect(prompt).toContain("Playwright MCP only")
+    expect(prompt).toContain("Do not use computer-use")
+    expect(prompt).toContain("todowrite")
+    expect(prompt).toContain("Scrolling works all the way")
+    expect(prompt).toContain("Mobile overflow checks")
+    expect(prompt).toContain("UI looks fine")
+  })
+
+  test("design agents deny playwright MCP; reviewer allows bash and todowrite", async () => {
+    const designer = await Bun.file(join(dir, "defaults", "opencode", "agents", "html-designer.md")).text()
+    const graphical = await Bun.file(join(dir, "defaults", "opencode", "agents", "graphical-enhancer.md")).text()
+    const reading = await Bun.file(join(dir, "defaults", "opencode", "agents", "reading-experience-enhancer.md")).text()
+    for (const agent of [designer, graphical, reading]) {
+      expect(agent).toContain("playwright: deny")
+      expect(agent).toContain("todowrite: deny")
+    }
+    const reviewer = await Bun.file(join(dir, "defaults", "opencode", "agents", "html-reviewer.md")).text()
+    expect(reviewer).toContain("bash: allow")
+    expect(reviewer).toContain("todowrite: allow")
   })
 
   test("shipped agent allows bash and todowrite", async () => {

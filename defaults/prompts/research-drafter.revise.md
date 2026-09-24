@@ -7,7 +7,7 @@ Request: {requestLabel}
 Reader calibration:
 {readerContext}
 
-The current article and unresolved findings are provided with this prompt.
+The unresolved findings are provided with this prompt. The current article is the working markdown file from the previous writing step. Edit that file in place. Do not rewrite the whole article, and do not create a new draft file.
 
 ## Revision stance
 
@@ -80,4 +80,4 @@ After resolving the findings, reread the complete article:
 - Does each section retain a clear role in the throughline?
 - Can anything now be removed?
 
-Return a clean, standalone markdown article. Do not include revision notes, changes made, open issues, findings, reviewer feedback, or a changelog.
+Do not include revision notes, changes made, open issues, findings, reviewer feedback, or a changelog.

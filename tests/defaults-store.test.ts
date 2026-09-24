@@ -63,6 +63,7 @@ describe("defaults store", () => {
   test("reads and updates shipped defaults role bindings in sqlite", async () => {
     const bindings = await listDefaultsRoleBindings(dir)
     expect(bindings.some((binding) => binding.role === "source-auditor")).toBe(true)
+    expect(bindings.some((binding) => binding.role === "html-reviewer")).toBe(true)
 
     await updateDefaultsRoleBinding(dir, "source-auditor", {
       provider: "opencode",

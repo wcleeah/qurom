@@ -372,6 +372,14 @@ describe("graph helpers", () => {
     expect(await resolveDesignMarkdownPath({ outputPath: dir, draft: "stale" })).toBe(join(dir, "final.md"))
   })
 
+  test("resolveDesignMarkdownPath uses draft.md when later fallbacks are empty", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-design-md-working-"))
+    await Bun.write(join(dir, "latest-draft.md"), "")
+    await Bun.write(join(dir, "draft.md"), "# Working article\n")
+
+    expect(await resolveDesignMarkdownPath({ outputPath: dir, draft: "stale" })).toBe(join(dir, "draft.md"))
+  })
+
   test("resolveDesignMarkdownPath skips empty latest-draft and uses in-memory draft", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qurom-design-md-"))
     await Bun.write(join(dir, "latest-draft.md"), "   \n")
