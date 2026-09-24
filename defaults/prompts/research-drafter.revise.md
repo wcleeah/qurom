@@ -2,7 +2,7 @@ Revise the current article to resolve the accepted findings while preserving its
 
 Request: {requestLabel}
 {standingContext}
-The unresolved findings are provided with this prompt. The current article is the working markdown file from the previous writing step. Edit that file in place. Do not rewrite the whole article, and do not create a new draft file.
+Unresolved findings are in findings.json. Treat that file as the source of truth. If this conversation was compacted and the findings are no longer in the prompt, re-read findings.json rather than guessing. The current article is the working markdown file from the previous writing step. Edit that file in place. Do not rewrite the whole article, and do not create a new draft file.
 
 ## Revision stance
 

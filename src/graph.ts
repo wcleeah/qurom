@@ -41,8 +41,11 @@ import { resolveReadabilitySystemOne, type ReadabilitySystemOne } from "./typesa
 import {
   draftRoundFilename,
   draftWorkingPath,
+  FINDINGS_WORKING_FILENAME,
+  findingsWorkingPath,
   restoreWorkingDraftFromLatestSnapshot,
   snapshotWorkingDraft,
+  unresolvedFindingsFilename,
 } from "./draft-artifacts"
 import {
   designHtmlArtifactName,
@@ -416,6 +419,20 @@ export function revisionPrompt(
     standingContext: standingWritingContext(config, state, options?.includeStandingContext !== false),
     requestLabel: requestLabel(state),
   })
+}
+
+export function persistFindingsPrompt(promptBundle: PromptBundle, state: ResearchState) {
+  return renderPromptTemplate(promptBundle.assets.researchDrafterPersistFindings, {
+    requestLabel: requestLabel(state),
+  })
+}
+
+/** Inline-only file-output providers cannot re-attach findings after compaction, so they copy findings.json into the writing workspace first. Attachment providers skip that extra turn and re-read the run file. */
+export function providerPersistsFindingsToWorkspace(runtime: AgentRuntime, role: string): boolean {
+  const capabilities = runtime.providerForRole?.(role)?.capabilities
+  if (!capabilities) return false
+  if (capabilities.has("inputFileAttachments")) return false
+  return capabilities.has("fileOutput")
 }
 
 async function persistRequestArtifact(state: ResearchState) {
@@ -1594,6 +1611,7 @@ async function promptWritingSession(input: {
   outputFile: string
   outputAction?: "write" | "edit"
   extraInputFiles?: PromptFileInput[]
+  preamble?: (input: { handle: AgentRunHandle; keepAliveFresh: boolean }) => Promise<void>
   contextFilename: "draft.md" | "document.html"
   telemetry?: GraphTelemetry
   telemetryName: string
@@ -1621,6 +1639,12 @@ async function promptWritingSession(input: {
       : input.prompt
     if (!prompt) {
       throw new Error(`Missing prompt for ${input.node}`)
+    }
+    if (input.preamble) {
+      await input.preamble({
+        handle,
+        keepAliveFresh: Boolean(handle.keepAliveFresh),
+      })
     }
     const inputFiles = await composeWritingInputFiles({
       handle,
@@ -2496,7 +2520,7 @@ function summarizeNodeResult(result: unknown) {
   return result
 }
 
-async function reviseDraft(
+export async function reviseDraft(
   config: RuntimeConfig,
   runtime: AgentRuntime,
   promptBundle: PromptBundle,
@@ -2509,11 +2533,14 @@ async function reviseDraft(
 
   await ensureRunDirPath(state.outputPath)
 
-  // Write unresolved findings to a temp JSON file for attachment
-  const findingsFile = `${state.outputPath}/unresolved-findings-round-${state.round}.json`
-  await writeRunJsonArtifact(state.outputPath, `unresolved-findings-round-${state.round}.json`, state.unresolvedFindings)
+  const roundFindingsName = unresolvedFindingsFilename(state.round)
+  await writeRunJsonArtifact(state.outputPath, roundFindingsName, state.unresolvedFindings)
+  const findingsFile = findingsWorkingPath(state.outputPath)
+  await writeRunJsonArtifact(state.outputPath, FINDINGS_WORKING_FILENAME, state.unresolvedFindings)
   const workingFile = draftWorkingPath(state.outputPath)
   const nextRound = state.round + 1
+  const persistToWorkspace = providerPersistsFindingsToWorkspace(runtime, DRAFTER_ROLE)
+  const findingsInput = { path: findingsFile, mime: "text/plain", filename: "findings.json" } satisfies PromptFileInput
 
   const response = await promptWritingSession({
     kind: "drafter",
@@ -2531,9 +2558,31 @@ async function reviseDraft(
     ),
     outputFile: workingFile,
     outputAction: "edit",
-    extraInputFiles: [
-      { path: findingsFile, mime: "text/plain", filename: "findings.json" },
-    ],
+    extraInputFiles: persistToWorkspace ? undefined : [findingsInput],
+    preamble: persistToWorkspace
+      ? async ({ handle }) => {
+          await runtime.prompt({
+            role: DRAFTER_ROLE,
+            handle,
+            prompt: persistFindingsPrompt(promptBundle, state),
+            outputFile: findingsFile,
+            outputAction: "write",
+            inputFiles: [findingsInput],
+            telemetry: graphAgentTelemetry({
+              telemetry,
+              state,
+              name: "agent.persistFindings",
+              agentName: DRAFTER_ROLE,
+              sessionId: handle.id,
+              input: {
+                requestId: state.requestId,
+                round: state.round,
+                unresolvedFindings: state.unresolvedFindings.length,
+              },
+            }),
+          })
+        }
+      : undefined,
     contextFilename: "draft.md",
     telemetry,
     telemetryName: "agent.reviseDraft",

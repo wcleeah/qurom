@@ -266,7 +266,16 @@ The graph also computes a signature of unresolved findings to detect stagnation 
 
 ### `reviseDraft`
 
-When consensus requires revision, the same keepAlive writing session edits `draft.md` in place from the unresolved findings (attached as JSON). The graph snapshots the next `draft-round-N.md`. The revision prompt is intentionally surgical: fix only what findings identify, preserve uncriticized text, and avoid mentioning the review process. Like readability, it repeats research-tool hints and reader calibration only when the writing session is new.
+When consensus requires revision, the same keepAlive writing session edits `draft.md` in place from the unresolved findings. Compaction can drop inlined prompt text, and Qurom cannot choose when that happens, so findings are made durable as files rather than left only in conversation history.
+
+The graph writes `unresolved-findings-round-N.json` (the round snapshot) and a stable working copy `findings.json`. What happens next depends on the drafter provider:
+
+- **Attachment providers (OpenCode):** skip an extra turn. `findings.json` is attached, the run directory is readable, and the revise prompt tells the agent to re-read that file if the conversation was compacted. OpenCode's research-drafter can read `runs/**` but can only edit markdown, so it must not rewrite the JSON.
+- **Inline file-output providers (Cursor):** a short persist turn copies the inlined findings into the writing workspace (`findings.json`, which Cursor stores as `/opt/cursor/artifacts/findings.json`). The following revise turn does **not** re-inline the JSON. If that keepAlive session dies, persist runs again on the replacement session so the new empty workspace gets the file. Standing context is still omitted on follow-up revise turns; persist does not consume `keepAliveFresh`.
+
+A Qurom MCP to fetch findings is the wrong investment here. Cursor cloud cannot see Qurom's local disk, so that MCP would be a remotely reachable authenticated service. OpenCode already has the file. After compaction, "call a tool" has the same reliability problem as "re-read the workspace file," with more moving parts.
+
+The revision prompt is intentionally surgical: fix only what findings identify, preserve uncriticized text, and avoid mentioning the review process. Like readability, it repeats research-tool hints and reader calibration only when the writing session is new. The graph snapshots the next `draft-round-N.md`.
 
 ---
 

@@ -25,6 +25,11 @@ export const promptAssetDefs = {
     role: "research-drafter",
     label: "Revise draft",
   },
+  researchDrafterPersistFindings: {
+    file: "research-drafter.persist-findings.md",
+    role: "research-drafter",
+    label: "Persist findings",
+  },
   researchDrafterReadabilityRevise: {
     file: "research-drafter.readability-revise.md",
     role: "research-drafter",

@@ -141,6 +141,8 @@ Provider behavior should follow capability:
 - With `inlineInputContext`, `AgentRuntime` inlines supported files into semantic context blocks.
 - With neither, `AgentRuntime` rejects prompts that include `inputFiles`.
 
+Conversation compaction can drop inlined findings after a keepAlive follow-up is sent. The graph does not try to time that. For `reviseDraft`, attachment providers keep `findings.json` on disk and tell the agent to re-read it. Inline file-output providers get a short persist turn that writes `findings.json` into the writing workspace before the revise prompt, then revise without re-inlining. Do not add a Qurom MCP just to fetch findings: Cursor cloud cannot see local run files, so that would be a remote service, and tool use after compaction is no more reliable than re-reading a workspace file.
+
 If a provider has low prompt-size limits, add explicit tests around attachment inlining and failure behavior. Do not silently drop attached files.
 
 ---

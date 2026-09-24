@@ -396,6 +396,11 @@ describe("view file browser classification", () => {
       subGroup: "Drafts",
       label: "Working draft",
     })
+    expect(classifyFile("findings.json")).toMatchObject({
+      group: "Research Rounds",
+      subGroup: "Consensus",
+      label: "Revision findings",
+    })
     expect(classifyFile("design.html")).toMatchObject({
       group: "Design",
       subGroup: "HTML Drafts",
