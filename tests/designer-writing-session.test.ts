@@ -4,6 +4,7 @@ import { tmpdir } from "os"
 import { join } from "node:path"
 
 import type { AgentRuntime } from "../src/agent-runtime/runtime"
+import { KeepAliveSessionDeadError } from "../src/agent-runtime/keep-alive"
 import {
   designHtmlNode,
   disposeDesignerWritingSession,
@@ -215,6 +216,178 @@ describe("designer writing session reuse", () => {
       expect(resumed).toBe(1)
       expect(graphed.designHtml).toContain("Graphics")
       expect(await Bun.file(join(dir, "design-html-graphical-enhancer.html")).text()).toContain("Graphics")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("does not reattach a dead designer session; restores snapshot and attaches HTML", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-designer-dead-"))
+    try {
+      await Bun.write(join(dir, "design.html"), "<html><body>PARTIAL</body></html>\n")
+      await Bun.write(join(dir, "design-html-html-designer.html"), "<html><body>Designed</body></html>\n")
+      await upsertSessionLedgerEntry(dir, {
+        role: "html-designer",
+        node: "runDesignHtml",
+        round: 0,
+        requestId,
+        handleId: "bc-dead",
+        status: "finished",
+      })
+      await upsertSessionLedgerEntry(dir, {
+        role: "html-designer",
+        node: "graphicalEnhance",
+        round: 0,
+        requestId,
+        handleId: "bc-dead",
+        status: "error",
+      })
+
+      let created = 0
+      let resumed = 0
+      const runtime = {
+        createHandle: async (role: string) => {
+          created += 1
+          return {
+            id: "designer-fresh",
+            providerId: "opencode",
+            role,
+            title: "html-designer",
+            keepAlive: false,
+          }
+        },
+        resumeHandle: async () => {
+          resumed += 1
+          throw new Error("should not resume a dead designer session")
+        },
+        prompt: async (input: {
+          role: string
+          handle: { id: string }
+          outputFile?: string
+          outputAction?: string
+          inputFiles?: Array<{ filename: string }>
+        }) => {
+          expect(input.role).toBe("graphical-enhancer")
+          expect(input.handle.id).toBe("designer-fresh")
+          expect(input.outputAction).toBe("edit")
+          expect(input.inputFiles?.map((file) => file.filename)).toEqual(["document.html"])
+          expect(await Bun.file(join(dir, "design.html")).text()).toContain("Designed")
+          await Bun.write(input.outputFile!, "<html><body>Graphics</body></html>\n")
+          return { text: "OK" }
+        },
+      } as unknown as AgentRuntime
+
+      const graphed = await graphicalEnhanceNode(
+        testRuntimeConfig({
+          dataDir: join(dir, "data"),
+          quorumOverrides: { designQuorum: { enabled: true } },
+        }),
+        runtime,
+        emptyPromptBundle({ graphicalEnhancerEnhance: "Add figures.\n" }),
+        {
+          requestId,
+          inputMode: "topic",
+          topic: "How framing works",
+          round: 0,
+          draft: "# Approved article\n",
+          audits: [],
+          activeRebuttals: {},
+          currentRebuttalResponsesByFinding: {},
+          rebuttalTurnCounts: {},
+          rebuttalHistory: [],
+          rebuttalResponseHistory: [],
+          unresolvedFindings: [],
+          approvedAgents: [],
+          status: "approved",
+          outputPath: dir,
+          designHtml: "<html><body>PARTIAL</body></html>\n",
+          designStatus: "running",
+          designRound: 0,
+        } as ResearchState,
+      )
+
+      expect(created).toBe(1)
+      expect(resumed).toBe(0)
+      expect(graphed.designHtml).toContain("Graphics")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("replaces a keepAlive designer session that dies mid-turn", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-designer-die-"))
+    try {
+      await Bun.write(join(dir, "final.md"), "# Approved article\n")
+      let createCount = 0
+      let enhancePrompts = 0
+      const runtime = {
+        createHandle: async (role: string) => {
+          createCount += 1
+          return {
+            id: `designer-${createCount}`,
+            providerId: "opencode",
+            role,
+            title: role,
+            keepAlive: false,
+          }
+        },
+        resumeHandle: async () => {
+          throw new Error("should not resume a dead designer session")
+        },
+        prompt: async (input: {
+          role: string
+          handle: { id: string }
+          outputFile?: string
+          outputAction?: string
+          inputFiles?: Array<{ filename: string }>
+        }) => {
+          if (input.role === "html-designer") {
+            await Bun.write(input.outputFile!, "<html><body>Designed</body></html>\n")
+            return { text: "OK" }
+          }
+          enhancePrompts += 1
+          if (enhancePrompts === 1) {
+            await Bun.write(input.outputFile!, "<html><body>PARTIAL</body></html>\n")
+            throw new KeepAliveSessionDeadError(input.handle.id, "cancelled")
+          }
+          expect(input.handle.id).toBe("designer-2")
+          expect(input.inputFiles?.map((file) => file.filename)).toEqual(["document.html"])
+          expect(await Bun.file(join(dir, "design.html")).text()).toContain("Designed")
+          await Bun.write(input.outputFile!, "<html><body>Graphics</body></html>\n")
+          return { text: "OK" }
+        },
+      } as unknown as AgentRuntime
+
+      const config = testRuntimeConfig({
+        dataDir: join(dir, "data"),
+        quorumOverrides: { designQuorum: { enabled: true } },
+      })
+      const prompts = emptyPromptBundle({
+        htmlDesignerDesign: "Design {topic}.\n",
+        graphicalEnhancerEnhance: "Add figures.\n",
+      })
+      const designed = await designHtmlNode(config, runtime, prompts, {
+        requestId,
+        inputMode: "topic",
+        topic: "How framing works",
+        round: 0,
+        draft: "# Approved article\n",
+        audits: [],
+        activeRebuttals: {},
+        currentRebuttalResponsesByFinding: {},
+        rebuttalTurnCounts: {},
+        rebuttalHistory: [],
+        rebuttalResponseHistory: [],
+        unresolvedFindings: [],
+        approvedAgents: [],
+        status: "approved",
+        outputPath: dir,
+      } as ResearchState)
+
+      const graphed = await graphicalEnhanceNode(config, runtime, prompts, designed)
+      expect(createCount).toBe(2)
+      expect(enhancePrompts).toBe(2)
+      expect(graphed.designHtml).toContain("Graphics")
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

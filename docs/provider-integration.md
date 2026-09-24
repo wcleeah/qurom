@@ -162,7 +162,8 @@ Pipeline roles persist a **session ledger** (`session-ledger.json`) at handle cr
 
 - **Reattach:** the provider run is still in flight. Wait for it, then download the expected artifact.
 - **Artifact pull:** the session already ended. Download the expected artifact (Cursor cloud `listArtifacts` / `downloadArtifact`) or, for file-output providers like OpenCode, reuse a complete local file.
-- **Miss:** the session ended without usable output. Mint a new handle and prompt as today. Same-session revitalize is intentionally not done yet.
+- **Miss (one-shot):** the session ended without usable output. Mint a new handle and prompt as today.
+- **keepAlive death:** `error` / `cancelled` / handle not active. Do not reattach that session id. Restore `draft.md` / `design.html` from the last committed snapshot, mint a new keepAlive session, and attach that document as context on the first prompt. In-flight wait harvest is unchanged.
 
 If a provider exposes durable remote sessions, choose one of these designs:
 

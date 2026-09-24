@@ -21,6 +21,9 @@ import {
   upsertSessionLedgerEntry,
 } from "../session-ledger"
 import { artifactBasename, parseHarvestedResult, readHarvestableLocalFile } from "./harvest"
+import { KeepAliveSessionDeadError, isDeadKeepAliveReason } from "./keep-alive"
+
+export { KeepAliveSessionDeadError, isDeadKeepAliveReason } from "./keep-alive"
 
 const INLINE_ATTACHMENT_MAX_BYTES = 1024 * 1024
 const DESIGN_PHASE_NODES: Record<string, string> = {
@@ -483,6 +486,13 @@ export function createAgentRuntime(
           })
           bus?.emit({ kind: "session.status", sessionID: handle.id, status: "error" })
         }
+        if (handle.keepAlive && !(error instanceof KeepAliveSessionDeadError)) {
+          throw new KeepAliveSessionDeadError(
+            handle.id,
+            error instanceof Error ? error.message : String(error),
+            { cause: error },
+          )
+        }
         throw error
       } finally {
         if (!handle.keepAlive) {
@@ -568,8 +578,22 @@ async function tryHarvestPrompt<T>(input: {
     telemetry: input.telemetry,
   })
 
-  if (input.handle.keepAlive && (collected.status !== "harvested" || collected.source !== "wait")) {
-    return { status: "continue" }
+  if (input.handle.keepAlive) {
+    if (collected.status === "harvested" && collected.source === "wait") {
+      // In-flight run finished; fall through and use it.
+    } else if (collected.status === "unavailable" && isDeadKeepAliveReason(collected.reason)) {
+      input.emitHarvest({
+        sessionID: input.handle.id,
+        role: input.role,
+        source: "miss",
+        node: harvest.node,
+        reason: collected.reason,
+      })
+      await input.recordLedger(input.handle, { status: "error" })
+      throw new KeepAliveSessionDeadError(input.handle.id, collected.reason)
+    } else {
+      return { status: "continue" }
+    }
   }
 
   if (collected.status === "harvested") {

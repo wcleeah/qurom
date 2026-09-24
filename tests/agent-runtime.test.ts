@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { createAgentRuntime } from "../src/agent-runtime/runtime"
+import { createAgentRuntime, KeepAliveSessionDeadError } from "../src/agent-runtime/runtime"
 import type { RuntimeConfig } from "../src/config"
 import { createEventBus, type RunnerEvent } from "../src/runner"
 import type { AgentProvider } from "../src/providers/types"
@@ -539,5 +539,49 @@ describe("createAgentRuntime", () => {
     expect(designEntry?.handleId).toBe("designer-session")
     expect(enhanceEntry?.handleId).toBe("designer-session")
     expect(enhanceEntry?.status).toBe("finished")
+  })
+
+  test("keepAlive harvest treats a cancelled provider run as a dead session", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "qurom-runtime-dead-"))
+    const outputFile = join(runDir, "draft.md")
+    let prompted = 0
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["fileOutput", "plainTextOutput"]),
+      async createRunHandle(input) {
+        return { id: "bc-dead", providerId: "fake", role: input.role, title: input.title }
+      },
+      async collectExistingOutput() {
+        return { status: "unavailable", reason: "cursor run status cancelled" }
+      },
+      async prompt() {
+        prompted += 1
+        return { text: "should not run" }
+      },
+    }
+    const bus = createEventBus()
+    const runtime = createAgentRuntime(config, bus, { providerForRole: () => provider })
+    bus.emit({
+      kind: "graph.node",
+      node: "draftFullDraft",
+      phase: "start",
+      state: {
+        inputMode: "topic",
+        topic: "x",
+        requestId: "req-dead",
+        round: 0,
+        outputPath: runDir,
+      } as never,
+    })
+    const handle = await runtime.createHandle("research-drafter", "draft")
+    handle.keepAlive = true
+    handle.harvest = { ...handle.harvest!, resumed: true }
+    await expect(runtime.prompt({
+      role: "research-drafter",
+      handle,
+      prompt: "Write the article.",
+      outputFile,
+    })).rejects.toBeInstanceOf(KeepAliveSessionDeadError)
+    expect(prompted).toBe(0)
   })
 })

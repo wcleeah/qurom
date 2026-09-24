@@ -425,7 +425,7 @@ Agents:
 | `reading-experience-enhancer` | Improves on-screen reading ergonomics after graphical enhance. |
 | `html-reviewer` | Playwright-checks the staged HTML and applies surgical layout fixes. |
 
-The three generative design roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped to `.opencode/skills/`). The skill is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright or computer-use. They share one keepAlive provider session bound to the `html-designer` runtime and edit `design.html` in place; the graph snapshots each role file. `html-reviewer` starts a fresh session so it can attach Playwright.
+The three generative design roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped to `.opencode/skills/`). The skill is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright or computer-use. They share one keepAlive provider session bound to the `html-designer` runtime and edit `design.html` in place; the graph snapshots each role file. If that session dies (`error` / `cancelled`), the graph restores the last role snapshot, mints a new `html-designer` keepAlive session, and attaches the HTML as context. `html-reviewer` starts a fresh session so it can attach Playwright.
 
 The design loop is linear:
 

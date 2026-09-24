@@ -164,14 +164,24 @@ const LEDGER_STATUS_RANK: Record<SessionLedgerStatus, number> = {
   error: 0,
 }
 
+export function deadWritingHandleIds(file: SessionLedgerFile): Set<string> {
+  return new Set(
+    file.sessions
+      .filter((entry) => entry.status === "error")
+      .map((entry) => entry.handleId),
+  )
+}
+
 async function findLatestMatchingLedgerEntry(
   runDir: string,
   requestId: string | undefined,
   match: (entry: SessionLedgerEntry) => boolean,
 ): Promise<SessionLedgerEntry | undefined> {
   const file = await readSessionLedger(runDir)
+  const deadIds = deadWritingHandleIds(file)
   const matches = file.sessions.filter((entry) => {
     if (!match(entry)) return false
+    if (deadIds.has(entry.handleId)) return false
     if (!isHarvestableLedgerStatus(entry.status)) return false
     if (requestId && entry.requestId && entry.requestId !== requestId) return false
     return true

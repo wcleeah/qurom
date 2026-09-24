@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { readdir } from "node:fs/promises"
+import { readdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { START, StateGraph, interrupt } from "@langchain/langgraph"
 
@@ -15,8 +15,10 @@ import {
 } from "./output"
 import { auditWithRestart } from "./audit-restart"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
+import { KeepAliveSessionDeadError } from "./agent-runtime/keep-alive"
 import { InvalidInputContextError, isNonEmptyTextFile } from "./agent-runtime/input-context"
-import type { AgentRunHandle } from "./providers/types"
+import type { AgentRunHandle, ProviderPromptResult } from "./providers/types"
+import type { PromptFileInput } from "./opencode"
 import type { PromptBundle } from "./prompt-assets"
 import { auditorAuditPromptKey, auditorRebuttalPromptKey } from "./prompt-asset-defs"
 import { buildResearchToolHint } from "./research-tools"
@@ -39,6 +41,7 @@ import { resolveReadabilitySystemOne, type ReadabilitySystemOne } from "./typesa
 import {
   draftRoundFilename,
   draftWorkingPath,
+  restoreWorkingDraftFromLatestSnapshot,
   snapshotWorkingDraft,
 } from "./draft-artifacts"
 import {
@@ -49,14 +52,19 @@ import {
   latestDesignHtmlArtifact,
   previousDesignHtmlArtifact,
   READING_EXPERIENCE_ENHANCER_ROLE,
+  restoreWorkingDesignFromPreviousSnapshot,
   snapshotWorkingDesign,
+  type DesignHtmlPipelineRole,
 } from "./design-artifacts"
 import { AUDITOR_ROLES, DESIGNER_ROLE, DRAFTER_ROLE } from "./role-registry"
 import {
+  deadWritingHandleIds,
   findLatestDesignerWritingEntry,
   findLatestDrafterWritingEntry,
   findSessionLedgerEntry,
   isHarvestableLedgerStatus,
+  readSessionLedger,
+  upsertSessionLedgerEntry,
 } from "./session-ledger"
 import { formatReaderTranscriptForPrompt, resolveReaderInterviewQuestions } from "./reader-transcript"
 import {
@@ -143,6 +151,56 @@ export async function disposeDesignerWritingSession(requestId: string) {
 
 type DrafterWritingNode = "draftFullDraft" | "reviseReadability" | "reviseDraft"
 type DesignerWritingNode = "runDesignHtml" | "graphicalEnhance" | "interactiveEnhance" | "readingExperienceEnhance"
+
+function designerRoleForNode(node: DesignerWritingNode): DesignHtmlPipelineRole {
+  switch (node) {
+    case "runDesignHtml":
+      return DESIGNER_ROLE
+    case "graphicalEnhance":
+    case "interactiveEnhance":
+      return GRAPHICAL_ENHANCER_ROLE
+    case "readingExperienceEnhance":
+      return READING_EXPERIENCE_ENHANCER_ROLE
+  }
+}
+
+async function resetWorkingFileForNewWritingSession(input: {
+  kind: "drafter" | "designer"
+  outputPath: string
+  node: DrafterWritingNode | DesignerWritingNode
+}) {
+  if (input.kind === "drafter") {
+    const restored = await restoreWorkingDraftFromLatestSnapshot(input.outputPath)
+    if (!restored && input.node === "draftFullDraft") {
+      await unlink(draftWorkingPath(input.outputPath)).catch(() => {})
+    }
+    return
+  }
+  const restored = await restoreWorkingDesignFromPreviousSnapshot(
+    input.outputPath,
+    designerRoleForNode(input.node as DesignerWritingNode),
+  )
+  if (!restored && input.node === "runDesignHtml") {
+    await unlink(designWorkingPath(input.outputPath)).catch(() => {})
+  }
+}
+
+async function composeWritingInputFiles(input: {
+  handle: AgentRunHandle
+  workingFile: string
+  contextFilename: "draft.md" | "document.html"
+  extra?: PromptFileInput[]
+}): Promise<PromptFileInput[] | undefined> {
+  const files = [...(input.extra ?? [])]
+  if (input.handle.keepAliveFresh && await isNonEmptyTextFile(input.workingFile)) {
+    files.unshift({
+      path: input.workingFile,
+      mime: "text/plain",
+      filename: input.contextFilename,
+    })
+  }
+  return files.length > 0 ? files : undefined
+}
 
 async function persistWorkingFile(
   path: string,
@@ -1086,32 +1144,26 @@ export async function draftFullDraft(
   if (!state.outputPath) throw new Error("Missing outputPath during draftFullDraft")
 
   const workingFile = draftWorkingPath(state.outputPath)
-  const handle = await getOrCreateDrafterWritingHandle({
+  const prompt = fullDraftPrompt(config, promptBundle, state)
+  const response = await promptWritingSession({
+    kind: "drafter",
     runtime,
     state,
     node: "draftFullDraft",
     title: `research-drafter:${state.requestId}:draft:${state.round}`,
     observer,
-  })
-
-  const prompt = fullDraftPrompt(config, promptBundle, state)
-  const response = await runtime.prompt({
     role: DRAFTER_ROLE,
-    handle,
     prompt,
     outputFile: workingFile,
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.draftFullDraft",
-      agentName: DRAFTER_ROLE,
-      sessionId: handle.id,
-      input: {
-        requestId: state.requestId,
-        round: state.round,
-        inputMode: state.inputMode,
-      },
-    }),
+    contextFilename: "draft.md",
+    telemetry,
+    telemetryName: "agent.draftFullDraft",
+    telemetryAgentName: DRAFTER_ROLE,
+    telemetryInput: {
+      requestId: state.requestId,
+      round: state.round,
+      inputMode: state.inputMode,
+    },
   })
   const draft = await persistWorkingDraft(state.outputPath, response.text, "draft")
   await snapshotWorkingDraft(state.outputPath, draftRoundFilename(state.round))
@@ -1266,33 +1318,27 @@ export async function reviseReadability(
   const nextTry = (state.readabilityTry ?? 0) + 1
   const workingFile = draftWorkingPath(state.outputPath)
 
-  const handle = await getOrCreateDrafterWritingHandle({
+  const response = await promptWritingSession({
+    kind: "drafter",
     runtime,
     state,
     node: "reviseReadability",
     title: `research-drafter:${state.requestId}:readability:${state.round}:try:${nextTry}`,
     observer,
-  })
-
-  const response = await runtime.prompt({
     role: DRAFTER_ROLE,
-    handle,
     prompt: readabilityReviewPrompt(config, promptBundle, state, hints),
     outputFile: workingFile,
     outputAction: "edit",
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.reviseReadability",
-      agentName: DRAFTER_ROLE,
-      sessionId: handle.id,
-      input: {
-        requestId: state.requestId,
-        round: state.round,
-        readabilityTry: nextTry,
-        hotspotCount: report.hotspots.length,
-      },
-    }),
+    contextFilename: "draft.md",
+    telemetry,
+    telemetryName: "agent.reviseReadability",
+    telemetryAgentName: DRAFTER_ROLE,
+    telemetryInput: {
+      requestId: state.requestId,
+      round: state.round,
+      readabilityTry: nextTry,
+      hotspotCount: report.hotspots.length,
+    },
   })
   const draft = await persistWorkingDraft(state.outputPath, response.text, "readability revision")
   await snapshotWorkingDraft(state.outputPath, readabilityDraftFilename(state.round, nextTry))
@@ -1390,10 +1436,17 @@ async function getOrCreateDrafterWritingHandle(input: {
       ? current
       : await findLatestDrafterWritingEntry(outputPath, input.state.requestId).catch(() => undefined)
 
-    if (prior && isHarvestableLedgerStatus(prior.status) && input.runtime.resumeHandle) {
+    const deadIds = await readSessionLedger(outputPath).then(deadWritingHandleIds).catch(() => new Set<string>())
+    if (
+      prior
+      && isHarvestableLedgerStatus(prior.status)
+      && !deadIds.has(prior.handleId)
+      && input.runtime.resumeHandle
+    ) {
       try {
         const resumed = await input.runtime.resumeHandle(DRAFTER_ROLE, input.title, prior.handleId)
         resumed.keepAlive = true
+        resumed.keepAliveFresh = false
         drafterWritingSessions.set(input.state.requestId, resumed)
         observeSession(input.observer, {
           sessionID: resumed.id,
@@ -1407,6 +1460,14 @@ async function getOrCreateDrafterWritingHandle(input: {
     }
   }
 
+  if (outputPath) {
+    await resetWorkingFileForNewWritingSession({
+      kind: "drafter",
+      outputPath,
+      node: input.node,
+    })
+  }
+
   const handle = await createObservedHandle({
     runtime: input.runtime,
     role: DRAFTER_ROLE,
@@ -1416,6 +1477,7 @@ async function getOrCreateDrafterWritingHandle(input: {
     displayRole: "drafter",
   })
   handle.keepAlive = true
+  handle.keepAliveFresh = true
   drafterWritingSessions.set(input.state.requestId, handle)
   return handle
 }
@@ -1444,10 +1506,17 @@ async function getOrCreateDesignerWritingHandle(input: {
       ? current
       : await findLatestDesignerWritingEntry(outputPath, input.state.requestId).catch(() => undefined)
 
-    if (prior && isHarvestableLedgerStatus(prior.status) && input.runtime.resumeHandle) {
+    const deadIds = await readSessionLedger(outputPath).then(deadWritingHandleIds).catch(() => new Set<string>())
+    if (
+      prior
+      && isHarvestableLedgerStatus(prior.status)
+      && !deadIds.has(prior.handleId)
+      && input.runtime.resumeHandle
+    ) {
       try {
         const resumed = await input.runtime.resumeHandle(DESIGNER_ROLE, input.title, prior.handleId)
         resumed.keepAlive = true
+        resumed.keepAliveFresh = false
         designerWritingSessions.set(input.state.requestId, resumed)
         observeSession(input.observer, {
           sessionID: resumed.id,
@@ -1461,6 +1530,14 @@ async function getOrCreateDesignerWritingHandle(input: {
     }
   }
 
+  if (outputPath) {
+    await resetWorkingFileForNewWritingSession({
+      kind: "designer",
+      outputPath,
+      node: input.node,
+    })
+  }
+
   const handle = await createObservedHandle({
     runtime: input.runtime,
     role: DESIGNER_ROLE,
@@ -1470,8 +1547,99 @@ async function getOrCreateDesignerWritingHandle(input: {
     displayRole: DESIGNER_ROLE,
   })
   handle.keepAlive = true
+  handle.keepAliveFresh = true
   designerWritingSessions.set(input.state.requestId, handle)
   return handle
+}
+
+async function promptWritingSession(input: {
+  kind: "drafter" | "designer"
+  runtime: AgentRuntime
+  state: ResearchState
+  node: DrafterWritingNode | DesignerWritingNode
+  title: string
+  observer?: RunObserver
+  role: string
+  prompt: string
+  outputFile: string
+  outputAction?: "write" | "edit"
+  extraInputFiles?: PromptFileInput[]
+  contextFilename: "draft.md" | "document.html"
+  telemetry?: GraphTelemetry
+  telemetryName: string
+  telemetryAgentName: string
+  telemetryInput?: unknown
+}): Promise<ProviderPromptResult<unknown>> {
+  const attempt = async () => {
+    const handle = input.kind === "drafter"
+      ? await getOrCreateDrafterWritingHandle({
+          runtime: input.runtime,
+          state: input.state,
+          node: input.node as DrafterWritingNode,
+          title: input.title,
+          observer: input.observer,
+        })
+      : await getOrCreateDesignerWritingHandle({
+          runtime: input.runtime,
+          state: input.state,
+          node: input.node as DesignerWritingNode,
+          title: input.title,
+          observer: input.observer,
+        })
+    const inputFiles = await composeWritingInputFiles({
+      handle,
+      workingFile: input.outputFile,
+      contextFilename: input.contextFilename,
+      extra: input.extraInputFiles,
+    })
+    const result = await input.runtime.prompt({
+      role: input.role,
+      handle,
+      prompt: input.prompt,
+      outputFile: input.outputFile,
+      outputAction: input.outputAction,
+      inputFiles,
+      telemetry: graphAgentTelemetry({
+        telemetry: input.telemetry,
+        state: input.state,
+        name: input.telemetryName,
+        agentName: input.telemetryAgentName,
+        sessionId: handle.id,
+        input: input.telemetryInput,
+      }),
+    })
+    handle.keepAliveFresh = false
+    return result
+  }
+
+  try {
+    return await attempt()
+  } catch (error) {
+    if (!(error instanceof KeepAliveSessionDeadError)) throw error
+    input.observer?.debugLog?.write("session.keepalive.replace", {
+      handleId: error.handleId,
+      reason: error.reason,
+      kind: input.kind,
+      node: input.node,
+      requestId: input.state.requestId,
+    })
+    if (input.state.outputPath) {
+      await upsertSessionLedgerEntry(input.state.outputPath, {
+        role: input.kind === "drafter" ? DRAFTER_ROLE : DESIGNER_ROLE,
+        node: input.node,
+        round: input.kind === "designer" ? (input.state.designRound ?? 0) : input.state.round,
+        requestId: input.state.requestId,
+        handleId: error.handleId,
+        status: "error",
+      }).catch(() => {})
+    }
+    if (input.kind === "drafter") {
+      await disposeDrafterWritingSession(input.state.requestId)
+    } else {
+      await disposeDesignerWritingSession(input.state.requestId)
+    }
+    return await attempt()
+  }
 }
 
 async function runParallelAudits(
@@ -2305,41 +2473,35 @@ async function reviseDraft(
 
   await ensureRunDirPath(state.outputPath)
 
-  const handle = await getOrCreateDrafterWritingHandle({
-    runtime,
-    state,
-    node: "reviseDraft",
-    title: `research-drafter:${state.requestId}:revise:${state.round}`,
-    observer,
-  })
-
   // Write unresolved findings to a temp JSON file for attachment
   const findingsFile = `${state.outputPath}/unresolved-findings-round-${state.round}.json`
   await writeRunJsonArtifact(state.outputPath, `unresolved-findings-round-${state.round}.json`, state.unresolvedFindings)
   const workingFile = draftWorkingPath(state.outputPath)
   const nextRound = state.round + 1
 
-  const response = await runtime.prompt({
+  const response = await promptWritingSession({
+    kind: "drafter",
+    runtime,
+    state,
+    node: "reviseDraft",
+    title: `research-drafter:${state.requestId}:revise:${state.round}`,
+    observer,
     role: DRAFTER_ROLE,
-    handle,
     prompt: revisionPrompt(config, promptBundle, state),
     outputFile: workingFile,
     outputAction: "edit",
-    inputFiles: [
+    extraInputFiles: [
       { path: findingsFile, mime: "text/plain", filename: "findings.json" },
     ],
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.reviseDraft",
-      agentName: DRAFTER_ROLE,
-      sessionId: handle.id,
-      input: {
-        requestId: state.requestId,
-        round: state.round,
-        unresolvedFindings: state.unresolvedFindings.length,
-      },
-    }),
+    contextFilename: "draft.md",
+    telemetry,
+    telemetryName: "agent.reviseDraft",
+    telemetryAgentName: DRAFTER_ROLE,
+    telemetryInput: {
+      requestId: state.requestId,
+      round: state.round,
+      unresolvedFindings: state.unresolvedFindings.length,
+    },
   })
   const draft = await persistWorkingDraft(state.outputPath, response.text, "revised draft")
   await snapshotWorkingDraft(state.outputPath, draftRoundFilename(nextRound))
@@ -2432,11 +2594,8 @@ export async function designHtmlNode(
 
   await disposeDrafterWritingSession(state.requestId)
 
-  const draftPath = await resolveDesignMarkdownPath({
-    outputPath: state.outputPath,
-    draft: state.draft,
-  })
-
+  const workingFile = designWorkingPath(state.outputPath)
+  observer?.onDesignPhase?.("drafting", state.designRound ?? 0)
   const topic = state.inputMode === "topic"
     ? state.topic ?? ""
     : state.documentText ?? state.documentPath ?? ""
@@ -2444,33 +2603,30 @@ export async function designHtmlNode(
     throw new InvalidInputContextError("html-designer topic context is empty")
   }
 
-  const workingFile = designWorkingPath(state.outputPath)
-  observer?.onDesignPhase?.("drafting", state.designRound ?? 0)
-  const handle = await getOrCreateDesignerWritingHandle({
+  const draftPath = await resolveDesignMarkdownPath({
+    outputPath: state.outputPath,
+    draft: state.draft,
+  })
+
+  const prompt = renderPromptTemplate(promptBundle.assets.htmlDesignerDesign, { topic })
+  const response = await promptWritingSession({
+    kind: "designer",
     runtime,
     state,
     node: "runDesignHtml",
     title: `html-designer:${state.requestId}`,
     observer,
-  })
-
-  const prompt = renderPromptTemplate(promptBundle.assets.htmlDesignerDesign, { topic })
-  const response = await runtime.prompt({
     role: DESIGNER_ROLE,
-    handle,
     prompt,
     outputFile: workingFile,
-    inputFiles: [
+    extraInputFiles: [
       { path: draftPath, mime: "text/plain", filename: "content.md" },
     ],
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: "agent.designHtml",
-      agentName: DESIGNER_ROLE,
-      sessionId: handle.id,
-      input: { topic },
-    }),
+    contextFilename: "document.html",
+    telemetry,
+    telemetryName: "agent.designHtml",
+    telemetryAgentName: DESIGNER_ROLE,
+    telemetryInput: { topic },
   })
 
   const html = await persistWorkingFile(workingFile, response.text, "design HTML")
@@ -2511,27 +2667,21 @@ async function runGenerativeDesignTransformNode(input: {
 
   const round = state.designRound ?? 0
   observer?.onDesignPhase?.(phase, round)
-  const handle = await getOrCreateDesignerWritingHandle({
+  const response = await promptWritingSession({
+    kind: "designer",
     runtime,
     state,
     node: nodeName,
     title: `${role}:${state.requestId}:round:${round}`,
     observer,
-  })
-
-  const response = await runtime.prompt({
     role,
-    handle,
     prompt,
     outputFile: workingFile,
     outputAction: "edit",
-    telemetry: graphAgentTelemetry({
-      telemetry,
-      state,
-      name: `agent.${nodeName}`,
-      agentName: role,
-      sessionId: handle.id,
-    }),
+    contextFilename: "document.html",
+    telemetry,
+    telemetryName: `agent.${nodeName}`,
+    telemetryAgentName: role,
   })
 
   const html = await persistWorkingFile(workingFile, response.text, `${role} HTML`)

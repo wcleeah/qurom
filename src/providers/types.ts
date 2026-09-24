@@ -41,6 +41,8 @@ export type AgentRunHandle = {
   title: string
   providerAgent?: string
   keepAlive?: boolean
+  /** True until the first successful prompt on a newly minted keepAlive session. */
+  keepAliveFresh?: boolean
   dispose?: () => Promise<void>
   harvest?: SessionHarvestContext
   sessionBootstrap?: {

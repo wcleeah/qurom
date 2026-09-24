@@ -124,4 +124,43 @@ describe("session ledger", () => {
       status: "waiting",
     })
   })
+
+  test("findLatest writing entries skip handle ids that have an error row", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "qurom-ledger-dead-"))
+    await upsertSessionLedgerEntry(runDir, {
+      role: "html-designer",
+      node: "runDesignHtml",
+      round: 0,
+      requestId: "req-1",
+      handleId: "bc-dead",
+      status: "finished",
+    })
+    await upsertSessionLedgerEntry(runDir, {
+      role: "html-designer",
+      node: "graphicalEnhance",
+      round: 0,
+      requestId: "req-1",
+      handleId: "bc-dead",
+      status: "error",
+    })
+    await upsertSessionLedgerEntry(runDir, {
+      role: "research-drafter",
+      node: "draftFullDraft",
+      round: 0,
+      requestId: "req-1",
+      handleId: "bc-draft-dead",
+      status: "finished",
+    })
+    await upsertSessionLedgerEntry(runDir, {
+      role: "research-drafter",
+      node: "reviseReadability",
+      round: 0,
+      requestId: "req-1",
+      handleId: "bc-draft-dead",
+      status: "error",
+    })
+
+    expect(await findLatestDesignerWritingEntry(runDir, "req-1")).toBeUndefined()
+    expect(await findLatestDrafterWritingEntry(runDir, "req-1")).toBeUndefined()
+  })
 })

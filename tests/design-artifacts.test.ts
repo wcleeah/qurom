@@ -11,6 +11,7 @@ import {
   latestDesignHtmlArtifact,
   presentDesignHtmlArtifact,
   previousDesignHtmlArtifact,
+  restoreWorkingDesignFromPreviousSnapshot,
   snapshotWorkingDesign,
 } from "../src/design-artifacts.ts"
 
@@ -73,6 +74,19 @@ describe("design artifacts", () => {
       const text = await snapshotWorkingDesign(dir, designHtmlArtifactName("html-designer"))
       expect(text).toContain("Live")
       expect(await Bun.file(join(dir, "design-html-html-designer.html")).text()).toContain("Live")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("restores design.html from the previous role snapshot", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-design-restore-"))
+    try {
+      await Bun.write(join(dir, "design-html-html-designer.html"), "<html><body>Designed</body></html>\n")
+      await Bun.write(join(dir, "design.html"), "<html><body>PARTIAL</body></html>\n")
+      const name = await restoreWorkingDesignFromPreviousSnapshot(dir, "graphical-enhancer")
+      expect(name).toBe("design-html-html-designer.html")
+      expect(await Bun.file(join(dir, "design.html")).text()).toContain("Designed")
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

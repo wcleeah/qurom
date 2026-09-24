@@ -1,3 +1,4 @@
+import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 
 export const DESIGNER_ROLE = "html-designer"
@@ -107,4 +108,22 @@ export function previousDesignHtmlArtifact(
     if (found) return found
   }
   return latestDesignHtmlArtifact(files.filter((f) => LEGACY_DESIGN_HTML_ROUND_RE.test(f)))
+}
+
+export async function restoreWorkingDesignFromPreviousSnapshot(
+  outputPath: string,
+  role: DesignHtmlPipelineRole,
+): Promise<string | undefined> {
+  let files: string[] = []
+  try {
+    files = await readdir(outputPath)
+  } catch {
+    return undefined
+  }
+  const name = previousDesignHtmlArtifact(role, files)
+  if (!name) return undefined
+  const text = await Bun.file(join(outputPath, name)).text()
+  if (!text.trim()) return undefined
+  await Bun.write(designWorkingPath(outputPath), text)
+  return name
 }
