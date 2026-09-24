@@ -184,12 +184,13 @@ describe("html repair", () => {
     expect(prompt).not.toContain("also attached as `document.html`")
   })
 
-  test("enhancer prompts restore chunked local-file write guidance", async () => {
+  test("enhancer prompts edit the shared working HTML instead of attaching a document", async () => {
     const graphical = await Bun.file(join(dir, "defaults", "prompts", "graphical-enhancer.enhance.md")).text()
     const reading = await Bun.file(join(dir, "defaults", "prompts", "reading-experience-enhancer.enhance.md")).text()
     for (const prompt of [graphical, reading]) {
-      expect(prompt).toContain("`HTML document` context or attached as a file")
-      expect(prompt).toContain("by chunk, instead of one full write")
+      expect(prompt).toContain("The current HTML is the working file from the previous design step")
+      expect(prompt).toContain("Edit that file in place")
+      expect(prompt).not.toContain("`HTML document` context or attached as a file")
       expect(prompt).not.toContain("The HTML document is provided with this prompt.")
     }
     expect(graphical).toContain("overlay or detail panel")

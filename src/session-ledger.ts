@@ -143,6 +143,18 @@ export async function findSessionLedgerEntry(
 }
 
 export const DRAFTER_WRITING_NODES = ["draftFullDraft", "reviseReadability", "reviseDraft"] as const
+export const DESIGNER_WRITING_NODES = [
+  "runDesignHtml",
+  "graphicalEnhance",
+  "interactiveEnhance",
+  "readingExperienceEnhance",
+] as const
+export const DESIGNER_WRITING_ROLES = [
+  "html-designer",
+  "graphical-enhancer",
+  "reading-experience-enhancer",
+  "interactive-enhancer",
+] as const
 
 const LEDGER_STATUS_RANK: Record<SessionLedgerStatus, number> = {
   waiting: 4,
@@ -152,15 +164,14 @@ const LEDGER_STATUS_RANK: Record<SessionLedgerStatus, number> = {
   error: 0,
 }
 
-export async function findLatestDrafterWritingEntry(
+async function findLatestMatchingLedgerEntry(
   runDir: string,
-  requestId?: string,
+  requestId: string | undefined,
+  match: (entry: SessionLedgerEntry) => boolean,
 ): Promise<SessionLedgerEntry | undefined> {
   const file = await readSessionLedger(runDir)
-  const writing = new Set<string>(DRAFTER_WRITING_NODES)
   const matches = file.sessions.filter((entry) => {
-    if (entry.role !== "research-drafter") return false
-    if (!writing.has(entry.node)) return false
+    if (!match(entry)) return false
     if (!isHarvestableLedgerStatus(entry.status)) return false
     if (requestId && entry.requestId && entry.requestId !== requestId) return false
     return true
@@ -171,4 +182,25 @@ export async function findLatestDrafterWritingEntry(
     return b.updatedAt.localeCompare(a.updatedAt)
   })
   return matches[0]
+}
+
+export async function findLatestDrafterWritingEntry(
+  runDir: string,
+  requestId?: string,
+): Promise<SessionLedgerEntry | undefined> {
+  const writing = new Set<string>(DRAFTER_WRITING_NODES)
+  return findLatestMatchingLedgerEntry(runDir, requestId, (entry) => {
+    return entry.role === "research-drafter" && writing.has(entry.node)
+  })
+}
+
+export async function findLatestDesignerWritingEntry(
+  runDir: string,
+  requestId?: string,
+): Promise<SessionLedgerEntry | undefined> {
+  const roles = new Set<string>(DESIGNER_WRITING_ROLES)
+  const nodes = new Set<string>(DESIGNER_WRITING_NODES)
+  return findLatestMatchingLedgerEntry(runDir, requestId, (entry) => {
+    return roles.has(entry.role) && nodes.has(entry.node)
+  })
 }

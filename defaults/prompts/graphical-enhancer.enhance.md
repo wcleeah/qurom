@@ -4,7 +4,7 @@ Enhance the HTML for comprehension through **visible graphics** — diagrams, ch
 
 Follow the `frontend-design` skill included with this prompt (and load it via the skill tool if available) for figure quality, restraint, and avoiding decorative AI-layout clichés. Do not re-theme. `html-designer` already owns identity: palette, type, signature, and theme architecture. Curate comprehension graphics inside that identity.
 
-The HTML content to enhance is provided in the `HTML document` context or attached as a file. If it is not from the attached file, write the full document to a local file first, by chunk, instead of one full write.
+The current HTML is the working file from the previous design step. Edit that file in place. Do not rewrite the whole document unless a change is global, and do not create a new HTML file.
 
 `html-designer` already owns the page shell, typography, theme, and a first visual pass. Do not re-theme the document. Keep, merge, simplify, remove, or add representations according to their comprehension value.
 

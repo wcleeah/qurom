@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
+  DESIGN_WORKING_FILENAME,
   designHtmlArtifactName,
   designHtmlArtifacts,
+  designWorkingPath,
   latestDesignHtmlArtifact,
   presentDesignHtmlArtifact,
   previousDesignHtmlArtifact,
+  snapshotWorkingDesign,
 } from "../src/design-artifacts.ts"
 
 describe("design artifacts", () => {
@@ -57,5 +63,18 @@ describe("design artifacts", () => {
       .toBe("design-html-round-2.html")
     expect(previousDesignHtmlArtifact("graphical-enhancer", ["design-html-round-0.html"]))
       .toBe("design-html-round-0.html")
+  })
+
+  test("snapshots the live working HTML to a role artifact", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-design-working-"))
+    try {
+      expect(designWorkingPath(dir)).toBe(join(dir, DESIGN_WORKING_FILENAME))
+      await Bun.write(join(dir, DESIGN_WORKING_FILENAME), "<html><body>Live</body></html>\n")
+      const text = await snapshotWorkingDesign(dir, designHtmlArtifactName("html-designer"))
+      expect(text).toContain("Live")
+      expect(await Bun.file(join(dir, "design-html-html-designer.html")).text()).toContain("Live")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

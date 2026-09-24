@@ -279,7 +279,7 @@ Every recovery tier emits a standardized debug-log event. Grep `{dataDir}/runs/<
 
 ## Design Quorum
 
-When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The design phase is linear: `html-designer` writes `design-html-html-designer.html`, `graphical-enhancer` writes comprehension-focused `design-html-graphical-enhancer.html`, `reading-experience-enhancer` writes screen-reading ergonomics to `design-html-reading-experience-enhancer.html`, `html-reviewer` Playwright-checks the page and writes `design-html-html-reviewer.html`, and `finalizeDesign` publishes `final.html`. Older runs may still have `design-html-interactive-enhancer.html` from the retired interactive-enhancer role.
+When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The three generative roles share one keepAlive session and edit `design.html`; the graph snapshots `design-html-html-designer.html`, `design-html-graphical-enhancer.html`, and `design-html-reading-experience-enhancer.html`. `html-reviewer` starts a fresh Playwright session and writes `design-html-html-reviewer.html`. `finalizeDesign` publishes `final.html`. Older runs may still have `design-html-interactive-enhancer.html` from the retired interactive-enhancer role.
 
 The first three roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped into `.opencode/skills/`). The skill text is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright. `html-reviewer` owns browser verification and surgical layout fixes.
 

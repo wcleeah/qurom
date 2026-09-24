@@ -24,6 +24,7 @@ export function renderFileBrowser(input: {
     "Run Metadata",
     "Research Rounds",
     "Rebuttals",
+    "Design",
     "Design Rounds",
     "Debug",
     "Other",

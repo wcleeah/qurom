@@ -99,7 +99,7 @@ There is no hardcoded topic whitelist. The current prompts bias the system towar
 | Provider registry | `src/providers/registry.ts` | Registers providers and resolves the provider for a role. |
 | OpenCode provider | `src/providers/opencode.ts` | Default provider implementation. |
 | Cursor provider | `src/providers/cursor.ts` | Cursor SDK provider implementation with inline JSON support. |
-| Design artifacts | `src/design-artifacts.ts` | Role-staged HTML filenames for the linear design pipeline. |
+| Design artifacts | `src/design-artifacts.ts` | Live `design.html` plus role-staged HTML snapshots. |
 | Working draft | `src/draft-artifacts.ts` | Live `draft.md` plus round/readability snapshots. |
 | Design skill | `src/frontend-design-skill.ts` | Loads Anthropic's `frontend-design` skill and inlines it for the three generative design roles. |
 | Output/artifacts | `src/output.ts` | Run directory creation, slug generation, approved/failed artifact writing. |
@@ -402,7 +402,8 @@ Common artifacts:
 | `session-ledger.json` | Durable provider session ids (`bc-…` / OpenCode session) keyed by role, node, and round. Used to harvest a live or finished session on resume instead of creating a new agent. |
 | `reader-profile.json` | Reader discovery profile. |
 | `reader-reply-turn-N.json` | Archived human replies. |
-| `design-html-<role>.html` | Role-staged design HTML (`html-designer`, `graphical-enhancer`, `reading-experience-enhancer`, `html-reviewer`). Older runs may still have `design-html-interactive-enhancer.html`. |
+| `design.html` | Live working HTML the three generative design roles edit. |
+| `design-html-<role>.html` | Snapshot of `design.html` after each design stage (`html-designer`, `graphical-enhancer`, `reading-experience-enhancer`, `html-reviewer`). Older runs may still have `design-html-interactive-enhancer.html`. |
 | `design-html-round-N.html` | Legacy design quorum draft HTML. |
 | `design-audit-{agent}-round-N.json` | Design audit result. |
 | `final.html` | Approved HTML output. |
@@ -424,7 +425,7 @@ Agents:
 | `reading-experience-enhancer` | Improves on-screen reading ergonomics after graphical enhance. |
 | `html-reviewer` | Playwright-checks the staged HTML and applies surgical layout fixes. |
 
-The three generative design roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped to `.opencode/skills/`). The skill is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright or computer-use. `html-reviewer` owns browser verification; Playwright MCP is attached only for that role and the viewer `html-repair` agent.
+The three generative design roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped to `.opencode/skills/`). The skill is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright or computer-use. They share one keepAlive provider session bound to the `html-designer` runtime and edit `design.html` in place; the graph snapshots each role file. `html-reviewer` starts a fresh session so it can attach Playwright.
 
 The design loop is linear:
 

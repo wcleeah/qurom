@@ -1,8 +1,31 @@
+import { join } from "node:path"
+
 export const DESIGNER_ROLE = "html-designer"
 export const GRAPHICAL_ENHANCER_ROLE = "graphical-enhancer"
 export const READING_EXPERIENCE_ENHANCER_ROLE = "reading-experience-enhancer"
 export const HTML_REVIEWER_ROLE = "html-reviewer"
 export const LEGACY_INTERACTIVE_ENHANCER_ROLE = "interactive-enhancer"
+
+/** Live HTML the three generative design roles edit. Role files are snapshots. */
+export const DESIGN_WORKING_FILENAME = "design.html"
+
+export function designWorkingPath(outputPath: string) {
+  return join(outputPath, DESIGN_WORKING_FILENAME)
+}
+
+export async function snapshotWorkingDesign(outputPath: string, destFilename: string) {
+  const source = designWorkingPath(outputPath)
+  const file = Bun.file(source)
+  if (!(await file.exists())) {
+    throw new Error(`Working design ${DESIGN_WORKING_FILENAME} is missing`)
+  }
+  const text = await file.text()
+  if (!text.trim()) {
+    throw new Error(`Working design ${DESIGN_WORKING_FILENAME} is empty`)
+  }
+  await Bun.write(join(outputPath, destFilename), text)
+  return text
+}
 
 /** Ordered design HTML pipeline roles (each writes its own artifact). */
 export const DESIGN_HTML_PIPELINE_ROLES = [

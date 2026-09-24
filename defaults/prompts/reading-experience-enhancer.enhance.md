@@ -4,7 +4,7 @@ Improve on-screen reading ergonomics — progress, overflow containment, narrow-
 
 Follow the `frontend-design` skill included with this prompt (and load it via the skill tool if available) for reading-chrome quality, restraint, and avoiding decorative clutter. Do not re-theme. `html-designer` already owns identity: palette, type, signature, and theme architecture. Improve ergonomics inside that identity.
 
-The HTML content to improve is provided in the `HTML document` context or attached as a file. If it is not from the attached file, write the full document to a local file first, by chunk, instead of one full write.
+The current HTML is the working file from the previous design step. Edit that file in place. Do not rewrite the whole document unless a change is global, and do not create a new HTML file.
 
 Rules:
 - Preserve authored textual content and meaning. Do not rewrite, delete, paraphrase, reorder claims, change examples, or alter technical substance.

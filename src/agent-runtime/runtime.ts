@@ -243,7 +243,8 @@ export function createAgentRuntime(
     return {
       ...fromHandle,
       // A keepAlive writing session is reused across graph nodes. Prefer the
-      // current graph node so leftover draft.md is not harvested as the next prompt.
+      // current graph node so leftover draft.md / design.html is not harvested
+      // as the next prompt.
       runDir: fromContext.runDir || fromHandle.runDir,
       node: fromContext.node ?? fromHandle.node,
       round: fromContext.round ?? fromHandle.round,

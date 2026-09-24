@@ -469,4 +469,75 @@ describe("createAgentRuntime", () => {
     expect(reviseEntry?.handleId).toBe("drafter-session")
     expect(reviseEntry?.status).toBe("finished")
   })
+
+  test("keepAlive design session records the current graph node and does not harvest leftover design.html", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "qurom-runtime-design-keepalive-"))
+    const outputFile = join(runDir, "design.html")
+    await writeFile(outputFile, "<html><body>Designed</body></html>\n")
+    let prompted = 0
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["fileOutput", "plainTextOutput"]),
+      async createRunHandle(input) {
+        return { id: "designer-session", providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt() {
+        prompted += 1
+        return { text: "OK" }
+      },
+    }
+    const bus = createEventBus()
+    const runtime = createAgentRuntime(config, bus, { providerForRole: () => provider })
+    const emitNode = (node: string) => {
+      bus.emit({
+        kind: "graph.node",
+        node,
+        phase: "start",
+        state: {
+          inputMode: "topic",
+          topic: "x",
+          requestId: "req-design-keepalive",
+          round: 0,
+          outputPath: runDir,
+        } as never,
+      })
+    }
+
+    emitNode("runDesignHtml")
+    const handle = await runtime.createHandle("html-designer", "design")
+    handle.keepAlive = true
+    await runtime.prompt({
+      role: "html-designer",
+      handle,
+      prompt: "Convert the article.",
+      outputFile,
+    })
+    expect(prompted).toBe(1)
+
+    emitNode("graphicalEnhance")
+    const result = await runtime.prompt({
+      role: "graphical-enhancer",
+      handle,
+      prompt: "Add figures.",
+      outputFile,
+      outputAction: "edit",
+    })
+    expect(prompted).toBe(2)
+    expect(result.harvested).toBeUndefined()
+
+    const { findSessionLedgerEntry } = await import("../src/session-ledger")
+    const designEntry = await findSessionLedgerEntry(runDir, {
+      role: "html-designer",
+      node: "runDesignHtml",
+      round: 0,
+    })
+    const enhanceEntry = await findSessionLedgerEntry(runDir, {
+      role: "html-designer",
+      node: "graphicalEnhance",
+      round: 0,
+    })
+    expect(designEntry?.handleId).toBe("designer-session")
+    expect(enhanceEntry?.handleId).toBe("designer-session")
+    expect(enhanceEntry?.status).toBe("finished")
+  })
 })

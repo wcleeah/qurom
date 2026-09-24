@@ -7,7 +7,7 @@ import { renderFailureBanner, renderInterviewChatCard } from "../src/view/compon
 import { renderNodeDashboard, renderNodeGrid, renderGlobalResearchRoundStrip, renderNodeMiniPipeline, researchRoundNumbers } from "../src/view/node-view.ts"
 import { renderReadabilityInterpretationGuide } from "../src/view/readability-view.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
-import { classifyFile } from "../src/view/file-browser.ts"
+import { classifyFile, renderFileBrowser } from "../src/view/file-browser.ts"
 import { card, section, summaryRow, summaryTable } from "../src/view/html.ts"
 import { getRunsDir, safeFilePath, safeRunPath } from "../src/view/paths.ts"
 import { CSS } from "../src/view/styles.ts"
@@ -396,6 +396,11 @@ describe("view file browser classification", () => {
       subGroup: "Drafts",
       label: "Working draft",
     })
+    expect(classifyFile("design.html")).toMatchObject({
+      group: "Design",
+      subGroup: "HTML Drafts",
+      label: "Working HTML",
+    })
     expect(classifyFile("design-html-html-reviewer.html")).toMatchObject({
       group: "Design",
       subGroup: "HTML Drafts",
@@ -411,6 +416,22 @@ describe("view file browser classification", () => {
       subGroup: "Readability",
       label: "Post-run readability raw",
     })
+  })
+
+  test("lists working HTML in the Design file group", () => {
+    const html = renderFileBrowser({
+      runName: "sample-run",
+      files: ["design.html", "design-html-html-designer.html", "design-failure.json"],
+      fileSizes: new Map([
+        ["design.html", 12],
+        ["design-html-html-designer.html", 20],
+        ["design-failure.json", 8],
+      ]),
+    })
+    expect(html).toContain("Working HTML")
+    expect(html).toContain("design.html")
+    expect(html).toContain("HTML · html-designer")
+    expect(html).toContain("Design failure details")
   })
 })
 

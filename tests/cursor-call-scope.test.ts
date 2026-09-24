@@ -59,6 +59,21 @@ describe("inferCursorCallScope", () => {
     })).toEqual({})
   })
 
+  test("does not uniquely map working files reused across nodes", () => {
+    expect(inferCursorCallScope({
+      role: "html-designer",
+      artifact: "design.html",
+    })).toEqual({})
+    expect(inferCursorCallScope({
+      role: "graphical-enhancer",
+      artifact: "design.html",
+    })).toEqual({})
+    expect(inferCursorCallScope({
+      role: "reading-experience-enhancer",
+      artifact: "design.html",
+    })).toEqual({})
+  })
+
   test("maps audit and review artifacts", () => {
     expect(inferCursorCallScope({
       role: "source-auditor",

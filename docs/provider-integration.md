@@ -154,9 +154,9 @@ Default to one-shot handles for:
 - auditing,
 - finding review,
 - rebuttal response,
-- design work.
+- html-reviewer (Playwright session).
 
-Use `keepAlive` for flows that must preserve a provider conversation across graph nodes or interrupts. Today that means `reader-interviewer` and the research-drafter writing session (`draftFullDraft`, `reviseReadability`, `reviseDraft`).
+Use `keepAlive` for flows that must preserve a provider conversation across graph nodes or interrupts. Today that means `reader-interviewer`, the research-drafter writing session (`draftFullDraft`, `reviseReadability`, `reviseDraft`), and the generative design session (`runDesignHtml`, `graphicalEnhance`, `readingExperienceEnhance`).
 
 Pipeline roles persist a **session ledger** (`session-ledger.json`) at handle create, keyed by role + graph node + round. On resume, `createHandle` calls `resumeRunHandle` when a harvestable entry exists, and `prompt` calls `collectExistingOutput` when implemented:
 

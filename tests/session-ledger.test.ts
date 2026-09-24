@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  findLatestDesignerWritingEntry,
   findLatestDrafterWritingEntry,
   findSessionLedgerEntry,
   readSessionLedger,
@@ -86,6 +87,40 @@ describe("session ledger", () => {
     expect(writing).toMatchObject({
       node: "reviseReadability",
       handleId: "bc-draft",
+      status: "waiting",
+    })
+  })
+
+  test("findLatestDesignerWritingEntry prefers an in-flight generative design session", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "qurom-ledger-design-"))
+    await upsertSessionLedgerEntry(runDir, {
+      role: "html-designer",
+      node: "runDesignHtml",
+      round: 0,
+      requestId: "req-1",
+      handleId: "bc-design",
+      status: "finished",
+    })
+    await upsertSessionLedgerEntry(runDir, {
+      role: "html-designer",
+      node: "graphicalEnhance",
+      round: 0,
+      requestId: "req-1",
+      handleId: "bc-design",
+      status: "waiting",
+    })
+    await upsertSessionLedgerEntry(runDir, {
+      role: "html-reviewer",
+      node: "htmlReview",
+      round: 0,
+      handleId: "bc-review",
+      status: "waiting",
+    })
+
+    const writing = await findLatestDesignerWritingEntry(runDir, "req-1")
+    expect(writing).toMatchObject({
+      node: "graphicalEnhance",
+      handleId: "bc-design",
       status: "waiting",
     })
   })
