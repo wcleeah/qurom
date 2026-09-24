@@ -628,7 +628,7 @@ export async function renderRun(name: string): Promise<Response> {
     fileCount: files.length,
     totalBytes,
   }, sessionTelemetry)
-  const sessionTelemetryHtml = renderSessionTelemetryTable(sessionTelemetry)
+  const sessionTelemetryHtml = renderSessionTelemetryTable(sessionTelemetry, nodeHistory)
   const debugLogHtml = await renderDebugLog(name, files)
   const failureBannerHtml = await renderFailureBanner(name, files, liveStatus)
   const interviewChatHtml = renderInterviewChatCard(name, liveStatus)

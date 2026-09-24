@@ -12,8 +12,10 @@ import {
 } from "../src/usage.ts"
 import { formatTokenPair } from "../src/view/utils.ts"
 import {
+  formatRelatedNodeLabels,
   nodeHistoryEntriesForNodeScope,
   nodeHistoryTotalsForNode,
+  relatedNodeIdsForSession,
   renderNodeSessionUsageTable,
   renderRunTelemetryStrip,
   renderSessionTelemetryTable,
@@ -335,7 +337,7 @@ describe("telemetry view", () => {
       ],
     })
 
-    expect(html).toContain("Session model telemetry")
+    expect(html).toContain("Agent sessions")
     expect(html.indexOf("methodologist")).toBeLessThan(html.indexOf("source-auditor"))
     expect(html).toContain("2026-07-04 12:00:00 UTC")
     expect(html).toContain("2026-07-04 10:00:00 UTC")
@@ -383,6 +385,7 @@ describe("telemetry view", () => {
     expect(html).toContain("standing omitted")
     expect(html).toContain("800 chars")
     expect(html).toContain("2.0k in / 3.0k cache read / 1.0k cache write / 400 out")
+    expect(html).toContain("Revise draft")
   })
 
   test("sessionTotalsForNodeRound scopes usage to a single research round", () => {
@@ -489,7 +492,7 @@ describe("telemetry view", () => {
       },
     ], "runParallelAudits", 1)
 
-    expect(html).toContain("Agent token usage")
+    expect(html).toContain("Related agent sessions")
     expect(html).toContain("composer-2.5")
     expect(html).toContain("methodologist")
     expect(html).not.toContain("source-auditor")
@@ -658,7 +661,7 @@ describe("telemetry view", () => {
     expect(sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, "reviewRebuttalResponses", 0).usage.tokensIn).toBe(98300)
 
     const html = renderNodeSessionUsageTable(sessionTelemetry, nodeHistory, "reviewRebuttalResponses", 0)
-    expect(html).toContain("Agent token usage")
+    expect(html).toContain("Related agent sessions")
     expect(html).toContain("source-auditor")
     expect(html).toContain("98.3k in")
   })
@@ -703,53 +706,90 @@ describe("telemetry view", () => {
       }],
     }
 
-    const designTotals = sessionTotalsForNode(sessionTelemetry, [], "runDesignHtml")
-    expect(designTotals.usageAvailable).toBe(true)
-    expect(designTotals.usage.tokensIn).toBe(5_371_098)
-
-    const enhanceTotals = sessionTotalsForNode(sessionTelemetry, [], "graphicalEnhance")
-    expect(enhanceTotals.usageAvailable).toBe(true)
-    expect(enhanceTotals.usage.tokensIn).toBe(2_628_133)
-    expect(sessionTotalsForNode(sessionTelemetry, [], "interactiveEnhance").usage.tokensIn).toBe(2_628_133)
+    expect(sessionsForNodeScope(sessionTelemetry, [], "runDesignHtml")).toHaveLength(1)
+    expect(sessionsForNodeScope(sessionTelemetry, [], "runDesignHtml")[0]?.sessionId).toBe("bc-designer")
+    expect(sessionsForNodeScope(sessionTelemetry, [], "graphicalEnhance")).toHaveLength(1)
+    expect(sessionsForNodeScope(sessionTelemetry, [], "graphicalEnhance")[0]?.sessionId).toBe("bc-enhancer")
+    expect(sessionsForNodeScope(sessionTelemetry, [], "interactiveEnhance")[0]?.sessionId).toBe("bc-enhancer")
   })
 
-  test("splits keep-alive design usage by per-call node", () => {
-    const sessionTelemetry = {
-      version: 1 as const,
-      sessions: [{
-        sessionId: "bc-designer",
-        role: "html-designer",
-        provider: "cursor",
-        node: "readingExperienceEnhance",
-        round: 0,
-        calls: [
-          {
-            cursorRunId: "run-design",
-            node: "runDesignHtml",
-            completedAt: "2026-09-24T04:52:45.000Z",
-            usage: { tokensIn: 8, tokensOut: 100, costUsd: 1, costAvailable: true, costEstimated: true },
-            usageSource: "csv-import" as const,
-          },
-          {
-            cursorRunId: "run-graphics",
-            node: "graphicalEnhance",
-            completedAt: "2026-09-24T04:55:25.000Z",
-            usage: { tokensIn: 24, tokensOut: 200, costUsd: 2, costAvailable: true, costEstimated: true },
-            usageSource: "csv-import" as const,
-          },
-          {
-            cursorRunId: "run-reading",
-            node: "readingExperienceEnhance",
-            completedAt: "2026-09-24T04:56:50.000Z",
-            usage: { tokensIn: 16, tokensOut: 300, costUsd: 3, costAvailable: true, costEstimated: true },
-            usageSource: "csv-import" as const,
-          },
-        ],
-      }],
+  test("keep-alive sessions keep full spend and list every related node", () => {
+    const session = {
+      sessionId: "bc-designer",
+      role: "html-designer",
+      provider: "cursor",
+      node: "readingExperienceEnhance",
+      round: 0,
+      calls: [
+        {
+          cursorRunId: "run-design",
+          node: "runDesignHtml",
+          completedAt: "2026-09-24T04:52:45.000Z",
+          usage: { tokensIn: 8, tokensOut: 100, costUsd: 1, costAvailable: true, costEstimated: true },
+          usageSource: "csv-import" as const,
+        },
+        {
+          cursorRunId: "run-graphics",
+          node: "graphicalEnhance",
+          completedAt: "2026-09-24T04:55:25.000Z",
+          usage: { tokensIn: 24, tokensOut: 200, costUsd: 2, costAvailable: true, costEstimated: true },
+          usageSource: "csv-import" as const,
+        },
+        {
+          cursorRunId: "run-reading",
+          node: "readingExperienceEnhance",
+          completedAt: "2026-09-24T04:56:50.000Z",
+          usage: { tokensIn: 16, tokensOut: 300, costUsd: 3, costAvailable: true, costEstimated: true },
+          usageSource: "csv-import" as const,
+        },
+      ],
     }
+    const sessionTelemetry = { version: 1 as const, sessions: [session] }
 
-    expect(sessionTotalsForNode(sessionTelemetry, [], "runDesignHtml").usage.tokensOut).toBe(100)
-    expect(sessionTotalsForNode(sessionTelemetry, [], "graphicalEnhance").usage.tokensOut).toBe(200)
-    expect(sessionTotalsForNode(sessionTelemetry, [], "readingExperienceEnhance").usage.tokensOut).toBe(300)
+    expect(relatedNodeIdsForSession(session)).toEqual([
+      "runDesignHtml",
+      "graphicalEnhance",
+      "readingExperienceEnhance",
+    ])
+    expect(formatRelatedNodeLabels(relatedNodeIdsForSession(session))).toBe(
+      "Design HTML, Graphical enhance, Reading experience",
+    )
+
+    for (const nodeName of ["runDesignHtml", "graphicalEnhance", "readingExperienceEnhance"]) {
+      const related = sessionsForNodeScope(sessionTelemetry, [], nodeName)
+      expect(related).toHaveLength(1)
+      expect(related[0]?.calls).toHaveLength(3)
+      const html = renderNodeSessionUsageTable(sessionTelemetry, [], nodeName)
+      expect(html).toContain("Related agent sessions")
+      expect(html).toContain("600 out")
+      expect(html).toContain("Design HTML, Graphical enhance, Reading experience")
+    }
+  })
+
+  test("associates a keep-alive drafter session to nodes from history, not by splitting spend", () => {
+    const session = {
+      sessionId: "bc-drafter",
+      role: "research-drafter",
+      provider: "cursor",
+      calls: [
+        { completedAt: "2026-09-24T04:22:32.000Z", usage: { tokensIn: 100, tokensOut: 10 }, usageSource: "csv-import" as const },
+        { completedAt: "2026-09-24T04:24:01.000Z", usage: { tokensIn: 20, tokensOut: 5 }, usageSource: "csv-import" as const },
+        { completedAt: "2026-09-24T04:41:22.000Z", usage: { tokensIn: 80, tokensOut: 8 }, usageSource: "csv-import" as const },
+      ],
+    }
+    const nodeHistory = [
+      { node: "draftFullDraft", startedAt: Date.parse("2026-09-24T04:11:25.000Z"), completedAt: Date.parse("2026-09-24T04:22:33.000Z"), status: "completed" as const, round: 0, durationMs: 668000 },
+      { node: "reviseReadability", startedAt: Date.parse("2026-09-24T04:22:34.000Z"), completedAt: Date.parse("2026-09-24T04:24:02.000Z"), status: "completed" as const, round: 0, durationMs: 88000 },
+      { node: "reviseDraft", startedAt: Date.parse("2026-09-24T04:30:18.000Z"), completedAt: Date.parse("2026-09-24T04:41:23.000Z"), status: "completed" as const, round: 0, durationMs: 664000 },
+    ]
+
+    expect(relatedNodeIdsForSession(session, nodeHistory)).toEqual([
+      "draftFullDraft",
+      "readabilityGate",
+      "reviseDraft",
+    ])
+    expect(formatRelatedNodeLabels(relatedNodeIdsForSession(session, nodeHistory))).toBe(
+      "Draft, Readability review, Revise draft",
+    )
   })
 })
