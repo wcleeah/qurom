@@ -122,7 +122,7 @@ type GraphTelemetry = {
 // discoverReader when the interview completes, fails, or the turn budget is exhausted.
 const readerInterviewerSessions = new Map<string, AgentRunHandle>()
 
-async function disposeReaderInterviewerSession(requestId: string) {
+export async function disposeReaderInterviewerSession(requestId: string) {
   const handle = readerInterviewerSessions.get(requestId)
   readerInterviewerSessions.delete(requestId)
   await handle?.dispose?.().catch(() => {})
@@ -288,6 +288,19 @@ export function readerContextBlock(state: ResearchState): string {
   return buildReaderContextBlock(state.readerProfile)
 }
 
+/** Reader calibration and research-tool hints for a keepAlive writing session. Omit on follow-up turns. */
+export function standingWritingContext(
+  config: RuntimeConfig,
+  state: ResearchState,
+  include: boolean,
+): string {
+  if (!include) return "\n"
+  const parts = [buildResearchToolHint(config)]
+  const reader = readerContextBlock(state).trim()
+  if (reader) parts.push(`Reader calibration:\n${reader}`)
+  return `\n${parts.join("\n\n")}\n`
+}
+
 async function fileExists(path: string) {
   return Bun.file(path).exists()
 }
@@ -393,10 +406,14 @@ export function rebuttalReviewPrompt(
   })
 }
 
-function revisionPrompt(config: RuntimeConfig, promptBundle: PromptBundle, state: ResearchState) {
+export function revisionPrompt(
+  config: RuntimeConfig,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  options?: { includeStandingContext?: boolean },
+) {
   return renderPromptTemplate(promptBundle.assets.researchDrafterRevise, {
-    researchToolHint: buildResearchToolHint(config),
-    readerContext: readerContextBlock(state),
+    standingContext: standingWritingContext(config, state, options?.includeStandingContext !== false),
     requestLabel: requestLabel(state),
   })
 }
@@ -817,7 +834,7 @@ export function repeatsPreviousReaderQuestion(
   return questions.some((question) => previousQuestions.has(normalizeReaderQuestion(question)))
 }
 
-function renderReaderInterviewPrompt(input: {
+export function renderReaderInterviewPrompt(input: {
   config: RuntimeConfig
   promptBundle: PromptBundle
   state: ResearchState
@@ -825,6 +842,7 @@ function renderReaderInterviewPrompt(input: {
   maxTurns: number
   turn: number
   mode: "first" | "followUp" | "duplicateCorrection"
+  includeResearchToolHint?: boolean
 }) {
   const asset = input.mode === "duplicateCorrection"
     ? input.promptBundle.assets.readerInterviewerDuplicateCorrection
@@ -834,7 +852,9 @@ function renderReaderInterviewPrompt(input: {
 
   return renderPromptTemplate(asset, {
     requestContext: requestContextBlock(input.state),
-    researchToolHint: buildResearchToolHint(input.config),
+    researchToolHint: input.includeResearchToolHint === false
+      ? ""
+      : buildResearchToolHint(input.config),
     transcript: input.transcriptText,
     profileSoFar: formatReaderProfileForPrompt(input.state.readerProfile),
     maxTurns: String(input.maxTurns),
@@ -921,7 +941,7 @@ async function repairSeededReaderProfile(input: {
   }
 }
 
-async function discoverReaderPrompt(
+export async function discoverReaderPrompt(
   config: RuntimeConfig,
   runtime: AgentRuntime,
   promptBundle: PromptBundle,
@@ -1009,6 +1029,7 @@ async function discoverReaderPrompt(
       observer,
     })
     handle.keepAlive = true
+    handle.keepAliveFresh = true
     readerInterviewerSessions.set(state.requestId, handle)
   }
   const sessionID = handle.id
@@ -1026,6 +1047,7 @@ async function discoverReaderPrompt(
         maxTurns,
         turn,
         mode: attempt > 1 ? "duplicateCorrection" : transcript.length === 0 ? "first" : "followUp",
+        includeResearchToolHint: Boolean(handle.keepAliveFresh),
       })
       const response = await runtime.prompt({
         role: "reader-interviewer",
@@ -1042,6 +1064,7 @@ async function discoverReaderPrompt(
           input: { turn, transcriptLen: transcript.length, attempt },
         }),
       })
+      handle.keepAliveFresh = false
       turnResult = response.structured
         ? readerInterviewTurnSchema.parse(response.structured) as ReaderInterviewTurn
         : undefined
@@ -1181,10 +1204,10 @@ export function readabilityReviewPrompt(
   promptBundle: PromptBundle,
   state: ResearchState,
   hints: string,
+  options?: { includeStandingContext?: boolean },
 ) {
   return renderPromptTemplate(promptBundle.assets.researchDrafterReadabilityRevise, {
-    researchToolHint: buildResearchToolHint(config),
-    readerContext: readerContextBlock(state),
+    standingContext: standingWritingContext(config, state, options?.includeStandingContext !== false),
     requestLabel: requestLabel(state),
     readabilityHints: hints,
   })
@@ -1326,7 +1349,13 @@ export async function reviseReadability(
     title: `research-drafter:${state.requestId}:readability:${state.round}:try:${nextTry}`,
     observer,
     role: DRAFTER_ROLE,
-    prompt: readabilityReviewPrompt(config, promptBundle, state, hints),
+    buildPrompt: ({ keepAliveFresh }) => readabilityReviewPrompt(
+      config,
+      promptBundle,
+      state,
+      hints,
+      { includeStandingContext: keepAliveFresh },
+    ),
     outputFile: workingFile,
     outputAction: "edit",
     contextFilename: "draft.md",
@@ -1560,7 +1589,8 @@ async function promptWritingSession(input: {
   title: string
   observer?: RunObserver
   role: string
-  prompt: string
+  prompt?: string
+  buildPrompt?: (input: { keepAliveFresh: boolean }) => string
   outputFile: string
   outputAction?: "write" | "edit"
   extraInputFiles?: PromptFileInput[]
@@ -1586,6 +1616,12 @@ async function promptWritingSession(input: {
           title: input.title,
           observer: input.observer,
         })
+    const prompt = input.buildPrompt
+      ? input.buildPrompt({ keepAliveFresh: Boolean(handle.keepAliveFresh) })
+      : input.prompt
+    if (!prompt) {
+      throw new Error(`Missing prompt for ${input.node}`)
+    }
     const inputFiles = await composeWritingInputFiles({
       handle,
       workingFile: input.outputFile,
@@ -1595,7 +1631,7 @@ async function promptWritingSession(input: {
     const result = await input.runtime.prompt({
       role: input.role,
       handle,
-      prompt: input.prompt,
+      prompt,
       outputFile: input.outputFile,
       outputAction: input.outputAction,
       inputFiles,
@@ -2487,7 +2523,12 @@ async function reviseDraft(
     title: `research-drafter:${state.requestId}:revise:${state.round}`,
     observer,
     role: DRAFTER_ROLE,
-    prompt: revisionPrompt(config, promptBundle, state),
+    buildPrompt: ({ keepAliveFresh }) => revisionPrompt(
+      config,
+      promptBundle,
+      state,
+      { includeStandingContext: keepAliveFresh },
+    ),
     outputFile: workingFile,
     outputAction: "edit",
     extraInputFiles: [

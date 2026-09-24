@@ -20,6 +20,7 @@ import { DEFAULT_READABILITY_THRESHOLDS, READABILITY_AUDIENCE, READABILITY_REGIS
 import {
   disposeDrafterWritingSession,
   readabilityReviewPrompt,
+  revisionPrompt,
   reviseReadability,
   routeAfterReadabilityScore,
   scoreReadability,
@@ -631,6 +632,96 @@ describe("readability review prompt", () => {
     expect(prompt).not.toContain("{readabilityHints}")
     expect(prompt).not.toContain("auditor")
     expect(prompt).not.toContain("findingId")
+  })
+
+  test("omits research-tool hints and reader calibration when includeStandingContext is false", () => {
+    const state = {
+      requestId: "req-1",
+      inputMode: "topic" as const,
+      topic: "How framing works",
+      round: 0,
+      readabilityTry: 0,
+      draft: "draft",
+      audits: [],
+      activeRebuttals: {},
+      currentRebuttalResponsesByFinding: {},
+      rebuttalTurnCounts: {},
+      rebuttalHistory: [],
+      rebuttalResponseHistory: [],
+      unresolvedFindings: [],
+      approvedAgents: [],
+      status: "revising_readability" as const,
+      readerProfile: {
+        intent: { goal: "evaluate framing", depth: "evaluation" as const, secondaryGoals: [] },
+        background: { summary: "Knows TCP" },
+        competence: {
+          inTopic: { level: "intermediate" as const, summary: "Can sketch a frame", evidence: ["drew a frame"] },
+          adjacent: { summary: "Networking", evidence: [] },
+        },
+        inferredGaps: [
+          { concept: "windowing", treatment: "must-explain" as const, rationale: "never mentioned" },
+        ],
+      },
+    }
+    const template = "Request: {requestLabel}\n{standingContext}Hints:\n{readabilityHints}\n"
+    const included = readabilityReviewPrompt(
+      testRuntimeConfig({ dataDir: "/tmp/qurom-readability-standing" }),
+      emptyPromptBundle({ researchDrafterReadabilityRevise: template }),
+      state,
+      "unnest",
+    )
+    expect(included).toContain("Research tool preferences")
+    expect(included).toContain("Reader calibration:")
+    expect(included).toContain("Reader primary goal")
+
+    const omitted = readabilityReviewPrompt(
+      testRuntimeConfig({ dataDir: "/tmp/qurom-readability-standing" }),
+      emptyPromptBundle({ researchDrafterReadabilityRevise: template }),
+      state,
+      "unnest",
+      { includeStandingContext: false },
+    )
+    expect(omitted).not.toContain("Research tool preferences")
+    expect(omitted).not.toContain("Reader calibration")
+    expect(omitted).toContain("unnest")
+    expect(omitted).toContain("topic:")
+  })
+
+  test("revisionPrompt omits standing context on follow-up turns", () => {
+    const state = {
+      requestId: "req-1",
+      inputMode: "topic" as const,
+      topic: "How framing works",
+      round: 1,
+      draft: "draft",
+      audits: [],
+      activeRebuttals: {},
+      currentRebuttalResponsesByFinding: {},
+      rebuttalTurnCounts: {},
+      rebuttalHistory: [],
+      rebuttalResponseHistory: [],
+      unresolvedFindings: [],
+      approvedAgents: [],
+      status: "revising" as const,
+      readerProfile: {
+        intent: { goal: "evaluate framing", depth: "evaluation" as const, secondaryGoals: [] },
+        background: { summary: "Knows TCP" },
+        competence: {
+          inTopic: { level: "intermediate" as const, summary: "Can sketch a frame", evidence: ["drew a frame"] },
+          adjacent: { summary: "Networking", evidence: [] },
+        },
+        inferredGaps: [],
+      },
+    }
+    const omitted = revisionPrompt(
+      testRuntimeConfig({ dataDir: "/tmp/qurom-revision-standing" }),
+      emptyPromptBundle({ researchDrafterRevise: "Revise.\n{standingContext}Request: {requestLabel}\n" }),
+      state,
+      { includeStandingContext: false },
+    )
+    expect(omitted).not.toContain("Research tool preferences")
+    expect(omitted).not.toContain("Reader calibration")
+    expect(omitted).toContain("topic:")
   })
 })
 

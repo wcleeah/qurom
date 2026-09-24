@@ -1,12 +1,7 @@
 Revise the current article to resolve the accepted findings while preserving its factual integrity and editorial purpose.
 
 Request: {requestLabel}
-
-{researchToolHint}
-
-Reader calibration:
-{readerContext}
-
+{standingContext}
 The unresolved findings are provided with this prompt. The current article is the working markdown file from the previous writing step. Edit that file in place. Do not rewrite the whole article, and do not create a new draft file.
 
 ## Revision stance

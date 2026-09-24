@@ -25,6 +25,12 @@ const {
   repeatsPreviousReaderQuestion,
   ingestRequest,
   hasSeededReaderInterview,
+  standingWritingContext,
+  revisionPrompt,
+  readabilityReviewPrompt,
+  renderReaderInterviewPrompt,
+  discoverReaderPrompt,
+  disposeReaderInterviewerSession,
 } = await import("../src/graph")
 const { loadPromptBundle } = await import("../src/prompt-assets")
 const { promptAssetFiles } = await import("../src/prompt-asset-defs")
@@ -601,5 +607,165 @@ describe("reader profile threaded to prompt-contract functions", () => {
   test("drafterReviewPrompt includes the reader context block when a profile is set", () => {
     const prompt = drafterReviewPrompt(testConfig, promptBundle, profileState())
     expect(prompt).toContain("Desired depth: evaluation")
+  })
+
+  test("fullDraftPrompt still includes research-tool hints and reader calibration", () => {
+    const prompt = fullDraftPrompt(testConfig, promptBundle, profileState())
+    expect(prompt).toContain("Research tool preferences")
+    expect(prompt).toContain("Prefer webfetch")
+    expect(prompt).toContain("Reader primary goal")
+  })
+
+  test("standingWritingContext includes research-tool hints and reader calibration when asked", () => {
+    const included = standingWritingContext(testConfig, profileState(), true)
+    expect(included).toContain("Research tool preferences")
+    expect(included).toContain("Prefer webfetch")
+    expect(included).toContain("Reader calibration:")
+    expect(included).toContain("Reader primary goal")
+
+    const omitted = standingWritingContext(testConfig, profileState(), false)
+    expect(omitted.trim()).toBe("")
+    expect(omitted).not.toContain("Research tool preferences")
+    expect(omitted).not.toContain("Reader calibration")
+  })
+
+  test("revisionPrompt omits standing context on keepAlive follow-ups", () => {
+    const fresh = revisionPrompt(testConfig, promptBundle, profileState())
+    expect(fresh).toContain("Research tool preferences")
+    expect(fresh).toContain("Reader calibration:")
+    expect(fresh).toContain("Reader primary goal")
+
+    const followUp = revisionPrompt(testConfig, promptBundle, profileState(), { includeStandingContext: false })
+    expect(followUp).not.toContain("Research tool preferences")
+    expect(followUp).not.toContain("Reader calibration")
+    expect(followUp).not.toContain("Reader primary goal")
+    expect(followUp).toContain("topic:")
+  })
+
+  test("readabilityReviewPrompt omits standing context on keepAlive follow-ups", () => {
+    const followUp = readabilityReviewPrompt(
+      testConfig,
+      promptBundle,
+      profileState({ status: "revising_readability" }),
+      "unnest this sentence",
+      { includeStandingContext: false },
+    )
+    expect(followUp).not.toContain("Research tool preferences")
+    expect(followUp).not.toContain("Reader calibration")
+    expect(followUp).toContain("unnest this sentence")
+  })
+
+  test("reader interview follow-up omits research-tool hints but keeps profile so far", () => {
+    const first = renderReaderInterviewPrompt({
+      config: testConfig,
+      promptBundle,
+      state: profileState({ readerProfile: undefined }),
+      transcriptText: "",
+      maxTurns: 6,
+      turn: 1,
+      mode: "first",
+    })
+    expect(first).toContain("Research tool preferences")
+    expect(first).toContain("Prefer webfetch")
+
+    const followUp = renderReaderInterviewPrompt({
+      config: testConfig,
+      promptBundle,
+      state: profileState(),
+      transcriptText: "Interviewer: What is your goal?\nReader: Evaluation.",
+      maxTurns: 6,
+      turn: 2,
+      mode: "followUp",
+      includeResearchToolHint: false,
+    })
+    expect(followUp).not.toContain("Research tool preferences")
+    expect(followUp).not.toContain("Prefer webfetch")
+    expect(followUp).toContain("Primary goal: decide if MLX is worth learning")
+    expect(followUp).toContain("What is your goal?")
+  })
+})
+
+describe("discoverReader keepAlive follow-up prompts", () => {
+  const requestId = "req-interview-keepalive"
+  let promptBundle: Awaited<ReturnType<typeof loadPromptBundle>>
+
+  beforeEach(async () => {
+    promptBundle = await loadPromptBundle(testConfig)
+  })
+
+  afterEach(async () => {
+    await disposeReaderInterviewerSession(requestId)
+  })
+
+  test("omits research-tool hints on a live interviewer follow-up and restores them on a fresh session", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-interview-keepalive-"))
+    const prompts: string[] = []
+    const runtime = {
+      createHandle: async () => ({
+        id: `interviewer-${prompts.length + 1}`,
+        providerId: "opencode",
+        role: "reader-interviewer",
+        title: "interview",
+        keepAlive: false,
+      }),
+      prompt: async (input: { prompt: string }) => {
+        prompts.push(input.prompt)
+        return {
+          structured: {
+            newQuestions: prompts.length === 1 ? ["What is your goal with this topic?"] : [],
+            done: prompts.length > 1,
+            profile: sampleReaderProfile(),
+          },
+        }
+      },
+    }
+
+    const base = researchStateSchema.parse({
+      requestId,
+      inputMode: "topic",
+      topic: "What is MLX?",
+      round: 0,
+      draft: "",
+      audits: [],
+      activeRebuttals: {},
+      currentRebuttalResponsesByFinding: {},
+      rebuttalTurnCounts: {},
+      rebuttalHistory: [],
+      rebuttalResponseHistory: [],
+      unresolvedFindings: [],
+      approvedAgents: [],
+      status: "drafting",
+      outputPath: dir,
+    })
+
+    try {
+      const first = await discoverReaderPrompt(testConfig, runtime as never, promptBundle, base)
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toContain("Research tool preferences")
+      expect(prompts[0]).toContain("Prefer webfetch")
+
+      const followUpState = researchStateSchema.parse({
+        ...first,
+        interviewTranscript: [
+          ...(first.interviewTranscript ?? []),
+          { role: "reader", text: "I want to decide if MLX is worth learning." },
+        ],
+      })
+      await discoverReaderPrompt(testConfig, runtime as never, promptBundle, followUpState)
+      expect(prompts).toHaveLength(2)
+      expect(prompts[1]).not.toContain("Research tool preferences")
+      expect(prompts[1]).not.toContain("Prefer webfetch")
+      expect(prompts[1]).toContain("Primary goal: decide if MLX is worth learning")
+      expect(prompts[1]).toContain("I want to decide if MLX is worth learning.")
+
+      await disposeReaderInterviewerSession(requestId)
+      const restarted = await discoverReaderPrompt(testConfig, runtime as never, promptBundle, followUpState)
+      expect(restarted.readerInterviewComplete).toBe(true)
+      expect(prompts).toHaveLength(3)
+      expect(prompts[2]).toContain("Research tool preferences")
+      expect(prompts[2]).toContain("Prefer webfetch")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
