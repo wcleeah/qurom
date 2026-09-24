@@ -10,6 +10,22 @@ import { emptyPromptBundle } from "../src/prompt-assets"
 import type { ResearchState } from "../src/schema"
 import { testRuntimeConfig } from "./test-env"
 
+const readerProfile = {
+  intent: { goal: "decide if MLX is worth learning", depth: "evaluation" as const, secondaryGoals: [] },
+  background: { summary: "Daily PyTorch user; no Swift or Apple stack experience" },
+  competence: {
+    inTopic: {
+      level: "intermediate" as const,
+      summary: "Understands training loops; weak on low-level runtime",
+      evidence: ["could not explain kernel compilation"],
+    },
+    adjacent: { summary: "Strong PyTorch background", evidence: ["uses PyTorch daily for model training"] },
+  },
+  inferredGaps: [
+    { concept: "autograd", treatment: "must-explain" as const, rationale: "could not explain how gradients flow" },
+  ],
+}
+
 describe("drafter writing session reuse", () => {
   const requestId = "req-writing-session"
 
@@ -38,10 +54,13 @@ describe("drafter writing session reuse", () => {
         resumeHandle: async () => {
           throw new Error("should reuse the in-memory handle")
         },
-        prompt: async (input: { outputFile?: string; outputAction?: string; inputFiles?: unknown[] }) => {
+        prompt: async (input: { outputFile?: string; outputAction?: string; inputFiles?: unknown[]; prompt?: string }) => {
           expect(input.outputFile).toBe(join(dir, "draft.md"))
           if (input.outputAction === "edit") {
             expect(input.inputFiles).toBeUndefined()
+            expect(input.prompt).not.toContain("Research tool preferences")
+            expect(input.prompt).not.toContain("Reader calibration")
+            expect(input.prompt).not.toContain("Reader primary goal")
             await Bun.write(input.outputFile!, "Edited article for readability.\n")
             return { text: "OK" }
           }
@@ -65,6 +84,7 @@ describe("drafter writing session reuse", () => {
         unresolvedFindings: [],
         approvedAgents: [],
         outputPath: dir,
+        readerProfile,
       }
 
       const drafted = await draftFullDraft(
@@ -99,7 +119,9 @@ describe("drafter writing session reuse", () => {
       const revised = await reviseReadability(
         testRuntimeConfig({ dataDir: join(dir, "data") }),
         runtime,
-        emptyPromptBundle({ researchDrafterReadabilityRevise: "Apply notes.\n{readabilityHints}\n" }),
+        emptyPromptBundle({
+          researchDrafterReadabilityRevise: "Apply notes.\n{standingContext}{readabilityHints}\n",
+        }),
         {
           ...base,
           draft: drafted.draft,
@@ -140,6 +162,7 @@ describe("drafter writing session reuse", () => {
         },
         prompt: async (input: {
           handle: { id: string }
+          prompt?: string
           outputFile?: string
           outputAction?: string
           inputFiles?: Array<{ filename: string }>
@@ -152,6 +175,9 @@ describe("drafter writing session reuse", () => {
             }
             expect(input.handle.id).toBe("drafter-2")
             expect(input.inputFiles?.map((file) => file.filename)).toEqual(["draft.md"])
+            expect(input.prompt).toContain("Research tool preferences")
+            expect(input.prompt).toContain("Reader calibration:")
+            expect(input.prompt).toContain("Reader primary goal")
             expect(await Bun.file(join(dir, "draft.md")).text()).toContain("First complete article")
             await Bun.write(input.outputFile!, "Edited article for readability.\n")
             return { text: "OK" }
@@ -176,6 +202,7 @@ describe("drafter writing session reuse", () => {
         unresolvedFindings: [],
         approvedAgents: [],
         outputPath: dir,
+        readerProfile,
       }
 
       const drafted = await draftFullDraft(
@@ -205,7 +232,9 @@ describe("drafter writing session reuse", () => {
       const revised = await reviseReadability(
         testRuntimeConfig({ dataDir: join(dir, "data") }),
         runtime,
-        emptyPromptBundle({ researchDrafterReadabilityRevise: "Apply notes.\n{readabilityHints}\n" }),
+        emptyPromptBundle({
+          researchDrafterReadabilityRevise: "Apply notes.\n{standingContext}{readabilityHints}\n",
+        }),
         {
           ...base,
           draft: drafted.draft,
