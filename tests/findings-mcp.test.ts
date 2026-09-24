@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
   FINDINGS_MCP_PATH,
   GET_UNRESOLVED_FINDINGS_TOOL,
+  advertisedOriginNote,
+  checkFindingsMcpForRun,
   handleFindingsMcpHttp,
+  inspectUnresolvedFindings,
   issueFindingsMcpGrant,
+  lookupFindingsMcpGrantByRequestId,
   resetFindingsMcpGrantsForTests,
   revokeFindingsMcpGrant,
 } from "../src/findings-mcp"
@@ -92,5 +96,65 @@ describe("findings MCP", () => {
       const revoked = await rpc(token, { jsonrpc: "2.0", id: 4, method: "tools/list" })
       expect(revoked?.status).toBe(401)
     })
+  })
+
+  test("inspectUnresolvedFindings prefers findings.json and reports the latest round snapshot", async () => {
+    await withDir(async (dir) => {
+      await Bun.write(join(dir, "unresolved-findings-round-1.json"), JSON.stringify([{ findingId: "old" }]))
+      await Bun.write(join(dir, "unresolved-findings-round-2.json"), JSON.stringify([{ findingId: "round-2" }]))
+      await Bun.write(join(dir, "findings.json"), JSON.stringify([{ findingId: "working" }]))
+      expect(await inspectUnresolvedFindings(dir)).toEqual({
+        findings: [{ findingId: "working" }],
+        sourceFile: "findings.json",
+        round: 2,
+      })
+    })
+  })
+
+  test("checkFindingsMcpForRun calls get_unresolved_findings and matches round files", async () => {
+    await withDir(async (dir) => {
+      const dataDir = join(dir, "data")
+      const outputPath = join(dir, "run")
+      await mkdir(outputPath, { recursive: true })
+      await Bun.write(join(outputPath, "unresolved-findings-round-2.json"), `${JSON.stringify([
+        { findingId: "req:2:source-auditor:1", agent: "source-auditor", severity: "major", issue: "Contradiction in section 2" },
+      ], null, 2)}\n`)
+
+      const issued = await checkFindingsMcpForRun({
+        requestId: "req-check",
+        outputPath,
+        dataDir,
+        probeAdvertised: false,
+      })
+      expect(issued.ok).toBe(true)
+      expect(issued.grantSource).toBe("issued-for-check")
+      expect(issued.round).toBe(2)
+      expect(issued.sourceFile).toBe("unresolved-findings-round-2.json")
+      expect(issued.findingsMatch).toBe(true)
+      expect(issued.findings).toEqual([
+        { findingId: "req:2:source-auditor:1", agent: "source-auditor", severity: "major", issue: "Contradiction in section 2" },
+      ])
+      expect(await lookupFindingsMcpGrantByRequestId("req-check", dataDir)).toBeUndefined()
+
+      const token = await issueFindingsMcpGrant({
+        requestId: "req-check",
+        outputPath,
+        dataDir,
+      })
+      const live = await checkFindingsMcpForRun({
+        requestId: "req-check",
+        outputPath,
+        dataDir,
+        probeAdvertised: false,
+      })
+      expect(live.ok).toBe(true)
+      expect(live.grantSource).toBe("live-session")
+      expect(await lookupFindingsMcpGrantByRequestId("req-check", dataDir)).toMatchObject({ token, requestId: "req-check" })
+    })
+  })
+
+  test("advertisedOriginNote warns when the MCP URL is not this dashboard", () => {
+    expect(advertisedOriginNote("http://127.0.0.1:3000/mcp/findings", "https://app.example.com")).toContain("QUORUM_MCP_BASE_URL")
+    expect(advertisedOriginNote("https://app.example.com/mcp/findings", "https://app.example.com")).toBeUndefined()
   })
 })

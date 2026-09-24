@@ -4,6 +4,7 @@ export { LIVE_REFRESH_STORAGE_KEY, renderRefreshControls }
 
 const RUN_DETAIL_SECTION_IDS = [
   "run-controls-section",
+  "findings-mcp-check-section",
   "telemetry-section",
   "round-strip-section",
   "agent-activity-section",
@@ -110,6 +111,10 @@ function buildRefreshScript(options: {
     if (!oldEl) return false
     if (id === "interview-chat-section") {
       return interviewSectionShouldSkipSwap(oldEl, newEl)
+    }
+    if (id === "findings-mcp-check-section") {
+      return oldEl.hasAttribute("data-findings-mcp-busy")
+        || !!oldEl.querySelector("[data-findings-mcp-result].has-result")
     }
     if (id === "node-dashboard-section" && oldEl.querySelector("details[open]")) {
       return true

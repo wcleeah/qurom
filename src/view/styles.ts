@@ -509,6 +509,40 @@ a:hover { text-decoration: underline; }
   margin: 0;
   font-size: 0.78rem;
 }
+.findings-mcp-check {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  margin-bottom: 0.75rem;
+}
+.findings-mcp-check h2 {
+  margin: 0 0 0.35rem;
+}
+.findings-mcp-check .muted-note {
+  margin: 0 0 0.65rem;
+}
+.findings-mcp-result {
+  margin-top: 0.75rem;
+}
+.findings-mcp-result .outcome-banner {
+  margin-bottom: 0.65rem;
+}
+.findings-mcp-warning {
+  color: var(--orange);
+}
+.findings-mcp-findings-heading {
+  font-size: 0.85rem;
+  margin: 0.85rem 0 0.4rem;
+}
+.findings-mcp-raw {
+  margin-top: 0.65rem;
+}
+.findings-mcp-raw pre {
+  max-height: 18rem;
+  overflow: auto;
+  font-size: 0.75rem;
+}
 .run-created {
   white-space: nowrap;
 }
