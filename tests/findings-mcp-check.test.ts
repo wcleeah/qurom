@@ -84,6 +84,17 @@ describe("findings MCP health check UI", () => {
     expect(page).toContain("Check findings MCP")
     expect(page).toContain("id=\"findings-mcp-check-section\"")
     expect(page).toContain("data-findings-mcp-check-btn")
+    expect(page).toContain("<details class=\"findings-mcp-details\" data-collapse-key=\"findings-mcp-check\">")
+    expect(page).not.toMatch(/findings-mcp-details" open>/)
+
+    const headerIdx = page.indexOf('class="header-bar"')
+    const controlsIdx = page.indexOf('id="run-controls-section"')
+    const debugIdx = page.indexOf('id="debug-log-section"')
+    const findingsIdx = page.indexOf('id="findings-mcp-check-section"')
+    expect(headerIdx).toBeGreaterThan(-1)
+    expect(controlsIdx).toBeGreaterThan(headerIdx)
+    expect(debugIdx).toBeGreaterThan(controlsIdx)
+    expect(findingsIdx).toBeGreaterThan(debugIdx)
   })
 
   test("POST /api/runs/:id/findings-mcp-check returns this run's round findings", async () => {

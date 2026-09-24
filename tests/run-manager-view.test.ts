@@ -144,6 +144,9 @@ describe("renderRunActionStrip", () => {
     expect(html).toContain("Rerun (repair profile)")
     expect(html).toContain("Rerun (fresh interview)")
     expect(html).toContain("Start a new run")
+    expect(html).toContain("<details class=\"run-actions-details\" data-collapse-key=\"run-actions\">")
+    expect(html).not.toMatch(/run-actions-details" open>/)
+    expect(html).toContain("rerun")
   })
 
   test("keeps reuse and repair clickable while another run is active", () => {
@@ -184,6 +187,8 @@ describe("renderRunActionStrip", () => {
     )
     expect(html).toContain("/api/runs/my-run-abc/archive")
     expect(html).toContain("Archive run")
+    expect(html).toContain("<details class=\"run-actions-details\" data-collapse-key=\"run-actions\">")
+    expect(html).toContain("archive")
   })
 
   test("renders a post-run readability review button", () => {
