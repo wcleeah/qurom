@@ -1055,6 +1055,7 @@ export async function discoverReaderPrompt(
         prompt,
         schema: readerInterviewTurnSchema,
         outputFile: scratchFile,
+        standingContextIncluded: Boolean(handle.keepAliveFresh),
         telemetry: graphAgentTelemetry({
           telemetry,
           state,
@@ -1635,6 +1636,7 @@ async function promptWritingSession(input: {
       outputFile: input.outputFile,
       outputAction: input.outputAction,
       inputFiles,
+      standingContextIncluded: input.buildPrompt ? Boolean(handle.keepAliveFresh) : undefined,
       telemetry: graphAgentTelemetry({
         telemetry: input.telemetry,
         state: input.state,

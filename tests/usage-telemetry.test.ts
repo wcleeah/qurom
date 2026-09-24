@@ -10,6 +10,7 @@ import {
   sumUsage,
   usageDelta,
 } from "../src/usage.ts"
+import { formatTokenPair } from "../src/view/utils.ts"
 import {
   nodeHistoryEntriesForNodeScope,
   nodeHistoryTotalsForNode,
@@ -24,26 +25,33 @@ import {
 } from "../src/view/telemetry-view.ts"
 
 describe("usage folding", () => {
-  test("folds opencode cache tokens into tokens in", () => {
+  test("keeps opencode cache tokens as separate buckets", () => {
     expect(foldOpencodeTokens({
       input: 100,
       output: 40,
       cache: { read: 20, write: 5 },
-    })).toEqual({ tokensIn: 125, tokensOut: 40 })
+    })).toEqual({ tokensIn: 100, tokensOut: 40, cacheReadTokens: 20, cacheWriteTokens: 5 })
   })
 
-  test("folds cursor cache tokens into tokens in", () => {
+  test("keeps cursor cache tokens as separate buckets", () => {
     expect(foldCursorUsage({
       inputTokens: 200,
       outputTokens: 80,
       cacheReadTokens: 30,
       cacheWriteTokens: 10,
-    })).toEqual({ tokensIn: 240, tokensOut: 80 })
+    })).toEqual({ tokensIn: 200, tokensOut: 80, cacheReadTokens: 30, cacheWriteTokens: 10 })
   })
 
   test("computes usage deltas for cumulative updates", () => {
     expect(usageDelta({ tokensIn: 100, tokensOut: 20 }, { tokensIn: 150, tokensOut: 35 }))
       .toEqual({ tokensIn: 50, tokensOut: 15 })
+  })
+
+  test("computes cache deltas for cumulative updates", () => {
+    expect(usageDelta(
+      { tokensIn: 100, tokensOut: 20, cacheReadTokens: 40, cacheWriteTokens: 10 },
+      { tokensIn: 150, tokensOut: 35, cacheReadTokens: 90, cacheWriteTokens: 12 },
+    )).toEqual({ tokensIn: 50, tokensOut: 15, cacheReadTokens: 50, cacheWriteTokens: 2 })
   })
 
   test("computes cost deltas for cumulative updates", () => {
@@ -88,6 +96,24 @@ describe("cursor pricing", () => {
     expect(result.costAvailable).toBe(true)
     expect(result.costEstimated).toBe(true)
     expect(result.costUsd).toBeCloseTo(0.5)
+  })
+
+  test("prices cache read cheaper than uncached input", () => {
+    const split = estimateCursorCostUsd("composer-2.5", {
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 0,
+    })
+    const foldedAsInput = estimateCursorCostUsd("composer-2.5", {
+      inputTokens: 2_000_000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    })
+    expect(split.costUsd).toBeCloseTo(0.7)
+    expect(foldedAsInput.costUsd).toBeCloseTo(1.0)
+    expect(split.costUsd ?? 0).toBeLessThan(foldedAsInput.costUsd ?? 0)
   })
 
   test("estimates auto pool cost from raw token buckets", () => {
@@ -217,6 +243,16 @@ describe("telemetry view", () => {
     expect(html).toContain("~$0.042 est.")
   })
 
+  test("formatTokenPair splits cache buckets when present", () => {
+    expect(formatTokenPair({ tokensIn: 2000, tokensOut: 400 }, true)).toBe("2.0k in / 400 out")
+    expect(formatTokenPair({
+      tokensIn: 2000,
+      tokensOut: 400,
+      cacheReadTokens: 3000,
+      cacheWriteTokens: 1000,
+    }, true)).toBe("2.0k in / 3.0k cache read / 1.0k cache write / 400 out")
+  })
+
   test("renders file count and total size in telemetry strip", () => {
     const html = renderRunTelemetryStrip(null, [], {
       fileCount: 12,
@@ -303,6 +339,50 @@ describe("telemetry view", () => {
     expect(html.indexOf("methodologist")).toBeLessThan(html.indexOf("source-auditor"))
     expect(html).toContain("2026-07-04 12:00:00 UTC")
     expect(html).toContain("2026-07-04 10:00:00 UTC")
+  })
+
+  test("renderSessionTelemetryTable shows prompt accounting and cache buckets", () => {
+    const html = renderSessionTelemetryTable({
+      version: 1,
+      sessions: [{
+        sessionId: "ses-draft",
+        role: "research-drafter",
+        provider: "cursor",
+        node: "reviseDraft",
+        calls: [{
+          completedAt: "2026-07-04T12:00:00.000Z",
+          usage: {
+            tokensIn: 2000,
+            tokensOut: 400,
+            cacheReadTokens: 3000,
+            cacheWriteTokens: 1000,
+            costUsd: 0.02,
+            costAvailable: true,
+            costEstimated: true,
+          },
+          usageSource: "sdk",
+        }],
+        prompts: [{
+          at: "2026-07-04T12:00:00.000Z",
+          node: "reviseDraft",
+          keepAlive: true,
+          keepAliveFresh: false,
+          standingContextIncluded: false,
+          promptChars: 800,
+          promptBytes: 800,
+          estimatedPromptTokens: 200,
+          inputFileCount: 1,
+          inputFileBytes: 1200,
+          inlined: true,
+        }],
+      }],
+    })
+
+    expect(html).toContain("Prompt accounting")
+    expect(html).toContain("follow-up")
+    expect(html).toContain("omitted")
+    expect(html).toContain("800 chars")
+    expect(html).toContain("2.0k in / 3.0k cache read / 1.0k cache write / 400 out")
   })
 
   test("sessionTotalsForNodeRound scopes usage to a single research round", () => {

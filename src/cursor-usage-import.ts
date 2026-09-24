@@ -38,6 +38,8 @@ export type CursorUsageMatch = {
   model: string
   tokensIn: number
   tokensOut: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
   costUsd?: number
   costAvailable: boolean
   costEstimated: boolean
@@ -245,8 +247,7 @@ function usageFromCsvRow(row: CursorUsageCsvRow) {
 
   if (parsedCost.costAvailable) {
     return {
-      tokensIn: folded.tokensIn,
-      tokensOut: folded.tokensOut,
+      ...folded,
       costUsd: parsedCost.costUsd,
       costAvailable: true,
       costEstimated: false,
@@ -256,8 +257,7 @@ function usageFromCsvRow(row: CursorUsageCsvRow) {
   const estimated = estimateCursorCostUsd(row.model, raw)
   if (estimated.costAvailable) {
     return {
-      tokensIn: folded.tokensIn,
-      tokensOut: folded.tokensOut,
+      ...folded,
       costUsd: estimated.costUsd,
       costAvailable: true,
       costEstimated: true,
@@ -265,8 +265,7 @@ function usageFromCsvRow(row: CursorUsageCsvRow) {
   }
 
   return {
-    tokensIn: folded.tokensIn,
-    tokensOut: folded.tokensOut,
+    ...folded,
     costAvailable: false,
     costEstimated: false,
   }
@@ -307,6 +306,8 @@ export function matchCursorUsageRows(
         model: row.model,
         tokensIn: usage.tokensIn,
         tokensOut: usage.tokensOut,
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheWriteTokens: usage.cacheWriteTokens,
         costUsd: usage.costUsd,
         costAvailable: usage.costAvailable,
         costEstimated: usage.costEstimated,
@@ -339,6 +340,8 @@ function mergeImportIntoSessionTelemetry(
       usage: {
         tokensIn: match.tokensIn,
         tokensOut: match.tokensOut,
+        cacheReadTokens: match.cacheReadTokens,
+        cacheWriteTokens: match.cacheWriteTokens,
         costUsd: match.costUsd,
         costAvailable: match.costAvailable,
         costEstimated: match.costEstimated,

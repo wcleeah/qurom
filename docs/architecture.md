@@ -376,6 +376,12 @@ Consumers include:
 
 The OpenCode event bridge translates provider events into this internal event vocabulary. That keeps the UI and telemetry mostly provider-neutral.
 
+### Token usage and prompt accounting
+
+Each provider call records billed usage on `session-telemetry.json`. Cursor and OpenCode report four token buckets: uncached input (`tokensIn`), cache read, cache write, and output. Cost estimates already used those buckets at different rates; the stored counts used to fold cache into `tokensIn`. New runs keep the split so keepAlive follow-ups can be judged by cache hit rate, not a mashed input total. Older files without cache fields still display `tokensIn` as a combined number.
+
+Prompt accounting is separate from billed usage. `runtime.prompt` emits `agent.prompt` (also in `debug-log.jsonl`) with the composed prompt size, attached/inlined file bytes, `keepAliveFresh`, and whether standing context (research-tool hints + reader calibration) was included. That is the measurement for “did this follow-up omit the standing context?” Estimated prompt tokens are `chars / 4`, not a tokenizer, and are not used for cost.
+
 ---
 
 ## Persistence And Artifacts
@@ -401,6 +407,7 @@ Common artifacts:
 | `failure.json` | Failure details. |
 | `summary.json` | Run summary. |
 | `debug-log.jsonl` | Structured diagnostic log. |
+| `session-telemetry.json` | Per-session model, cache-split token usage, cost, and prompt-size accounting. Dashboard source of truth for run cost. |
 | `session-ledger.json` | Durable provider session ids (`bc-…` / OpenCode session) keyed by role, node, and round. Used to harvest a live or finished session on resume instead of creating a new agent. |
 | `reader-profile.json` | Reader discovery profile. |
 | `reader-reply-turn-N.json` | Archived human replies. |

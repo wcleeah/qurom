@@ -31,6 +31,8 @@ export type LangfuseUsageDetails = {
   input: number
   output: number
   total: number
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
 }
 
 type ObservationInput = {
@@ -78,11 +80,16 @@ export type TelemetryRun = {
 /** Map Qurom usage totals into Langfuse generation usageDetails. */
 export function toUsageDetails(usage: UsageTotals | undefined): LangfuseUsageDetails | undefined {
   if (!usage || !hasUsage(usage)) return undefined
-  return {
+  const cacheRead = usage.cacheReadTokens ?? 0
+  const cacheWrite = usage.cacheWriteTokens ?? 0
+  const details: LangfuseUsageDetails = {
     input: usage.tokensIn,
     output: usage.tokensOut,
-    total: usage.tokensIn + usage.tokensOut,
+    total: usage.tokensIn + usage.tokensOut + cacheRead + cacheWrite,
   }
+  if (usage.cacheReadTokens != null) details.cache_read_input_tokens = usage.cacheReadTokens
+  if (usage.cacheWriteTokens != null) details.cache_creation_input_tokens = usage.cacheWriteTokens
+  return details
 }
 
 export function toCostDetails(usage: UsageTotals | undefined): { total: number } | undefined {

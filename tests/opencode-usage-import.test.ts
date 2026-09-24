@@ -12,7 +12,6 @@ import {
   sessionNeedsBackfill,
 } from "../src/opencode-usage-import.ts"
 import { readSessionTelemetry, SESSION_TELEMETRY_FILENAME } from "../src/session-telemetry.ts"
-import { foldOpencodeTokens } from "../src/usage.ts"
 
 function createTestOpenCodeDb(dbPath: string, rows: Array<{ sessionId: string; data: Record<string, unknown> }>) {
   const db = new Database(dbPath, { create: true })
@@ -90,7 +89,7 @@ describe("sessionNeedsBackfill", () => {
 })
 
 describe("fetchOpenCodeSessionUsage", () => {
-  test("folds cache tokens into tokensIn", async () => {
+  test("keeps cache tokens as separate buckets", async () => {
     const runsDir = await mkdtemp(join(tmpdir(), "opencode-fetch-"))
     const dbPath = join(runsDir, "opencode.db")
     createTestOpenCodeDb(dbPath, [
@@ -113,9 +112,9 @@ describe("fetchOpenCodeSessionUsage", () => {
     db.close()
 
     const row = usage.get("ses-fold")
-    expect(row?.tokensIn).toBe(
-      foldOpencodeTokens({ input: 100, output: 20, cache: { read: 300, write: 50 } }).tokensIn,
-    )
+    expect(row?.tokensIn).toBe(100)
+    expect(row?.cacheReadTokens).toBe(300)
+    expect(row?.cacheWriteTokens).toBe(50)
     expect(row?.tokensOut).toBe(20)
     expect(row?.costAvailable).toBe(true)
     expect(row?.costUsd).toBe(0.42)

@@ -19,6 +19,7 @@ import { answeredQuestionsFromTranscript, readerInterviewStateFromRunDir, reader
 import { resolveRunForResume } from "./run-resume"
 import { join } from "node:path"
 import { createSessionTelemetryWriter } from "./session-telemetry"
+import { addUsage, emptyUsage } from "./usage"
 
 export type GraphFactory = typeof createGraph
 
@@ -101,6 +102,8 @@ export type RunnerEvent =
       sessionID: string
       tokensIn: number
       tokensOut: number
+      cacheReadTokens?: number
+      cacheWriteTokens?: number
       source: "opencode" | "cursor"
       messageID?: string
       runID?: string
@@ -108,6 +111,24 @@ export type RunnerEvent =
       costUsd?: number
       costAvailable?: boolean
       costEstimated?: boolean
+    }
+  | {
+      kind: "agent.prompt"
+      sessionID: string
+      role: string
+      provider?: string
+      node?: string
+      round?: number
+      keepAlive?: boolean
+      keepAliveFresh?: boolean
+      standingContextIncluded?: boolean
+      promptChars: number
+      promptBytes: number
+      estimatedPromptTokens: number
+      basePromptChars?: number
+      inputFileCount: number
+      inputFileBytes: number
+      inlined: boolean
     }
   | { kind: "result"; runResult: unknown }
   | {
@@ -460,7 +481,7 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
   const toolObservations = new Map<string, TraceObservation>()
   const toolPermissions = new Map<string, string[]>()
   const pending = new Map<string, Promise<void>>()
-  const sessionUsage = new Map<string, { tokensIn: number; tokensOut: number }>()
+  const sessionUsage = new Map<string, import("./usage").UsageTotals>()
 
   const off = bus.on((event) => {
     if (event.kind === "session.created") {
@@ -520,15 +541,21 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
     sessionID: string
     tokensIn: number
     tokensOut: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
     costUsd?: number
     costAvailable?: boolean
     costEstimated?: boolean
   }) {
-    const prior = sessionUsage.get(event.sessionID) ?? { tokensIn: 0, tokensOut: 0 }
-    const accumulated = {
-      tokensIn: prior.tokensIn + event.tokensIn,
-      tokensOut: prior.tokensOut + event.tokensOut,
-    }
+    const prior = sessionUsage.get(event.sessionID) ?? emptyUsage()
+    const accumulated = emptyUsage()
+    addUsage(accumulated, prior)
+    addUsage(accumulated, {
+      tokensIn: event.tokensIn,
+      tokensOut: event.tokensOut,
+      cacheReadTokens: event.cacheReadTokens,
+      cacheWriteTokens: event.cacheWriteTokens,
+    })
     sessionUsage.set(event.sessionID, accumulated)
 
     const { toUsageDetails, toCostDetails } = await import("./telemetry")
@@ -536,6 +563,8 @@ export function attachTelemetryListener(bus: EventBus, telemetry: TelemetryRun) 
     const costDetails = toCostDetails({
       tokensIn: event.tokensIn,
       tokensOut: event.tokensOut,
+      cacheReadTokens: event.cacheReadTokens,
+      cacheWriteTokens: event.cacheWriteTokens,
       costUsd: event.costUsd,
       costAvailable: event.costAvailable,
       costEstimated: event.costEstimated,
@@ -1194,6 +1223,8 @@ export function describeRunnerEvent(event: RunnerEvent): string {
       return `agent.permission.replied:${event.sessionID}:${event.requestID}:${event.reply}`
     case "agent.usage":
       return `agent.usage:${event.sessionID}:${event.source}`
+    case "agent.prompt":
+      return `agent.prompt:${event.sessionID}:${event.promptChars}`
     case "result":
       return "result"
     case "design.phase":

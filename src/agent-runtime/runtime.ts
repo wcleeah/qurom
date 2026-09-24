@@ -22,6 +22,7 @@ import {
 } from "../session-ledger"
 import { artifactBasename, parseHarvestedResult, readHarvestableLocalFile } from "./harvest"
 import { KeepAliveSessionDeadError, isDeadKeepAliveReason } from "./keep-alive"
+import { estimateTokensFromChars } from "../usage"
 
 export { KeepAliveSessionDeadError, isDeadKeepAliveReason } from "./keep-alive"
 
@@ -62,6 +63,8 @@ export type RuntimePromptInput<T> = {
   inputFiles?: PromptFileInput[]
   outputFile?: string
   outputAction?: "write" | "edit"
+  /** When set, records whether keepAlive standing context was included in this prompt. */
+  standingContextIncluded?: boolean
   telemetry?: ProviderPromptInput<T>["telemetry"]
 }
 
@@ -75,6 +78,69 @@ export type AgentRuntime = {
 
 export type AgentRuntimeOptions = {
   providerForRole?: (role: AgentRole) => AgentProvider
+}
+
+async function measureInputFiles(inputFiles: PromptFileInput[] | undefined) {
+  if (!inputFiles || inputFiles.length === 0) {
+    return { count: 0, bytes: 0 }
+  }
+  let bytes = 0
+  for (const file of inputFiles) {
+    bytes += Number(Bun.file(file.path).size)
+  }
+  return { count: inputFiles.length, bytes }
+}
+
+function emitPromptAccounting(input: {
+  bus?: EventBus
+  debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
+  role: AgentRole
+  handle: AgentRunHandle
+  standingContextIncluded?: boolean
+  prompt: string
+  basePromptChars: number
+  inlined: boolean
+  inputFileCount: number
+  inputFileBytes: number
+}) {
+  const promptChars = input.prompt.length
+  const promptBytes = new TextEncoder().encode(input.prompt).length
+  const payload = {
+    sessionID: input.handle.id,
+    role: input.role,
+    provider: input.handle.providerId,
+    node: input.handle.harvest?.node,
+    round: input.handle.harvest?.round,
+    keepAlive: Boolean(input.handle.keepAlive),
+    keepAliveFresh: Boolean(input.handle.keepAliveFresh),
+    standingContextIncluded: input.standingContextIncluded,
+    promptChars,
+    promptBytes,
+    basePromptChars: input.basePromptChars,
+    estimatedPromptTokens: estimateTokensFromChars(promptChars),
+    inputFileCount: input.inputFileCount,
+    inputFileBytes: input.inputFileBytes,
+    inlined: input.inlined,
+  }
+  input.debugLog?.write("agent.prompt", payload)
+  input.bus?.emit({
+    kind: "agent.prompt",
+    sessionID: payload.sessionID,
+    role: payload.role,
+    provider: payload.provider,
+    node: payload.node,
+    round: payload.round,
+    keepAlive: payload.keepAlive,
+    keepAliveFresh: payload.keepAliveFresh,
+    standingContextIncluded: payload.standingContextIncluded,
+    promptChars: payload.promptChars,
+    promptBytes: payload.promptBytes,
+    estimatedPromptTokens: payload.estimatedPromptTokens,
+    basePromptChars: payload.basePromptChars,
+    inputFileCount: payload.inputFileCount,
+    inputFileBytes: payload.inputFileBytes,
+    inlined: payload.inlined,
+  })
 }
 
 async function inlineInputFiles(prompt: string, inputFiles: PromptFileInput[] | undefined) {
@@ -454,7 +520,21 @@ export function createAgentRuntime(
         expectedArtifact: artifactBasename(input.outputFile),
       })
       try {
+        const measuredFiles = await measureInputFiles(input.inputFiles)
         const promptInput = await renderPromptInputs(provider, prompt, input.inputFiles)
+        const inlined = Boolean(input.inputFiles?.length) && promptInput.inputFiles === undefined
+        emitPromptAccounting({
+          bus,
+          debugLog: input.telemetry?.debugLog,
+          role: input.role,
+          handle,
+          standingContextIncluded: input.standingContextIncluded,
+          prompt: promptInput.prompt,
+          basePromptChars: prompt.length,
+          inlined,
+          inputFileCount: measuredFiles.count,
+          inputFileBytes: measuredFiles.bytes,
+        })
         const result = await provider.prompt({
           config,
           bus,

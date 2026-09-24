@@ -144,7 +144,7 @@ If any role uses Cursor, also set `CURSOR_API_KEY`.
 
 On first dashboard start, Qurom seeds SQLite from `defaults/`, auto-seeds missing `.opencode/agents/` files when using OpenCode, and shows a bootstrap banner on the index page if local agents differ from shipped defaults. Existing repo-local `runs/` data is auto-migrated into `~/.local/share/qurom/` (or `$XDG_DATA_HOME/qurom`).
 
-Leave the `LANGFUSE_*` keys blank to skip cloud tracing. When set, Qurom uses a process-level OpenTelemetry provider (`batched` export) and mirrors token usage into Langfuse Generations/Agents for OpenCode and Cursor. Local `session-telemetry.json` remains the dashboard cost source of truth.
+Leave the `LANGFUSE_*` keys blank to skip cloud tracing. When set, Qurom uses a process-level OpenTelemetry provider (`batched` export) and mirrors token usage into Langfuse Generations/Agents for OpenCode and Cursor, including cache-read and cache-write buckets when the provider reports them. Local `session-telemetry.json` remains the dashboard cost source of truth and now stores uncached input separately from cache tokens, plus per-prompt size accounting.
 
 4. If you use OpenCode-bound roles, confirm `opencode` is on your `PATH` (`opencode --version`).
 

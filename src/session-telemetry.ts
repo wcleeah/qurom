@@ -8,6 +8,22 @@ export const SESSION_TELEMETRY_FILENAME = "session-telemetry.json"
 
 export type ModelParam = { id: string; value: string }
 
+export type SessionPromptAccounting = {
+  at: string
+  node?: string
+  round?: number
+  keepAlive?: boolean
+  keepAliveFresh?: boolean
+  standingContextIncluded?: boolean
+  promptChars: number
+  promptBytes: number
+  estimatedPromptTokens: number
+  basePromptChars?: number
+  inputFileCount: number
+  inputFileBytes: number
+  inlined: boolean
+}
+
 export type SessionTelemetryCall = {
   cursorRunId?: string
   callIndex?: number
@@ -30,11 +46,31 @@ export type SessionTelemetryRecord = {
   providerAgent?: string
   createdAt?: string
   calls: SessionTelemetryCall[]
+  prompts?: SessionPromptAccounting[]
 }
 
 export type SessionTelemetryFile = {
   version: 1
   sessions: SessionTelemetryRecord[]
+}
+
+export type AgentPromptTelemetryEvent = {
+  kind: "agent.prompt"
+  sessionID: string
+  role: string
+  provider?: string
+  node?: string
+  round?: number
+  keepAlive?: boolean
+  keepAliveFresh?: boolean
+  standingContextIncluded?: boolean
+  promptChars: number
+  promptBytes: number
+  estimatedPromptTokens: number
+  basePromptChars?: number
+  inputFileCount: number
+  inputFileBytes: number
+  inlined: boolean
 }
 
 export type SessionTelemetryEvent = {
@@ -95,6 +131,7 @@ export function applySessionTelemetryEvent(
     sessions: file.sessions.map((session) => ({
       ...session,
       calls: session.calls.map((call) => ({ ...call })),
+      prompts: session.prompts?.map((prompt) => ({ ...prompt })),
     })),
   }
 
@@ -143,10 +180,7 @@ export function applySessionTelemetryEvent(
 
 export function sumSessionTelemetryUsage(file: SessionTelemetryFile): UsageTotals & { usageAvailable: boolean } {
   const usage: UsageTotals & { usageAvailable: boolean } = {
-    tokensIn: 0,
-    tokensOut: 0,
-    costUsd: 0,
-    costAvailable: false,
+    ...emptyUsage(),
     usageAvailable: false,
   }
 
@@ -154,17 +188,67 @@ export function sumSessionTelemetryUsage(file: SessionTelemetryFile): UsageTotal
     for (const call of session.calls) {
       if (!call.usage) continue
       usage.usageAvailable = true
-      usage.tokensIn += call.usage.tokensIn
-      usage.tokensOut += call.usage.tokensOut
-      if (call.usage.costAvailable) {
-        usage.costAvailable = true
-        usage.costUsd = (usage.costUsd ?? 0) + (call.usage.costUsd ?? 0)
-        if (call.usage.costEstimated) usage.costEstimated = true
-      }
+      addUsage(usage, call.usage)
     }
   }
 
   return usage
+}
+
+export function applyAgentPromptEvent(
+  file: SessionTelemetryFile,
+  event: AgentPromptTelemetryEvent,
+  context?: { node?: string; round?: number; provider?: string },
+): SessionTelemetryFile {
+  const next: SessionTelemetryFile = {
+    version: 1,
+    sessions: file.sessions.map((session) => ({
+      ...session,
+      calls: session.calls.map((call) => ({ ...call })),
+      prompts: session.prompts?.map((prompt) => ({ ...prompt })),
+    })),
+  }
+
+  let record = findSession(next, event.sessionID)
+  if (!record) {
+    record = {
+      sessionId: event.sessionID,
+      role: event.role,
+      provider: event.provider ?? context?.provider ?? "unknown",
+      calls: [],
+      prompts: [],
+    }
+    next.sessions.push(record)
+  }
+
+  record.role = event.role || record.role
+  if (event.provider) record.provider = event.provider
+  else if (context?.provider) record.provider = context.provider
+  if (event.node !== undefined) record.node = event.node
+  else if (context?.node !== undefined) record.node = context.node
+  if (event.round !== undefined) record.round = event.round
+  else if (context?.round !== undefined) record.round = context.round
+
+  const prompt: SessionPromptAccounting = {
+    at: new Date().toISOString(),
+    promptChars: event.promptChars,
+    promptBytes: event.promptBytes,
+    estimatedPromptTokens: event.estimatedPromptTokens,
+    inputFileCount: event.inputFileCount,
+    inputFileBytes: event.inputFileBytes,
+    inlined: event.inlined,
+  }
+  if (event.node !== undefined) prompt.node = event.node
+  else if (context?.node !== undefined) prompt.node = context.node
+  if (event.round !== undefined) prompt.round = event.round
+  else if (context?.round !== undefined) prompt.round = context.round
+  if (event.keepAlive != null) prompt.keepAlive = event.keepAlive
+  if (event.keepAliveFresh != null) prompt.keepAliveFresh = event.keepAliveFresh
+  if (event.standingContextIncluded != null) prompt.standingContextIncluded = event.standingContextIncluded
+  if (event.basePromptChars != null) prompt.basePromptChars = event.basePromptChars
+
+  record.prompts = [...(record.prompts ?? []), prompt]
+  return next
 }
 
 export type AgentUsageTelemetryContext = {
@@ -183,6 +267,8 @@ export function applyAgentUsageEvent(
     source: "opencode" | "cursor"
     tokensIn: number
     tokensOut: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
     messageID?: string
     runID?: string
     cumulative?: boolean
@@ -195,6 +281,8 @@ export function applyAgentUsageEvent(
   const next: UsageTotals = {
     tokensIn: event.tokensIn,
     tokensOut: event.tokensOut,
+    ...(event.cacheReadTokens != null ? { cacheReadTokens: event.cacheReadTokens } : {}),
+    ...(event.cacheWriteTokens != null ? { cacheWriteTokens: event.cacheWriteTokens } : {}),
     ...(event.costAvailable
       ? {
           costUsd: event.costUsd ?? 0,
@@ -336,6 +424,15 @@ export function createSessionTelemetryWriter(runDir: string | (() => string | un
           messageUsageTotals,
           cursorRunUsageTotals,
         })
+        queueWrite()
+      })
+      return
+    }
+
+    if (event.kind === "agent.prompt") {
+      enqueueEvent(async () => {
+        await ensureLoaded()
+        file = applyAgentPromptEvent(file, event, graphContext())
         queueWrite()
       })
       return

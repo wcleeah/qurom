@@ -25,6 +25,8 @@ export type OpenCodeSessionUsage = {
   providerId: string | null
   tokensIn: number
   tokensOut: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
   costUsd: number
   costAvailable: boolean
   durationMs: number
@@ -50,6 +52,8 @@ export type OpenCodeUsageMatch = {
   completedAt: string
   tokensIn: number
   tokensOut: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
   costUsd?: number
   costAvailable: boolean
   costEstimated: boolean
@@ -161,6 +165,8 @@ function usageFromSessionRow(row: OpenCodeSessionUsage) {
   return {
     tokensIn: row.tokensIn,
     tokensOut: row.tokensOut,
+    cacheReadTokens: row.cacheReadTokens,
+    cacheWriteTokens: row.cacheWriteTokens,
     ...(row.costAvailable
       ? {
           costUsd: row.costUsd,
@@ -224,6 +230,8 @@ function rowToSessionUsage(row: SessionUsageRow): OpenCodeSessionUsage {
     providerId: row.provider_id == null ? null : String(row.provider_id),
     tokensIn: folded.tokensIn,
     tokensOut: folded.tokensOut,
+    cacheReadTokens: folded.cacheReadTokens,
+    cacheWriteTokens: folded.cacheWriteTokens,
     costUsd: reportedCost,
     costAvailable: reportedCost > 0,
     durationMs: Number(row.duration_ms ?? 0),
@@ -324,6 +332,8 @@ function buildMatch(record: SessionTelemetryRecord, usage: OpenCodeSessionUsage)
     completedAt,
     tokensIn: usageTotals.tokensIn,
     tokensOut: usageTotals.tokensOut,
+    cacheReadTokens: usageTotals.cacheReadTokens,
+    cacheWriteTokens: usageTotals.cacheWriteTokens,
     costUsd: usageTotals.costUsd,
     costAvailable: usageTotals.costAvailable ?? false,
     costEstimated: false,
@@ -351,6 +361,8 @@ function mergeImportIntoSessionTelemetry(
       usage: {
         tokensIn: match.tokensIn,
         tokensOut: match.tokensOut,
+        cacheReadTokens: match.cacheReadTokens,
+        cacheWriteTokens: match.cacheWriteTokens,
         costUsd: match.costUsd,
         costAvailable: match.costAvailable,
         costEstimated: match.costEstimated,
@@ -387,7 +399,7 @@ export async function applyOpenCodeUsageImport(input: {
         unmatched: [],
       }
 
-      if (!usage || !hasUsage({ tokensIn: usage.tokensIn, tokensOut: usage.tokensOut })) {
+      if (!usage || !hasUsage(usageFromSessionRow(usage))) {
         bucket.unmatched.push(candidate.record.sessionId)
         byRun.set(candidate.runDir, bucket)
         continue
