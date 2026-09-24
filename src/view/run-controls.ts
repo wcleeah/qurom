@@ -143,28 +143,43 @@ export function renderRunActionStrip(
   const archiveButtons = showArchive ? renderArchiveForm(runName) : ""
 
   const sections: string[] = []
+  const summaryBits: string[] = []
   if (continueButtons) {
+    summaryBits.push("continue")
     sections.push(`<span class="run-actions-label">Continue this run</span>
   <div class="run-actions-buttons">${continueButtons}</div>
   ${busyNote}`)
   }
   if (rerunButtons) {
+    summaryBits.push("rerun")
     sections.push(`<span class="run-actions-label">Start a new run</span>
   <div class="run-actions-buttons">${rerunButtons}</div>
   ${continueButtons ? "" : busyNote}`)
   }
   if (reviewButtons) {
+    summaryBits.push("review")
     sections.push(`<span class="run-actions-label">Inspect this run</span>
   <div class="run-actions-buttons">${reviewButtons}</div>
   <p class="muted-note dim-text run-actions-note">Scores the finished article. Does not rewrite the draft.</p>`)
   }
   if (archiveButtons) {
+    summaryBits.push("archive")
     sections.push(`<span class="run-actions-label">Manage</span>
   <div class="run-actions-buttons">${archiveButtons}</div>`)
   }
 
   return `<div class="run-actions">
+  <details class="run-actions-details" data-collapse-key="run-actions">
+    <summary class="run-actions-summary">
+      <span class="run-actions-summary-main">
+        <span class="run-actions-heading">Actions</span>
+        <span class="muted-note">${escapeHtml(summaryBits.join(" · "))}</span>
+      </span>
+    </summary>
+    <div class="run-actions-body">
   ${sections.join("\n  ")}
+    </div>
+  </details>
 </div>`
 }
 

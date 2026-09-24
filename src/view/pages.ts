@@ -723,9 +723,6 @@ export async function renderRun(name: string): Promise<Response> {
   const body = `
 ${isRunning ? renderRefreshControls() : ""}
 ${renderRerunQueueStrip(rerunQueue)}
-${runControlsHtml}
-${renderFindingsMcpCheckPanel(name)}
-${interviewChatSection}
 <div class="header-bar">
   <div class="header-main">
     <div class="header-title-row">
@@ -741,17 +738,19 @@ ${interviewChatSection}
     </div>
   </div>
 </div>
-
+${interviewChatSection}
 ${failureBannerSection}
 ${telemetrySection}
 ${finalOutputSection}
 ${articleTagsSection}
 ${designSummarySection}
+${runControlsHtml}
 ${roundStripSection}
 ${agentActivitySection}
 ${nodeGridSection}
 ${sessionTelemetrySection}
 ${debugLogSection}
+${renderFindingsMcpCheckPanel(name)}
 ${markdownSection}
 ${filesSection}
 ${READ_SCRIPT}

@@ -2,12 +2,21 @@ import { escapeHtml } from "./utils"
 
 export function renderFindingsMcpCheckPanel(runName: string): string {
   return `<div id="findings-mcp-check-section" class="section findings-mcp-check" data-findings-mcp-check data-run-name="${escapeHtml(runName)}">
-  <h2>Findings MCP</h2>
-  <p class="muted-note dim-text">Call this run’s findings MCP the same way Cursor would, and confirm it returns the current round’s unresolved findings.</p>
-  <div class="run-actions-buttons">
-    <button type="button" class="btn btn-secondary" data-findings-mcp-check-btn>Check findings MCP</button>
-  </div>
-  <div class="findings-mcp-result" data-findings-mcp-result></div>
+  <details class="findings-mcp-details" data-collapse-key="findings-mcp-check">
+    <summary class="findings-mcp-summary">
+      <span class="findings-mcp-summary-main">
+        <span class="findings-mcp-heading">Findings MCP</span>
+        <span class="muted-note">Health check</span>
+      </span>
+    </summary>
+    <div class="findings-mcp-body">
+      <p class="muted-note dim-text">Call this run’s findings MCP the same way Cursor would, and confirm it returns the current round’s unresolved findings.</p>
+      <div class="run-actions-buttons">
+        <button type="button" class="btn btn-secondary" data-findings-mcp-check-btn>Check findings MCP</button>
+      </div>
+      <div class="findings-mcp-result" data-findings-mcp-result></div>
+    </div>
+  </details>
 </div>`
 }
 
