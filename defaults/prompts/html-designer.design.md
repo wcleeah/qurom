@@ -6,7 +6,7 @@ The markdown document is provided with this prompt.
 
 ## frontend-design
 
-Follow the `frontend-design` skill included with this prompt (and load it via the skill tool if available). Use its two-pass process: design plan (palette, type, layout, signature), critique generic defaults, then implement.
+Follow the `frontend-design` skill included with this prompt (and load it via the skill tool if available). Use its two-pass process: design plan (palette, type, layout, signature), critique generic defaults, then implement. Later turns on this session will not repeat the skill; keep following it.
 
 Taste is yours and should be specific to this subject. Do not default to a generic grey SaaS shell, system-ui-only type, or a single stock accent on a cool-grey ramp unless that is truly the best expression of this document.
 

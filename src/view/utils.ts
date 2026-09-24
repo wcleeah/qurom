@@ -124,16 +124,39 @@ export function formatTokenCount(n: number): string {
   return String(n)
 }
 
+type TokenPairUsage = {
+  tokensIn: number
+  tokensOut: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+}
+
 export function formatTokenPair(
-  usage: { tokensIn: number; tokensOut: number } | undefined,
+  usage: TokenPairUsage | undefined,
   available?: boolean,
 ): string {
   if (!available || !usage) return "—"
-  return `${formatTokenCount(usage.tokensIn)} in / ${formatTokenCount(usage.tokensOut)} out`
+  const inOut = `${formatTokenCount(usage.tokensIn)} in / ${formatTokenCount(usage.tokensOut)} out`
+  const cacheRead = usage.cacheReadTokens ?? 0
+  const cacheWrite = usage.cacheWriteTokens ?? 0
+  if (usage.cacheReadTokens == null && usage.cacheWriteTokens == null) return inOut
+  if (cacheRead === 0 && cacheWrite === 0) return inOut
+  const cacheParts: string[] = []
+  if (cacheRead > 0) cacheParts.push(`${formatTokenCount(cacheRead)} cache read`)
+  if (cacheWrite > 0) cacheParts.push(`${formatTokenCount(cacheWrite)} cache write`)
+  return `${formatTokenCount(usage.tokensIn)} in / ${cacheParts.join(" / ")} / ${formatTokenCount(usage.tokensOut)} out`
 }
 
 export function formatUsagePair(
-  usage: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean; costEstimated?: boolean } | undefined,
+  usage: {
+    tokensIn: number
+    tokensOut: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
+    costUsd?: number
+    costAvailable?: boolean
+    costEstimated?: boolean
+  } | undefined,
   available?: boolean,
 ): string {
   if (!available || !usage) return "—"
@@ -152,7 +175,15 @@ export function formatCostUsd(amount: number, opts?: { estimated?: boolean }): s
 }
 
 export function formatUsageAndCostPair(
-  usage: { tokensIn: number; tokensOut: number; costUsd?: number; costAvailable?: boolean; costEstimated?: boolean } | undefined,
+  usage: {
+    tokensIn: number
+    tokensOut: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
+    costUsd?: number
+    costAvailable?: boolean
+    costEstimated?: boolean
+  } | undefined,
   usageAvailable?: boolean,
 ): string {
   return formatUsagePair(usage, usageAvailable)

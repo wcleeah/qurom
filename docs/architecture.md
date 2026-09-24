@@ -101,7 +101,7 @@ There is no hardcoded topic whitelist. The current prompts bias the system towar
 | Cursor provider | `src/providers/cursor.ts` | Cursor SDK provider implementation with inline JSON support. |
 | Design artifacts | `src/design-artifacts.ts` | Live `design.html` plus role-staged HTML snapshots. |
 | Working draft | `src/draft-artifacts.ts` | Live `draft.md` plus round/readability snapshots. |
-| Design skill | `src/frontend-design-skill.ts` | Loads Anthropic's `frontend-design` skill and inlines it for the three generative design roles. |
+| Design skill | `src/frontend-design-skill.ts` | Loads Anthropic's `frontend-design` skill and inlines it on the first keepAlive prompt for the three generative design roles. |
 | Output/artifacts | `src/output.ts` | Run directory creation, slug generation, approved/failed artifact writing. |
 | Checkpointing | `src/checkpointer.ts` | `BunSqliteSaver`, the custom LangGraph SQLite checkpointer. |
 | Debug log | `src/debug-log.ts` | Structured JSONL log writer. |
@@ -142,7 +142,7 @@ Important config sections:
 }
 ```
 
-OpenCode agent files live under `.opencode/agents/` (frontmatter only: model, variant, tool/file permissions). OpenCode skills ship from `defaults/opencode/skills/` into `.opencode/skills/`. Behavioral prompts live under `defaults/prompts/` and the SQLite config store — one full file per role×task. The graph only fills template placeholders; provider-specific output wrappers are appended by code. Design quorum prompts also receive the inlined `frontend-design` skill at runtime.
+OpenCode agent files live under `.opencode/agents/` (frontmatter only: model, variant, tool/file permissions). OpenCode skills ship from `defaults/opencode/skills/` into `.opencode/skills/`. Behavioral prompts live under `defaults/prompts/` and the SQLite config store — one full file per role×task. The graph only fills template placeholders; provider-specific output wrappers are appended by code. Design quorum prompts receive the inlined `frontend-design` skill on the first keepAlive turn only.
 
 ---
 
@@ -376,6 +376,12 @@ Consumers include:
 
 The OpenCode event bridge translates provider events into this internal event vocabulary. That keeps the UI and telemetry mostly provider-neutral.
 
+### Token usage and prompt accounting
+
+Each provider call records billed usage on `session-telemetry.json`. Cursor and OpenCode report four token buckets: uncached input (`tokensIn`), cache read, cache write, and output. Cost estimates already used those buckets at different rates; the stored counts used to fold cache into `tokensIn`. New runs keep the split so keepAlive follow-ups can be judged by cache hit rate, not a mashed input total. Older files without cache fields still display `tokensIn` as a combined number.
+
+Prompt accounting is separate from billed usage. `runtime.prompt` emits `agent.prompt` (also in `debug-log.jsonl`) with the composed prompt size, attached/inlined file bytes, `keepAliveFresh`, whether standing context (research-tool hints + reader calibration) was included, and whether the `frontend-design` skill was inlined. That is the measurement for “did this follow-up omit repeated context?” Estimated prompt tokens are `chars / 4`, not a tokenizer, and are not used for cost.
+
 ---
 
 ## Persistence And Artifacts
@@ -401,6 +407,7 @@ Common artifacts:
 | `failure.json` | Failure details. |
 | `summary.json` | Run summary. |
 | `debug-log.jsonl` | Structured diagnostic log. |
+| `session-telemetry.json` | Per-session model, cache-split token usage, cost, and prompt-size accounting. Dashboard source of truth for run cost. |
 | `session-ledger.json` | Durable provider session ids (`bc-…` / OpenCode session) keyed by role, node, and round. Used to harvest a live or finished session on resume instead of creating a new agent. |
 | `reader-profile.json` | Reader discovery profile. |
 | `reader-reply-turn-N.json` | Archived human replies. |
@@ -427,7 +434,7 @@ Agents:
 | `reading-experience-enhancer` | Improves on-screen reading ergonomics after graphical enhance. |
 | `html-reviewer` | Playwright-checks the staged HTML and applies surgical layout fixes. |
 
-The three generative design roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped to `.opencode/skills/`). The skill is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright or computer-use. They share one keepAlive provider session bound to the `html-designer` runtime and edit `design.html` in place; the graph snapshots each role file. If that session dies (`error` / `cancelled`), the graph restores the last role snapshot, mints a new `html-designer` keepAlive session, and attaches the HTML as context. `html-reviewer` starts a fresh session so it can attach Playwright.
+The three generative design roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped to `.opencode/skills/`). The skill is inlined on the first keepAlive prompt so both OpenCode and Cursor see it; follow-ups omit it. If that first prompt has not yet sent the source markdown, inline file-output providers persist `content.md` into the writing workspace before HTML work. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright or computer-use. They share one keepAlive provider session bound to the `html-designer` runtime and edit `design.html` in place; the graph snapshots each role file. If that session dies (`error` / `cancelled`), the graph restores the last role snapshot, mints a new `html-designer` keepAlive session, and attaches the HTML (and the source markdown, which has not been prompted on the new session) as context. `html-reviewer` starts a fresh session so it can attach Playwright.
 
 The design loop is linear:
 

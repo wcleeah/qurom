@@ -144,7 +144,7 @@ If any role uses Cursor, also set `CURSOR_API_KEY`.
 
 On first dashboard start, Qurom seeds SQLite from `defaults/`, auto-seeds missing `.opencode/agents/` files when using OpenCode, and shows a bootstrap banner on the index page if local agents differ from shipped defaults. Existing repo-local `runs/` data is auto-migrated into `~/.local/share/qurom/` (or `$XDG_DATA_HOME/qurom`).
 
-Leave the `LANGFUSE_*` keys blank to skip cloud tracing. When set, Qurom uses a process-level OpenTelemetry provider (`batched` export) and mirrors token usage into Langfuse Generations/Agents for OpenCode and Cursor. Local `session-telemetry.json` remains the dashboard cost source of truth.
+Leave the `LANGFUSE_*` keys blank to skip cloud tracing. When set, Qurom uses a process-level OpenTelemetry provider (`batched` export) and mirrors token usage into Langfuse Generations/Agents for OpenCode and Cursor, including cache-read and cache-write buckets when the provider reports them. Local `session-telemetry.json` remains the dashboard cost source of truth and now stores uncached input separately from cache tokens, plus per-prompt size accounting.
 
 4. If you use OpenCode-bound roles, confirm `opencode` is on your `PATH` (`opencode --version`).
 
@@ -282,7 +282,7 @@ Every recovery tier emits a standardized debug-log event. Grep `{dataDir}/runs/<
 
 When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The three generative roles share one keepAlive session and edit `design.html`; the graph snapshots `design-html-html-designer.html`, `design-html-graphical-enhancer.html`, and `design-html-reading-experience-enhancer.html`. `html-reviewer` starts a fresh Playwright session and writes `design-html-html-reviewer.html`. `finalizeDesign` publishes `final.html`. Older runs may still have `design-html-interactive-enhancer.html` from the retired interactive-enhancer role.
 
-The first three roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped into `.opencode/skills/`). The skill text is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright. `html-reviewer` owns browser verification and surgical layout fixes.
+The first three roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped into `.opencode/skills/`). The skill text is inlined on the first keepAlive prompt so both OpenCode and Cursor see it; later turns on that session omit it. On that first prompt, inline providers also persist `content.md` into the writing workspace before HTML work so later turns can re-read it after compaction. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright. `html-reviewer` owns browser verification and surgical layout fixes.
 
 Resume design from the dashboard **Resume run** action or:
 

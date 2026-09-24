@@ -60,6 +60,57 @@ describe("createAgentRuntime", () => {
     expect(events).toContainEqual({ kind: "session.status", sessionID: "handle:research-drafter", status: "completed" })
   })
 
+  test("emits prompt accounting for the composed prompt", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-runtime-prompt-acct-"))
+    const filePath = join(dir, "draft.md")
+    await writeFile(filePath, "# Draft\n\nHello")
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput", "inlineInputContext"]),
+      async createRunHandle(input) {
+        return {
+          id: `handle:${input.role}`,
+          providerId: "fake",
+          role: input.role,
+          title: input.title,
+        }
+      },
+      async prompt() {
+        return { text: "ok" }
+      },
+    }
+    const bus = createEventBus()
+    const events = collect(bus)
+    const runtime = createAgentRuntime(config, bus, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("research-drafter", "draft")
+    handle.keepAlive = true
+    handle.keepAliveFresh = false
+
+    await runtime.prompt({
+      role: "research-drafter",
+      handle,
+      prompt: "Revise the article.",
+      standingContextIncluded: false,
+      inputFiles: [{ path: filePath, mime: "text/markdown", filename: "draft.md" }],
+    })
+
+    const promptEvent = events.find((event) => event.kind === "agent.prompt")
+    expect(promptEvent).toMatchObject({
+      kind: "agent.prompt",
+      sessionID: "handle:research-drafter",
+      role: "research-drafter",
+      provider: "fake",
+      keepAlive: true,
+      keepAliveFresh: false,
+      standingContextIncluded: false,
+      inlined: true,
+      inputFileCount: 1,
+    })
+    expect(promptEvent && promptEvent.kind === "agent.prompt" ? promptEvent.promptChars : 0).toBeGreaterThan("Revise the article.".length)
+    expect(promptEvent && promptEvent.kind === "agent.prompt" ? promptEvent.inputFileBytes : 0).toBeGreaterThan(0)
+    expect(promptEvent && promptEvent.kind === "agent.prompt" ? promptEvent.basePromptChars : 0).toBe("Revise the article.".length)
+  })
+
   test("inlines input files for providers with inline input context support", async () => {
     let seenPrompt = ""
     let seenInputFiles: unknown
@@ -241,6 +292,39 @@ describe("createAgentRuntime", () => {
     expect(seenPrompt).toContain("<frontend_design_skill>")
     expect(seenPrompt).toContain("name: frontend-design")
     expect(seenPrompt).toContain("Convert the draft.")
+  })
+
+  test("omits frontend-design on keepAlive follow-up prompts", async () => {
+    let seenPrompt = ""
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt(input) {
+        seenPrompt = input.prompt
+        return { text: "ok" }
+      },
+    }
+    const bus = createEventBus()
+    const events = collect(bus)
+    const runtime = createAgentRuntime(config, bus, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("graphical-enhancer", "enhance")
+    handle.keepAlive = true
+    handle.keepAliveFresh = false
+
+    await runtime.prompt({ role: "graphical-enhancer", handle, prompt: "Add figures." })
+
+    expect(seenPrompt).toBe("Add figures.")
+    expect(seenPrompt).not.toContain("<frontend_design_skill>")
+    const promptEvent = events.find((event) => event.kind === "agent.prompt")
+    expect(promptEvent).toMatchObject({
+      kind: "agent.prompt",
+      frontendSkillIncluded: false,
+      keepAlive: true,
+      keepAliveFresh: false,
+    })
   })
 
   test("resumes a ledger session and harvests a finished local artifact without prompting", async () => {

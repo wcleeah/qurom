@@ -290,6 +290,7 @@ export function createLiveStatusWriter(
       }
       case "agent.metadata":
       case "agent.usage":
+      case "agent.prompt":
         break
     }
   })

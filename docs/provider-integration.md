@@ -193,7 +193,8 @@ Common event mappings:
 | Tool call started/updated/finished | `agent.tool` |
 | Permission requested | `agent.permission` |
 | Permission answered | `agent.permission.replied` |
-| Token usage reported | `agent.usage` |
+| Token usage reported | `agent.usage` (uncached input, cache read/write, output) |
+| Composed prompt sent | `agent.prompt` (size, keepAlive, standing context) |
 
 If the provider cannot stream, do not fake fine-grained events. `AgentRuntime` emits coarse `session.status` / `session.error` events for non-streaming providers, which is enough for the web dashboard and logs.
 

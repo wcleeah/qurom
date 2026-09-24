@@ -190,8 +190,12 @@ async function composeWritingInputFiles(input: {
   workingFile: string
   contextFilename: "draft.md" | "document.html"
   extra?: PromptFileInput[]
+  sourceMarkdown?: PromptFileInput
 }): Promise<PromptFileInput[] | undefined> {
   const files = [...(input.extra ?? [])]
+  if (input.handle.keepAliveFresh && input.sourceMarkdown) {
+    files.push(input.sourceMarkdown)
+  }
   if (input.handle.keepAliveFresh && await isNonEmptyTextFile(input.workingFile)) {
     files.unshift({
       path: input.workingFile,
@@ -404,6 +408,22 @@ export function rebuttalReviewPrompt(
     requestLabel: requestLabel(state),
     maxRebuttalTurns: String(maxRebuttalTurns),
   })
+}
+
+export function persistDesignMarkdownInstructions(): string {
+  return [
+    "The source markdown is included with this prompt as content.md.",
+    "Before writing or editing HTML, persist that markdown verbatim as a workspace file named `content.md`. Do not revise the markdown.",
+    "Later turns in this session should re-read content.md if the conversation is compacted.",
+    "",
+  ].join("\n")
+}
+
+function providerNeedsWorkspaceMarkdownPersist(runtime: AgentRuntime, role: string): boolean {
+  const capabilities = runtime.providerForRole?.(role)?.capabilities
+  if (!capabilities) return false
+  if (capabilities.has("inputFileAttachments")) return false
+  return capabilities.has("fileOutput")
 }
 
 export function revisionPrompt(
@@ -1055,6 +1075,7 @@ export async function discoverReaderPrompt(
         prompt,
         schema: readerInterviewTurnSchema,
         outputFile: scratchFile,
+        standingContextIncluded: Boolean(handle.keepAliveFresh),
         telemetry: graphAgentTelemetry({
           telemetry,
           state,
@@ -1594,6 +1615,7 @@ async function promptWritingSession(input: {
   outputFile: string
   outputAction?: "write" | "edit"
   extraInputFiles?: PromptFileInput[]
+  sourceMarkdown?: PromptFileInput
   contextFilename: "draft.md" | "document.html"
   telemetry?: GraphTelemetry
   telemetryName: string
@@ -1616,17 +1638,27 @@ async function promptWritingSession(input: {
           title: input.title,
           observer: input.observer,
         })
-    const prompt = input.buildPrompt
-      ? input.buildPrompt({ keepAliveFresh: Boolean(handle.keepAliveFresh) })
+    const keepAliveFresh = Boolean(handle.keepAliveFresh)
+    let prompt = input.buildPrompt
+      ? input.buildPrompt({ keepAliveFresh })
       : input.prompt
     if (!prompt) {
       throw new Error(`Missing prompt for ${input.node}`)
+    }
+    if (
+      input.kind === "designer"
+      && keepAliveFresh
+      && input.sourceMarkdown
+      && providerNeedsWorkspaceMarkdownPersist(input.runtime, input.role)
+    ) {
+      prompt = `${persistDesignMarkdownInstructions()}\n${prompt}`
     }
     const inputFiles = await composeWritingInputFiles({
       handle,
       workingFile: input.outputFile,
       contextFilename: input.contextFilename,
       extra: input.extraInputFiles,
+      sourceMarkdown: input.sourceMarkdown,
     })
     const result = await input.runtime.prompt({
       role: input.role,
@@ -1635,6 +1667,7 @@ async function promptWritingSession(input: {
       outputFile: input.outputFile,
       outputAction: input.outputAction,
       inputFiles,
+      standingContextIncluded: input.kind === "drafter" && input.buildPrompt ? keepAliveFresh : undefined,
       telemetry: graphAgentTelemetry({
         telemetry: input.telemetry,
         state: input.state,
@@ -2660,9 +2693,7 @@ export async function designHtmlNode(
     role: DESIGNER_ROLE,
     prompt,
     outputFile: workingFile,
-    extraInputFiles: [
-      { path: draftPath, mime: "text/plain", filename: "content.md" },
-    ],
+    sourceMarkdown: { path: draftPath, mime: "text/plain", filename: "content.md" },
     contextFilename: "document.html",
     telemetry,
     telemetryName: "agent.designHtml",
@@ -2708,6 +2739,16 @@ async function runGenerativeDesignTransformNode(input: {
 
   const round = state.designRound ?? 0
   observer?.onDesignPhase?.(phase, round)
+  let sourceMarkdown: PromptFileInput | undefined
+  try {
+    const draftPath = await resolveDesignMarkdownPath({
+      outputPath: state.outputPath,
+      draft: state.draft,
+    })
+    sourceMarkdown = { path: draftPath, mime: "text/plain", filename: "content.md" }
+  } catch {
+    // Enhancers can still edit HTML if the source markdown is unavailable.
+  }
   const response = await promptWritingSession({
     kind: "designer",
     runtime,
@@ -2719,6 +2760,7 @@ async function runGenerativeDesignTransformNode(input: {
     prompt,
     outputFile: workingFile,
     outputAction: "edit",
+    sourceMarkdown,
     contextFilename: "document.html",
     telemetry,
     telemetryName: `agent.${nodeName}`,
