@@ -14,6 +14,7 @@ describe("design artifacts", () => {
     expect(designHtmlArtifactName("graphical-enhancer")).toBe("design-html-graphical-enhancer.html")
     expect(designHtmlArtifactName("interactive-enhancer")).toBe("design-html-interactive-enhancer.html")
     expect(designHtmlArtifactName("reading-experience-enhancer")).toBe("design-html-reading-experience-enhancer.html")
+    expect(designHtmlArtifactName("html-reviewer")).toBe("design-html-html-reviewer.html")
   })
 
   test("orders pipeline artifacts and prefers the latest role stage", () => {
@@ -21,16 +22,19 @@ describe("design artifacts", () => {
       "design-html-reading-experience-enhancer.html",
       "design-html-html-designer.html",
       "design-html-graphical-enhancer.html",
+      "design-html-html-reviewer.html",
       "final.html",
     ]
     expect(designHtmlArtifacts(files)).toEqual([
       "design-html-html-designer.html",
       "design-html-graphical-enhancer.html",
       "design-html-reading-experience-enhancer.html",
+      "design-html-html-reviewer.html",
     ])
-    expect(latestDesignHtmlArtifact(files)).toBe("design-html-reading-experience-enhancer.html")
+    expect(latestDesignHtmlArtifact(files)).toBe("design-html-html-reviewer.html")
     expect(previousDesignHtmlArtifact("graphical-enhancer", files)).toBe("design-html-html-designer.html")
     expect(previousDesignHtmlArtifact("reading-experience-enhancer", files)).toBe("design-html-graphical-enhancer.html")
+    expect(previousDesignHtmlArtifact("html-reviewer", files)).toBe("design-html-reading-experience-enhancer.html")
   })
 
   test("treats the retired interactive-enhancer filename as the graphical stage", () => {

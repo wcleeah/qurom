@@ -218,6 +218,7 @@ export function createLiveStatusWriter(
           drafting: "runDesignHtml",
           enhancing: "graphicalEnhance",
           reading: "readingExperienceEnhance",
+          reviewing: "htmlReview",
           finalizing: "finalizeDesign",
         }
         status.node = nodeMap[event.phase] ?? "runDesignHtml"

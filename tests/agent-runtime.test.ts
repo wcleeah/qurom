@@ -368,4 +368,105 @@ describe("createAgentRuntime", () => {
     expect(result.harvestSource).toBe("wait")
     expect(result.text).toContain("From live run")
   })
+
+  test("edit output instructions ask the agent to change the existing file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-runtime-edit-"))
+    const outputFile = join(dir, "draft.md")
+    await writeFile(outputFile, "# Existing draft\n")
+    let seenPrompt = ""
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["fileOutput", "plainTextOutput"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt(input) {
+        seenPrompt = input.prompt
+        return { text: "OK" }
+      },
+    }
+    const runtime = createAgentRuntime(config, undefined, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("research-drafter", "draft")
+    await runtime.prompt({
+      role: "research-drafter",
+      handle,
+      prompt: "Tighten the opening.",
+      outputFile,
+      outputAction: "edit",
+    })
+    expect(seenPrompt).toContain("Edit the existing file")
+    expect(seenPrompt).toContain(outputFile)
+    expect(seenPrompt).not.toContain("Write the complete output")
+  })
+
+  test("keepAlive writing session records the current graph node and does not harvest leftover draft.md", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "qurom-runtime-keepalive-"))
+    const outputFile = join(runDir, "draft.md")
+    await writeFile(outputFile, "# First draft\n")
+    let prompted = 0
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["fileOutput", "plainTextOutput"]),
+      async createRunHandle(input) {
+        return { id: "drafter-session", providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt() {
+        prompted += 1
+        return { text: "OK" }
+      },
+    }
+    const bus = createEventBus()
+    const runtime = createAgentRuntime(config, bus, { providerForRole: () => provider })
+    const emitNode = (node: string) => {
+      bus.emit({
+        kind: "graph.node",
+        node,
+        phase: "start",
+        state: {
+          inputMode: "topic",
+          topic: "x",
+          requestId: "req-keepalive",
+          round: 0,
+          outputPath: runDir,
+        } as never,
+      })
+    }
+
+    emitNode("draftFullDraft")
+    const handle = await runtime.createHandle("research-drafter", "draft")
+    handle.keepAlive = true
+    await runtime.prompt({
+      role: "research-drafter",
+      handle,
+      prompt: "Write the article.",
+      outputFile,
+    })
+    expect(prompted).toBe(1)
+
+    emitNode("reviseReadability")
+    const result = await runtime.prompt({
+      role: "research-drafter",
+      handle,
+      prompt: "Apply readability notes.",
+      outputFile,
+      outputAction: "edit",
+    })
+    expect(prompted).toBe(2)
+    expect(result.harvested).toBeUndefined()
+
+    const { findSessionLedgerEntry } = await import("../src/session-ledger")
+    const draftEntry = await findSessionLedgerEntry(runDir, {
+      role: "research-drafter",
+      node: "draftFullDraft",
+      round: 0,
+    })
+    const reviseEntry = await findSessionLedgerEntry(runDir, {
+      role: "research-drafter",
+      node: "reviseReadability",
+      round: 0,
+    })
+    expect(draftEntry?.handleId).toBe("drafter-session")
+    expect(reviseEntry?.handleId).toBe("drafter-session")
+    expect(reviseEntry?.status).toBe("finished")
+  })
 })

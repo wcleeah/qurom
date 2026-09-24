@@ -37,13 +37,24 @@ import { scoreDraftReadability, skippedReadabilityReport } from "./readability/s
 import { segmentDraft } from "./readability/segment"
 import { resolveReadabilitySystemOne, type ReadabilitySystemOne } from "./typesafe/client"
 import {
+  draftRoundFilename,
+  draftWorkingPath,
+  snapshotWorkingDraft,
+} from "./draft-artifacts"
+import {
   designHtmlArtifactName,
   GRAPHICAL_ENHANCER_ROLE,
+  HTML_REVIEWER_ROLE,
   latestDesignHtmlArtifact,
   previousDesignHtmlArtifact,
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "./design-artifacts"
 import { AUDITOR_ROLES, DESIGNER_ROLE, DRAFTER_ROLE } from "./role-registry"
+import {
+  findLatestDrafterWritingEntry,
+  findSessionLedgerEntry,
+  isHarvestableLedgerStatus,
+} from "./session-ledger"
 import { formatReaderTranscriptForPrompt, resolveReaderInterviewQuestions } from "./reader-transcript"
 import {
   aggregatedFindingSchema,
@@ -75,7 +86,7 @@ import type { TelemetryRun, TraceObservation } from "./telemetry"
 
 import type { DebugLog } from "./debug-log"
 
-export type DesignPhase = "drafting" | "enhancing" | "reading" | "finalizing"
+export type DesignPhase = "drafting" | "enhancing" | "reading" | "reviewing" | "finalizing"
 
 export type RunObserver = {
   debugLog?: DebugLog
@@ -104,6 +115,35 @@ async function disposeReaderInterviewerSession(requestId: string) {
   const handle = readerInterviewerSessions.get(requestId)
   readerInterviewerSessions.delete(requestId)
   await handle?.dispose?.().catch(() => {})
+}
+
+// One keepAlive writing session for draft / readability / revise. Audits, JSON
+// reviews, and design nodes still mint fresh sessions. Disposed when research ends.
+const drafterWritingSessions = new Map<string, AgentRunHandle>()
+
+export async function disposeDrafterWritingSession(requestId: string) {
+  const handle = drafterWritingSessions.get(requestId)
+  drafterWritingSessions.delete(requestId)
+  await handle?.dispose?.().catch(() => {})
+}
+
+type DrafterWritingNode = "draftFullDraft" | "reviseReadability" | "reviseDraft"
+
+async function persistWorkingDraft(
+  outputPath: string,
+  responseText: string | undefined,
+  label: string,
+) {
+  const working = draftWorkingPath(outputPath)
+  if (await fileExists(working)) {
+    const text = await Bun.file(working).text()
+    if (text.trim()) return text
+  }
+  if (responseText && responseText.trim() && responseText.trim() !== "OK") {
+    await Bun.write(working, responseText)
+    return responseText
+  }
+  throw new Error(`Missing ${label} at ${working}`)
 }
 
 function observeNode(observer: RunObserver | undefined, node: string, state: ResearchState | GraphInput) {
@@ -1021,7 +1061,7 @@ function routeAfterReaderPrompt(state: ResearchState): string {
   return "draftFullDraft"
 }
 
-async function draftFullDraft(
+export async function draftFullDraft(
   config: RuntimeConfig,
   runtime: AgentRuntime,
   promptBundle: PromptBundle,
@@ -1030,15 +1070,15 @@ async function draftFullDraft(
   observer?: RunObserver,
 ) {
   assertStatus(state, "drafting", "draftFullDraft")
+  if (!state.outputPath) throw new Error("Missing outputPath during draftFullDraft")
 
-  const outputFile = `${state.outputPath}/draft-round-${state.round}.md`
-  const handle = await createObservedHandle({
+  const workingFile = draftWorkingPath(state.outputPath)
+  const handle = await getOrCreateDrafterWritingHandle({
     runtime,
-    role: DRAFTER_ROLE,
+    state,
+    node: "draftFullDraft",
     title: `research-drafter:${state.requestId}:draft:${state.round}`,
-    requestId: state.requestId,
     observer,
-    displayRole: "drafter",
   })
 
   const prompt = fullDraftPrompt(config, promptBundle, state)
@@ -1046,7 +1086,7 @@ async function draftFullDraft(
     role: DRAFTER_ROLE,
     handle,
     prompt,
-    outputFile,
+    outputFile: workingFile,
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
@@ -1060,7 +1100,8 @@ async function draftFullDraft(
       },
     }),
   })
-  const draft = await ensureTextArtifact(outputFile, response.text, "draft")
+  const draft = await persistWorkingDraft(state.outputPath, response.text, "draft")
+  await snapshotWorkingDraft(state.outputPath, draftRoundFilename(state.round))
 
   return researchStateSchema.parse({
     ...state,
@@ -1210,26 +1251,22 @@ export async function reviseReadability(
 
   const hints = formatReadabilityHints(report.hotspots)
   const nextTry = (state.readabilityTry ?? 0) + 1
-  const snapshotFile = `${state.outputPath}/${readabilityDraftFilename(state.round, nextTry)}`
-  const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
+  const workingFile = draftWorkingPath(state.outputPath)
 
-  const handle = await createObservedHandle({
+  const handle = await getOrCreateDrafterWritingHandle({
     runtime,
-    role: DRAFTER_ROLE,
+    state,
+    node: "reviseReadability",
     title: `research-drafter:${state.requestId}:readability:${state.round}:try:${nextTry}`,
-    requestId: state.requestId,
     observer,
-    displayRole: "drafter",
   })
 
   const response = await runtime.prompt({
     role: DRAFTER_ROLE,
     handle,
     prompt: readabilityReviewPrompt(config, promptBundle, state, hints),
-    outputFile: snapshotFile,
-    inputFiles: [
-      { path: draftFile, mime: "text/plain", filename: "draft.md" },
-    ],
+    outputFile: workingFile,
+    outputAction: "edit",
     telemetry: graphAgentTelemetry({
       telemetry,
       state,
@@ -1244,8 +1281,9 @@ export async function reviseReadability(
       },
     }),
   })
-  const draft = await ensureTextArtifact(snapshotFile, response.text, "readability revision")
-  await Bun.write(draftFile, draft)
+  const draft = await persistWorkingDraft(state.outputPath, response.text, "readability revision")
+  await snapshotWorkingDraft(state.outputPath, readabilityDraftFilename(state.round, nextTry))
+  await snapshotWorkingDraft(state.outputPath, draftRoundFilename(state.round))
 
   return researchStateSchema.parse({
     ...state,
@@ -1312,6 +1350,60 @@ async function createObservedHandle(input: {
     role: input.displayRole ?? input.role,
     requestId: input.requestId,
   })
+  return handle
+}
+
+async function getOrCreateDrafterWritingHandle(input: {
+  runtime: AgentRuntime
+  state: ResearchState
+  node: DrafterWritingNode
+  title: string
+  observer?: RunObserver
+}): Promise<AgentRunHandle> {
+  const cached = drafterWritingSessions.get(input.state.requestId)
+  if (cached) {
+    cached.keepAlive = true
+    return cached
+  }
+
+  const outputPath = input.state.outputPath
+  if (outputPath) {
+    const current = await findSessionLedgerEntry(outputPath, {
+      role: DRAFTER_ROLE,
+      node: input.node,
+      round: input.state.round,
+    }).catch(() => undefined)
+    const prior = current && isHarvestableLedgerStatus(current.status)
+      ? current
+      : await findLatestDrafterWritingEntry(outputPath, input.state.requestId).catch(() => undefined)
+
+    if (prior && isHarvestableLedgerStatus(prior.status) && input.runtime.resumeHandle) {
+      try {
+        const resumed = await input.runtime.resumeHandle(DRAFTER_ROLE, input.title, prior.handleId)
+        resumed.keepAlive = true
+        drafterWritingSessions.set(input.state.requestId, resumed)
+        observeSession(input.observer, {
+          sessionID: resumed.id,
+          role: "drafter",
+          requestId: input.state.requestId,
+        })
+        return resumed
+      } catch {
+        // Fall through and mint a new writing session.
+      }
+    }
+  }
+
+  const handle = await createObservedHandle({
+    runtime: input.runtime,
+    role: DRAFTER_ROLE,
+    title: input.title,
+    requestId: input.state.requestId,
+    observer: input.observer,
+    displayRole: "drafter",
+  })
+  handle.keepAlive = true
+  drafterWritingSessions.set(input.state.requestId, handle)
   return handle
 }
 
@@ -2146,29 +2238,27 @@ async function reviseDraft(
 
   await ensureRunDirPath(state.outputPath)
 
-  const handle = await createObservedHandle({
+  const handle = await getOrCreateDrafterWritingHandle({
     runtime,
-    role: DRAFTER_ROLE,
+    state,
+    node: "reviseDraft",
     title: `research-drafter:${state.requestId}:revise:${state.round}`,
-    requestId: state.requestId,
     observer,
-    displayRole: "drafter",
   })
 
   // Write unresolved findings to a temp JSON file for attachment
   const findingsFile = `${state.outputPath}/unresolved-findings-round-${state.round}.json`
   await writeRunJsonArtifact(state.outputPath, `unresolved-findings-round-${state.round}.json`, state.unresolvedFindings)
-  const draftFile = `${state.outputPath}/draft-round-${state.round}.md`
+  const workingFile = draftWorkingPath(state.outputPath)
   const nextRound = state.round + 1
-  const outputFile = `${state.outputPath}/draft-round-${nextRound}.md`
 
   const response = await runtime.prompt({
     role: DRAFTER_ROLE,
     handle,
     prompt: revisionPrompt(config, promptBundle, state),
-    outputFile,
+    outputFile: workingFile,
+    outputAction: "edit",
     inputFiles: [
-      { path: draftFile, mime: "text/plain", filename: "draft.md" },
       { path: findingsFile, mime: "text/plain", filename: "findings.json" },
     ],
     telemetry: graphAgentTelemetry({
@@ -2184,7 +2274,8 @@ async function reviseDraft(
       },
     }),
   })
-  const draft = await ensureTextArtifact(outputFile, response.text, "revised draft")
+  const draft = await persistWorkingDraft(state.outputPath, response.text, "revised draft")
+  await snapshotWorkingDraft(state.outputPath, draftRoundFilename(nextRound))
 
   const nextState = researchStateSchema.parse({
     ...state,
@@ -2206,6 +2297,7 @@ async function finalizeApprovedDraft(_config: RuntimeConfig, state: ResearchStat
   assertStatus(state, "approved", "finalizeApprovedDraft")
   if (!state.outputPath) throw new Error("Missing outputPath during finalizeApprovedDraft")
 
+  await disposeDrafterWritingSession(state.requestId)
   await writeApprovedArtifacts(state.outputPath, {
     draft: state.draft,
     summary: buildRunSummary(state, "approved"),
@@ -2218,6 +2310,7 @@ async function finalizeFailedRun(_config: RuntimeConfig, state: ResearchState) {
   assertStatus(state, "failed", "finalizeFailedRun")
   if (!state.outputPath) throw new Error("Missing outputPath during finalizeFailedRun")
 
+  await disposeDrafterWritingSession(state.requestId)
   await writeFailedArtifacts(state.outputPath, {
     draft: state.draft,
     summary: buildRunSummary(state, "failed_non_convergent"),
@@ -2258,6 +2351,9 @@ export async function resolveDesignMarkdownPath(input: {
   const latestPath = `${input.outputPath}/latest-draft.md`
   if (await isNonEmptyTextFile(latestPath)) return latestPath
 
+  const workingPath = draftWorkingPath(input.outputPath)
+  if (await isNonEmptyTextFile(workingPath)) return workingPath
+
   if (input.draft?.trim()) {
     await Bun.write(latestPath, input.draft)
     return latestPath
@@ -2276,6 +2372,8 @@ async function designHtmlNode(
 ) {
   if (!state.outputPath) throw new Error("Missing outputPath during designHtml")
   if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
+
+  await disposeDrafterWritingSession(state.requestId)
 
   const draftPath = await resolveDesignMarkdownPath({
     outputPath: state.outputPath,
@@ -2338,7 +2436,7 @@ async function runDesignHtmlTransformNode(input: {
   state: ResearchState
   telemetry?: GraphTelemetry
   observer?: RunObserver
-  role: typeof GRAPHICAL_ENHANCER_ROLE | typeof READING_EXPERIENCE_ENHANCER_ROLE
+  role: typeof GRAPHICAL_ENHANCER_ROLE | typeof READING_EXPERIENCE_ENHANCER_ROLE | typeof HTML_REVIEWER_ROLE
   phase: DesignPhase
   nodeName: string
   prompt: string
@@ -2439,6 +2537,28 @@ async function readingExperienceEnhanceNode(
     phase: "reading",
     nodeName: "readingExperienceEnhance",
     prompt: promptBundle.assets.readingExperienceEnhancerEnhance,
+  })
+}
+
+async function htmlReviewNode(
+  config: RuntimeConfig,
+  runtime: AgentRuntime,
+  promptBundle: PromptBundle,
+  state: ResearchState,
+  telemetry?: GraphTelemetry,
+  observer?: RunObserver,
+) {
+  return runDesignHtmlTransformNode({
+    config,
+    runtime,
+    promptBundle,
+    state,
+    telemetry,
+    observer,
+    role: HTML_REVIEWER_ROLE,
+    phase: "reviewing",
+    nodeName: "htmlReview",
+    prompt: promptBundle.assets.htmlReviewerReview,
   })
 }
 
@@ -2765,6 +2885,11 @@ export function createGraph(
         readingExperienceEnhanceNode(config, runtime, promptBundle, state, graphTelemetry, observer),
       ),
     )
+    .addNode("htmlReview", async (state) =>
+      withNodeTelemetry("htmlReview", state, () =>
+        htmlReviewNode(config, runtime, promptBundle, state, graphTelemetry, observer),
+      ),
+    )
     .addNode("finalizeDesign", async (state) =>
       withNodeTelemetry("finalizeDesign", state, () =>
         finalizeDesignNode(config, promptBundle, state, graphTelemetry, observer),
@@ -2818,7 +2943,8 @@ export function createGraph(
     ])
     .addEdge("graphicalEnhance", "readingExperienceEnhance")
     .addEdge("interactiveEnhance", "readingExperienceEnhance")
-    .addEdge("readingExperienceEnhance", "finalizeDesign")
+    .addEdge("readingExperienceEnhance", "htmlReview")
+    .addEdge("htmlReview", "finalizeDesign")
     .addEdge("finalizeDesign", "__end__")
     .compile({
       checkpointer: new BunSqliteSaver(config.env.QUORUM_CHECKPOINT_PATH),

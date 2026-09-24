@@ -1,6 +1,7 @@
 export const DESIGNER_ROLE = "html-designer"
 export const GRAPHICAL_ENHANCER_ROLE = "graphical-enhancer"
 export const READING_EXPERIENCE_ENHANCER_ROLE = "reading-experience-enhancer"
+export const HTML_REVIEWER_ROLE = "html-reviewer"
 export const LEGACY_INTERACTIVE_ENHANCER_ROLE = "interactive-enhancer"
 
 /** Ordered design HTML pipeline roles (each writes its own artifact). */
@@ -8,6 +9,7 @@ export const DESIGN_HTML_PIPELINE_ROLES = [
   DESIGNER_ROLE,
   GRAPHICAL_ENHANCER_ROLE,
   READING_EXPERIENCE_ENHANCER_ROLE,
+  HTML_REVIEWER_ROLE,
 ] as const
 
 export type DesignHtmlPipelineRole = (typeof DESIGN_HTML_PIPELINE_ROLES)[number]

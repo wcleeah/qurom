@@ -5,6 +5,7 @@ import { dirname, join } from "node:path"
 import { z } from "zod"
 
 import type { RuntimeConfig } from "../src/config"
+import { DEFAULT_PLAYWRIGHT_MCP_SERVER } from "../src/mcp-config"
 import { createEventBus, type RunnerEvent } from "../src/runner"
 import { testQuorumConfig, testRuntimeEnv, unitTestDataDir } from "./test-env"
 
@@ -458,6 +459,54 @@ describe("cursorProvider", () => {
     })
   })
 
+  test("omits Playwright MCP for designer roles and keeps it for html-reviewer", async () => {
+    const mcpConfig: RuntimeConfig = {
+      ...config,
+      mcpRegistry: {
+        servers: [
+          DEFAULT_PLAYWRIGHT_MCP_SERVER,
+          { name: "search", type: "remote", url: "https://mcp.example/search", headers: {} },
+        ],
+        enabled: ["playwright", "search"],
+      },
+      roleBindings: {
+        ...config.roleBindings,
+        "html-designer": { provider: "cursor", model: "composer-2.5", options: {} },
+        "html-reviewer": { provider: "cursor", model: "composer-2.5", options: {} },
+      },
+    }
+
+    await cursorProvider.createRunHandle({
+      config: mcpConfig,
+      role: "html-designer",
+      title: "design",
+    })
+    expect(createCalls[0]).toEqual(expect.objectContaining({
+      mcpServers: {
+        search: { url: "https://mcp.example/search" },
+      },
+    }))
+    expect(createCalls[0]).not.toEqual(expect.objectContaining({
+      mcpServers: expect.objectContaining({ playwright: expect.anything() }),
+    }))
+
+    createCalls.length = 0
+    await cursorProvider.createRunHandle({
+      config: mcpConfig,
+      role: "html-reviewer",
+      title: "review",
+    })
+    expect(createCalls[0]).toEqual(expect.objectContaining({
+      mcpServers: expect.objectContaining({
+        playwright: {
+          command: "npx",
+          args: ["-y", "@playwright/mcp@latest", "--headless"],
+        },
+        search: { url: "https://mcp.example/search" },
+      }),
+    }))
+  })
+
   test("interpolates environment placeholders in Cursor MCP definitions", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qurom-cursor-mcp-env-"))
     process.env.CURSOR_MCP_CONFIG_PATH = join(dir, "mcp.json")
@@ -586,6 +635,26 @@ describe("cursorProvider", () => {
     expect(instructions).toContain("The artifact must be named exactly `reader-profile-1.json`")
     expect(instructions).toContain("\"ok\"")
     expect(instructions).not.toContain("/tmp/reader-profile-1.json")
+  })
+
+  test("edit output instructions update the existing Cursor artifact in place", () => {
+    const instructions = cursorProvider.outputInstructions?.({
+      config,
+      handle: {
+        id: "bc-cursor-agent-1",
+        providerId: "cursor",
+        role: "research-drafter",
+        title: "draft",
+      },
+      role: "research-drafter",
+      outputFile: "/tmp/draft.md",
+      outputAction: "edit",
+    })
+
+    expect(instructions).toContain("Update the existing downloadable Cursor Cloud artifact named `draft.md`")
+    expect(instructions).toContain("Edit that file in place")
+    expect(instructions).not.toContain("Write the complete output content")
+    expect(instructions).not.toContain("/tmp/draft.md")
   })
 
   test("emits runner activity events from Cursor deltas", async () => {

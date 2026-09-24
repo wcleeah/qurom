@@ -41,13 +41,4 @@ Contract:
 - If no image is available, try to use svg to illustrate.
 - The `<title>` must match the document's title.
 - Do not mention this contract, the quorum process, the frontend-design skill, or design revision history in the output.
-
-## Mandatory verification (Playwright + todos)
-
-Before you finish, you MUST use the `todowrite` tool to create exactly these three todos, then verify each with Playwright (and bash if you need a local static server for `file://`/`http://` access):
-
-1. **Scrolling works all the way** — open the page at a desktop viewport; scroll from top to bottom; confirm the document reaches the end and sticky chrome does not trap scroll.
-2. **Mobile overflow checks** — resize to a narrow mobile viewport (~390×844); confirm no horizontal page overflow (`document.documentElement.scrollWidth` ≤ viewport width); wide tables/code must scroll inside their containers, not the page; open every overlay/dialog/detail panel and confirm its title and body are fully visible with no left/right clipping.
-3. **UI and information layout look intentional** — no page/console errors; typography follows the declared role map; SVGs introduce no unrelated fonts; captions feel part of the article; no table header or identifier column is squeezed into fragmented words; inspect the widest table at desktop and mobile sizes; primary reading chrome (nav/progress/theme controls if present) remains usable; nothing is clipped or stacked incorrectly (including overlay titles and two-column comparisons).
-
-Mark each todo complete only after you have Playwright evidence for that check. If a check fails, fix the HTML and re-run that check. Do not claim success while any of the three todos is incomplete or failed.
+- Do not use Playwright, a browser, computer-use, screenshots, or other live UI verification. Layout QA happens in a later HTML review step.

@@ -3,6 +3,7 @@ import { basename } from "node:path"
 import {
   designHtmlRoleFromFilename,
   GRAPHICAL_ENHANCER_ROLE,
+  HTML_REVIEWER_ROLE,
   LEGACY_DESIGN_HTML_ROUND_RE,
   LEGACY_INTERACTIVE_ENHANCER_ROLE,
   READING_EXPERIENCE_ENHANCER_ROLE,
@@ -36,6 +37,8 @@ function designNodeForRole(role: string): string | undefined {
       return "graphicalEnhance"
     case READING_EXPERIENCE_ENHANCER_ROLE:
       return "readingExperienceEnhance"
+    case HTML_REVIEWER_ROLE:
+      return "htmlReview"
     default:
       return undefined
   }
@@ -113,6 +116,8 @@ function inferScopeFromRole(role: string): CursorCallScope {
       return { node: "graphicalEnhance", round: 0 }
     case READING_EXPERIENCE_ENHANCER_ROLE:
       return { node: "readingExperienceEnhance", round: 0 }
+    case HTML_REVIEWER_ROLE:
+      return { node: "htmlReview", round: 0 }
     case "source-auditor":
     case "logic-auditor":
     case "clarity-auditor":

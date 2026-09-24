@@ -24,6 +24,7 @@ describe("provider registry", () => {
     expect(roles).toContain("graphical-enhancer")
     expect(roles).not.toContain("interactive-enhancer")
     expect(roles).toContain("reading-experience-enhancer")
+    expect(roles).toContain("html-reviewer")
     expect(roles).toContain("json-fixer")
     expect(roles).toContain("html-repair")
     expect(roles).not.toContain("browser-qa-enhancer")

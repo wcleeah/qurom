@@ -135,6 +135,7 @@ export type ProviderOutputInstructionInput = {
   role: AgentRole
   outputFile: string
   schema?: z.ZodType<unknown>
+  outputAction?: "write" | "edit"
 }
 
 export type ProviderBridgeInput = {

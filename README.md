@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/488d9741-d4ad-454f-bb34-422627048370
 
 - Accepts either a topic prompt or a document (paste in the browser, load a local file, or provide a server path).
 - Runs an optional **reader discovery** interview to learn what the reader already knows before drafting.
-- Writes a full draft from the request and evidence, then runs revision rounds when needed.
+- Writes a full draft from the request and evidence into a live working file (`draft.md`), then runs readability and revision rounds on the same drafter writing session.
 - Runs three auditors in parallel to review the draft from different perspectives.
 - Aggregates findings, rebuttals, and approvals until the run is approved or fails.
 - When enabled, an optional **design quorum** turns an approved document into a self-contained HTML page (`final.html`).
@@ -45,6 +45,7 @@ Design quorum (when `designQuorum.enabled` is true):
 - `html-designer`
 - `graphical-enhancer`
 - `reading-experience-enhancer`
+- `html-reviewer` (Playwright layout QA after the three design nodes)
 
 HTML viewer:
 
@@ -78,7 +79,7 @@ Runtime config is stored in SQLite under the Qurom data directory. Shipped defau
 
 The `/config/mcp` dashboard page is the sole MCP registry for both Cursor and OpenCode. Add a structured local server (`command`, arguments, environment, optional working directory) or remote server (`url`, headers, optional OAuth), then select the globally enabled servers. This enabled list is independent of `researchTools.prefer`. Values may reference environment variables as `${NAME}`, `${env:NAME}`, or `{ENV:NAME}`; placeholders remain stored and are resolved immediately before provider startup.
 
-New profiles (and lazy migration) seed a headless Playwright MCP server (`npx @playwright/mcp@latest --headless`) and enable it by default so the HTML Fix agent can verify scroll, mobile overflow, and UI checks in a real browser.
+New profiles (and lazy migration) seed a headless Playwright MCP server (`npx @playwright/mcp@latest --headless`) and enable it by default. Cursor attaches Playwright only to `html-reviewer` and the viewer `html-repair` agent. The three design nodes do not receive Playwright or run browser verification.
 
 Qurom does not read `~/.cursor/mcp.json`, role-level `mcpServers`, or external OpenCode MCP configuration. It preserves unrelated JSON from `OPENCODE_CONFIG_CONTENT`, replaces its `mcp` section with the enabled registry, and passes the result to the OpenCode process it launches.
 
@@ -278,9 +279,9 @@ Every recovery tier emits a standardized debug-log event. Grep `{dataDir}/runs/<
 
 ## Design Quorum
 
-When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The design phase is linear: `html-designer` writes `design-html-html-designer.html`, `graphical-enhancer` writes comprehension-focused `design-html-graphical-enhancer.html`, `reading-experience-enhancer` writes screen-reading ergonomics to `design-html-reading-experience-enhancer.html`, and `finalizeDesign` publishes `final.html`. Older runs may still have `design-html-interactive-enhancer.html` from the retired interactive-enhancer role.
+When `designQuorum.enabled` is true, an approved research run can be turned into a single self-contained HTML document. The design phase is linear: `html-designer` writes `design-html-html-designer.html`, `graphical-enhancer` writes comprehension-focused `design-html-graphical-enhancer.html`, `reading-experience-enhancer` writes screen-reading ergonomics to `design-html-reading-experience-enhancer.html`, `html-reviewer` Playwright-checks the page and writes `design-html-html-reviewer.html`, and `finalizeDesign` publishes `final.html`. Older runs may still have `design-html-interactive-enhancer.html` from the retired interactive-enhancer role.
 
-Those three roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped into `.opencode/skills/`). The skill text is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme.
+The first three roles follow Anthropic's `frontend-design` skill (shipped at `defaults/opencode/skills/frontend-design/`, bootstrapped into `.opencode/skills/`). The skill text is inlined into their prompts so both OpenCode and Cursor see it. `html-designer` chooses the visual identity; the enhancers must not re-theme. They do not run Playwright. `html-reviewer` owns browser verification and surgical layout fixes.
 
 Resume design from the dashboard **Resume run** action or:
 

@@ -434,6 +434,7 @@ export function classifyFile(filename: string): FileClass {
   if (filename === "final.html") return { group: "Final Outputs", subGroup: "Published", label: "Final HTML", description: "Rendered design output" }
   if (filename === "final.md") return { group: "Final Outputs", subGroup: "Published", label: "Final markdown", description: "Approved research document" }
   if (filename === "latest-draft.md") return { group: "Final Outputs", subGroup: "Fallbacks", label: "Latest draft", description: "Most recent research draft" }
+  if (filename === "draft.md") return { group: "Research Rounds", subGroup: "Drafts", label: "Working draft", description: "Live article the research drafter edits" }
   if (/^draft-round-\d+\.md$/.test(filename)) return { group: "Research Rounds", subGroup: "Drafts", label: `Draft round ${round}`, description: "Research draft submitted to auditors" }
   if (/^draft-round-\d+-readability-\d+\.md$/.test(filename)) {
     const tryIndex = filename.match(/readability-(\d+)/)?.[1]

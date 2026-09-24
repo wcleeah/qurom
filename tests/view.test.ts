@@ -391,10 +391,15 @@ describe("view file browser classification", () => {
       subGroup: "HTML Drafts",
       label: "HTML · interactive-enhancer",
     })
-    expect(classifyFile("design-html-graphical-enhancer.html")).toMatchObject({
+    expect(classifyFile("draft.md")).toMatchObject({
+      group: "Research Rounds",
+      subGroup: "Drafts",
+      label: "Working draft",
+    })
+    expect(classifyFile("design-html-html-reviewer.html")).toMatchObject({
       group: "Design",
       subGroup: "HTML Drafts",
-      label: "HTML · graphical-enhancer",
+      label: "HTML · html-reviewer",
     })
     expect(classifyFile("readability-review.json")).toMatchObject({
       group: "Research Rounds",
@@ -638,8 +643,10 @@ describe("view components", () => {
     expect(html).toContain("/runs/example-run/node/runDesignHtml")
     expect(html).toContain("/runs/example-run/node/graphicalEnhance")
     expect(html).toContain("/runs/example-run/node/readingExperienceEnhance")
+    expect(html).toContain("/runs/example-run/node/htmlReview")
     expect(html).toContain("/runs/example-run/node/finalizeDesign")
     expect(html).toContain(">Reading<")
+    expect(html).toContain(">Review<")
   })
 })
 

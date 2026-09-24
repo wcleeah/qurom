@@ -34,6 +34,7 @@ describe("role registry", () => {
     expect(configuredAgentRoles(withDesign)).toContain("graphical-enhancer")
     expect(configuredAgentRoles(withDesign)).not.toContain("interactive-enhancer")
     expect(configuredAgentRoles(withDesign)).toContain("reading-experience-enhancer")
+    expect(configuredAgentRoles(withDesign)).toContain("html-reviewer")
     expect(configuredAgentRoles(withoutDesign)).not.toContain("html-designer")
     expect(configuredAgentRoles(withoutDesign)).not.toContain("reading-experience-enhancer")
     expect(configuredAgentRoles(withDesign)).toContain(DRAFTER_ROLE)
@@ -54,6 +55,7 @@ describe("role registry", () => {
       SUMMARIZER_ROLE,
       TAGGER_ROLE,
       "html-designer",
+      "html-reviewer",
     ])
   })
 

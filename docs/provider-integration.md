@@ -151,14 +151,12 @@ If a provider has low prompt-size limits, add explicit tests around attachment i
 
 Default to one-shot handles for:
 
-- drafting,
 - auditing,
 - finding review,
 - rebuttal response,
-- revision,
-- design audit work.
+- design work.
 
-Use `keepAlive` only for flows that must preserve a provider conversation across graph interrupts. Today that means `reader-interviewer`.
+Use `keepAlive` for flows that must preserve a provider conversation across graph nodes or interrupts. Today that means `reader-interviewer` and the research-drafter writing session (`draftFullDraft`, `reviseReadability`, `reviseDraft`).
 
 Pipeline roles persist a **session ledger** (`session-ledger.json`) at handle create, keyed by role + graph node + round. On resume, `createHandle` calls `resumeRunHandle` when a harvestable entry exists, and `prompt` calls `collectExistingOutput` when implemented:
 

@@ -58,13 +58,4 @@ How to work:
 - Prefer one strong comparative or structural figure over several narrow illustrations.
 - Add a figure only when the visual representation materially improves comprehension.
 - If no change has clear value, leave the file unchanged and respond `OK`.
-
-## Mandatory verification (Playwright + todos)
-
-Before you finish, you MUST use the `todowrite` tool to create exactly these three todos, then verify each with Playwright (and bash if you need a local static server for `file://`/`http://` access):
-
-1. **Scrolling works all the way** — open the page at a desktop viewport; scroll from top to bottom; confirm the document reaches the end and sticky chrome does not trap scroll.
-2. **Mobile overflow checks** — resize to a narrow mobile viewport (~390×844); confirm no horizontal page overflow (`document.documentElement.scrollWidth` ≤ viewport width); wide tables/code must scroll inside their containers, not the page; open every overlay/dialog that contains a figure or comparison and confirm nothing clips.
-3. **Figures earn their space** — no page/console errors; every retained figure answers a distinct reader question; captions do not repeat nearby prose; figure typography matches the page; labels remain legible at desktop and mobile sizes; no figure is clipped or creates page-level overflow.
-
-Mark each todo complete only after you have Playwright evidence for that check. If a check fails, fix the HTML and re-run that check. Do not claim success while any of the three todos is incomplete or failed.
+- Do not use Playwright, a browser, computer-use, screenshots, or other live UI verification. Layout QA happens in a later HTML review step.

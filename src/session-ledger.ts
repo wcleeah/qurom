@@ -141,3 +141,34 @@ export async function findSessionLedgerEntry(
   const file = await readSessionLedger(runDir)
   return findLedgerEntry(file, key)
 }
+
+export const DRAFTER_WRITING_NODES = ["draftFullDraft", "reviseReadability", "reviseDraft"] as const
+
+const LEDGER_STATUS_RANK: Record<SessionLedgerStatus, number> = {
+  waiting: 4,
+  created: 3,
+  harvested: 2,
+  finished: 1,
+  error: 0,
+}
+
+export async function findLatestDrafterWritingEntry(
+  runDir: string,
+  requestId?: string,
+): Promise<SessionLedgerEntry | undefined> {
+  const file = await readSessionLedger(runDir)
+  const writing = new Set<string>(DRAFTER_WRITING_NODES)
+  const matches = file.sessions.filter((entry) => {
+    if (entry.role !== "research-drafter") return false
+    if (!writing.has(entry.node)) return false
+    if (!isHarvestableLedgerStatus(entry.status)) return false
+    if (requestId && entry.requestId && entry.requestId !== requestId) return false
+    return true
+  })
+  matches.sort((a, b) => {
+    const rank = LEDGER_STATUS_RANK[b.status] - LEDGER_STATUS_RANK[a.status]
+    if (rank !== 0) return rank
+    return b.updatedAt.localeCompare(a.updatedAt)
+  })
+  return matches[0]
+}

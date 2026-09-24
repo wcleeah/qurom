@@ -3,13 +3,20 @@ import type { AgentRole } from "./providers/types"
 import {
   DESIGNER_ROLE,
   GRAPHICAL_ENHANCER_ROLE,
+  HTML_REVIEWER_ROLE,
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "./design-artifacts"
 
 export const DRAFTER_ROLE = "research-drafter"
 export const SUMMARIZER_ROLE = "markdown-summarizer"
 export const TAGGER_ROLE = "research-tagger"
-export { DESIGNER_ROLE, GRAPHICAL_ENHANCER_ROLE, READING_EXPERIENCE_ENHANCER_ROLE }
+export { DESIGNER_ROLE, GRAPHICAL_ENHANCER_ROLE, HTML_REVIEWER_ROLE, READING_EXPERIENCE_ENHANCER_ROLE }
+
+export const FRONTEND_DESIGN_SKILL_ROLES = [
+  DESIGNER_ROLE,
+  GRAPHICAL_ENHANCER_ROLE,
+  READING_EXPERIENCE_ENHANCER_ROLE,
+] as const
 
 export const AUDITOR_ROLES = [
   "source-auditor",
@@ -34,6 +41,7 @@ export const DESIGN_QUORUM_ROLES = [
   DESIGNER_ROLE,
   GRAPHICAL_ENHANCER_ROLE,
   READING_EXPERIENCE_ENHANCER_ROLE,
+  HTML_REVIEWER_ROLE,
 ] as const
 
 export const DEFAULT_PROVIDER = "opencode"
@@ -73,7 +81,7 @@ export function pipelineAgentRoles(config: RuntimeConfig): AgentRole[] {
 export function requiredOpenCodeAgentRoles(config: RuntimeConfig): AgentRole[] {
   const roles: AgentRole[] = [DRAFTER_ROLE, ...AUDITOR_ROLES, SUMMARIZER_ROLE, TAGGER_ROLE]
   if (config.quorumConfig.designQuorum?.enabled) {
-    roles.push(DESIGNER_ROLE)
+    roles.push(DESIGNER_ROLE, HTML_REVIEWER_ROLE)
   }
   return roles
 }

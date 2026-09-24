@@ -22,13 +22,4 @@ How to work:
 - Study the document as a reader on a screen: scroll, viewports, overflow, progress, sticky nav, touch ergonomics. Open every overlay at ~390px width and check titles, comparison rows, and source lines.
 - Improve only the reading-experience layer when benefit is clear.
 - If opportunities are genuine, edit the document directly.
-
-## Mandatory verification (Playwright + todos)
-
-Before you finish, you MUST use the `todowrite` tool to create exactly these three todos, then verify each with Playwright (and bash if you need a local static server for `file://`/`http://` access):
-
-1. **Scrolling works all the way** — open the page at a desktop viewport; scroll from top to bottom; confirm the document reaches the end and sticky chrome does not trap scroll.
-2. **Mobile and table readability checks** — resize to a narrow mobile viewport (~390×844); confirm no horizontal page overflow (`document.documentElement.scrollWidth` ≤ viewport width); wide tables/code scroll inside their containers, not the page; inspect the widest and most column-heavy table at desktop and mobile sizes; confirm headers and identifier columns remain readable and the chosen scroll/card behavior preserves meaning; open every overlay/dialog/detail panel and confirm its title and body are fully visible.
-3. **UI looks fine** — no page/console errors from the document; primary reading chrome (nav/progress/theme controls if present) remains usable; nothing obviously clipped or stacked incorrectly at desktop and mobile sizes (including overlay titles and two-column comparisons).
-
-Mark each todo complete only after you have Playwright evidence for that check. If a check fails, fix the HTML and re-run that check. Do not claim success while any of the three todos is incomplete or failed.
+- Do not use Playwright, a browser, computer-use, screenshots, or other live UI verification. Layout QA happens in a later HTML review step.

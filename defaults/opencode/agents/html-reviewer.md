@@ -1,8 +1,8 @@
 ---
-description: Graphical enhancer for design quorum HTML
+description: HTML reviewer for quorum — Playwright-checks staged HTML and applies surgical layout fixes
 mode: subagent
 model: opencode/big-pickle
-variant: high
+variant: max
 permission:
   external_directory:
     "~/.local/share/qurom/runs/**": allow
@@ -14,15 +14,11 @@ permission:
   webfetch: allow
   websearch: allow
   codesearch: allow
-  skill:
-    "*": deny
-    frontend-design: allow
+  skill: deny
   edit:
     "runs/**/*.html": allow
-  bash: deny
+  bash: allow
   task: deny
   question: deny
-  todowrite: deny
-  mcp:
-    playwright: deny
+  todowrite: allow
 ---

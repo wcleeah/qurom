@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  findLatestDrafterWritingEntry,
   findSessionLedgerEntry,
   readSessionLedger,
   sessionLedgerKey,
@@ -53,5 +54,39 @@ describe("session ledger", () => {
       expectedArtifact: "draft-round-0.md",
     })
     expect(sessionLedgerKey(draft!)).toBe("research-drafter:draftFullDraft:0")
+  })
+
+  test("findLatestDrafterWritingEntry prefers an in-flight writing session", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "qurom-ledger-writing-"))
+    await upsertSessionLedgerEntry(runDir, {
+      role: "research-drafter",
+      node: "draftFullDraft",
+      round: 0,
+      requestId: "req-1",
+      handleId: "bc-draft",
+      status: "finished",
+    })
+    await upsertSessionLedgerEntry(runDir, {
+      role: "research-drafter",
+      node: "reviseReadability",
+      round: 0,
+      requestId: "req-1",
+      handleId: "bc-draft",
+      status: "waiting",
+    })
+    await upsertSessionLedgerEntry(runDir, {
+      role: "source-auditor",
+      node: "runParallelAudits",
+      round: 0,
+      handleId: "bc-audit",
+      status: "waiting",
+    })
+
+    const writing = await findLatestDrafterWritingEntry(runDir, "req-1")
+    expect(writing).toMatchObject({
+      node: "reviseReadability",
+      handleId: "bc-draft",
+      status: "waiting",
+    })
   })
 })

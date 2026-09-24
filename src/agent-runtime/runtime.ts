@@ -27,6 +27,7 @@ const DESIGN_PHASE_NODES: Record<string, string> = {
   drafting: "runDesignHtml",
   enhancing: "graphicalEnhance",
   reading: "readingExperienceEnhance",
+  reviewing: "htmlReview",
   finalizing: "finalizeDesign",
 }
 
@@ -57,6 +58,7 @@ export type RuntimePromptInput<T> = {
   variant?: string
   inputFiles?: PromptFileInput[]
   outputFile?: string
+  outputAction?: "write" | "edit"
   telemetry?: ProviderPromptInput<T>["telemetry"]
 }
 
@@ -114,6 +116,7 @@ function renderOutputInstructions(input: {
   outputFile?: string
   schema?: z.ZodType<unknown>
   mode: OutputMode
+  outputAction?: "write" | "edit"
   providerInstructions?: string
 }) {
   if (!input.outputFile) return ""
@@ -140,6 +143,16 @@ function renderOutputInstructions(input: {
   }
 
   if (input.mode === "file") {
+    if (input.outputAction === "edit") {
+      return [
+        "## Output instructions",
+        `Edit the existing file \`${input.outputFile}\` in place.`,
+        "Apply the requested changes without rewriting the entire document unless a change is global.",
+        "Do not create a new output file.",
+        "Respond with only `OK` when the file is saved.",
+        "Do not include the output content in your response.",
+      ].join("\n")
+    }
     return [
       "## Output instructions",
       `Write the complete output to \`${input.outputFile}\`.`,
@@ -161,6 +174,7 @@ function renderPromptForOutputMode(input: {
   outputFile?: string
   schema?: z.ZodType<unknown>
   mode: OutputMode
+  outputAction?: "write" | "edit"
   providerInstructions?: string
 }) {
   const instructions = renderOutputInstructions(input)
@@ -214,13 +228,26 @@ export function createAgentRuntime(
   }
 
   function currentHarvest(handle?: AgentRunHandle): SessionHarvestContext | undefined {
-    if (handle?.harvest?.runDir) return handle.harvest
-    if (!harvestContext.runDir || !harvestContext.node) return undefined
+    const fromHandle = handle?.harvest?.runDir ? handle.harvest : undefined
+    const fromContext = harvestContext.runDir && harvestContext.node
+      ? {
+          runDir: harvestContext.runDir,
+          node: harvestContext.node,
+          round: harvestContext.round,
+          requestId: harvestContext.requestId,
+        }
+      : undefined
+    if (!fromHandle && !fromContext) return undefined
+    if (!fromHandle) return fromContext
+    if (!fromContext) return fromHandle
     return {
-      runDir: harvestContext.runDir,
-      node: harvestContext.node,
-      round: harvestContext.round,
-      requestId: harvestContext.requestId,
+      ...fromHandle,
+      // A keepAlive writing session is reused across graph nodes. Prefer the
+      // current graph node so leftover draft.md is not harvested as the next prompt.
+      runDir: fromContext.runDir || fromHandle.runDir,
+      node: fromContext.node ?? fromHandle.node,
+      round: fromContext.round ?? fromHandle.round,
+      requestId: fromContext.requestId ?? fromHandle.requestId,
     }
   }
 
@@ -403,6 +430,7 @@ export function createAgentRuntime(
         outputFile: input.outputFile,
         schema: input.schema,
         mode: outputMode,
+        outputAction: input.outputAction,
         providerInstructions: outputMode === "file" && input.outputFile
           ? provider.outputInstructions?.({
               config,
@@ -410,6 +438,7 @@ export function createAgentRuntime(
               role: input.role,
               outputFile: input.outputFile,
               schema: input.schema,
+              outputAction: input.outputAction,
             })
           : undefined,
       })

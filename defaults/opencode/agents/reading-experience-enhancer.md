@@ -23,4 +23,6 @@ permission:
   task: deny
   question: deny
   todowrite: deny
+  mcp:
+    playwright: deny
 ---
