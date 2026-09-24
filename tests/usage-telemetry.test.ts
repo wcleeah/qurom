@@ -24,6 +24,7 @@ import {
   sessionTotalsForNode,
   sessionTotalsForNodeRound,
   sessionsForNodeScope,
+  sumSessionsForDisplay,
 } from "../src/view/telemetry-view.ts"
 
 describe("usage folding", () => {
@@ -338,9 +339,12 @@ describe("telemetry view", () => {
     })
 
     expect(html).toContain("Agent sessions")
+    expect(html).toContain("The run total is the sum of these sessions")
     expect(html.indexOf("methodologist")).toBeLessThan(html.indexOf("source-auditor"))
     expect(html).toContain("2026-07-04 12:00:00 UTC")
     expect(html).toContain("2026-07-04 10:00:00 UTC")
+    expect(html).toContain("Run total")
+    expect(html).toContain("300 in / 30 out")
   })
 
   test("renderSessionTelemetryTable shows prompt accounting and cache buckets", () => {
@@ -763,7 +767,66 @@ describe("telemetry view", () => {
       expect(html).toContain("Related agent sessions")
       expect(html).toContain("600 out")
       expect(html).toContain("Design HTML, Graphical enhance, Reading experience")
+      expect(html).not.toContain("Run total")
     }
+  })
+
+  test("run total sums each session once instead of related node pages", () => {
+    const sessionTelemetry = {
+      version: 1 as const,
+      sessions: [{
+        sessionId: "bc-designer",
+        role: "html-designer",
+        provider: "cursor",
+        node: "readingExperienceEnhance",
+        round: 0,
+        calls: [
+          {
+            node: "runDesignHtml",
+            usage: { tokensIn: 8, tokensOut: 100, costUsd: 1, costAvailable: true, costEstimated: true },
+            usageSource: "csv-import" as const,
+          },
+          {
+            node: "graphicalEnhance",
+            usage: { tokensIn: 24, tokensOut: 200, costUsd: 2, costAvailable: true, costEstimated: true },
+            usageSource: "csv-import" as const,
+          },
+          {
+            node: "readingExperienceEnhance",
+            usage: { tokensIn: 16, tokensOut: 300, costUsd: 3, costAvailable: true, costEstimated: true },
+            usageSource: "csv-import" as const,
+          },
+        ],
+      }, {
+        sessionId: "bc-auditor",
+        role: "source-auditor",
+        provider: "cursor",
+        node: "runParallelAudits",
+        calls: [{
+          usage: { tokensIn: 50, tokensOut: 25, costUsd: 0.5, costAvailable: true, costEstimated: true },
+          usageSource: "csv-import" as const,
+        }],
+      }],
+    }
+
+    const resolved = resolveRunTelemetry(sessionTelemetry)
+    expect(resolved.usage.tokensIn).toBe(98)
+    expect(resolved.usage.tokensOut).toBe(625)
+    expect(resolved.usage.costUsd).toBeCloseTo(6.5)
+    expect(resolved.costEstimated).toBe(true)
+
+    let relatedPageCost = 0
+    for (const nodeName of ["runDesignHtml", "graphicalEnhance", "readingExperienceEnhance"]) {
+      relatedPageCost += sumSessionsForDisplay(sessionsForNodeScope(sessionTelemetry, [], nodeName)).costUsd ?? 0
+    }
+    expect(relatedPageCost).toBeCloseTo(18)
+    expect(resolved.usage.costUsd).toBeLessThan(relatedPageCost)
+
+    const html = renderSessionTelemetryTable(sessionTelemetry)
+    expect(html).toContain("Run total")
+    expect(html).toContain("98 in / 625 out")
+    expect(html).toContain("~$6.50 est.")
+    expect(html).toContain("The run total is the sum of these sessions")
   })
 
   test("associates a keep-alive drafter session to nodes from history, not by splitting spend", () => {

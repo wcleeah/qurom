@@ -1588,6 +1588,12 @@ details.structured-card:not([open]) > summary.auditor-header {
 .summary-table tr:last-child th {
   border-bottom: none;
 }
+.summary-table tfoot th,
+.summary-table tfoot td {
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+}
 
 /* Drafter review card */
 .section-nested {

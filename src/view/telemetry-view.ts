@@ -1,5 +1,5 @@
 import { addUsage, emptyUsage, type UsageTotals } from "../usage"
-import { sumSessionTelemetryUsage, type SessionPromptAccounting, type SessionTelemetryFile } from "../session-telemetry"
+import { type SessionPromptAccounting, type SessionTelemetryFile } from "../session-telemetry"
 import { tableWrap } from "./html"
 import { getNodeDefinition, resolveLiveNode } from "./node-registry"
 import { escapeHtml, formatBytes, formatCostUsd, formatDurationMs, formatElapsed, formatTokenCount, formatTokenPair, formatUsagePair } from "./utils"
@@ -29,6 +29,24 @@ function addSessionCallUsage(
 ) {
   if (!call.usage) return
   addUsage(target, normalizeUsageForDisplay(call.usage, call.usageSource))
+}
+
+/** Sum each session's calls once. Keep-alive sessions that touch several nodes still count once. */
+export function sumSessionsForDisplay(
+  sessions: SessionTelemetryFile["sessions"],
+): UsageTotals & { usageAvailable: boolean } {
+  const usage: UsageTotals & { usageAvailable: boolean } = {
+    ...emptyUsage(),
+    usageAvailable: false,
+  }
+  for (const session of sessions) {
+    for (const call of session.calls) {
+      if (!call.usage) continue
+      usage.usageAvailable = true
+      addSessionCallUsage(usage, call)
+    }
+  }
+  return usage
 }
 
 type SessionRecord = SessionTelemetryFile["sessions"][number]
@@ -385,19 +403,7 @@ export function resolveRunTelemetry(
     return { usage: emptyUsage(), usageAvailable: false, costAvailable: false }
   }
 
-  const usage = sumSessionTelemetryUsage({
-    version: 1,
-    sessions: sessionTelemetry.sessions.map((session) => ({
-      ...session,
-      calls: session.calls.map((call) => ({
-        ...call,
-        usage: call.usage
-          ? normalizeUsageForDisplay(call.usage, call.usageSource)
-          : undefined,
-      })),
-    })),
-  })
-
+  const usage = sumSessionsForDisplay(sessionTelemetry.sessions)
   return {
     usage,
     usageAvailable: usage.usageAvailable,
@@ -457,6 +463,7 @@ export function sessionsForNodeScope(
 function renderSessionUsageTableBody(
   sessions: SessionTelemetryFile["sessions"],
   nodeHistory: NodeHistoryEntry[] = [],
+  options?: { includeRunTotal?: boolean },
 ): string {
   const withUsage = sessions.filter((session) => session.calls.some((call) => call.usage))
   if (withUsage.length === 0) return ""
@@ -489,7 +496,18 @@ function renderSessionUsageTableBody(
 </tr>`
   }
 
-  table += "</tbody></table>"
+  table += "</tbody>"
+  if (options?.includeRunTotal) {
+    const runUsage = sumSessionsForDisplay(withUsage)
+    const callCount = withUsage.reduce((total, session) => total + session.calls.length, 0)
+    table += `<tfoot><tr>
+  <th colspan="6">Run total</th>
+  <td>${callCount}</td>
+  <td>${escapeHtml(formatTokenPair(runUsage, true))}</td>
+  <td>${escapeHtml(formatAgentCostCell(runUsage))}</td>
+</tr></tfoot>`
+  }
+  table += "</table>"
   return tableWrap(table)
 }
 
@@ -566,12 +584,12 @@ export function renderSessionTelemetryTable(
   nodeHistory: NodeHistoryEntry[] = [],
 ): string {
   if (!sessionTelemetry?.sessions.length) return ""
-  const usageTable = renderSessionUsageTableBody(sessionTelemetry.sessions, nodeHistory)
+  const usageTable = renderSessionUsageTableBody(sessionTelemetry.sessions, nodeHistory, { includeRunTotal: true })
   const promptTable = renderPromptAccountingTableBody(sessionTelemetry.sessions)
   if (!usageTable && !promptTable) return ""
   const sections: string[] = []
   if (usageTable) sections.push(`<div class="section"><h2>Agent sessions</h2>
-<p class="muted-note dim-text">Token spend belongs to the agent session. Nodes are the pipeline steps that session ran.</p>
+<p class="muted-note dim-text">The run total is the sum of these sessions, counted once even when a session relates to several nodes.</p>
 ${usageTable}</div>`)
   if (promptTable) sections.push(`<div class="section"><h2>Prompt accounting</h2>${promptTable}</div>`)
   return sections.join("")
