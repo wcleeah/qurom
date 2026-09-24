@@ -1,4 +1,4 @@
-import { addUsage, emptyUsage, hasCacheBreakdown, type UsageTotals } from "../usage"
+import { addUsage, emptyUsage, type UsageTotals } from "../usage"
 import { sumSessionTelemetryUsage, type SessionPromptAccounting, type SessionTelemetryFile } from "../session-telemetry"
 import { tableWrap } from "./html"
 import { getNodeDefinition, resolveLiveNode } from "./node-registry"
@@ -34,6 +34,101 @@ function addSessionCallUsage(
 type SessionRecord = SessionTelemetryFile["sessions"][number]
 type SessionCall = SessionRecord["calls"][number]
 
+export function canonicalNodeId(nodeName: string): string | undefined {
+  return getNodeDefinition(nodeName)?.id
+}
+
+function sessionActivityTimestamps(session: SessionRecord): number[] {
+  const times: number[] = []
+  if (session.createdAt) {
+    const created = Date.parse(session.createdAt)
+    if (Number.isFinite(created)) times.push(created)
+  }
+  for (const call of session.calls) {
+    if (!call.completedAt) continue
+    const timestamp = Date.parse(call.completedAt)
+    if (Number.isFinite(timestamp)) times.push(timestamp)
+  }
+  for (const prompt of session.prompts ?? []) {
+    const timestamp = Date.parse(prompt.at)
+    if (Number.isFinite(timestamp)) times.push(timestamp)
+  }
+  return times
+}
+
+/** Graph nodes this session touched. Association only — spend stays on the session. */
+export function relatedNodeIdsForSession(
+  session: SessionRecord,
+  nodeHistory: NodeHistoryEntry[] = [],
+): string[] {
+  const ids = new Set<string>()
+  const add = (raw?: string) => {
+    const id = raw ? canonicalNodeId(raw) : undefined
+    if (id) ids.add(id)
+  }
+
+  add(session.node)
+  for (const call of session.calls) add(call.node)
+  for (const prompt of session.prompts ?? []) add(prompt.node)
+
+  for (const timestamp of sessionActivityTimestamps(session)) {
+    for (const entry of nodeHistory) {
+      if (timestamp >= entry.startedAt && timestamp <= entry.completedAt) add(entry.node)
+    }
+  }
+
+  return [...ids].sort((a, b) => {
+    const orderA = getNodeDefinition(a)?.order ?? 999
+    const orderB = getNodeDefinition(b)?.order ?? 999
+    return orderA - orderB || a.localeCompare(b)
+  })
+}
+
+export function formatRelatedNodeLabels(nodeIds: string[]): string {
+  if (nodeIds.length === 0) return "—"
+  return nodeIds.map((id) => getNodeDefinition(id)?.label ?? id).join(", ")
+}
+
+function sessionRelatedToNode(
+  session: SessionRecord,
+  nodeHistory: NodeHistoryEntry[],
+  nodeName: string,
+  round?: number,
+  liveStatus?: LiveStatus | null,
+): boolean {
+  const aliases = nodeAliases(nodeName)
+  const nodeId = getNodeDefinition(nodeName)?.id ?? nodeName
+  const related = relatedNodeIdsForSession(session, nodeHistory)
+  const scopeEntries = nodeHistoryEntriesForNodeScope(nodeHistory, nodeName)
+  const scopeIds = new Set<string>([nodeId, ...aliases])
+  for (const entry of scopeEntries) {
+    scopeIds.add(canonicalNodeId(entry.node) ?? entry.node)
+  }
+  const active = liveStatus?.phase === "running"
+    && (resolveLiveNode(liveStatus) === nodeId || (liveStatus.node !== undefined && aliases.has(liveStatus.node)))
+
+  const matchesNode = related.some((id) => scopeIds.has(id))
+    || (active && session.node !== undefined && aliases.has(session.node))
+  if (!matchesNode) return false
+  if (round === undefined) return true
+
+  if (session.round === round && session.node && scopeIds.has(canonicalNodeId(session.node) ?? session.node)) {
+    return true
+  }
+  if (session.calls.some((call) => call.round === round && call.node && scopeIds.has(canonicalNodeId(call.node) ?? call.node))) {
+    return true
+  }
+  if (session.prompts?.some((prompt) => prompt.round === round && prompt.node && scopeIds.has(canonicalNodeId(prompt.node) ?? prompt.node))) {
+    return true
+  }
+
+  const roundEntries = nodeHistoryEntriesForNodeScope(nodeHistory, nodeName, round)
+  const times = sessionActivityTimestamps(session)
+  return roundEntries.some((entry) =>
+    times.some((timestamp) => timestamp >= entry.startedAt && timestamp <= entry.completedAt),
+  )
+}
+
 function callMatchesNodeEntry(call: SessionCall, entry: NodeHistoryEntry): boolean {
   if (!call.completedAt || !call.usage) return false
   const timestamp = Date.parse(call.completedAt)
@@ -61,17 +156,6 @@ function callMatchesNodeRound(
   }
 
   return false
-}
-
-function filterSessionForNodeRound(
-  session: SessionRecord,
-  aliases: Set<string>,
-  roundEntries: NodeHistoryEntry[],
-  round: number,
-): SessionRecord | null {
-  const calls = session.calls.filter((call) => callMatchesNodeRound(call, session, aliases, roundEntries, round))
-  if (calls.length === 0) return null
-  return { ...session, calls }
 }
 
 /** Map a research-round tab to the node-history windows that produced that round's draft. */
@@ -277,46 +361,6 @@ export function sessionTotalsForNodeRound(
   }
 }
 
-export function sessionTotalsForLiveNode(
-  sessionTelemetry: SessionTelemetryFile | null | undefined,
-  liveStatus: LiveStatus | null,
-): {
-  usage: UsageTotals
-  usageAvailable: boolean
-  costAvailable: boolean
-  costEstimated?: boolean
-  usageByAgent: Record<string, AgentUsageSnapshot>
-} {
-  const usage = emptyUsage()
-  let usageAvailable = false
-  const usageByAgent: Record<string, AgentUsageSnapshot> = {}
-  if (!sessionTelemetry?.sessions.length || !liveStatus?.node) {
-    return { usage, usageAvailable: false, costAvailable: false, usageByAgent }
-  }
-
-  const aliases = nodeAliases(liveStatus.node)
-  for (const session of sessionTelemetry.sessions) {
-    if (!session.node || !aliases.has(session.node)) continue
-    const agent = usageByAgent[session.role] ?? { ...emptyUsage(), usageAvailable: false }
-    for (const call of session.calls) {
-      if (!call.usage) continue
-      usageAvailable = true
-      addSessionCallUsage(usage, call)
-      addSessionCallUsage(agent, call)
-      agent.usageAvailable = true
-    }
-    if (agent.usageAvailable) usageByAgent[session.role] = agent
-  }
-
-  return {
-    usage,
-    usageAvailable,
-    costAvailable: usage.costAvailable === true,
-    costEstimated: usage.costEstimated,
-    usageByAgent,
-  }
-}
-
 export function runElapsedMs(liveStatus: LiveStatus | null, nodeHistory: NodeHistoryEntry[]): number | undefined {
   const startedAt = liveStatus?.runStartedAt
     ?? (nodeHistory.length > 0 ? nodeHistory[0]!.startedAt : undefined)
@@ -405,36 +449,19 @@ export function sessionsForNodeScope(
 ): SessionTelemetryFile["sessions"] {
   if (!sessionTelemetry?.sessions.length) return []
 
-  const aliases = nodeAliases(nodeName)
-  const nodeId = getNodeDefinition(nodeName)?.id ?? nodeName
-  const scopeEntries = nodeHistoryEntriesForNodeScope(nodeHistory, nodeName)
-  const active = liveStatus?.phase === "running"
-    && (resolveLiveNode(liveStatus) === nodeId || (liveStatus.node !== undefined && aliases.has(liveStatus.node)))
-
-  if (round !== undefined) {
-    const roundEntries = nodeHistoryEntriesForNodeScope(nodeHistory, nodeName, round)
-    return sessionTelemetry.sessions
-      .map((session) => filterSessionForNodeRound(session, aliases, roundEntries, round))
-      .filter((session): session is SessionRecord => session !== null)
-  }
-
-  return sessionTelemetry.sessions
-    .map((session) => {
-      const calls = session.calls.filter((call) => {
-        if (active && call.usage && session.node && aliases.has(session.node)) return true
-        return callBelongsToNode(call, session, aliases, scopeEntries, nodeId)
-      })
-      if (calls.length === 0) return null
-      return { ...session, calls }
-    })
-    .filter((session): session is SessionRecord => session !== null)
+  return sessionTelemetry.sessions.filter((session) =>
+    sessionRelatedToNode(session, nodeHistory, nodeName, round, liveStatus),
+  )
 }
 
-function renderSessionUsageTableBody(sessions: SessionTelemetryFile["sessions"]): string {
+function renderSessionUsageTableBody(
+  sessions: SessionTelemetryFile["sessions"],
+  nodeHistory: NodeHistoryEntry[] = [],
+): string {
   const withUsage = sessions.filter((session) => session.calls.some((call) => call.usage))
   if (withUsage.length === 0) return ""
 
-  let table = `<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Time</th><th>Role</th><th>Provider</th><th>Model</th><th>Parameters</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>`
+  let table = `<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Time</th><th>Role</th><th>Nodes</th><th>Provider</th><th>Model</th><th>Parameters</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>`
 
   for (const session of [...withUsage].sort(
     (a, b) => sessionLatestActivityMs(b) - sessionLatestActivityMs(a),
@@ -448,9 +475,11 @@ function renderSessionUsageTableBody(sessions: SessionTelemetryFile["sessions"])
     }
     const usageLabel = usageAvailable ? formatTokenPair(usage, true) : "—"
     const models = [...new Set(session.calls.map((call) => call.resolvedModel).filter(Boolean))]
+    const nodes = formatRelatedNodeLabels(relatedNodeIdsForSession(session, nodeHistory))
     table += `<tr>
   <td class="dim-text tiny-text">${escapeHtml(formatSessionActivityTime(session))}</td>
   <td>${escapeHtml(session.role)}</td>
+  <td class="session-nodes">${escapeHtml(nodes)}</td>
   <td>${escapeHtml(session.provider)}</td>
   <td>${escapeHtml(models.join(", ") || "—")}</td>
   <td>${escapeHtml(formatModelParams(session.modelParams))}</td>
@@ -525,47 +554,25 @@ export function renderNodeSessionUsageTable(
   liveStatus?: LiveStatus | null,
 ): string {
   const sessions = sessionsForNodeScope(sessionTelemetry, nodeHistory, nodeName, round, liveStatus)
-  const table = renderSessionUsageTableBody(sessions)
+  const table = renderSessionUsageTableBody(sessions, nodeHistory)
   if (!table) return ""
-  return `<div class="section"><h2>Agent token usage</h2>${table}</div>`
+  return `<div class="section"><h2>Related agent sessions</h2>
+<p class="muted-note dim-text">Spend is counted for the whole session. Keep-alive sessions list every node they touched.</p>
+${table}</div>`
 }
 
-export function sessionUsageForHistoryEntry(
+export function renderSessionTelemetryTable(
   sessionTelemetry: SessionTelemetryFile | null | undefined,
-  entry: NodeHistoryEntry,
-): UsageTotals & { usageAvailable: boolean } {
-  const usage = emptyUsage()
-  let usageAvailable = false
-  if (!sessionTelemetry?.sessions.length) return { ...usage, usageAvailable: false }
-
-  for (const session of sessionTelemetry.sessions) {
-    for (const call of session.calls) {
-      if (!call.usage || !call.completedAt) continue
-      if (call.node && call.node !== entry.node) {
-        const aliases = nodeAliases(entry.node)
-        if (!aliases.has(call.node)) continue
-      }
-      const timestamp = Date.parse(call.completedAt)
-      if (!Number.isFinite(timestamp) || timestamp < entry.startedAt || timestamp > entry.completedAt) continue
-      if (!call.node && session.node && session.node !== entry.node) {
-        const aliases = nodeAliases(entry.node)
-        if (!aliases.has(session.node)) continue
-      }
-      usageAvailable = true
-      addSessionCallUsage(usage, call)
-    }
-  }
-
-  return { ...usage, usageAvailable }
-}
-
-export function renderSessionTelemetryTable(sessionTelemetry: SessionTelemetryFile | null | undefined): string {
+  nodeHistory: NodeHistoryEntry[] = [],
+): string {
   if (!sessionTelemetry?.sessions.length) return ""
-  const usageTable = renderSessionUsageTableBody(sessionTelemetry.sessions)
+  const usageTable = renderSessionUsageTableBody(sessionTelemetry.sessions, nodeHistory)
   const promptTable = renderPromptAccountingTableBody(sessionTelemetry.sessions)
   if (!usageTable && !promptTable) return ""
   const sections: string[] = []
-  if (usageTable) sections.push(`<div class="section"><h2>Session model telemetry</h2>${usageTable}</div>`)
+  if (usageTable) sections.push(`<div class="section"><h2>Agent sessions</h2>
+<p class="muted-note dim-text">Token spend belongs to the agent session. Nodes are the pipeline steps that session ran.</p>
+${usageTable}</div>`)
   if (promptTable) sections.push(`<div class="section"><h2>Prompt accounting</h2>${promptTable}</div>`)
   return sections.join("")
 }
@@ -602,35 +609,6 @@ function formatAgentCostCell(snapshot: UsageTotals): string {
   return formatCostUsd(snapshot.costUsd ?? 0, { estimated: snapshot.costEstimated })
 }
 
-export function renderAgentUsageTable(
-  usageByAgent: Record<string, AgentUsageSnapshot>,
-): string {
-  const rows = Object.entries(usageByAgent)
-    .filter(([, snapshot]) => snapshot.usageAvailable)
-    .sort(([a], [b]) => a.localeCompare(b))
-
-  if (rows.length === 0) return ""
-
-  const showCache = rows.some(([, snapshot]) => hasCacheBreakdown(snapshot))
-  const cacheHeaders = showCache ? `<th>Cache read</th><th>Cache write</th>` : ""
-  let table = `<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Agent</th><th>Tokens in</th>${cacheHeaders}<th>Tokens out</th><th>Cost</th></tr></thead><tbody>`
-  for (const [agent, snapshot] of rows) {
-    const cacheCells = showCache
-      ? `<td>${escapeHtml(hasCacheBreakdown(snapshot) ? formatTokenCount(snapshot.cacheReadTokens ?? 0) : "—")}</td>
-  <td>${escapeHtml(hasCacheBreakdown(snapshot) ? formatTokenCount(snapshot.cacheWriteTokens ?? 0) : "—")}</td>`
-      : ""
-    table += `<tr>
-  <td>${escapeHtml(agent)}</td>
-  <td>${escapeHtml(formatTokenCount(snapshot.tokensIn))}</td>
-  ${cacheCells}
-  <td>${escapeHtml(formatTokenCount(snapshot.tokensOut))}</td>
-  <td>${escapeHtml(formatAgentCostCell(snapshot))}</td>
-</tr>`
-  }
-  table += "</tbody></table>"
-  return `<div class="section"><h2>Agent token usage</h2>${tableWrap(table)}</div>`
-}
-
 export function renderNodeTelemetryMeta(
   liveStatus: LiveStatus | null,
   nodeHistory: NodeHistoryEntry[],
@@ -645,50 +623,22 @@ export function renderNodeTelemetryMeta(
 
   if (activeRound && liveStatus) {
     const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : undefined
-    const totals = sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, nodeName, round)
-    const parts: string[] = []
-    if (elapsed) parts.push(`${elapsed} elapsed`)
-    const usageLabel = formatTelemetryUsageLabel(totals.usage, totals.usageAvailable || totals.costAvailable)
-    if (usageLabel) parts.push(usageLabel)
-    if (parts.length === 0) return ""
-    return `<div class="telemetry-strip telemetry-strip-compact">${parts.map((part) => `<span class="telemetry-chip">${escapeHtml(part)}</span>`).join("")}</div>`
+    if (!elapsed) return ""
+    return `<div class="telemetry-strip telemetry-strip-compact"><span class="telemetry-chip">${escapeHtml(`${elapsed} elapsed`)}</span></div>`
   }
 
   if (active && round === undefined && liveStatus) {
     const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : undefined
-    const totals = sessionTotalsForLiveNode(sessionTelemetry, liveStatus)
-    const parts: string[] = []
-    if (elapsed) parts.push(`${elapsed} elapsed`)
-    const usageLabel = formatTelemetryUsageLabel(totals.usage, totals.usageAvailable || totals.costAvailable)
-    if (usageLabel) parts.push(usageLabel)
-    if (parts.length === 0) return ""
-    return `<div class="telemetry-strip telemetry-strip-compact">${parts.map((part) => `<span class="telemetry-chip">${escapeHtml(part)}</span>`).join("")}</div>`
+    if (!elapsed) return ""
+    return `<div class="telemetry-strip telemetry-strip-compact"><span class="telemetry-chip">${escapeHtml(`${elapsed} elapsed`)}</span></div>`
   }
 
   const totals = round !== undefined
     ? sessionTotalsForNodeRound(sessionTelemetry, nodeHistory, nodeName, round)
     : sessionTotalsForNode(sessionTelemetry, nodeHistory, nodeName)
-  if (totals.durationMs <= 0 && !totals.usageAvailable && !totals.costAvailable) return ""
+  if (totals.durationMs <= 0) return ""
 
-  const parts: string[] = []
-  if (totals.durationMs > 0) parts.push(`${formatDurationMs(totals.durationMs)} total`)
-  const usageLabel = formatTelemetryUsageLabel(totals.usage, totals.usageAvailable || totals.costAvailable)
-  if (usageLabel) parts.push(usageLabel)
-  if (parts.length === 0) return ""
-  return `<div class="telemetry-strip telemetry-strip-compact">${parts.map((part) => `<span class="telemetry-chip">${escapeHtml(part)}</span>`).join("")}</div>`
-}
-
-export function nodeTelemetrySuffix(
-  nodeHistory: NodeHistoryEntry[],
-  nodeId: string,
-  sessionTelemetry?: SessionTelemetryFile | null,
-): string {
-  const totals = sessionTotalsForNode(sessionTelemetry, nodeHistory, nodeId)
-  const parts: string[] = []
-  if (totals.durationMs > 0) parts.push(formatDurationMs(totals.durationMs))
-  const usageLabel = formatTelemetryUsageLabel(totals.usage, totals.usageAvailable || totals.costAvailable)
-  if (usageLabel) parts.push(usageLabel)
-  return parts.length > 0 ? ` · ${parts.join(" · ")}` : ""
+  return `<div class="telemetry-strip telemetry-strip-compact"><span class="telemetry-chip">${escapeHtml(`${formatDurationMs(totals.durationMs)} total`)}</span></div>`
 }
 
 export function usageLabelForRole(

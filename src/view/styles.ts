@@ -1846,7 +1846,10 @@ details.structured-card:not([open]) > summary.auditor-header {
   max-height: 200px;
   overflow-y: auto;
 }
-.summary-table-compact { font-size: 0.78rem; }
+.session-nodes {
+  max-width: 18rem;
+  white-space: normal;
+}
 .summary-table-debug { font-size: 0.7rem; }
 .cell-nowrap { white-space: nowrap; }
 .cell-truncate {
