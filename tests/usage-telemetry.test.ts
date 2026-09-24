@@ -380,7 +380,7 @@ describe("telemetry view", () => {
 
     expect(html).toContain("Prompt accounting")
     expect(html).toContain("follow-up")
-    expect(html).toContain("omitted")
+    expect(html).toContain("standing omitted")
     expect(html).toContain("800 chars")
     expect(html).toContain("2.0k in / 3.0k cache read / 1.0k cache write / 400 out")
   })

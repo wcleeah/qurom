@@ -122,6 +122,7 @@ export type RunnerEvent =
       keepAlive?: boolean
       keepAliveFresh?: boolean
       standingContextIncluded?: boolean
+      frontendSkillIncluded?: boolean
       promptChars: number
       promptBytes: number
       estimatedPromptTokens: number

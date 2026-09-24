@@ -10,6 +10,7 @@ import {
   disposeDesignerWritingSession,
   graphicalEnhanceNode,
   htmlReviewNode,
+  persistDesignMarkdownInstructions,
   readingExperienceEnhanceNode,
 } from "../src/graph"
 import { emptyPromptBundle } from "../src/prompt-assets"
@@ -127,6 +128,82 @@ describe("designer writing session reuse", () => {
       expect(createdHandles[1]?.keepAlive).not.toBe(true)
       expect(reviewed.designHtml).toContain("Reviewed")
       expect(await Bun.file(join(dir, "design-html-html-reviewer.html")).text()).toContain("Reviewed")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("asks inline providers to persist content.md on the first design prompt only", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-designer-persist-md-"))
+    try {
+      await Bun.write(join(dir, "final.md"), "# Approved article\n")
+      const promptsSeen: string[] = []
+      const runtime = {
+        createHandle: async (role: string) => ({
+          id: "designer-session",
+          providerId: "cursor",
+          role,
+          title: role,
+          keepAlive: false,
+        }),
+        resumeHandle: async () => {
+          throw new Error("should reuse the in-memory designer handle")
+        },
+        prompt: async (input: {
+          role: string
+          prompt?: string
+          outputFile?: string
+          outputAction?: string
+          inputFiles?: Array<{ filename: string }>
+        }) => {
+          promptsSeen.push(input.prompt ?? "")
+          if (input.role === "html-designer") {
+            expect(input.inputFiles?.map((file) => file.filename)).toEqual(["content.md"])
+            expect(input.prompt).toContain(persistDesignMarkdownInstructions().trim())
+            await Bun.write(input.outputFile!, "<html><body>Designed</body></html>\n")
+            return { text: "OK" }
+          }
+          expect(input.role).toBe("graphical-enhancer")
+          expect(input.inputFiles).toBeUndefined()
+          expect(input.prompt).not.toContain("persist that markdown verbatim")
+          await Bun.write(input.outputFile!, "<html><body>Graphics</body></html>\n")
+          return { text: "OK" }
+        },
+        providerForRole: () => ({
+          id: "cursor",
+          capabilities: new Set(["inlineInputContext", "fileOutput"]),
+        }),
+      } as unknown as AgentRuntime
+
+      const config = testRuntimeConfig({
+        dataDir: join(dir, "data"),
+        quorumOverrides: { designQuorum: { enabled: true } },
+      })
+      const prompts = emptyPromptBundle({
+        htmlDesignerDesign: "Design {topic}.\n",
+        graphicalEnhancerEnhance: "Add figures.\n",
+      })
+      const base = {
+        requestId,
+        inputMode: "topic" as const,
+        topic: "How framing works",
+        round: 0,
+        draft: "# Approved article\n",
+        audits: [],
+        activeRebuttals: {},
+        currentRebuttalResponsesByFinding: {},
+        rebuttalTurnCounts: {},
+        rebuttalHistory: [],
+        rebuttalResponseHistory: [],
+        unresolvedFindings: [],
+        approvedAgents: [],
+        status: "approved" as const,
+        outputPath: dir,
+      }
+
+      const designed = await designHtmlNode(config, runtime, prompts, { ...base } as ResearchState)
+      await graphicalEnhanceNode(config, runtime, prompts, designed)
+      expect(promptsSeen).toHaveLength(2)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -270,7 +347,7 @@ describe("designer writing session reuse", () => {
           expect(input.role).toBe("graphical-enhancer")
           expect(input.handle.id).toBe("designer-fresh")
           expect(input.outputAction).toBe("edit")
-          expect(input.inputFiles?.map((file) => file.filename)).toEqual(["document.html"])
+          expect(input.inputFiles?.map((file) => file.filename)).toEqual(["document.html", "content.md"])
           expect(await Bun.file(join(dir, "design.html")).text()).toContain("Designed")
           await Bun.write(input.outputFile!, "<html><body>Graphics</body></html>\n")
           return { text: "OK" }
@@ -351,7 +428,7 @@ describe("designer writing session reuse", () => {
             throw new KeepAliveSessionDeadError(input.handle.id, "cancelled")
           }
           expect(input.handle.id).toBe("designer-2")
-          expect(input.inputFiles?.map((file) => file.filename)).toEqual(["document.html"])
+          expect(input.inputFiles?.map((file) => file.filename)).toEqual(["document.html", "content.md"])
           expect(await Bun.file(join(dir, "design.html")).text()).toContain("Designed")
           await Bun.write(input.outputFile!, "<html><body>Graphics</body></html>\n")
           return { text: "OK" }

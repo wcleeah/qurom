@@ -294,6 +294,39 @@ describe("createAgentRuntime", () => {
     expect(seenPrompt).toContain("Convert the draft.")
   })
 
+  test("omits frontend-design on keepAlive follow-up prompts", async () => {
+    let seenPrompt = ""
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt(input) {
+        seenPrompt = input.prompt
+        return { text: "ok" }
+      },
+    }
+    const bus = createEventBus()
+    const events = collect(bus)
+    const runtime = createAgentRuntime(config, bus, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("graphical-enhancer", "enhance")
+    handle.keepAlive = true
+    handle.keepAliveFresh = false
+
+    await runtime.prompt({ role: "graphical-enhancer", handle, prompt: "Add figures." })
+
+    expect(seenPrompt).toBe("Add figures.")
+    expect(seenPrompt).not.toContain("<frontend_design_skill>")
+    const promptEvent = events.find((event) => event.kind === "agent.prompt")
+    expect(promptEvent).toMatchObject({
+      kind: "agent.prompt",
+      frontendSkillIncluded: false,
+      keepAlive: true,
+      keepAliveFresh: false,
+    })
+  })
+
   test("resumes a ledger session and harvests a finished local artifact without prompting", async () => {
     const runDir = await mkdtemp(join(tmpdir(), "qurom-runtime-harvest-"))
     const outputFile = join(runDir, "draft-round-0.md")

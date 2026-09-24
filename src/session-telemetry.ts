@@ -15,6 +15,7 @@ export type SessionPromptAccounting = {
   keepAlive?: boolean
   keepAliveFresh?: boolean
   standingContextIncluded?: boolean
+  frontendSkillIncluded?: boolean
   promptChars: number
   promptBytes: number
   estimatedPromptTokens: number
@@ -64,6 +65,7 @@ export type AgentPromptTelemetryEvent = {
   keepAlive?: boolean
   keepAliveFresh?: boolean
   standingContextIncluded?: boolean
+  frontendSkillIncluded?: boolean
   promptChars: number
   promptBytes: number
   estimatedPromptTokens: number
@@ -245,6 +247,7 @@ export function applyAgentPromptEvent(
   if (event.keepAlive != null) prompt.keepAlive = event.keepAlive
   if (event.keepAliveFresh != null) prompt.keepAliveFresh = event.keepAliveFresh
   if (event.standingContextIncluded != null) prompt.standingContextIncluded = event.standingContextIncluded
+  if (event.frontendSkillIncluded != null) prompt.frontendSkillIncluded = event.frontendSkillIncluded
   if (event.basePromptChars != null) prompt.basePromptChars = event.basePromptChars
 
   record.prompts = [...(record.prompts ?? []), prompt]

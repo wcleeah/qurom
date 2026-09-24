@@ -13,7 +13,7 @@ import type {
   SessionHarvestContext,
 } from "../providers/types"
 import type { PromptFileInput } from "../opencode"
-import { prependFrontendDesignSkill, usesFrontendDesignSkill } from "../frontend-design-skill"
+import { includeFrontendDesignSkill, prependFrontendDesignSkill, usesFrontendDesignSkill } from "../frontend-design-skill"
 import { assertNonEmptyInputFiles } from "./input-context"
 import {
   findSessionLedgerEntry,
@@ -97,6 +97,7 @@ function emitPromptAccounting(input: {
   role: AgentRole
   handle: AgentRunHandle
   standingContextIncluded?: boolean
+  frontendSkillIncluded?: boolean
   prompt: string
   basePromptChars: number
   inlined: boolean
@@ -114,6 +115,7 @@ function emitPromptAccounting(input: {
     keepAlive: Boolean(input.handle.keepAlive),
     keepAliveFresh: Boolean(input.handle.keepAliveFresh),
     standingContextIncluded: input.standingContextIncluded,
+    frontendSkillIncluded: input.frontendSkillIncluded,
     promptChars,
     promptBytes,
     basePromptChars: input.basePromptChars,
@@ -133,6 +135,7 @@ function emitPromptAccounting(input: {
     keepAlive: payload.keepAlive,
     keepAliveFresh: payload.keepAliveFresh,
     standingContextIncluded: payload.standingContextIncluded,
+    frontendSkillIncluded: payload.frontendSkillIncluded,
     promptChars: payload.promptChars,
     promptBytes: payload.promptBytes,
     estimatedPromptTokens: payload.estimatedPromptTokens,
@@ -487,12 +490,20 @@ export function createAgentRuntime(
         if (!handle.keepAlive) await handle.dispose?.()
         const replacement = await runtime.createHandle(input.role, handle.title)
         replacement.keepAlive = handle.keepAlive
+        replacement.keepAliveFresh = true
         return runtime.prompt({ ...input, handle: replacement })
       }
 
       const outputMode = outputModeFor(provider, input.schema, input.outputFile)
       const workspaceDir = config.env.QUORUM_WORKSPACE_DIRECTORY || config.env.OPENCODE_DIRECTORY
-      const taskPrompt = usesFrontendDesignSkill(input.role)
+      const frontendSkillIncluded = usesFrontendDesignSkill(input.role)
+        ? includeFrontendDesignSkill({
+          role: input.role,
+          keepAlive: handle.keepAlive,
+          keepAliveFresh: handle.keepAliveFresh,
+        })
+        : undefined
+      const taskPrompt = frontendSkillIncluded
         ? await prependFrontendDesignSkill(input.prompt, workspaceDir)
         : input.prompt
       const prompt = renderPromptForOutputMode({
@@ -529,6 +540,7 @@ export function createAgentRuntime(
           role: input.role,
           handle,
           standingContextIncluded: input.standingContextIncluded,
+          frontendSkillIncluded,
           prompt: promptInput.prompt,
           basePromptChars: prompt.length,
           inlined,

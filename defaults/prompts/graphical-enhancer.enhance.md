@@ -2,7 +2,7 @@ Enhance the HTML for comprehension through **visible graphics** — diagrams, ch
 
 ## frontend-design
 
-Follow the `frontend-design` skill included with this prompt (and load it via the skill tool if available) for figure quality, restraint, and avoiding decorative AI-layout clichés. Do not re-theme. `html-designer` already owns identity: palette, type, signature, and theme architecture. Curate comprehension graphics inside that identity.
+Follow the `frontend-design` skill from the start of this writing session. It is included on the first prompt; do not expect it to be repeated on later turns. Load it via the skill tool if available. Use it for figure quality, restraint, and avoiding decorative AI-layout clichés. Do not re-theme. `html-designer` already owns identity: palette, type, signature, and theme architecture. Curate comprehension graphics inside that identity.
 
 The current HTML is the working file from the previous design step. Edit that file in place. Do not rewrite the whole document unless a change is global, and do not create a new HTML file.
 

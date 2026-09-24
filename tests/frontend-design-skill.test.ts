@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { createAgentRuntime } from "../src/agent-runtime/runtime"
 import {
+  includeFrontendDesignSkill,
   prependFrontendDesignSkill,
   readFrontendDesignSkill,
   usesFrontendDesignSkill,
@@ -40,6 +41,10 @@ describe("frontend-design skill", () => {
     expect(usesFrontendDesignSkill("html-reviewer")).toBe(false)
     expect(usesFrontendDesignSkill("html-repair")).toBe(false)
     expect(usesFrontendDesignSkill("research-drafter")).toBe(false)
+    expect(includeFrontendDesignSkill({ role: "html-designer" })).toBe(true)
+    expect(includeFrontendDesignSkill({ role: "html-designer", keepAlive: true, keepAliveFresh: true })).toBe(true)
+    expect(includeFrontendDesignSkill({ role: "graphical-enhancer", keepAlive: true, keepAliveFresh: false })).toBe(false)
+    expect(includeFrontendDesignSkill({ role: "research-drafter", keepAlive: true, keepAliveFresh: true })).toBe(false)
   })
 
   test("ships Anthropic skill text and license", async () => {
@@ -100,13 +105,16 @@ describe("frontend-design skill", () => {
 
     expect(byKey.graphicalEnhancerEnhance).toContain("Do not re-theme")
     expect(byKey.graphicalEnhancerEnhance).toContain("## frontend-design")
+    expect(byKey.graphicalEnhancerEnhance).toContain("do not expect it to be repeated")
     expect(byKey.readingExperienceEnhancerEnhance).toContain("Do not re-theme")
     expect(byKey.readingExperienceEnhancerEnhance).toContain("## frontend-design")
+    expect(byKey.readingExperienceEnhancerEnhance).toContain("do not expect it to be repeated")
   })
 
   test("runtime inlines the skill for design roles only", async () => {
     let designerPrompt = ""
     let drafterPrompt = ""
+    let followUpPrompt = ""
     const provider: AgentProvider = {
       id: "fake",
       capabilities: new Set(["plainTextOutput", "plainJsonOutput"]),
@@ -116,6 +124,7 @@ describe("frontend-design skill", () => {
       async prompt(input) {
         if (input.role === "html-designer") designerPrompt = input.prompt
         if (input.role === "research-drafter") drafterPrompt = input.prompt
+        if (input.role === "graphical-enhancer") followUpPrompt = input.prompt
         return { text: "ok" }
       },
     }
@@ -133,6 +142,13 @@ describe("frontend-design skill", () => {
     expect(designerPrompt).toContain("<frontend_design_skill>")
     expect(designerPrompt).toContain("Convert the draft.")
     expect(drafterPrompt).toBe("Write the draft.")
+
+    const followUp = await runtime.createHandle("graphical-enhancer", "enhance")
+    followUp.keepAlive = true
+    followUp.keepAliveFresh = false
+    await runtime.prompt({ role: "graphical-enhancer", handle: followUp, prompt: "Add figures." })
+    expect(followUpPrompt).toBe("Add figures.")
+    expect(followUpPrompt).not.toContain("<frontend_design_skill>")
   })
 
   test("defaults skill directory is a real OpenCode skill package", async () => {

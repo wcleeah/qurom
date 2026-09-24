@@ -505,8 +505,14 @@ function renderSessionUsageTableBody(sessions: SessionTelemetryFile["sessions"])
 }
 
 function formatStandingContextCell(prompt: SessionPromptAccounting): string {
-  if (prompt.standingContextIncluded == null) return "—"
-  return prompt.standingContextIncluded ? "included" : "omitted"
+  const parts: string[] = []
+  if (prompt.standingContextIncluded != null) {
+    parts.push(prompt.standingContextIncluded ? "standing included" : "standing omitted")
+  }
+  if (prompt.frontendSkillIncluded != null) {
+    parts.push(prompt.frontendSkillIncluded ? "skill included" : "skill omitted")
+  }
+  return parts.join(" · ") || "—"
 }
 
 function formatKeepAliveCell(prompt: SessionPromptAccounting): string {
@@ -534,7 +540,7 @@ function renderPromptAccountingTableBody(sessions: SessionTelemetryFile["session
 
   rows.sort((a, b) => b.prompt.at.localeCompare(a.prompt.at))
 
-  let table = `<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Time</th><th>Role</th><th>Node</th><th>Session</th><th>Standing context</th><th>Prompt</th></tr></thead><tbody>`
+  let table = `<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Time</th><th>Role</th><th>Node</th><th>Session</th><th>Repeated context</th><th>Prompt</th></tr></thead><tbody>`
   for (const { session, prompt } of rows) {
     const time = prompt.at.replace("T", " ").slice(0, 19) + " UTC"
     const node = prompt.node ?? session.node ?? "—"
