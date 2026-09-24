@@ -1588,6 +1588,12 @@ details.structured-card:not([open]) > summary.auditor-header {
 .summary-table tr:last-child th {
   border-bottom: none;
 }
+.summary-table tfoot th,
+.summary-table tfoot td {
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+}
 
 /* Drafter review card */
 .section-nested {
@@ -1846,7 +1852,10 @@ details.structured-card:not([open]) > summary.auditor-header {
   max-height: 200px;
   overflow-y: auto;
 }
-.summary-table-compact { font-size: 0.78rem; }
+.session-nodes {
+  max-width: 18rem;
+  white-space: normal;
+}
 .summary-table-debug { font-size: 0.7rem; }
 .cell-nowrap { white-space: nowrap; }
 .cell-truncate {

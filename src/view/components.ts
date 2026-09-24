@@ -3,9 +3,9 @@ import { safeFilePath } from "./paths"
 import { answeredQuestionsFromTranscript } from "../reader-transcript"
 import { renderReaderProfileSummary } from "./artifact-renderers"
 import { getNodeDefinition } from "./node-registry"
-import { escapeHtml, formatDurationMs, formatUsagePair, statusDot } from "./utils"
+import { escapeHtml, formatDurationMs, statusDot } from "./utils"
 import type { SessionTelemetryFile } from "../session-telemetry"
-import { sessionUsageForHistoryEntry, usageLabelForRole } from "./telemetry-view"
+import { usageLabelForRole } from "./telemetry-view"
 import type { LiveStatus, NodeHistoryEntry } from "./types"
 
 export function renderAgentActivity(
@@ -56,7 +56,7 @@ export function renderAgentActivity(
 export function renderNodeHistory(
   history: NodeHistoryEntry[],
   runName: string,
-  sessionTelemetry?: SessionTelemetryFile | null,
+  _sessionTelemetry?: SessionTelemetryFile | null,
 ): string {
   if (!history.length) return ""
 
@@ -67,16 +67,12 @@ export function renderNodeHistory(
   for (const entry of nodes) {
     const elapsed = entry.durationMs ?? (entry.completedAt - entry.startedAt)
     const elapsedStr = formatDurationMs(elapsed)
-    const usage = sessionUsageForHistoryEntry(sessionTelemetry, entry)
-    const usageStr = usage.usageAvailable || usage.costAvailable
-      ? ` · ${formatUsagePair(usage, true)}`
-      : ""
     const icon = entry.status === "completed" ? "✓" : "✗"
     const linkNode = getNodeDefinition(entry.node)?.pipelineLabel ?? entry.node
     html += `<div class="node-history-row">
   <span class="node-history-icon ${entry.status === "completed" ? "success-text" : "danger-text"}">${icon}</span>
   <a class="node-history-link" href="/runs/${encodeURIComponent(runName)}/node/${encodeURIComponent(linkNode)}">${escapeHtml(entry.node)}</a>
-  <span class="node-history-meta">${elapsedStr}${usageStr}</span>
+  <span class="node-history-meta">${elapsedStr}</span>
   ${entry.round >= 0 ? `<span class="node-history-extra">· round ${entry.round}</span>` : ""}
   ${entry.rebuttalTurn ? `<span class="node-history-extra">· turn ${entry.rebuttalTurn}</span>` : ""}
   ${entry.summary ? `<span class="node-history-extra">· ${escapeHtml(JSON.stringify(entry.summary))}</span>` : ""}

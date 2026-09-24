@@ -29,13 +29,12 @@ import type { AggregatedFindings } from "./types"
 import {
   renderNodeSessionUsageTable,
   renderNodeTelemetryMeta,
-  sessionTotalsForLiveNode,
   sessionTotalsForNode,
-  sessionUsageForHistoryEntry,
+  sessionsForNodeScope,
 } from "./telemetry-view"
 import { safeFilePath } from "./paths"
 import type { SessionTelemetryFile } from "../session-telemetry"
-import { escapeHtml, formatDurationMs, formatElapsed, formatUsagePair } from "./utils"
+import { escapeHtml, formatDurationMs, formatElapsed } from "./utils"
 import type { LiveStatus, NodeHistoryEntry, RebuttalEntry, RebuttalResponseEntry, RunStatus } from "./types"
 
 type NodeScope = "total" | number
@@ -110,8 +109,10 @@ export function renderNodeGrid(
     if (totals.durationMs > 0) {
       kpis.unshift({ label: "Time", value: formatDurationMs(totals.durationMs) })
     }
-    if (totals.usageAvailable || totals.costAvailable) {
-      kpis.unshift({ label: "Usage", value: formatUsagePair(totals.usage, true) })
+    const relatedSessions = sessionsForNodeScope(sessionTelemetry, nodeHistory, telemetryNode)
+      .filter((session) => session.calls.some((call) => call.usage)).length
+    if (relatedSessions > 0) {
+      kpis.unshift({ label: "Sessions", value: String(relatedSessions) })
     }
 
     let statusIcon = "○"
@@ -135,7 +136,7 @@ export function renderNodeExecutionHistory(
   entries: NodeHistoryEntry[],
   nodeName: string,
   _runName: string,
-  sessionTelemetry?: SessionTelemetryFile | null,
+  _sessionTelemetry?: SessionTelemetryFile | null,
 ): string {
   const def = getNodeDefinition(nodeName)
   const aliases = new Set([nodeName, ...(def?.liveNodeAliases ?? []), def?.id, def?.pipelineLabel].filter(Boolean) as string[])
@@ -146,15 +147,11 @@ export function renderNodeExecutionHistory(
   for (const entry of [...filtered].reverse()) {
     const elapsed = entry.durationMs ?? (entry.completedAt - entry.startedAt)
     const elapsedStr = formatDurationMs(elapsed)
-    const usage = sessionUsageForHistoryEntry(sessionTelemetry, entry)
-    const usageStr = usage.usageAvailable || usage.costAvailable
-      ? ` · ${formatUsagePair(usage, true)}`
-      : ""
     const icon = entry.status === "completed" ? "✓" : "✗"
     html += `<div class="node-history-row">
   <span class="node-history-icon ${entry.status === "completed" ? "success-text" : "danger-text"}">${icon}</span>
   <span class="node-history-link">${escapeHtml(entry.node)}</span>
-  <span class="node-history-meta">${elapsedStr}${usageStr}</span>
+  <span class="node-history-meta">${elapsedStr}</span>
   ${entry.round > 0 || entry.round === 0 ? `<span class="node-history-extra">· round ${entry.round}</span>` : ""}
   ${entry.rebuttalTurn ? `<span class="node-history-extra">· turn ${entry.rebuttalTurn}</span>` : ""}
   ${entry.summary ? `<span class="node-history-extra">· ${escapeHtml(formatSummary(entry.summary))}</span>` : ""}
@@ -583,14 +580,10 @@ export async function renderNodeDashboard(
   }
 
   if (active && liveStatus) {
-    const totals = sessionTotalsForLiveNode(sessionTelemetry, liveStatus)
     const elapsed = liveStatus.nodeStartedAt ? formatElapsed(Date.now() - liveStatus.nodeStartedAt) : ""
-    const usageLabel = totals.usageAvailable || totals.costAvailable
-      ? ` · ${formatUsagePair(totals.usage, true)}`
-      : ""
     live += `<div class="card active-run-hero">
   <span class="badge badge-running">● Running</span>
-  <span class="dim-text">${escapeHtml(resolvedId)} · ${escapeHtml(elapsed)}${escapeHtml(usageLabel)}</span>
+  <span class="dim-text">${escapeHtml(resolvedId)}${elapsed ? ` · ${escapeHtml(elapsed)}` : ""}</span>
 </div>`
     live += renderAgentActivity(liveStatus, sessionTelemetry)
   }
