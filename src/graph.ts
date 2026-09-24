@@ -212,15 +212,6 @@ async function fileExists(path: string) {
   return Bun.file(path).exists()
 }
 
-async function ensureTextArtifact(path: string, text: string | undefined, label: string) {
-  if (await fileExists(path)) return Bun.file(path).text()
-  if (text && text.trim() && text.trim() !== "OK") {
-    await Bun.write(path, text)
-    return text
-  }
-  throw new Error(`Missing ${label} artifact at ${path}; provider returned no inline content to persist`)
-}
-
 async function ensureJsonArtifact(path: string, data: unknown, label: string) {
   if (await fileExists(path)) return
   if (data !== undefined) {

@@ -1,4 +1,4 @@
-import { createGraph } from "./graph"
+import { createGraph, type DesignPhase } from "./graph"
 import { createOpencodeEventBridge } from "./opencode-event-bridge"
 import { createAgentRuntime } from "./agent-runtime/runtime"
 import { createLiveStatusWriter, type NodeHistoryEntry } from "./live-status"
@@ -112,7 +112,7 @@ export type RunnerEvent =
   | { kind: "result"; runResult: unknown }
   | {
       kind: "design.phase"
-      phase: "drafting" | "enhancing" | "reading" | "finalizing"
+      phase: DesignPhase
       round: number
     }
 

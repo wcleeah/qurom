@@ -192,13 +192,16 @@ describe("html repair", () => {
       expect(prompt).toContain("by chunk, instead of one full write")
       expect(prompt).not.toContain("The HTML document is provided with this prompt.")
     }
-    expect(graphical).toContain("open every overlay/dialog")
+    expect(graphical).toContain("overlay or detail panel")
     expect(reading).toContain("Fix overlay/dialog/detail-panel clipping")
     const designer = await Bun.file(join(dir, "defaults", "prompts", "html-designer.design.md")).text()
-    expect(designer).toContain("open every overlay/dialog/detail panel")
+    expect(designer).toContain("must stay fully inside a ~390px viewport")
     expect(designer).not.toContain("Mandatory verification (Playwright")
     expect(graphical).not.toContain("Mandatory verification (Playwright")
     expect(reading).not.toContain("Mandatory verification (Playwright")
+    for (const prompt of [designer, graphical, reading]) {
+      expect(prompt).toContain("Do not use Playwright")
+    }
   })
 
   test("html-reviewer prompt owns Playwright verification", async () => {
