@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import type { RuntimeConfig } from "../src/config.ts"
 import {
@@ -7,6 +10,7 @@ import {
   effectiveResponsesByFinding,
   ingestRequest,
   prepareOutputPath,
+  resolveDesignMarkdownPath,
   routeAfterAggregate,
   routeAfterDrafterReview,
   routeAfterReadabilityScore,
@@ -358,5 +362,31 @@ describe("graph helpers", () => {
     )
 
     expect(state.artifactSummary).toBeUndefined()
+  })
+
+  test("resolveDesignMarkdownPath prefers non-empty final.md over leftover latest-draft", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-design-md-"))
+    await Bun.write(join(dir, "latest-draft.md"), "")
+    await Bun.write(join(dir, "final.md"), "# Approved article\n")
+
+    expect(await resolveDesignMarkdownPath({ outputPath: dir, draft: "stale" })).toBe(join(dir, "final.md"))
+  })
+
+  test("resolveDesignMarkdownPath skips empty latest-draft and uses in-memory draft", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-design-md-"))
+    await Bun.write(join(dir, "latest-draft.md"), "   \n")
+
+    const path = await resolveDesignMarkdownPath({ outputPath: dir, draft: "# Memory draft\n" })
+    expect(path).toBe(join(dir, "latest-draft.md"))
+    expect(await Bun.file(path).text()).toBe("# Memory draft\n")
+  })
+
+  test("resolveDesignMarkdownPath fails when every markdown source is empty", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-design-md-"))
+    await Bun.write(join(dir, "latest-draft.md"), "")
+
+    await expect(resolveDesignMarkdownPath({ outputPath: dir, draft: "  " })).rejects.toThrow(
+      "html-designer has no markdown document to convert",
+    )
   })
 })

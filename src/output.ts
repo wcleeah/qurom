@@ -174,7 +174,9 @@ export async function writeFailedArtifacts(
     summary: Record<string, unknown>
   },
 ) {
-  await writeRunTextArtifact(runDir, "latest-draft.md", input.draft)
+  if (input.draft.trim()) {
+    await writeRunTextArtifact(runDir, "latest-draft.md", input.draft)
+  }
   await writeRunJsonArtifact(runDir, "failure.json", input.summary)
 }
 
@@ -192,15 +194,20 @@ async function renameIfExists(from: string, to: string): Promise<boolean> {
   }
 }
 
-/** Move sticky failure artifacts aside so a resumed run is not haunted by the prior error UI. */
+/** Move sticky failure artifacts aside so a resumed run is not haunted by the prior error UI or a stale latest-draft. */
 export async function archiveFailureArtifactsOnResume(runDir: string): Promise<{
   archivedFailure: boolean
   archivedRunStatus: boolean
+  archivedLatestDraft: boolean
 }> {
   const stamp = archiveTimestamp()
   const archivedFailure = await renameIfExists(
     join(runDir, "failure.json"),
     join(runDir, `failure-archived-${stamp}.json`),
+  )
+  const archivedLatestDraft = await renameIfExists(
+    join(runDir, "latest-draft.md"),
+    join(runDir, `latest-draft-archived-${stamp}.md`),
   )
 
   let archivedRunStatus = false
@@ -219,7 +226,7 @@ export async function archiveFailureArtifactsOnResume(runDir: string): Promise<{
     }
   }
 
-  return { archivedFailure, archivedRunStatus }
+  return { archivedFailure, archivedRunStatus, archivedLatestDraft }
 }
 
 export async function writeDesignHtmlArtifact(runDir: string, html: string) {

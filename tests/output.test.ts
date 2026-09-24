@@ -10,6 +10,7 @@ import {
   ensureRunDirPath,
   removeEmptyRunDir,
   resolveRunDir,
+  writeFailedArtifacts,
   writeRunJsonArtifact,
   writeRunTextArtifact,
 } from "../src/output.ts"
@@ -115,14 +116,16 @@ describe("output helpers", () => {
 
     expect(result.archivedFailure).toBe(true)
     expect(result.archivedRunStatus).toBe(true)
+    expect(result.archivedLatestDraft).toBe(true)
     expect(await Bun.file(join(runDir, "failure.json")).exists()).toBe(false)
     expect(await Bun.file(join(runDir, "run-status.json")).exists()).toBe(false)
-    expect(await Bun.file(join(runDir, "latest-draft.md")).exists()).toBe(true)
+    expect(await Bun.file(join(runDir, "latest-draft.md")).exists()).toBe(false)
 
     const { readdir } = await import("node:fs/promises")
     const files = await readdir(runDir)
     expect(files.some((f) => f.startsWith("failure-archived-") && f.endsWith(".json"))).toBe(true)
     expect(files.some((f) => f.startsWith("run-status-archived-") && f.endsWith(".json"))).toBe(true)
+    expect(files.some((f) => f.startsWith("latest-draft-archived-") && f.endsWith(".md"))).toBe(true)
   })
 
   test("archiveFailureArtifactsOnResume leaves non-error run-status alone", async () => {
@@ -135,5 +138,18 @@ describe("output helpers", () => {
     expect(result.archivedFailure).toBe(false)
     expect(result.archivedRunStatus).toBe(false)
     expect(await Bun.file(join(runDir, "run-status.json")).json()).toEqual({ phase: "complete" })
+  })
+
+  test("writeFailedArtifacts omits empty latest-draft.md", async () => {
+    const root = await mkdtemp(join(tmpdir(), "qurom-output-"))
+    const runDir = join(root, "empty-fail")
+
+    await writeFailedArtifacts(runDir, {
+      draft: "   ",
+      summary: { error: "cancelled before draft" },
+    })
+
+    expect(await Bun.file(join(runDir, "latest-draft.md")).exists()).toBe(false)
+    expect(await Bun.file(join(runDir, "failure.json")).exists()).toBe(true)
   })
 })

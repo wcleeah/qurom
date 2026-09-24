@@ -2,6 +2,7 @@ import type { RuntimeConfig } from "./config"
 import { loadPromptAssetsFromStore } from "./config-store"
 import { SUMMARIZER_ROLE } from "./role-registry"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
+import { assertNonEmptyText } from "./agent-runtime/input-context"
 import { markdownSummarySchema, type MarkdownSummary } from "./schema"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
 
@@ -10,6 +11,7 @@ export async function summarizeMarkdown(input: {
   title: string
   markdown: string
   mode: "input" | "artifact"
+  outputFile?: string
   runtime?: AgentRuntime
   telemetry?: {
     run: TelemetryRun
@@ -21,6 +23,7 @@ export async function summarizeMarkdown(input: {
     metadata?: Record<string, unknown>
   }
 }): Promise<MarkdownSummary> {
+  assertNonEmptyText(input.markdown, "markdown")
   const runtime = input.runtime ?? createAgentRuntime(input.config)
   const role = SUMMARIZER_ROLE
   const handle = await runtime.createHandle(role, input.title)
@@ -34,6 +37,7 @@ export async function summarizeMarkdown(input: {
     handle,
     prompt,
     schema: markdownSummarySchema,
+    outputFile: input.outputFile,
     telemetry: input.telemetry
       ? {
           run: input.telemetry.run,
