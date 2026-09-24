@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises"
 import {
   designHtmlArtifactName,
   designHtmlArtifacts,
+  designHtmlPanelTitle,
   DESIGNER_ROLE,
   GRAPHICAL_ENHANCER_ROLE,
   HTML_REVIEWER_ROLE,
@@ -10,7 +11,7 @@ import {
   READING_EXPERIENCE_ENHANCER_ROLE,
 } from "../design-artifacts"
 import { answeredQuestionsFromTranscript } from "../reader-transcript"
-import { renderReaderProfileCard, renderReaderProfileSummary } from "./artifact-renderers"
+import { renderReaderProfileCard, renderReaderProfileSummary, renderStructuredJson } from "./artifact-renderers"
 import { resolveLiveNode } from "./node-registry"
 import { safeFilePath, safeRunPath } from "./paths"
 import type { LiveStatus } from "./types"
@@ -274,14 +275,13 @@ function renderDesignHtmlPanel(
   filename: string,
   options: { expanded?: boolean; subtitle?: string },
 ): string {
-  const round = filename.match(/round-(\d+)/)?.[1] ?? "?"
   const viewerHref = `/runs/${encodeURIComponent(runName)}/raw/${encodeURIComponent(filename)}`
   const embedSrc = `${viewerHref}?source=1`
   const subtitle = options.subtitle ? `<span class="dim-text">${escapeHtml(options.subtitle)}</span>` : ""
 
   return `<div class="node-work-panel design-preview-panel">
   <div class="node-work-panel-header">
-    <h3>Round ${round} HTML</h3>
+    <h3>${escapeHtml(designHtmlPanelTitle(filename))}</h3>
     ${subtitle}
     <a class="tiny-text" href="${viewerHref}">Open in viewer</a>
     <a class="tiny-text" href="${embedSrc}" target="_blank" rel="noopener">Raw HTML</a>
@@ -425,4 +425,27 @@ export async function renderHtmlReviewScope(
     liveLabel: "HTML reviewer is checking the page in Playwright…",
     note: `The html-reviewer agent Playwright-checks the reading-experience HTML and writes <code>${escapeHtml(designHtmlArtifactName(HTML_REVIEWER_ROLE))}</code>.`,
   })
+}
+
+/** Structured previews for node artifacts that don't have a dedicated dashboard. */
+export async function renderRelatedNodeArtifacts(runName: string, files: string[]): Promise<string> {
+  const unique = [...new Set(files)].sort()
+  let html = ""
+  for (const file of unique) {
+    const ext = file.split(".").pop()?.toLowerCase()
+    if (ext === "json") {
+      try {
+        const parsed = await Bun.file(safeFilePath(runName, file)).json()
+        html += `<div class="section">${renderStructuredJson(file, parsed)}</div>`
+      } catch {
+        // skip unreadable json
+      }
+    } else if (ext === "md") {
+      const content = await readTextFile(runName, file)
+      if (content) html += renderDraftPanel(runName, file, content, unique.length === 1)
+    } else if (ext === "html" || ext === "htm") {
+      html += `<div class="section">${renderDesignHtmlPanel(runName, file, { expanded: unique.length === 1 })}</div>`
+    }
+  }
+  return html
 }

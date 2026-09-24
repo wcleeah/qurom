@@ -13,6 +13,7 @@ import {
 } from "../run-manager"
 import {
   archiveRunDirectory,
+  isArchivedRun,
   resolveArchiveRunName,
   resolveRunName,
   safeRunPath,
@@ -215,7 +216,14 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
   if (resumeMatch && req.method === "POST") {
     try {
       const runId = decodeURIComponent(resumeMatch[1])
-      const result = await getRunManager().resumeResearch(runId)
+      const runName = await resolveRunName(runId)
+      if (!runName) {
+        throw new RunManagerError(`Run not found: ${runId}`, 404)
+      }
+      if (isArchivedRun(runName)) {
+        await unarchiveRunDirectory(runName)
+      }
+      const result = await getRunManager().resumeResearch(runName)
       return redirectOrJson(
         req,
         url,
@@ -234,6 +242,9 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
       const runName = await resolveRunName(runRef)
       if (!runName) {
         throw new RunManagerError(`Run not found: ${runRef}`, 404)
+      }
+      if (isArchivedRun(runName)) {
+        throw new RunManagerError("Cannot check findings MCP on an archived run", 409)
       }
       const runDir = safeRunPath(runName)
       let requestId: string | undefined
@@ -267,6 +278,9 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
       const runName = await resolveRunName(runRef)
       if (!runName) {
         throw new RunManagerError(`Run not found: ${runRef}`, 404)
+      }
+      if (isArchivedRun(runName)) {
+        throw new RunManagerError("Cannot score readability on an archived run", 409)
       }
       if (isRunManagedActive(runName) || isRunManagedActive(runRef)) {
         throw new RunManagerError("Cannot score readability while this run's pipeline is active.", 409)

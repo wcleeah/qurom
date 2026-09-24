@@ -440,6 +440,7 @@ describe("view file browser classification", () => {
     expect(html).toContain("design.html")
     expect(html).toContain("HTML · html-designer")
     expect(html).toContain("Design failure details")
+    expect(html).not.toContain("Design Rounds")
   })
 })
 

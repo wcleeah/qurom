@@ -235,6 +235,11 @@ export function getNodeDefinition(nodeId: string): NodeDefinition | undefined {
     ?? GRAPH_NODES.find((n) => n.liveNodeAliases?.includes(nodeId))
 }
 
+export function isDesignPhaseNode(nodeId?: string | null): boolean {
+  if (!nodeId) return false
+  return getNodeDefinition(nodeId)?.phase === "design"
+}
+
 export function resolveLiveNode(liveStatus: LiveStatus | null): string | undefined {
   if (!liveStatus?.node) return undefined
   const raw = liveStatus.node
@@ -393,7 +398,7 @@ export function nodeKpis(nodeId: string, files: string[], index?: RunArtifactInd
       return []
     case "runDesignHtml": {
       const html = files.filter((f) => isDesignHtmlArtifact(f))
-      kpis.push({ label: "HTML drafts", value: String(html.length) })
+      kpis.push({ label: "Stages", value: String(html.length) })
       break
     }
     case "finalizeDesign": {

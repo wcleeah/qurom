@@ -191,6 +191,26 @@ describe("renderRunActionStrip", () => {
     expect(html).toContain("archive")
   })
 
+  test("renders unarchive instead of archive for archived runs", () => {
+    const html = renderRunActionStrip(
+      "my-run-abc",
+      {
+        showResume: true,
+        showRestartFromSource: false,
+        showRerunReuseProfile: false,
+        showRerunRepairProfile: false,
+        showRerunFreshInterview: false,
+        showReadabilityReview: false,
+      },
+      { showUnarchive: true },
+    )
+    expect(html).toContain("/api/runs/my-run-abc/unarchive")
+    expect(html).toContain("Unarchive")
+    expect(html).toContain("unarchive")
+    expect(html).not.toContain("Archive run")
+    expect(html).not.toContain("readability-review")
+  })
+
   test("renders a post-run readability review button", () => {
     const html = renderRunActionStrip("my-run-abc", {
       showResume: false,

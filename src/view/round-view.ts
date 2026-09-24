@@ -1,8 +1,24 @@
 import { buildRoundAuditVoteRows, renderRoundAuditVoteTable } from "./audit-view"
+import { getNodeDefinition, isDesignPhaseNode, resolveLiveNode } from "./node-registry"
 import { safeFilePath } from "./paths"
 import { outcomeClassForRound, outcomeLabelForRound, indexRunArtifacts, summarizeConsensusData, type RoundArtifacts } from "./run-artifacts"
 import { escapeHtml } from "./utils"
 import type { LiveStatus } from "./types"
+
+export function livePipelineLabel(liveStatus: LiveStatus): string {
+  const nodeId = resolveLiveNode(liveStatus) ?? liveStatus.node ?? "running"
+  return getNodeDefinition(nodeId)?.label ?? nodeId
+}
+
+export function livePipelineLine(liveStatus: LiveStatus): string {
+  const nodeId = resolveLiveNode(liveStatus) ?? liveStatus.node ?? "running"
+  const parts: string[] = [livePipelineLabel(liveStatus)]
+  if (!isDesignPhaseNode(nodeId)) {
+    parts.push(`Round ${liveStatus.round}/${liveStatus.maxRounds}`)
+  }
+  if (liveStatus.awaitingReaderReply) parts.push("Waiting for reader")
+  return parts.join(" · ")
+}
 
 type RoundStripMeta = {
   round: RoundArtifacts
@@ -85,7 +101,16 @@ export async function renderRoundStrip(
 
 export function renderLiveStatusMeta(liveStatus: LiveStatus | null): string {
   if (!liveStatus || liveStatus.phase !== "running") return ""
-  const parts: string[] = [`Round ${liveStatus.round}/${liveStatus.maxRounds}`]
+  const nodeId = resolveLiveNode(liveStatus) ?? liveStatus.node
+  const parts: string[] = []
+  if (isDesignPhaseNode(nodeId)) {
+    parts.push(livePipelineLabel(liveStatus))
+  } else {
+    parts.push(`Round ${liveStatus.round}/${liveStatus.maxRounds}`)
+  }
+  if (liveStatus.awaitingReaderReply) {
+    parts.push("Waiting for reader")
+  }
   if (liveStatus.rebuttalTurn !== undefined && liveStatus.rebuttalTurn > 0) {
     parts.push(`Rebuttal turn ${liveStatus.rebuttalTurn}`)
   }
@@ -95,7 +120,7 @@ export function renderLiveStatusMeta(liveStatus: LiveStatus | null): string {
   if (liveStatus.unresolvedFindingCount !== undefined && liveStatus.unresolvedFindingCount > 0) {
     parts.push(`${liveStatus.unresolvedFindingCount} unresolved`)
   }
-  if (liveStatus.researchPhase) {
+  if (liveStatus.researchPhase && !isDesignPhaseNode(nodeId)) {
     parts.push(liveStatus.researchPhase.replace(/_/g, " "))
   }
   return `<span class="meta-item live-meta">${parts.map((p) => escapeHtml(p)).join(" · ")}</span>`
