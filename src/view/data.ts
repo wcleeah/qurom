@@ -466,6 +466,7 @@ export function classifyFile(filename: string): FileClass {
   if (/^drafter-finding-review-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Reviews", label: `Drafter review round ${round}`, description: "Accepted findings and rebuttal choices" }
   if (/^aggregated-findings-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Consensus", label: `Consensus round ${round}`, description: "Aggregated unresolved findings/outcome" }
   if (/^unresolved-findings-round-\d+\.json$/.test(filename)) return { group: "Research Rounds", subGroup: "Consensus", label: `Unresolved findings round ${round}`, description: "Findings carried into revision" }
+  if (filename === "findings.json") return { group: "Research Rounds", subGroup: "Consensus", label: "Revision findings", description: "Working copy of unresolved findings for the writing session" }
   if (/^auditor-rebuttal-responses-round-\d+-turn-\d+\.json$/.test(filename)) {
     const turn = filename.match(/turn-(\d+)/)?.[1]
     return { group: "Rebuttals", subGroup: "Auditor Responses", label: `Auditor responses round ${round} turn ${turn}`, description: "Aggregated auditor rebuttal responses" }

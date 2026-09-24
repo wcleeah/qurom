@@ -81,7 +81,7 @@ The `/config/mcp` dashboard page is the sole MCP registry for both Cursor and Op
 
 New profiles (and lazy migration) seed a headless Playwright MCP server (`npx @playwright/mcp@latest --headless`) and enable it by default. Cursor attaches Playwright only to `html-reviewer` and the viewer `html-repair` agent. The three design nodes do not receive Playwright or run browser verification.
 
-Qurom does not read `~/.cursor/mcp.json`, role-level `mcpServers`, or external OpenCode MCP configuration. It preserves unrelated JSON from `OPENCODE_CONFIG_CONTENT`, replaces its `mcp` section with the enabled registry, and passes the result to the OpenCode process it launches.
+Qurom does not read `~/.cursor/mcp.json`, role-level `mcpServers`, or external OpenCode MCP configuration. It preserves unrelated JSON from `OPENCODE_CONFIG_CONTENT`, replaces its `mcp` section with the enabled registry, and passes the result to the OpenCode process it launches. The research-drafter unresolved-findings MCP (`/mcp/findings`) is injected per writing session and is not part of this registry.
 
 Data directory resolution:
 
@@ -105,6 +105,7 @@ Main environment variables:
 - `QUORUM_CAPTURE_OPENCODE_EVENTS`
 - `QUORUM_CAPTURE_SYNC_HISTORY`
 - `VIEW_PORT` / `VIEW_HOST` — dashboard bind address (default `3000` / `0.0.0.0`)
+- `QUORUM_MCP_BASE_URL` — public origin Cursor cloud uses to reach `/mcp/findings` (default `http://127.0.0.1:$VIEW_PORT`)
 - `CURSOR_API_KEY` — Cursor provider API key
 - `LANGFUSE_PUBLIC_KEY`
 - `LANGFUSE_SECRET_KEY`

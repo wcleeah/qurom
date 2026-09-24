@@ -139,7 +139,7 @@ export const GRAPH_NODES: NodeDefinition[] = [
     label: "Revise draft",
     order: 13,
     phase: "research",
-    filePatterns: [/^unresolved-findings-round-\d+\.json$/],
+    filePatterns: [/^unresolved-findings-round-\d+\.json$/, /^findings\.json$/],
     roundScoped: true,
   },
   {

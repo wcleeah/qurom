@@ -22,6 +22,7 @@ import {
 } from "../session-ledger"
 import { artifactBasename, parseHarvestedResult, readHarvestableLocalFile } from "./harvest"
 import { KeepAliveSessionDeadError, isDeadKeepAliveReason } from "./keep-alive"
+import { extractFindingsMcpToken } from "../findings-mcp"
 import { estimateTokensFromChars } from "../usage"
 
 export { KeepAliveSessionDeadError, isDeadKeepAliveReason } from "./keep-alive"
@@ -68,9 +69,13 @@ export type RuntimePromptInput<T> = {
   telemetry?: ProviderPromptInput<T>["telemetry"]
 }
 
+export type CreateHandleOptions = {
+  providerOptions?: Record<string, unknown>
+}
+
 export type AgentRuntime = {
-  createHandle: (role: AgentRole, title: string, parentId?: string) => Promise<AgentRunHandle>
-  resumeHandle: (role: AgentRole, title: string, handleId: string) => Promise<AgentRunHandle>
+  createHandle: (role: AgentRole, title: string, parentId?: string, options?: CreateHandleOptions) => Promise<AgentRunHandle>
+  resumeHandle: (role: AgentRole, title: string, handleId: string, options?: CreateHandleOptions) => Promise<AgentRunHandle>
   prompt: <T>(input: RuntimePromptInput<T>) => Promise<ProviderPromptResult<T>>
   abort: (handle: AgentRunHandle) => Promise<void>
   providerForRole: (role: AgentRole) => AgentProvider
@@ -339,6 +344,12 @@ export function createAgentRuntime(
     return handle
   }
 
+  function attachFindingsMcpToken(handle: AgentRunHandle, providerOptions?: Record<string, unknown>) {
+    const token = extractFindingsMcpToken(providerOptions) ?? handle.findingsMcpToken
+    if (token) handle.findingsMcpToken = token
+    return handle
+  }
+
   function emitCreated(provider: AgentProvider, handle: AgentRunHandle, role: AgentRole) {
     if (provider.capabilities.has("streamingEvents")) return
     bus?.emit({ kind: "session.created", sessionID: handle.id, role })
@@ -403,7 +414,7 @@ export function createAgentRuntime(
   }
 
   const runtime: AgentRuntime = {
-    async createHandle(role, title, parentId) {
+    async createHandle(role, title, parentId, options) {
       const provider = resolveProvider(role)
       const harvest = currentHarvest()
       if (harvest?.runDir && harvest.node && provider.resumeRunHandle) {
@@ -415,7 +426,13 @@ export function createAgentRuntime(
         if (entry && isHarvestableLedgerStatus(entry.status) && entry.status !== "error") {
           try {
             const resumed = attachHarvest(
-              await provider.resumeRunHandle({ config, role, title, handleId: entry.handleId }),
+              await provider.resumeRunHandle({
+                config,
+                role,
+                title,
+                handleId: entry.handleId,
+                providerOptions: options?.providerOptions,
+              }),
               {
                 ...harvest,
                 resumed: true,
@@ -423,6 +440,7 @@ export function createAgentRuntime(
                 expectedArtifact: entry.expectedArtifact,
               },
             )
+            attachFindingsMcpToken(resumed, options?.providerOptions)
             emitCreated(provider, resumed, role)
             emitHarvest({
               sessionID: resumed.id,
@@ -443,20 +461,35 @@ export function createAgentRuntime(
         }
       }
 
-      const handle = attachHarvest(await provider.createRunHandle({ config, role, title, parentId }))
+      const handle = attachHarvest(await provider.createRunHandle({
+        config,
+        role,
+        title,
+        parentId,
+        providerOptions: options?.providerOptions,
+      }))
+      attachFindingsMcpToken(handle, options?.providerOptions)
       emitCreated(provider, handle, role)
       await recordLedger(handle, { status: "created" })
       return handle
     },
-    async resumeHandle(role, title, handleId) {
+    async resumeHandle(role, title, handleId, options) {
       const provider = resolveProvider(role)
       if (!provider.resumeRunHandle) {
         throw new Error(`Provider ${provider.id} does not support resuming run handles`)
       }
-      return attachHarvest(
-        await provider.resumeRunHandle({ config, role, title, handleId }),
+      const resumed = attachHarvest(
+        await provider.resumeRunHandle({
+          config,
+          role,
+          title,
+          handleId,
+          providerOptions: options?.providerOptions,
+        }),
         { resumed: true },
       )
+      attachFindingsMcpToken(resumed, options?.providerOptions)
+      return resumed
     },
     async prompt(input) {
       const provider = resolveProvider(input.role)
@@ -488,8 +521,16 @@ export function createAgentRuntime(
       }
       if (harvested.status === "replace") {
         if (!handle.keepAlive) await handle.dispose?.()
-        const replacement = await runtime.createHandle(input.role, handle.title)
+        const replacement = await runtime.createHandle(
+          input.role,
+          handle.title,
+          undefined,
+          handle.findingsMcpToken
+            ? { providerOptions: { findingsMcpToken: handle.findingsMcpToken } }
+            : undefined,
+        )
         replacement.keepAlive = handle.keepAlive
+        replacement.findingsMcpToken = handle.findingsMcpToken
         replacement.keepAliveFresh = true
         return runtime.prompt({ ...input, handle: replacement })
       }

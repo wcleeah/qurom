@@ -266,7 +266,16 @@ The graph also computes a signature of unresolved findings to detect stagnation 
 
 ### `reviseDraft`
 
-When consensus requires revision, the same keepAlive writing session edits `draft.md` in place from the unresolved findings (attached as JSON). The graph snapshots the next `draft-round-N.md`. The revision prompt is intentionally surgical: fix only what findings identify, preserve uncriticized text, and avoid mentioning the review process. Like readability, it repeats research-tool hints and reader calibration only when the writing session is new.
+When consensus requires revision, the same keepAlive writing session edits `draft.md` in place from the unresolved findings. Compaction can drop inlined prompt text, and Qurom cannot choose when that happens, so findings are not left only in conversation history.
+
+The graph writes `unresolved-findings-round-N.json` and a stable working copy `findings.json`.
+
+- **Attachment providers (OpenCode):** attach `findings.json`. The run directory is readable; the revise prompt tells the agent to re-read that file if the conversation was compacted.
+- **Inline providers (Cursor):** do not inline the JSON. At writing-session create, Qurom mints a session capability token, stores it, and injects a remote MCP server (`/mcp/findings`) with `Authorization: Bearer <token>`. The tool `get_unresolved_findings` returns the current findings for that request. The token is connection auth, not a prompt argument, and stays valid for multiple fetches until the writing session is disposed. Cursor cloud must be able to reach the dashboard origin; set `QUORUM_MCP_BASE_URL` to a public base URL. Local Cursor can use `http://127.0.0.1:$VIEW_PORT`.
+
+This MCP is per writing session. It is not part of the user-managed `/config/mcp` registry.
+
+The revision prompt is intentionally surgical: fix only what findings identify, preserve uncriticized text, and avoid mentioning the review process. Like readability, it repeats research-tool hints and reader calibration only when the writing session is new. The graph snapshots the next `draft-round-N.md`.
 
 ---
 

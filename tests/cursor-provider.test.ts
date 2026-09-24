@@ -559,6 +559,25 @@ describe("cursorProvider", () => {
     })
   })
 
+  test("injects the per-session findings MCP when a capability token is provided", async () => {
+    await cursorProvider.createRunHandle({
+      config,
+      role: "research-drafter",
+      title: "draft",
+      providerOptions: { findingsMcpToken: "session-token" },
+    })
+
+    const { findingsMcpEndpointUrl } = await import("../src/findings-mcp")
+    expect(createCalls[0]).toMatchObject({
+      mcpServers: {
+        "qurom-findings": {
+          url: findingsMcpEndpointUrl(),
+          headers: { Authorization: "Bearer session-token" },
+        },
+      },
+    })
+  })
+
   test("ignores legacy role-level Cursor MCP overrides", async () => {
     process.env.SEARCH_API_KEY = "role-search-secret"
     const mcpConfig: RuntimeConfig = {
