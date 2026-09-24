@@ -15,6 +15,7 @@ import {
 } from "./output"
 import { auditWithRestart } from "./audit-restart"
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
+import { InvalidInputContextError, isNonEmptyTextFile } from "./agent-runtime/input-context"
 import type { AgentRunHandle } from "./providers/types"
 import type { PromptBundle } from "./prompt-assets"
 import { auditorAuditPromptKey, auditorRebuttalPromptKey } from "./prompt-asset-defs"
@@ -402,7 +403,8 @@ export async function summarizeInputDocument(config: RuntimeConfig, state: Resea
         sourcePath: state.documentPath,
       },
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof InvalidInputContextError) throw error
     return researchStateSchema.parse(state)
   }
 }
@@ -2246,6 +2248,24 @@ async function listRunBasenames(outputPath: string): Promise<string[]> {
   }
 }
 
+export async function resolveDesignMarkdownPath(input: {
+  outputPath: string
+  draft?: string
+}): Promise<string> {
+  const finalPath = `${input.outputPath}/final.md`
+  if (await isNonEmptyTextFile(finalPath)) return finalPath
+
+  const latestPath = `${input.outputPath}/latest-draft.md`
+  if (await isNonEmptyTextFile(latestPath)) return latestPath
+
+  if (input.draft?.trim()) {
+    await Bun.write(latestPath, input.draft)
+    return latestPath
+  }
+
+  throw new InvalidInputContextError("html-designer has no markdown document to convert")
+}
+
 async function designHtmlNode(
   config: RuntimeConfig,
   runtime: AgentRuntime,
@@ -2257,20 +2277,17 @@ async function designHtmlNode(
   if (!state.outputPath) throw new Error("Missing outputPath during designHtml")
   if (!config.quorumConfig.designQuorum?.enabled) return researchStateSchema.parse(state)
 
-  const draftPath = `${state.outputPath}/latest-draft.md`
-  if (!(await Bun.file(draftPath).exists())) {
-    // Fall back to final.md if latest-draft doesn't exist
-    const finalPath = `${state.outputPath}/final.md`
-    if (await Bun.file(finalPath).exists()) {
-      await Bun.write(draftPath, await Bun.file(finalPath).text())
-    } else {
-      await Bun.write(draftPath, state.draft)
-    }
-  }
+  const draftPath = await resolveDesignMarkdownPath({
+    outputPath: state.outputPath,
+    draft: state.draft,
+  })
 
   const topic = state.inputMode === "topic"
     ? state.topic ?? ""
     : state.documentText ?? state.documentPath ?? ""
+  if (!topic.trim()) {
+    throw new InvalidInputContextError("html-designer topic context is empty")
+  }
 
   const htmlBasename = designHtmlArtifactName(DESIGNER_ROLE)
   const htmlFile = `${state.outputPath}/${htmlBasename}`
@@ -2496,6 +2513,7 @@ export async function summarizeOutputArtifact(config: RuntimeConfig, state: Rese
       title: `summary-artifact:${state.requestId}`,
       markdown: await artifactFile.text(),
       mode: "artifact",
+      outputFile: `${state.outputPath}/artifact-summary.json`,
       runtime,
       telemetry: !telemetry
         ? undefined
@@ -2519,7 +2537,8 @@ export async function summarizeOutputArtifact(config: RuntimeConfig, state: Rese
         sourcePath: artifactPath,
       } satisfies RunDisplaySummary,
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof InvalidInputContextError) throw error
     return researchStateSchema.parse(state)
   }
 }

@@ -14,6 +14,7 @@ import type {
 } from "../providers/types"
 import type { PromptFileInput } from "../opencode"
 import { prependFrontendDesignSkill, usesFrontendDesignSkill } from "../frontend-design-skill"
+import { assertNonEmptyInputFiles } from "./input-context"
 import {
   findSessionLedgerEntry,
   isHarvestableLedgerStatus,
@@ -167,6 +168,7 @@ function renderPromptForOutputMode(input: {
 }
 
 async function renderPromptInputs(provider: AgentProvider, prompt: string, inputFiles: PromptFileInput[] | undefined) {
+  await assertNonEmptyInputFiles(inputFiles)
   if (provider.capabilities.has("inputFileAttachments")) {
     return { prompt, inputFiles }
   }

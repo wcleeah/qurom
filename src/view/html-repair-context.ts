@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises"
 
+import { isNonEmptyTextFile } from "../agent-runtime/input-context"
 import type { PromptFileInput } from "../opencode"
 import { displayHighlightQuote } from "./library-notes-types"
 import { safeFilePath } from "./paths"
@@ -22,6 +23,7 @@ export async function resolveRepairHtml(runName: string, htmlFile: string): Prom
   try {
     const fileStat = await stat(absolutePath)
     if (!fileStat.isFile()) throw new NoRepairHtmlError(runName, htmlFile)
+    if (!(await isNonEmptyTextFile(absolutePath))) throw new NoRepairHtmlError(runName, htmlFile)
     return { htmlFile, absolutePath, mtimeMs: fileStat.mtimeMs }
   } catch (error) {
     if (error instanceof NoRepairHtmlError) throw error

@@ -1,6 +1,7 @@
-import { basename } from "node:path"
+import { basename, join } from "node:path"
 
 import { createAgentRuntime, type AgentRuntime } from "./agent-runtime/runtime"
+import { assertNonEmptyText, InvalidInputContextError } from "./agent-runtime/input-context"
 import type { RuntimeConfig } from "./config"
 import { loadPromptAssetsFromStore } from "./config-store"
 import { createArticleTagsResultSchema, type ArticleTagEntry, type ArticleTagsResult } from "./schema"
@@ -56,6 +57,7 @@ export async function tagArticle(input: {
     metadata?: Record<string, unknown>
   }
 }): Promise<ArticleTagsResult> {
+  assertNonEmptyText(input.markdown, "research-tagger markdown")
   const tagging = input.config.quorumConfig.tagging ?? {
     enabled: true,
     maxArticleTags: 8,
@@ -85,6 +87,7 @@ export async function tagArticle(input: {
       maxArticleTags: tagging.maxArticleTags ?? 8,
     }),
     schema,
+    outputFile: join(input.outputPath, "article-tags.json"),
     telemetry: input.telemetry
       ? {
           run: input.telemetry.run,
@@ -185,5 +188,6 @@ export async function tagOutputArtifact(
       requestId: state.requestId,
       error: error instanceof Error ? error.message : String(error),
     })
+    if (error instanceof InvalidInputContextError) throw error
   }
 }

@@ -86,6 +86,13 @@ describe("html ask context", () => {
     expect(source.absolutePath).toContain("final.md")
   })
 
+  test("resolveSourceMarkdown skips empty final.md", async () => {
+    await writeFile(join(dir, "runs", "alpha-run", "final.md"), "  \n")
+    await writeFile(join(dir, "runs", "alpha-run", "latest-draft.md"), "# Draft body\n")
+    const source = await resolveSourceMarkdown("alpha-run")
+    expect(source.mdFile).toBe("latest-draft.md")
+  })
+
   test("buildAskPrompt bootstrap includes md attachment and followup is plain text", async () => {
     const source = await resolveSourceMarkdown("alpha-run")
     const bootstrap = await buildAskPrompt({

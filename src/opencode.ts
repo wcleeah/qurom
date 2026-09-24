@@ -8,6 +8,7 @@ import type { RuntimeConfig } from "./config"
 import { requiredOpenCodeAgentRoles } from "./role-registry"
 import type { DebugLog } from "./debug-log"
 import type { TelemetryRun, TraceObservation } from "./telemetry"
+import { assertNonEmptyInputFiles } from "./agent-runtime/input-context"
 import {
   buildFileRepairPrompt,
   buildStructuredRepairPrompt,
@@ -148,6 +149,7 @@ export async function promptAgent<T>(input: {
       { type: "text", text: prompt } satisfies TextPartInput,
     ]
 
+    await assertNonEmptyInputFiles(input.inputFiles)
     if (input.inputFiles) {
       for (const f of input.inputFiles) {
         parts.push({

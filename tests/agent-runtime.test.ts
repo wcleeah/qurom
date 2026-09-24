@@ -100,6 +100,9 @@ describe("createAgentRuntime", () => {
   test("passes input files through for providers with input file attachment support", async () => {
     let seenPrompt = ""
     let seenInputFiles: unknown
+    const dir = await mkdtemp(join(tmpdir(), "qurom-runtime-attach-"))
+    const filePath = join(dir, "draft.md")
+    await writeFile(filePath, "# Draft\n")
     const provider: AgentProvider = {
       id: "fake",
       capabilities: new Set(["plainJsonOutput", "inputFileAttachments"]),
@@ -114,7 +117,7 @@ describe("createAgentRuntime", () => {
     }
     const runtime = createAgentRuntime(config, undefined, { providerForRole: () => provider })
     const handle = await runtime.createHandle("source-auditor", "audit")
-    const inputFiles = [{ path: "/tmp/draft.md", mime: "text/markdown", filename: "draft.md" }]
+    const inputFiles = [{ path: filePath, mime: "text/markdown", filename: "draft.md" }]
 
     await runtime.prompt({ role: "source-auditor", handle, prompt: "Review this.", inputFiles })
 
@@ -122,7 +125,57 @@ describe("createAgentRuntime", () => {
     expect(seenInputFiles).toBe(inputFiles)
   })
 
+  test("rejects empty inlined input context", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-runtime-empty-"))
+    const filePath = join(dir, "draft.md")
+    await writeFile(filePath, "  \n")
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput", "inlineInputContext"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt() {
+        return { text: "ok" }
+      },
+    }
+    const runtime = createAgentRuntime(config, undefined, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("html-designer", "design")
+
+    await expect(runtime.prompt({
+      role: "html-designer",
+      handle,
+      prompt: "Convert the draft.",
+      inputFiles: [{ path: filePath, mime: "text/plain", filename: "content.md" }],
+    })).rejects.toThrow("Input context content.md is empty")
+  })
+
+  test("rejects missing attached input files", async () => {
+    const provider: AgentProvider = {
+      id: "fake",
+      capabilities: new Set(["plainJsonOutput", "inputFileAttachments"]),
+      async createRunHandle(input) {
+        return { id: `handle:${input.role}`, providerId: "fake", role: input.role, title: input.title }
+      },
+      async prompt() {
+        return { text: "ok" }
+      },
+    }
+    const runtime = createAgentRuntime(config, undefined, { providerForRole: () => provider })
+    const handle = await runtime.createHandle("source-auditor", "audit")
+
+    await expect(runtime.prompt({
+      role: "source-auditor",
+      handle,
+      prompt: "Review this.",
+      inputFiles: [{ path: "/tmp/does-not-exist-qurom-draft.md", mime: "text/markdown", filename: "draft.md" }],
+    })).rejects.toThrow("Input context draft.md is missing")
+  })
+
   test("rejects input files when provider declares no input mode", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qurom-runtime-none-"))
+    const filePath = join(dir, "draft.md")
+    await writeFile(filePath, "# Draft\n")
     const provider: AgentProvider = {
       id: "fake",
       capabilities: new Set(["plainJsonOutput"]),
@@ -140,7 +193,7 @@ describe("createAgentRuntime", () => {
       role: "source-auditor",
       handle,
       prompt: "Review this.",
-      inputFiles: [{ path: "/tmp/draft.md", mime: "text/markdown", filename: "draft.md" }],
+      inputFiles: [{ path: filePath, mime: "text/markdown", filename: "draft.md" }],
     })).rejects.toThrow("does not support input files or inline input context")
   })
 

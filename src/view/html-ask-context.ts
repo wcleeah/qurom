@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises"
 import { join } from "node:path"
 
+import { isNonEmptyTextFile } from "../agent-runtime/input-context"
 import type { RuntimeConfig } from "../config"
 import type { PromptFileInput } from "../opencode"
 import { buildResearchToolHint } from "../research-tools"
@@ -29,6 +30,7 @@ export async function resolveSourceMarkdown(runName: string): Promise<ResolvedSo
     try {
       const fileStat = await stat(absolutePath)
       if (!fileStat.isFile()) continue
+      if (!(await isNonEmptyTextFile(absolutePath))) continue
       return { mdFile, absolutePath, mtimeMs: fileStat.mtimeMs }
     } catch {
       continue
