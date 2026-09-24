@@ -2,11 +2,20 @@ import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 
 export const DRAFT_WORKING_FILENAME = "draft.md"
+export const FINDINGS_WORKING_FILENAME = "findings.json"
 export const DRAFT_ROUND_RE = /^draft-round-(\d+)\.md$/
 export const DRAFT_READABILITY_RE = /^draft-round-(\d+)-readability-(\d+)\.md$/
 
 export function draftWorkingPath(outputPath: string) {
   return join(outputPath, DRAFT_WORKING_FILENAME)
+}
+
+export function findingsWorkingPath(outputPath: string) {
+  return join(outputPath, FINDINGS_WORKING_FILENAME)
+}
+
+export function unresolvedFindingsFilename(round: number) {
+  return `unresolved-findings-round-${round}.json`
 }
 
 export function draftRoundFilename(round: number) {

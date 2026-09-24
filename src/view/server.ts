@@ -34,6 +34,7 @@ import { handleRunApi } from "./run-api"
 import { handleShareApi } from "./share-api"
 import { handleTagsApi } from "./tags-api"
 import { resolveRunName, safeFilePath, HOST, PORT, safeRunPath } from "./paths"
+import { handleFindingsMcpHttp } from "../findings-mcp"
 import { setRunRead } from "./read-store"
 import { viewServerAdminEnabled } from "./server-options"
 import { MARKED_UMD_PATH, MARKED_UMD_URL } from "./html-viewer-markdown"
@@ -58,6 +59,9 @@ export function startViewServer(): void {
     async fetch(req, server): Promise<Response> {
       const url = new URL(req.url)
       const path = url.pathname
+
+      const findingsMcp = await handleFindingsMcpHttp(req, path)
+      if (findingsMcp) return findingsMcp
 
       if (path === OFFLINE_SW_PATH) {
         return serveOfflineServiceWorker()

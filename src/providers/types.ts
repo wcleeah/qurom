@@ -43,6 +43,8 @@ export type AgentRunHandle = {
   keepAlive?: boolean
   /** True until the first successful prompt on a newly minted keepAlive session. */
   keepAliveFresh?: boolean
+  /** Capability token for the per-session unresolved-findings MCP. */
+  findingsMcpToken?: string
   dispose?: () => Promise<void>
   harvest?: SessionHarvestContext
   sessionBootstrap?: {

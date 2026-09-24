@@ -41,9 +41,17 @@ import { resolveReadabilitySystemOne, type ReadabilitySystemOne } from "./typesa
 import {
   draftRoundFilename,
   draftWorkingPath,
+  FINDINGS_WORKING_FILENAME,
+  findingsWorkingPath,
   restoreWorkingDraftFromLatestSnapshot,
   snapshotWorkingDraft,
+  unresolvedFindingsFilename,
 } from "./draft-artifacts"
+import {
+  FINDINGS_MCP_TOKEN_OPTION,
+  issueFindingsMcpGrant,
+  revokeFindingsMcpGrant,
+} from "./findings-mcp"
 import {
   designHtmlArtifactName,
   designWorkingPath,
@@ -136,6 +144,7 @@ export async function disposeDrafterWritingSession(requestId: string) {
   const handle = drafterWritingSessions.get(requestId)
   drafterWritingSessions.delete(requestId)
   await handle?.dispose?.().catch(() => {})
+  await revokeFindingsMcpGrant(requestId)
 }
 
 // One keepAlive session for html-designer → graphical → reading-experience.
@@ -299,6 +308,27 @@ export function standingWritingContext(
   const reader = readerContextBlock(state).trim()
   if (reader) parts.push(`Reader calibration:\n${reader}`)
   return `\n${parts.join("\n\n")}\n`
+}
+
+export function providerUsesFindingsMcp(runtime: AgentRuntime, role: string): boolean {
+  const capabilities = runtime.providerForRole?.(role)?.capabilities
+  if (!capabilities) return false
+  return !capabilities.has("inputFileAttachments")
+}
+
+async function drafterFindingsMcpOptions(input: {
+  runtime: AgentRuntime
+  state: ResearchState
+  dataDir?: string
+}): Promise<{ providerOptions: Record<string, unknown> } | undefined> {
+  if (!providerUsesFindingsMcp(input.runtime, DRAFTER_ROLE)) return undefined
+  if (!input.state.outputPath || !input.dataDir) return undefined
+  const token = await issueFindingsMcpGrant({
+    requestId: input.state.requestId,
+    outputPath: input.state.outputPath,
+    dataDir: input.dataDir,
+  })
+  return { providerOptions: { [FINDINGS_MCP_TOKEN_OPTION]: token } }
 }
 
 async function fileExists(path: string) {
@@ -1179,6 +1209,7 @@ export async function draftFullDraft(
     prompt,
     outputFile: workingFile,
     contextFilename: "draft.md",
+    dataDir: config.env.QUORUM_DATA_DIR,
     telemetry,
     telemetryName: "agent.draftFullDraft",
     telemetryAgentName: DRAFTER_ROLE,
@@ -1359,6 +1390,7 @@ export async function reviseReadability(
     outputFile: workingFile,
     outputAction: "edit",
     contextFilename: "draft.md",
+    dataDir: config.env.QUORUM_DATA_DIR,
     telemetry,
     telemetryName: "agent.reviseReadability",
     telemetryAgentName: DRAFTER_ROLE,
@@ -1431,8 +1463,14 @@ async function createObservedHandle(input: {
   requestId: string
   observer?: RunObserver
   displayRole?: string
+  providerOptions?: Record<string, unknown>
 }): Promise<AgentRunHandle> {
-  const handle = await input.runtime.createHandle(input.role, input.title)
+  const handle = await input.runtime.createHandle(
+    input.role,
+    input.title,
+    undefined,
+    input.providerOptions ? { providerOptions: input.providerOptions } : undefined,
+  )
   observeSession(input.observer, {
     sessionID: handle.id,
     role: input.displayRole ?? input.role,
@@ -1447,6 +1485,7 @@ async function getOrCreateDrafterWritingHandle(input: {
   node: DrafterWritingNode
   title: string
   observer?: RunObserver
+  dataDir?: string
 }): Promise<AgentRunHandle> {
   const cached = drafterWritingSessions.get(input.state.requestId)
   if (cached) {
@@ -1454,6 +1493,7 @@ async function getOrCreateDrafterWritingHandle(input: {
     return cached
   }
 
+  const mcpOptions = await drafterFindingsMcpOptions(input)
   const outputPath = input.state.outputPath
   if (outputPath) {
     const current = await findSessionLedgerEntry(outputPath, {
@@ -1473,7 +1513,12 @@ async function getOrCreateDrafterWritingHandle(input: {
       && input.runtime.resumeHandle
     ) {
       try {
-        const resumed = await input.runtime.resumeHandle(DRAFTER_ROLE, input.title, prior.handleId)
+        const resumed = await input.runtime.resumeHandle(
+          DRAFTER_ROLE,
+          input.title,
+          prior.handleId,
+          mcpOptions,
+        )
         resumed.keepAlive = true
         resumed.keepAliveFresh = false
         drafterWritingSessions.set(input.state.requestId, resumed)
@@ -1504,6 +1549,7 @@ async function getOrCreateDrafterWritingHandle(input: {
     requestId: input.state.requestId,
     observer: input.observer,
     displayRole: "drafter",
+    providerOptions: mcpOptions?.providerOptions,
   })
   handle.keepAlive = true
   handle.keepAliveFresh = true
@@ -1594,6 +1640,7 @@ async function promptWritingSession(input: {
   outputFile: string
   outputAction?: "write" | "edit"
   extraInputFiles?: PromptFileInput[]
+  dataDir?: string
   contextFilename: "draft.md" | "document.html"
   telemetry?: GraphTelemetry
   telemetryName: string
@@ -1608,6 +1655,7 @@ async function promptWritingSession(input: {
           node: input.node as DrafterWritingNode,
           title: input.title,
           observer: input.observer,
+          dataDir: input.dataDir,
         })
       : await getOrCreateDesignerWritingHandle({
           runtime: input.runtime,
@@ -2496,7 +2544,7 @@ function summarizeNodeResult(result: unknown) {
   return result
 }
 
-async function reviseDraft(
+export async function reviseDraft(
   config: RuntimeConfig,
   runtime: AgentRuntime,
   promptBundle: PromptBundle,
@@ -2509,11 +2557,14 @@ async function reviseDraft(
 
   await ensureRunDirPath(state.outputPath)
 
-  // Write unresolved findings to a temp JSON file for attachment
-  const findingsFile = `${state.outputPath}/unresolved-findings-round-${state.round}.json`
-  await writeRunJsonArtifact(state.outputPath, `unresolved-findings-round-${state.round}.json`, state.unresolvedFindings)
+  const roundFindingsName = unresolvedFindingsFilename(state.round)
+  await writeRunJsonArtifact(state.outputPath, roundFindingsName, state.unresolvedFindings)
+  const findingsFile = findingsWorkingPath(state.outputPath)
+  await writeRunJsonArtifact(state.outputPath, FINDINGS_WORKING_FILENAME, state.unresolvedFindings)
   const workingFile = draftWorkingPath(state.outputPath)
   const nextRound = state.round + 1
+  const findingsInput = { path: findingsFile, mime: "text/plain", filename: "findings.json" } satisfies PromptFileInput
+  const useFindingsMcp = providerUsesFindingsMcp(runtime, DRAFTER_ROLE)
 
   const response = await promptWritingSession({
     kind: "drafter",
@@ -2531,9 +2582,8 @@ async function reviseDraft(
     ),
     outputFile: workingFile,
     outputAction: "edit",
-    extraInputFiles: [
-      { path: findingsFile, mime: "text/plain", filename: "findings.json" },
-    ],
+    extraInputFiles: useFindingsMcp ? undefined : [findingsInput],
+    dataDir: config.env.QUORUM_DATA_DIR,
     contextFilename: "draft.md",
     telemetry,
     telemetryName: "agent.reviseDraft",

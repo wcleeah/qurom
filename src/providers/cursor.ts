@@ -21,6 +21,11 @@ import { estimateCursorCostUsd, resolveCursorPricingModelId } from "../cursor-pr
 import { foldCursorUsage, hasUsage, type UsageTotals } from "../usage"
 import { toCostDetails, toUsageDetails, type TraceObservation } from "../telemetry"
 import { toCursorMcpServers } from "../mcp-config"
+import {
+  extractFindingsMcpToken,
+  FINDINGS_MCP_SERVER_NAME,
+  findingsMcpCursorServer,
+} from "../findings-mcp"
 import type {
   AgentProvider,
   AgentRunHandle,
@@ -433,6 +438,20 @@ function logCursorPromptError(input: {
     status: error instanceof CursorRunStatusError ? error.status : undefined,
     result: error instanceof CursorRunStatusError ? error.result : undefined,
   })
+}
+
+function cursorMcpServersForHandle(input: {
+  config: RuntimeConfig
+  role: AgentRole
+  providerOptions?: Record<string, unknown>
+}) {
+  const registry = toCursorMcpServers(input.config.mcpRegistry, input.config.env, input.role)
+  const token = extractFindingsMcpToken(input.providerOptions)
+  if (!token) return registry
+  const extra = {
+    [FINDINGS_MCP_SERVER_NAME]: findingsMcpCursorServer(token, input.config.env.QUORUM_MCP_BASE_URL),
+  }
+  return { ...registry, ...extra }
 }
 
 function cursorRuntimeOptions(
@@ -1044,7 +1063,7 @@ export const cursorProvider: AgentProvider = {
     const options = cursorOptionsForRole(input.config, input.role)
     const catalogModel = (await listCursorModels(apiKey, model)).find((entry) => entry.id === model)
     const modelParams = cursorModelParamsForRole(input.config, input.role, catalogModel)
-    const mcpServers = toCursorMcpServers(input.config.mcpRegistry, input.config.env, input.role)
+    const mcpServers = cursorMcpServersForHandle(input)
     const agent = await Agent.create({
       apiKey,
       name: clampCursorAgentName(input.title),
@@ -1069,6 +1088,7 @@ export const cursorProvider: AgentProvider = {
         variant: input.config.roleBindings[input.role]?.variant,
       },
       dispose: () => disposeAgent(agentId),
+      findingsMcpToken: extractFindingsMcpToken(input.providerOptions),
     }
   },
   async resumeRunHandle(input): Promise<AgentRunHandle> {
@@ -1089,6 +1109,7 @@ export const cursorProvider: AgentProvider = {
           variant: input.config.roleBindings[input.role]?.variant,
         },
         dispose: () => disposeAgent(input.handleId),
+        findingsMcpToken: extractFindingsMcpToken(input.providerOptions),
       }
     }
 
@@ -1096,7 +1117,7 @@ export const cursorProvider: AgentProvider = {
     const options = cursorOptionsForRole(input.config, input.role)
     const catalogModel = (await listCursorModels(apiKey, model)).find((entry) => entry.id === model)
     const modelParams = cursorModelParamsForRole(input.config, input.role, catalogModel)
-    const mcpServers = toCursorMcpServers(input.config.mcpRegistry, input.config.env, input.role)
+    const mcpServers = cursorMcpServersForHandle(input)
     // Inline MCP servers are not persisted across resume; pass them again.
     const agent = await Agent.resume(input.handleId, {
       apiKey,
@@ -1117,6 +1138,7 @@ export const cursorProvider: AgentProvider = {
         variant: input.config.roleBindings[input.role]?.variant,
       },
       dispose: () => disposeAgent(agentId),
+      findingsMcpToken: extractFindingsMcpToken(input.providerOptions),
     }
   },
   async collectExistingOutput(input) {

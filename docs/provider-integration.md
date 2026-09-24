@@ -141,6 +141,8 @@ Provider behavior should follow capability:
 - With `inlineInputContext`, `AgentRuntime` inlines supported files into semantic context blocks.
 - With neither, `AgentRuntime` rejects prompts that include `inputFiles`.
 
+Conversation compaction can drop inlined findings. `reviseDraft` therefore does not inline findings for providers without attachments. Those providers receive a per-session Qurom MCP at `/mcp/findings`, authenticated by a Bearer token passed in the MCP definition at `Agent.create` / resume. The agent calls `get_unresolved_findings` when findings are missing from the conversation. Attachment providers keep `findings.json` on disk and re-read it. Set `QUORUM_MCP_BASE_URL` when Cursor cloud agents must reach this process.
+
 If a provider has low prompt-size limits, add explicit tests around attachment inlining and failure behavior. Do not silently drop attached files.
 
 ---
