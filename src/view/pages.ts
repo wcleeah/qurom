@@ -8,6 +8,7 @@ import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
 import { hasReviewableMarkdown } from "../readability/posthoc"
 import { POSTHOC_REPORT_FILENAME } from "../readability/schema"
 import { renderRunControlsSection, renderUnarchiveForm, resolveRunResumeActions } from "./run-controls"
+import { renderFindingsMcpCheckPanel, FINDINGS_MCP_CHECK_SCRIPT } from "./findings-mcp-check"
 import { tryGetRunManager } from "../run-manager"
 import { renderRerunQueueStrip } from "./rerun-queue-view"
 import { renderStructuredJson } from "./artifact-renderers"
@@ -723,6 +724,7 @@ export async function renderRun(name: string): Promise<Response> {
 ${isRunning ? renderRefreshControls() : ""}
 ${renderRerunQueueStrip(rerunQueue)}
 ${runControlsHtml}
+${renderFindingsMcpCheckPanel(name)}
 ${interviewChatSection}
 <div class="header-bar">
   <div class="header-main">
@@ -753,6 +755,7 @@ ${debugLogSection}
 ${markdownSection}
 ${filesSection}
 ${READ_SCRIPT}
+${FINDINGS_MCP_CHECK_SCRIPT}
 ${hasFinalHtml ? SHARE_SCRIPT : ""}
 ${hasResearchRounds ? ROUND_TABS_SCRIPT : ""}
 ${isRunning ? POLLING_SCRIPT : ""}
