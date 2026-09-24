@@ -194,6 +194,8 @@ describe("view artifact renderers", () => {
         unitId: "s1-p1",
         section: "Wire format",
         quote: "The framing bit chooses the decoder.",
+        startLine: 12,
+        endLine: 14,
         criterion: "convolution",
         score: 1.8,
         confidence: 0.74,
@@ -208,6 +210,7 @@ describe("view artifact renderers", () => {
     expect(html).toContain("inversion earned")
     expect(html).toContain("class=\"readability-quote\"")
     expect(html).toContain("The framing bit chooses the decoder.")
+    expect(html).toContain("lines 12–14")
     expect(html).toMatch(/readability-quote">The framing bit chooses the decoder\.<\/blockquote>[\s\S]*<details>/)
     expect(html).not.toContain("json-tree")
   })

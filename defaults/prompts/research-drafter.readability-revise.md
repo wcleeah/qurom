@@ -2,7 +2,7 @@ Revise the article for readability. Apply the local edits in the review notes, o
 
 Request: {requestLabel}
 {standingContext}
-The current article is the working markdown file from the previous writing step. Edit that file in place. Do not rewrite the whole article, and do not create a new draft file.
+The current article is the working markdown file from the previous writing step. Edit that file in place. Do not rewrite the whole article, and do not create a new draft file. The review notes name line ranges in that file. Read those spans first, then edit. Work from the bottom of the file so later ranges stay valid.
 
 {readabilityHints}
 

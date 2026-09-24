@@ -130,15 +130,16 @@ Default seed: apply local edits in the review notes, or leave a passage when the
 ```markdown
 ## Readability review
 
-Local processing notes. Ignore one when the marked style is doing work.
+Local processing notes. Ignore one when the marked style is doing work. Read every listed span in the working markdown file first, then edit. Work from the bottom of the file so line numbers stay valid. Do not guess the passage from this prompt.
 
 Remedy: unnest = flatten clauses, keep the paragraph; split = more than one move; uninvert = restore subject–verb order; simplify_words = same claim, plainer diction; lower_register = drop performative formality only.
 
-- [s3-p2] Wire format — convolution 2.1 (conf 0.74); remedy: unnest
-  That which the protocol conceals, the wire format makes inevitable:
+- [s3-p2] Wire format — lines 84–91 — convolution 2.1 (conf 0.74); remedy: unnest
 ```
 
-**All** hotspots, no cap. One bullet per tripped criterion.
+**All** hotspot units, no cap. One bullet per unit (several tripped scores share that bullet). Listed from the bottom of the file so earlier edits do not shift later ranges. Paragraph text stays in the report JSON for the dashboard; it is not copied into the prompt.
+
+The drafter prompt tells the agent to read those spans in the working markdown file first, then edit in place. Do not re-attach `draft.md` on a Cursor follow-up — that would inline the whole article.
 
 Auditor `research-drafter.revise.md` is unchanged (no hints). Draft prompt: no Jev rubric. Clarity audit: one fence (throughline/idea-density vs packed syntax of one idea).
 

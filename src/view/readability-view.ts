@@ -1,3 +1,4 @@
+import { formatReadabilityLineSpan } from "../readability/hints"
 import type { ReadabilityReport, ReadabilityUnit, ScoreCriterion } from "../readability/schema"
 import { isPosthocReadabilityReport, SCORE_CRITERIA } from "../readability/schema"
 import {
@@ -56,6 +57,11 @@ function renderScoreBar(criterion: ScoreCriterion, unit: ReadabilityUnit, thresh
 </div>`
 }
 
+function lineSpanChip(startLine?: number, endLine?: number) {
+  const span = formatReadabilityLineSpan(startLine, endLine)
+  return span ? `<span class="readability-chip">${escapeHtml(span)}</span>` : ""
+}
+
 function renderQuote(quote: string) {
   return `<blockquote class="readability-quote">${escapeHtml(quote)}</blockquote>`
 }
@@ -68,6 +74,7 @@ function renderHotspot(report: ReadabilityReport) {
   <div class="readability-hotspot-meta">
     <code>${escapeHtml(hotspot.unitId)}</code>
     <span>${escapeHtml(section)}</span>
+    ${lineSpanChip(hotspot.startLine, hotspot.endLine)}
     <span class="readability-chip">${escapeHtml(hotspot.criterion)} ${escapeHtml(formatScore(hotspot.score))}</span>
     <span class="readability-chip">conf ${escapeHtml(formatScore(hotspot.confidence))}</span>
     <span class="readability-remedy">${escapeHtml(hotspot.remedy)}</span>
@@ -100,6 +107,7 @@ function renderUnit(unit: ReadabilityUnit, thresholds: ReadabilityThresholds) {
   <div class="readability-unit-meta">
     <code>${escapeHtml(unit.id)}</code>
     <span>${escapeHtml(section)}</span>
+    ${lineSpanChip(unit.startLine, unit.endLine)}
     <span class="readability-remedy">${escapeHtml(unit.remedy.choice)}</span>
     ${cached}
   </div>
