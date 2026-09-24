@@ -206,11 +206,11 @@ Builds the full drafting prompt from:
 - reader context
 - `research-drafter.draft.md`
 
-The designated drafter writes the live working file `draft.md` on a keepAlive writing session. The graph snapshots that file to `draft-round-N.md`. Finding review and rebuttal review still mint independent one-shot sessions.
+The designated drafter writes the live working file `draft.md` on a keepAlive writing session. The graph snapshots that file to `draft-round-N.md`. Finding review and rebuttal review still mint independent one-shot sessions. The first prompt on a writing session includes research-tool hints and reader calibration. Later follow-ups on that live session omit both — they are already in history. A replacement session after death or process restart includes them again.
 
 ### `scoreReadability` / `reviseReadability`
 
-Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review on the same writing session. The drafter edits `draft.md` in place; the graph snapshots `draft-round-N-readability-M.md` and refreshes `draft-round-N.md`. Not an auditor: no vote, no findings, no rebuttal. Jev state includes a constant `audience`: the reader is fluent but not a native English speaker. See [readability-review-plan.md](./readability-review-plan.md).
+Readability review gate (TypeSafe Jev). Scores each prose paragraph, then either continues to audits (zero hotspots, skipped, or max tries) or sends the drafter a readability review on the same writing session. The drafter edits `draft.md` in place; the graph snapshots `draft-round-N-readability-M.md` and refreshes `draft-round-N.md`. That follow-up omits research-tool hints and reader calibration unless the writing session was just minted. Not an auditor: no vote, no findings, no rebuttal. Jev state includes a constant `audience`: the reader is fluent but not a native English speaker. See [readability-review-plan.md](./readability-review-plan.md).
 
 Finished runs can also request a **score-only post-run review** (`POST /api/runs/:id/readability-review`). That path does not resume the graph or rewrite `final.md`. It writes sidecar artifacts `readability-review.json`, `readability-review.jev.json`, and `readability-review-status.json` using the current quorum thresholds and model. If readability is disabled or `TYPESAFE_API_KEY` is missing, the request fails instead of writing a skipped-pass report.
 
@@ -266,7 +266,7 @@ The graph also computes a signature of unresolved findings to detect stagnation 
 
 ### `reviseDraft`
 
-When consensus requires revision, the same keepAlive writing session edits `draft.md` in place from the unresolved findings (attached as JSON). The graph snapshots the next `draft-round-N.md`. The revision prompt is intentionally surgical: fix only what findings identify, preserve uncriticized text, and avoid mentioning the review process.
+When consensus requires revision, the same keepAlive writing session edits `draft.md` in place from the unresolved findings (attached as JSON). The graph snapshots the next `draft-round-N.md`. The revision prompt is intentionally surgical: fix only what findings identify, preserve uncriticized text, and avoid mentioning the review process. Like readability, it repeats research-tool hints and reader calibration only when the writing session is new.
 
 ---
 
@@ -287,6 +287,8 @@ The resulting profile affects drafting through `readerContextBlock()`:
 - The learning goal is injected so the draft can prioritize the right depth.
 
 If the feature is disabled or the turn budget is exhausted, the graph continues without a profile.
+
+The interviewer reuses one keepAlive session across turns. The first prompt on that session includes research-tool hints. Later follow-ups omit the hints (they are already in history) but still send the current `profileSoFar` and transcript. A freshly minted interviewer session after process restart includes the hints again.
 
 ---
 

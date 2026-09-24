@@ -1,12 +1,7 @@
 Revise the article for readability. Apply the local edits in the review notes, or leave a passage when the marked style is doing work.
 
 Request: {requestLabel}
-
-{researchToolHint}
-
-Reader calibration:
-{readerContext}
-
+{standingContext}
 The current article is the working markdown file from the previous writing step. Edit that file in place. Do not rewrite the whole article, and do not create a new draft file.
 
 {readabilityHints}
