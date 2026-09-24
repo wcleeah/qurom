@@ -712,4 +712,44 @@ describe("telemetry view", () => {
     expect(enhanceTotals.usage.tokensIn).toBe(2_628_133)
     expect(sessionTotalsForNode(sessionTelemetry, [], "interactiveEnhance").usage.tokensIn).toBe(2_628_133)
   })
+
+  test("splits keep-alive design usage by per-call node", () => {
+    const sessionTelemetry = {
+      version: 1 as const,
+      sessions: [{
+        sessionId: "bc-designer",
+        role: "html-designer",
+        provider: "cursor",
+        node: "readingExperienceEnhance",
+        round: 0,
+        calls: [
+          {
+            cursorRunId: "run-design",
+            node: "runDesignHtml",
+            completedAt: "2026-09-24T04:52:45.000Z",
+            usage: { tokensIn: 8, tokensOut: 100, costUsd: 1, costAvailable: true, costEstimated: true },
+            usageSource: "csv-import" as const,
+          },
+          {
+            cursorRunId: "run-graphics",
+            node: "graphicalEnhance",
+            completedAt: "2026-09-24T04:55:25.000Z",
+            usage: { tokensIn: 24, tokensOut: 200, costUsd: 2, costAvailable: true, costEstimated: true },
+            usageSource: "csv-import" as const,
+          },
+          {
+            cursorRunId: "run-reading",
+            node: "readingExperienceEnhance",
+            completedAt: "2026-09-24T04:56:50.000Z",
+            usage: { tokensIn: 16, tokensOut: 300, costUsd: 3, costAvailable: true, costEstimated: true },
+            usageSource: "csv-import" as const,
+          },
+        ],
+      }],
+    }
+
+    expect(sessionTotalsForNode(sessionTelemetry, [], "runDesignHtml").usage.tokensOut).toBe(100)
+    expect(sessionTotalsForNode(sessionTelemetry, [], "graphicalEnhance").usage.tokensOut).toBe(200)
+    expect(sessionTotalsForNode(sessionTelemetry, [], "readingExperienceEnhance").usage.tokensOut).toBe(300)
+  })
 })

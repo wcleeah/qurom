@@ -31,6 +31,8 @@ export type SessionTelemetryCall = {
   resolvedModel?: string
   durationMs?: number
   completedAt?: string
+  node?: string
+  round?: number
   usage?: UsageTotals
   usageSource?: "sdk" | "csv-import" | "turso-import" | "opencode-import"
 }
@@ -162,7 +164,6 @@ export function applySessionTelemetryEvent(
     return next
   }
 
-  const completedAt = event.completedAt ? new Date(event.completedAt).toISOString() : new Date().toISOString()
   let call = findCall(record, event.cursorRunId)
   if (!call) {
     call = {}
@@ -173,7 +174,16 @@ export function applySessionTelemetryEvent(
   if (event.callIndex !== undefined) call.callIndex = event.callIndex
   if (event.resolvedModel !== undefined) call.resolvedModel = event.resolvedModel
   if (event.durationMs !== undefined) call.durationMs = event.durationMs
-  call.completedAt = completedAt
+  if (event.node !== undefined) call.node = event.node
+  if (event.round !== undefined) call.round = event.round
+  const incomingCompletedAt = event.completedAt ? new Date(event.completedAt).toISOString() : undefined
+  if (incomingCompletedAt) {
+    if (!call.completedAt || event.usageSource !== "csv-import") {
+      call.completedAt = incomingCompletedAt
+    }
+  } else if (!call.completedAt) {
+    call.completedAt = new Date().toISOString()
+  }
   if (event.usage) call.usage = { ...event.usage }
   if (event.usageSource) call.usageSource = event.usageSource
 

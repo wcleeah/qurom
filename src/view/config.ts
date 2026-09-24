@@ -158,7 +158,7 @@ function renderCursorUsageImportSection(importSummary?: CursorUsageImportSummary
 
   return section("Cursor usage import", `${summaryHtml}
 <form class="config-form" method="POST" action="/config/cursor-usage-import" enctype="multipart/form-data">
-  <label class="form-field"><span>Usage CSV</span><input class="form-input" type="file" name="csv" accept=".csv,text/csv" required><small>Export from Cursor settings → Usage. Matches by Cloud Agent ID and call order.</small></label>
+  <label class="form-field"><span>Usage CSV</span><input class="form-input" type="file" name="csv" accept=".csv,text/csv" required><small>Matches by Cloud Agent ID. Finished calls are paired in time order; failed retries and empty Free rows are skipped so one extra metadata file no longer drops the whole agent.</small></label>
   <div class="form-actions"><button type="submit" class="btn btn-primary">Import usage into runs</button></div>
 </form>`)
 }

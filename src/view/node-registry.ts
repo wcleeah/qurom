@@ -156,7 +156,8 @@ export const GRAPH_NODES: NodeDefinition[] = [
     label: "Summarize output",
     order: 15,
     phase: "research",
-    filePatterns: [/^summary\.json$/],
+    liveNodeAliases: ["enrichApprovedOutput"],
+    filePatterns: [/^summary\.json$/, /^artifact-summary\.json$/],
     roundScoped: false,
   },
   {
