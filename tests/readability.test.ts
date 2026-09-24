@@ -6,9 +6,9 @@ import { join } from "node:path"
 import type { SystemOneResult } from "@typesafe-ai/sdk"
 
 import type { AgentRuntime } from "../src/agent-runtime/runtime"
-import { formatReadabilityHints } from "../src/readability/hints"
+import { formatReadabilityHints, formatReadabilityLineSpan } from "../src/readability/hints"
 import { deriveHotspots, scoreDraftReadability, takeUnchangedPassedUnit } from "../src/readability/score"
-import { segmentDraft } from "../src/readability/segment"
+import { segmentDraft, type SegmentedUnit } from "../src/readability/segment"
 import { readabilityReportSchema, POSTHOC_RAW_FILENAME, POSTHOC_REPORT_FILENAME, type ReadabilityHotspot, type ReadabilityReport, type ReadabilityUnit } from "../src/readability/schema"
 import {
   hasReviewableMarkdown,
@@ -31,6 +31,19 @@ import { emptyPromptBundle } from "../src/prompt-assets"
 import { AUDITOR_ROLES } from "../src/role-registry"
 import type { ResearchState } from "../src/schema"
 import { testRuntimeConfig } from "./test-env"
+
+function seg(id: string, quote: string, extra: Partial<Omit<SegmentedUnit, "id" | "quote">> = {}): SegmentedUnit {
+  return {
+    id,
+    section: "Intro",
+    quote,
+    before: "",
+    after: "",
+    startLine: 1,
+    endLine: 1,
+    ...extra,
+  }
+}
 
 function scoreAnswer(score: number, confidence = 0.85) {
   return {
@@ -120,6 +133,24 @@ This bibliographic paragraph must not be scored even though it is long enough.
     expect(units.map((unit) => unit.id)).toEqual(["s1-p1", "s2-p1"])
     expect(units[0]?.section).toBe("Title")
     expect(units[1]?.section).toBe("Details")
+    expect(units[0]?.startLine).toBe(3)
+    expect(units[0]?.endLine).toBe(3)
+    expect(units[1]?.startLine).toBe(7)
+    expect(units[1]?.endLine).toBe(7)
+  })
+
+  test("records inclusive 1-based line spans for wrapped paragraphs", () => {
+    const units = segmentDraft(`# Title
+
+This opening paragraph is long enough
+to count as prose for the readability reviewer.
+
+## Details
+
+Another substantial paragraph that should be scored because it carries a complete idea.
+`)
+    expect(units[0]).toMatchObject({ id: "s1-p1", startLine: 3, endLine: 4 })
+    expect(units[1]).toMatchObject({ id: "s2-p1", startLine: 8, endLine: 8 })
   })
 })
 
@@ -163,14 +194,28 @@ describe("deriveHotspots", () => {
     })
     expect(deriveHotspots([quiet], DEFAULT_READABILITY_THRESHOLDS)).toHaveLength(0)
   })
+
+  test("copies the unit's 1-based line span onto each hotspot", () => {
+    const tripped = unit({
+      startLine: 12,
+      endLine: 14,
+      scores: { ...unit().scores, convolution: scoreAnswer(1.8) },
+    })
+    expect(deriveHotspots([tripped], DEFAULT_READABILITY_THRESHOLDS)[0]).toMatchObject({
+      startLine: 12,
+      endLine: 14,
+    })
+  })
 })
 
 describe("formatReadabilityHints", () => {
-  test("includes every hotspot and no cap", () => {
+  test("includes every hotspot unit and no cap", () => {
     const hotspots = Array.from({ length: 10 }, (_, i) => ({
       unitId: `s1-p${i + 1}`,
       section: "Wire format",
       quote: `Paragraph ${i + 1} is long enough to quote in the readability review notes.`,
+      startLine: 10 + i * 4,
+      endLine: 11 + i * 4,
       criterion: "convolution" as const,
       score: 1.8,
       confidence: 0.74,
@@ -179,20 +224,77 @@ describe("formatReadabilityHints", () => {
     const hints = formatReadabilityHints(hotspots)
     expect(hints).toContain("## Readability review")
     expect(hints.match(/^\- \[/gm)?.length).toBe(10)
+    expect(hints).toContain("lines 46–47")
+    expect(hints).toContain("lines 10–11")
+    expect(hints.indexOf("[s1-p10]")).toBeLessThan(hints.indexOf("[s1-p1]"))
+    expect(hints).not.toContain("Paragraph 1 is long enough")
     expect(hints).not.toContain("auditor")
+  })
+
+  test("collapses multiple tripped scores for one unit onto one line range", () => {
+    const hints = formatReadabilityHints([
+      {
+        unitId: "s3-p2",
+        section: "Wire format",
+        quote: "That which the protocol conceals, the wire format makes inevitable:",
+        startLine: 84,
+        endLine: 91,
+        criterion: "convolution",
+        score: 2.1,
+        confidence: 0.74,
+        remedy: "unnest",
+      },
+      {
+        unitId: "s3-p2",
+        section: "Wire format",
+        quote: "That which the protocol conceals, the wire format makes inevitable:",
+        startLine: 84,
+        endLine: 91,
+        criterion: "density",
+        score: 1.6,
+        confidence: 0.8,
+        remedy: "split",
+      },
+    ])
+    expect(hints.match(/^\- \[/gm)?.length).toBe(1)
+    expect(hints).toContain("[s3-p2] Wire format — lines 84–91")
+    expect(hints).toContain("convolution 2.1")
+    expect(hints).toContain("density 1.6")
+    expect(hints).toContain("remedy: unnest")
+    expect(hints).toContain("remedy: split")
+    expect(hints).not.toContain("That which the protocol conceals")
+  })
+
+  test("falls back to section-only bullets when a report has no line spans", () => {
+    const hints = formatReadabilityHints([{
+      unitId: "s3-p2",
+      section: "Wire format",
+      quote: "That which the protocol conceals, the wire format makes inevitable:",
+      criterion: "convolution",
+      score: 2.1,
+      confidence: 0.74,
+      remedy: "unnest",
+    }])
+    expect(hints).toContain("- [s3-p2] Wire format — convolution 2.1")
+    expect(hints).not.toContain("— line")
+    expect(hints).not.toContain("That which the protocol conceals")
+  })
+})
+
+describe("formatReadabilityLineSpan", () => {
+  test("names a single line or an inclusive range", () => {
+    expect(formatReadabilityLineSpan(3, 3)).toBe("line 3")
+    expect(formatReadabilityLineSpan(84, 91)).toBe("lines 84–91")
+    expect(formatReadabilityLineSpan(91, 84)).toBe("lines 84–91")
+    expect(formatReadabilityLineSpan()).toBeUndefined()
+    expect(formatReadabilityLineSpan(1)).toBeUndefined()
   })
 })
 
 describe("scoreDraftReadability", () => {
   test("marks a draft clean when scores stay below the trip", async () => {
     const { report } = await scoreDraftReadability({
-      units: [{
-        id: "s1-p1",
-        section: "Intro",
-        quote: "A substantial paragraph about the framing bit and how the decoder is chosen.",
-        before: "",
-        after: "",
-      }],
+      units: [seg("s1-p1", "A substantial paragraph about the framing bit and how the decoder is chosen.")],
       context: { articleJob: "Explain framing", reader: { familiar: [], unfamiliar: [] } },
       model: "jev-latest",
       thresholds: DEFAULT_READABILITY_THRESHOLDS,
@@ -208,13 +310,7 @@ describe("scoreDraftReadability", () => {
     const seen: Array<Record<string, unknown>> = []
     const inner = mockSystemOne(0.4)!
     const { raw } = await scoreDraftReadability({
-      units: [{
-        id: "s1-p1",
-        section: "Intro",
-        quote: "A substantial paragraph about the framing bit and how the decoder is chosen.",
-        before: "",
-        after: "",
-      }],
+      units: [seg("s1-p1", "A substantial paragraph about the framing bit and how the decoder is chosen.")],
       context: { articleJob: "Explain framing", reader: { familiar: ["framing"], unfamiliar: [] } },
       model: "jev-latest",
       thresholds: DEFAULT_READABILITY_THRESHOLDS,
@@ -261,8 +357,8 @@ describe("scoreDraftReadability", () => {
     const inner = mockSystemOne(0.2)!
     const { report, raw } = await scoreDraftReadability({
       units: [
-        { id: "s1-p1", section: "Intro", quote: passedQuote, before: "", after: rewritten },
-        { id: "s1-p2", section: "Intro", quote: rewritten, before: passedQuote, after: "" },
+        seg("s1-p1", passedQuote, { after: rewritten, startLine: 3, endLine: 3 }),
+        seg("s1-p2", rewritten, { before: passedQuote, startLine: 5, endLine: 5 }),
       ],
       context: { articleJob: "Explain framing", reader: { familiar: [], unfamiliar: [] } },
       model: "jev-latest",
@@ -280,6 +376,8 @@ describe("scoreDraftReadability", () => {
     expect(report.units[0]?.cached).toBe(true)
     expect(report.units[0]?.quote).toBe(passedQuote)
     expect(report.units[0]?.id).toBe("s1-p1")
+    expect(report.units[0]?.startLine).toBe(3)
+    expect(report.units[0]?.endLine).toBe(3)
     expect(report.units[1]?.cached).toBeUndefined()
     expect(report.units[1]?.quote).toBe(rewritten)
   })
@@ -304,7 +402,7 @@ describe("scoreDraftReadability", () => {
     })
     let calls = 0
     const { report } = await scoreDraftReadability({
-      units: [{ id: "s1-p1", section: "Intro", quote, before: "", after: "" }],
+      units: [seg("s1-p1", quote, { startLine: 3, endLine: 3 })],
       context: { articleJob: "Explain framing", reader: { familiar: [], unfamiliar: [] } },
       model: "jev-latest",
       thresholds: DEFAULT_READABILITY_THRESHOLDS,
@@ -342,8 +440,8 @@ describe("scoreDraftReadability", () => {
     let calls = 0
     const { report } = await scoreDraftReadability({
       units: [
-        { id: "s1-p1", section: "Intro", quote, before: "", after: quote },
-        { id: "s1-p2", section: "Intro", quote, before: quote, after: "" },
+        seg("s1-p1", quote, { after: quote, startLine: 3, endLine: 3 }),
+        seg("s1-p2", quote, { before: quote, startLine: 5, endLine: 5 }),
       ],
       context: { articleJob: "Explain framing", reader: { familiar: [], unfamiliar: [] } },
       model: "jev-latest",
@@ -588,7 +686,7 @@ describe("scoreReadability graph node", () => {
 })
 
 describe("readability review prompt", () => {
-  test("loads the prompt asset and substitutes {readabilityHints}", () => {
+  test("loads the prompt asset and substitutes {readabilityHints}", async () => {
     expect(promptAssetFiles.researchDrafterReadabilityRevise).toBe("research-drafter.readability-revise.md")
     expect(AUDITOR_ROLES).not.toContain("readability-auditor")
 
@@ -596,6 +694,8 @@ describe("readability review prompt", () => {
       unitId: "s3-p2",
       section: "Wire format",
       quote: "That which the protocol conceals, the wire format makes inevitable:",
+      startLine: 84,
+      endLine: 91,
       criterion: "convolution",
       score: 2.1,
       confidence: 0.74,
@@ -628,10 +728,13 @@ describe("readability review prompt", () => {
     )
     expect(prompt).toContain("## Readability review")
     expect(prompt).toContain("[s3-p2]")
+    expect(prompt).toContain("lines 84–91")
     expect(prompt).toContain("unnest")
+    expect(prompt).not.toContain("That which the protocol conceals")
     expect(prompt).not.toContain("{readabilityHints}")
     expect(prompt).not.toContain("auditor")
     expect(prompt).not.toContain("findingId")
+    expect(await Bun.file("defaults/prompts/research-drafter.readability-revise.md").text()).toContain("line ranges")
   })
 
   test("omits research-tool hints and reader calibration when includeStandingContext is false", () => {
@@ -800,6 +903,8 @@ describe("reviseReadability graph node", () => {
           unitId: "s1-p1",
           section: "Wire format",
           quote: original,
+          startLine: 1,
+          endLine: 1,
           criterion: "convolution",
           score: 1.8,
           confidence: 0.74,
@@ -845,7 +950,9 @@ describe("reviseReadability graph node", () => {
         },
       )
       expect(promptText).toContain("[s1-p1]")
+      expect(promptText).toContain("line 1")
       expect(promptText).toContain("unnest")
+      expect(promptText).not.toContain(original)
       expect(outputAction).toBe("edit")
       expect(next.status).toBe("scoring_readability")
       expect(next.readabilityTry).toBe(1)

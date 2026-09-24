@@ -93,6 +93,8 @@ export function deriveHotspots(units: ReadabilityUnit[], thresholds: Readability
         unitId: unit.id,
         section: unit.section,
         quote: unit.quote,
+        startLine: unit.startLine,
+        endLine: unit.endLine,
         criterion,
         score: unit.scores[criterion].score,
         confidence: unit.scores[criterion].confidence,
@@ -125,6 +127,8 @@ function reusedUnit(segmented: SegmentedUnit, previous: ReadabilityUnit): Readab
     id: segmented.id,
     section: segmented.section,
     quote: segmented.quote,
+    startLine: segmented.startLine,
+    endLine: segmented.endLine,
     cached: true,
   }
 }
@@ -155,6 +159,8 @@ function unitFromAnswers(
     id: segmented.id,
     section: segmented.section,
     quote: segmented.quote,
+    startLine: segmented.startLine,
+    endLine: segmented.endLine,
     scores: {
       convolution: toScoreAnswer(answers.convolution),
       inversion: toScoreAnswer(answers.inversion),

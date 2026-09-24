@@ -4,6 +4,8 @@ export type SegmentedUnit = {
   quote: string
   before: string
   after: string
+  startLine: number
+  endLine: number
 }
 
 const MIN_PROSE_CHARS = 40
@@ -38,23 +40,38 @@ function isSkippableParagraph(text: string) {
 
 export function segmentDraft(markdown: string): SegmentedUnit[] {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n")
-  const paragraphs: Array<{ section: string; sectionIndex: number; quote: string }> = []
+  const paragraphs: Array<{
+    section: string
+    sectionIndex: number
+    quote: string
+    startLine: number
+    endLine: number
+  }> = []
   let section = ""
   let sectionIndex = 0
   let inFence = false
   let inTable = false
   let pastSources = false
   let buffer: string[] = []
+  let bufferStart: number | undefined
 
   const flush = () => {
     const quote = buffer.join("\n").trim()
+    const startLine = bufferStart
+    const endLine = bufferStart !== undefined && buffer.length > 0
+      ? bufferStart + buffer.length - 1
+      : undefined
     buffer = []
+    bufferStart = undefined
     if (!quote || pastSources) return
     if (isSkippableParagraph(quote)) return
-    paragraphs.push({ section, sectionIndex, quote })
+    if (startLine === undefined || endLine === undefined) return
+    paragraphs.push({ section, sectionIndex, quote, startLine, endLine })
   }
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!
+    const lineNo = index + 1
     if (isFence(line)) {
       flush()
       inFence = !inFence
@@ -90,6 +107,7 @@ export function segmentDraft(markdown: string): SegmentedUnit[] {
       flush()
       continue
     }
+    if (bufferStart === undefined) bufferStart = lineNo
     buffer.push(line)
   }
   flush()
@@ -104,6 +122,8 @@ export function segmentDraft(markdown: string): SegmentedUnit[] {
       quote: paragraph.quote,
       before: paragraphs[index - 1]?.quote ?? "",
       after: paragraphs[index + 1]?.quote ?? "",
+      startLine: paragraph.startLine,
+      endLine: paragraph.endLine,
     }
   })
 }

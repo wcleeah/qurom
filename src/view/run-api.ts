@@ -3,6 +3,8 @@ import { readRunSourceDocument } from "../document-input"
 import { parseRerunInterviewMode } from "../run-rerun"
 import { scoreCompletedRun } from "../readability/posthoc"
 import { loadRuntimeConfig } from "../config"
+import { quorumDataPaths } from "../data-paths"
+import { checkFindingsMcpForRun } from "../findings-mcp"
 import {
   RunManagerError,
   getRunManager,
@@ -56,6 +58,18 @@ function errorResponse(error: unknown, req?: Request, url?: URL): Response {
     })
   }
   return Response.json({ error: message }, { status: 500 })
+}
+
+function requestOrigin(req: Request): string | undefined {
+  const origin = req.headers.get("origin")
+  if (origin) return origin
+  const referer = req.headers.get("referer")
+  if (!referer) return undefined
+  try {
+    return new URL(referer).origin
+  } catch {
+    return undefined
+  }
 }
 
 export async function handleRunApi(req: Request, path: string, url: URL): Promise<Response | undefined> {
@@ -208,6 +222,39 @@ export async function handleRunApi(req: Request, path: string, url: URL): Promis
         `/runs/${encodeURIComponent(result.runId)}`,
         { ok: true, runId: result.runId },
       )
+    } catch (error) {
+      return errorResponse(error, req, url)
+    }
+  }
+
+  const findingsMcpCheckMatch = path.match(/^\/api\/runs\/(.+?)\/findings-mcp-check$/)
+  if (findingsMcpCheckMatch && req.method === "POST") {
+    try {
+      const runRef = decodeURIComponent(findingsMcpCheckMatch[1])
+      const runName = await resolveRunName(runRef)
+      if (!runName) {
+        throw new RunManagerError(`Run not found: ${runRef}`, 404)
+      }
+      const runDir = safeRunPath(runName)
+      let requestId: string | undefined
+      try {
+        const requestJson = await Bun.file(`${runDir}/request.json`).json() as { requestId?: unknown }
+        if (typeof requestJson.requestId === "string" && requestJson.requestId.trim()) {
+          requestId = requestJson.requestId.trim()
+        }
+      } catch {
+        // request.json may be missing on incomplete runs
+      }
+      if (!requestId) {
+        throw new RunManagerError("This run has no requestId in request.json.", 400)
+      }
+      const result = await checkFindingsMcpForRun({
+        requestId,
+        outputPath: runDir,
+        dataDir: quorumDataPaths().root,
+        requestOrigin: requestOrigin(req),
+      })
+      return Response.json(result, { status: result.ok ? 200 : 502 })
     } catch (error) {
       return errorResponse(error, req, url)
     }

@@ -34,6 +34,8 @@ export const readabilityUnitSchema = z.object({
   id: z.string().min(1),
   section: z.string(),
   quote: z.string(),
+  startLine: z.number().int().positive().optional(),
+  endLine: z.number().int().positive().optional(),
   scores: z.object({
     convolution: scoreAnswerSchema,
     inversion: scoreAnswerSchema,
@@ -54,6 +56,8 @@ export const readabilityHotspotSchema = z.object({
   unitId: z.string().min(1),
   section: z.string(),
   quote: z.string(),
+  startLine: z.number().int().positive().optional(),
+  endLine: z.number().int().positive().optional(),
   criterion: z.enum(SCORE_CRITERIA),
   score: z.number(),
   confidence: z.number().min(0).max(1),
