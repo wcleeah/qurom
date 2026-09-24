@@ -9,6 +9,17 @@ export function usesFrontendDesignSkill(role: string): boolean {
   return (FRONTEND_DESIGN_SKILL_ROLES as readonly string[]).includes(role)
 }
 
+/** KeepAlive follow-ups already have the skill in history. One-shot and fresh sessions still need it inlined. */
+export function includeFrontendDesignSkill(input: {
+  role: string
+  keepAlive?: boolean
+  keepAliveFresh?: boolean
+}): boolean {
+  if (!usesFrontendDesignSkill(input.role)) return false
+  if (input.keepAlive && !input.keepAliveFresh) return false
+  return true
+}
+
 export async function readFrontendDesignSkill(workspaceDir?: string): Promise<string> {
   const candidates = [
     join(opencodeSkillsDir(workspaceDir), FRONTEND_DESIGN_SKILL_NAME, "SKILL.md"),

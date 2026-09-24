@@ -54,10 +54,11 @@ describe("drafter writing session reuse", () => {
         resumeHandle: async () => {
           throw new Error("should reuse the in-memory handle")
         },
-        prompt: async (input: { outputFile?: string; outputAction?: string; inputFiles?: unknown[]; prompt?: string }) => {
+        prompt: async (input: { outputFile?: string; outputAction?: string; inputFiles?: unknown[]; prompt?: string; standingContextIncluded?: boolean }) => {
           expect(input.outputFile).toBe(join(dir, "draft.md"))
           if (input.outputAction === "edit") {
             expect(input.inputFiles).toBeUndefined()
+            expect(input.standingContextIncluded).toBe(false)
             expect(input.prompt).not.toContain("Research tool preferences")
             expect(input.prompt).not.toContain("Reader calibration")
             expect(input.prompt).not.toContain("Reader primary goal")
@@ -166,6 +167,7 @@ describe("drafter writing session reuse", () => {
           outputFile?: string
           outputAction?: string
           inputFiles?: Array<{ filename: string }>
+          standingContextIncluded?: boolean
         }) => {
           if (input.outputAction === "edit") {
             readabilityPrompts += 1
@@ -178,6 +180,7 @@ describe("drafter writing session reuse", () => {
             expect(input.prompt).toContain("Research tool preferences")
             expect(input.prompt).toContain("Reader calibration:")
             expect(input.prompt).toContain("Reader primary goal")
+            expect(input.standingContextIncluded).toBe(true)
             expect(await Bun.file(join(dir, "draft.md")).text()).toContain("First complete article")
             await Bun.write(input.outputFile!, "Edited article for readability.\n")
             return { text: "OK" }

@@ -1,3 +1,7 @@
+import type { UsageTotals } from "../usage"
+
+export type { UsageTotals }
+
 export type RunStatus = "approved" | "failed" | "running"
 
 export interface RunMeta {
@@ -53,14 +57,6 @@ export interface LiveAgentStatus {
     error?: string
   }>
   reasoning: string
-}
-
-export interface UsageTotals {
-  tokensIn: number
-  tokensOut: number
-  costUsd?: number
-  costAvailable?: boolean
-  costEstimated?: boolean
 }
 
 export interface AgentUsageSnapshot extends UsageTotals {

@@ -13,7 +13,7 @@ import type {
   SessionHarvestContext,
 } from "../providers/types"
 import type { PromptFileInput } from "../opencode"
-import { prependFrontendDesignSkill, usesFrontendDesignSkill } from "../frontend-design-skill"
+import { includeFrontendDesignSkill, prependFrontendDesignSkill, usesFrontendDesignSkill } from "../frontend-design-skill"
 import { assertNonEmptyInputFiles } from "./input-context"
 import {
   findSessionLedgerEntry,
@@ -23,6 +23,7 @@ import {
 import { artifactBasename, parseHarvestedResult, readHarvestableLocalFile } from "./harvest"
 import { KeepAliveSessionDeadError, isDeadKeepAliveReason } from "./keep-alive"
 import { extractFindingsMcpToken } from "../findings-mcp"
+import { estimateTokensFromChars } from "../usage"
 
 export { KeepAliveSessionDeadError, isDeadKeepAliveReason } from "./keep-alive"
 
@@ -63,6 +64,8 @@ export type RuntimePromptInput<T> = {
   inputFiles?: PromptFileInput[]
   outputFile?: string
   outputAction?: "write" | "edit"
+  /** When set, records whether keepAlive standing context was included in this prompt. */
+  standingContextIncluded?: boolean
   telemetry?: ProviderPromptInput<T>["telemetry"]
 }
 
@@ -80,6 +83,72 @@ export type AgentRuntime = {
 
 export type AgentRuntimeOptions = {
   providerForRole?: (role: AgentRole) => AgentProvider
+}
+
+async function measureInputFiles(inputFiles: PromptFileInput[] | undefined) {
+  if (!inputFiles || inputFiles.length === 0) {
+    return { count: 0, bytes: 0 }
+  }
+  let bytes = 0
+  for (const file of inputFiles) {
+    bytes += Number(Bun.file(file.path).size)
+  }
+  return { count: inputFiles.length, bytes }
+}
+
+function emitPromptAccounting(input: {
+  bus?: EventBus
+  debugLog?: { write: (type: string, data?: Record<string, unknown>) => void }
+  role: AgentRole
+  handle: AgentRunHandle
+  standingContextIncluded?: boolean
+  frontendSkillIncluded?: boolean
+  prompt: string
+  basePromptChars: number
+  inlined: boolean
+  inputFileCount: number
+  inputFileBytes: number
+}) {
+  const promptChars = input.prompt.length
+  const promptBytes = new TextEncoder().encode(input.prompt).length
+  const payload = {
+    sessionID: input.handle.id,
+    role: input.role,
+    provider: input.handle.providerId,
+    node: input.handle.harvest?.node,
+    round: input.handle.harvest?.round,
+    keepAlive: Boolean(input.handle.keepAlive),
+    keepAliveFresh: Boolean(input.handle.keepAliveFresh),
+    standingContextIncluded: input.standingContextIncluded,
+    frontendSkillIncluded: input.frontendSkillIncluded,
+    promptChars,
+    promptBytes,
+    basePromptChars: input.basePromptChars,
+    estimatedPromptTokens: estimateTokensFromChars(promptChars),
+    inputFileCount: input.inputFileCount,
+    inputFileBytes: input.inputFileBytes,
+    inlined: input.inlined,
+  }
+  input.debugLog?.write("agent.prompt", payload)
+  input.bus?.emit({
+    kind: "agent.prompt",
+    sessionID: payload.sessionID,
+    role: payload.role,
+    provider: payload.provider,
+    node: payload.node,
+    round: payload.round,
+    keepAlive: payload.keepAlive,
+    keepAliveFresh: payload.keepAliveFresh,
+    standingContextIncluded: payload.standingContextIncluded,
+    frontendSkillIncluded: payload.frontendSkillIncluded,
+    promptChars: payload.promptChars,
+    promptBytes: payload.promptBytes,
+    estimatedPromptTokens: payload.estimatedPromptTokens,
+    basePromptChars: payload.basePromptChars,
+    inputFileCount: payload.inputFileCount,
+    inputFileBytes: payload.inputFileBytes,
+    inlined: payload.inlined,
+  })
 }
 
 async function inlineInputFiles(prompt: string, inputFiles: PromptFileInput[] | undefined) {
@@ -462,12 +531,20 @@ export function createAgentRuntime(
         )
         replacement.keepAlive = handle.keepAlive
         replacement.findingsMcpToken = handle.findingsMcpToken
+        replacement.keepAliveFresh = true
         return runtime.prompt({ ...input, handle: replacement })
       }
 
       const outputMode = outputModeFor(provider, input.schema, input.outputFile)
       const workspaceDir = config.env.QUORUM_WORKSPACE_DIRECTORY || config.env.OPENCODE_DIRECTORY
-      const taskPrompt = usesFrontendDesignSkill(input.role)
+      const frontendSkillIncluded = usesFrontendDesignSkill(input.role)
+        ? includeFrontendDesignSkill({
+          role: input.role,
+          keepAlive: handle.keepAlive,
+          keepAliveFresh: handle.keepAliveFresh,
+        })
+        : undefined
+      const taskPrompt = frontendSkillIncluded
         ? await prependFrontendDesignSkill(input.prompt, workspaceDir)
         : input.prompt
       const prompt = renderPromptForOutputMode({
@@ -495,7 +572,22 @@ export function createAgentRuntime(
         expectedArtifact: artifactBasename(input.outputFile),
       })
       try {
+        const measuredFiles = await measureInputFiles(input.inputFiles)
         const promptInput = await renderPromptInputs(provider, prompt, input.inputFiles)
+        const inlined = Boolean(input.inputFiles?.length) && promptInput.inputFiles === undefined
+        emitPromptAccounting({
+          bus,
+          debugLog: input.telemetry?.debugLog,
+          role: input.role,
+          handle,
+          standingContextIncluded: input.standingContextIncluded,
+          frontendSkillIncluded,
+          prompt: promptInput.prompt,
+          basePromptChars: prompt.length,
+          inlined,
+          inputFileCount: measuredFiles.count,
+          inputFileBytes: measuredFiles.bytes,
+        })
         const result = await provider.prompt({
           config,
           bus,

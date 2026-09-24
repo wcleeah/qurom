@@ -201,6 +201,8 @@ export function createOpencodeEventBridge(config: RuntimeConfig, opts: OpencodeB
             messageID: info.id,
             tokensIn: folded.tokensIn,
             tokensOut: folded.tokensOut,
+            cacheReadTokens: folded.cacheReadTokens,
+            cacheWriteTokens: folded.cacheWriteTokens,
             source: "opencode",
             ...(typeof info.cost === "number"
               ? { costUsd: info.cost, costAvailable: true, costEstimated: false }

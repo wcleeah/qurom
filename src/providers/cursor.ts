@@ -623,8 +623,7 @@ function cursorUsageTotalsFromRun(
   if (!folded || !hasUsage(folded)) return undefined
   const cost = raw ? estimateCursorCostUsd(resolveCursorPricingModelId(model), raw) : { costUsd: 0, costAvailable: false, costEstimated: true }
   return {
-    tokensIn: folded.tokensIn,
-    tokensOut: folded.tokensOut,
+    ...folded,
     ...(cost.costAvailable
       ? { costUsd: cost.costUsd, costAvailable: true, costEstimated: cost.costEstimated }
       : {}),
@@ -688,6 +687,8 @@ function emitCursorRunUsage(
     runID: run.id,
     tokensIn: folded.tokensIn,
     tokensOut: folded.tokensOut,
+    cacheReadTokens: folded.cacheReadTokens,
+    cacheWriteTokens: folded.cacheWriteTokens,
     source: "cursor",
     cumulative: true,
     ...(cost.costAvailable

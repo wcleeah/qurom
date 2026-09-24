@@ -1,5 +1,5 @@
-import { addUsage, emptyUsage, type UsageTotals } from "../usage"
-import { sumSessionTelemetryUsage, type SessionTelemetryFile } from "../session-telemetry"
+import { addUsage, emptyUsage, hasCacheBreakdown, type UsageTotals } from "../usage"
+import { sumSessionTelemetryUsage, type SessionPromptAccounting, type SessionTelemetryFile } from "../session-telemetry"
 import { tableWrap } from "./html"
 import { getNodeDefinition, resolveLiveNode } from "./node-registry"
 import { escapeHtml, formatBytes, formatCostUsd, formatDurationMs, formatElapsed, formatTokenCount, formatTokenPair, formatUsagePair } from "./utils"
@@ -504,6 +504,59 @@ function renderSessionUsageTableBody(sessions: SessionTelemetryFile["sessions"])
   return tableWrap(table)
 }
 
+function formatStandingContextCell(prompt: SessionPromptAccounting): string {
+  const parts: string[] = []
+  if (prompt.standingContextIncluded != null) {
+    parts.push(prompt.standingContextIncluded ? "standing included" : "standing omitted")
+  }
+  if (prompt.frontendSkillIncluded != null) {
+    parts.push(prompt.frontendSkillIncluded ? "skill included" : "skill omitted")
+  }
+  return parts.join(" · ") || "—"
+}
+
+function formatKeepAliveCell(prompt: SessionPromptAccounting): string {
+  if (!prompt.keepAlive) return "one-shot"
+  return prompt.keepAliveFresh ? "fresh" : "follow-up"
+}
+
+function formatPromptSizeCell(prompt: SessionPromptAccounting): string {
+  const chars = `${formatTokenCount(prompt.promptChars)} chars`
+  const estimate = `~${formatTokenCount(prompt.estimatedPromptTokens)} tok`
+  if (prompt.inputFileCount > 0) {
+    const files = `${prompt.inputFileCount} file${prompt.inputFileCount === 1 ? "" : "s"} · ${formatBytes(prompt.inputFileBytes)}`
+    const inline = prompt.inlined ? "inlined" : "attached"
+    return `${chars} (${estimate}) · ${files} ${inline}`
+  }
+  return `${chars} (${estimate})`
+}
+
+function renderPromptAccountingTableBody(sessions: SessionTelemetryFile["sessions"]): string {
+  const rows: Array<{ session: SessionTelemetryFile["sessions"][number]; prompt: SessionPromptAccounting }> = []
+  for (const session of sessions) {
+    for (const prompt of session.prompts ?? []) rows.push({ session, prompt })
+  }
+  if (rows.length === 0) return ""
+
+  rows.sort((a, b) => b.prompt.at.localeCompare(a.prompt.at))
+
+  let table = `<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Time</th><th>Role</th><th>Node</th><th>Session</th><th>Repeated context</th><th>Prompt</th></tr></thead><tbody>`
+  for (const { session, prompt } of rows) {
+    const time = prompt.at.replace("T", " ").slice(0, 19) + " UTC"
+    const node = prompt.node ?? session.node ?? "—"
+    table += `<tr>
+  <td class="dim-text tiny-text">${escapeHtml(time)}</td>
+  <td>${escapeHtml(session.role)}</td>
+  <td>${escapeHtml(node)}</td>
+  <td>${escapeHtml(formatKeepAliveCell(prompt))}</td>
+  <td>${escapeHtml(formatStandingContextCell(prompt))}</td>
+  <td>${escapeHtml(formatPromptSizeCell(prompt))}</td>
+</tr>`
+  }
+  table += "</tbody></table>"
+  return tableWrap(table)
+}
+
 export function renderNodeSessionUsageTable(
   sessionTelemetry: SessionTelemetryFile | null | undefined,
   nodeHistory: NodeHistoryEntry[],
@@ -541,9 +594,13 @@ export function sessionUsageForHistoryEntry(
 
 export function renderSessionTelemetryTable(sessionTelemetry: SessionTelemetryFile | null | undefined): string {
   if (!sessionTelemetry?.sessions.length) return ""
-  const table = renderSessionUsageTableBody(sessionTelemetry.sessions)
-  if (!table) return ""
-  return `<div class="section"><h2>Session model telemetry</h2>${table}</div>`
+  const usageTable = renderSessionUsageTableBody(sessionTelemetry.sessions)
+  const promptTable = renderPromptAccountingTableBody(sessionTelemetry.sessions)
+  if (!usageTable && !promptTable) return ""
+  const sections: string[] = []
+  if (usageTable) sections.push(`<div class="section"><h2>Session model telemetry</h2>${usageTable}</div>`)
+  if (promptTable) sections.push(`<div class="section"><h2>Prompt accounting</h2>${promptTable}</div>`)
+  return sections.join("")
 }
 
 export function renderRunTelemetryStrip(
@@ -587,11 +644,18 @@ export function renderAgentUsageTable(
 
   if (rows.length === 0) return ""
 
-  let table = `<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Agent</th><th>Tokens in</th><th>Tokens out</th><th>Cost</th></tr></thead><tbody>`
+  const showCache = rows.some(([, snapshot]) => hasCacheBreakdown(snapshot))
+  const cacheHeaders = showCache ? `<th>Cache read</th><th>Cache write</th>` : ""
+  let table = `<table class="summary-table summary-table-wide summary-table-compact"><thead><tr><th>Agent</th><th>Tokens in</th>${cacheHeaders}<th>Tokens out</th><th>Cost</th></tr></thead><tbody>`
   for (const [agent, snapshot] of rows) {
+    const cacheCells = showCache
+      ? `<td>${escapeHtml(hasCacheBreakdown(snapshot) ? formatTokenCount(snapshot.cacheReadTokens ?? 0) : "—")}</td>
+  <td>${escapeHtml(hasCacheBreakdown(snapshot) ? formatTokenCount(snapshot.cacheWriteTokens ?? 0) : "—")}</td>`
+      : ""
     table += `<tr>
   <td>${escapeHtml(agent)}</td>
   <td>${escapeHtml(formatTokenCount(snapshot.tokensIn))}</td>
+  ${cacheCells}
   <td>${escapeHtml(formatTokenCount(snapshot.tokensOut))}</td>
   <td>${escapeHtml(formatAgentCostCell(snapshot))}</td>
 </tr>`

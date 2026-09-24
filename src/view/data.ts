@@ -422,7 +422,7 @@ export function classifyFile(filename: string): FileClass {
   if (filename === "debug-log.jsonl") return { group: "Debug", subGroup: "Logs", label: "Debug log", description: "Chronological pipeline/recovery events" }
   if (filename === SESSION_LEDGER_FILENAME) return { group: "Debug", subGroup: "Sessions", label: "Session ledger", description: "Durable provider session ids for harvest/resume" }
   if (filename === "node-history.json") return { group: "Debug", subGroup: "Timelines", label: "Node history", description: "Processed graph steps" }
-  if (filename === SESSION_TELEMETRY_FILENAME) return { group: "Debug", subGroup: "Telemetry", label: "Session telemetry", description: "Model, parameters, and usage per agent session" }
+  if (filename === SESSION_TELEMETRY_FILENAME) return { group: "Debug", subGroup: "Telemetry", label: "Session telemetry", description: "Model, cache buckets, prompt sizes, and usage per agent session" }
   if (filename === CURSOR_USAGE_IMPORT_FILENAME) return { group: "Debug", subGroup: "Telemetry", label: "Cursor usage import", description: "CSV backfilled token usage for Cursor cloud calls" }
   if (filename === "live-status.json") return { group: "Debug", subGroup: "Live", label: "Live status", description: "Current dashboard snapshot" }
   if (/^cursor-[\w.-]+-call-\d+-attempt-\d+-[\w.-]+-(metadata|result|artifacts|conversation)\.json$/.test(filename)) {

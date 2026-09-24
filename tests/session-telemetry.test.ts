@@ -212,6 +212,52 @@ describe("session telemetry", () => {
     writer.dispose()
   })
 
+  test("createSessionTelemetryWriter persists agent.prompt accounting", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quorum-session-prompt-"))
+    const bus = createEventBus()
+    const writer = createSessionTelemetryWriter(dir, bus)
+
+    bus.emit({ kind: "session.created", sessionID: "ses_prompt", role: "research-drafter" })
+    bus.emit({
+      kind: "agent.prompt",
+      sessionID: "ses_prompt",
+      role: "research-drafter",
+      provider: "cursor",
+      node: "reviseDraft",
+      round: 1,
+      keepAlive: true,
+      keepAliveFresh: false,
+      standingContextIncluded: false,
+      promptChars: 800,
+      promptBytes: 800,
+      estimatedPromptTokens: 200,
+      basePromptChars: 800,
+      inputFileCount: 1,
+      inputFileBytes: 1200,
+      inlined: true,
+    })
+
+    await writer.flush()
+
+    const saved = JSON.parse(await readFile(join(dir, "session-telemetry.json"), "utf8"))
+    expect(saved.sessions[0]?.role).toBe("research-drafter")
+    expect(saved.sessions[0]?.provider).toBe("cursor")
+    expect(saved.sessions[0]?.prompts).toHaveLength(1)
+    expect(saved.sessions[0]?.prompts[0]).toMatchObject({
+      node: "reviseDraft",
+      round: 1,
+      keepAlive: true,
+      keepAliveFresh: false,
+      standingContextIncluded: false,
+      promptChars: 800,
+      estimatedPromptTokens: 200,
+      inputFileCount: 1,
+      inlined: true,
+    })
+
+    writer.dispose()
+  })
+
   test("resolveRunTelemetry reads only session telemetry", () => {
     const resolved = resolveRunTelemetry({
       version: 1,
