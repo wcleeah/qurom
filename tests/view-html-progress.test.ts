@@ -7,6 +7,7 @@ import {
   getHtmlReaderProgress,
   setHtmlReaderProgress,
 } from "../src/view/html-progress-store.ts"
+import { progressNeedsRestore } from "../src/view/html-viewer-progress.ts"
 import { renderHtmlViewerPage } from "../src/view/html-viewer.ts"
 import { serveRawFile } from "../src/view/pages.ts"
 
@@ -105,6 +106,32 @@ describe("html reader progress store", () => {
 })
 
 describe("html viewer progress wiring", () => {
+  test("progressNeedsRestore is true only when a saved offset exists", () => {
+    expect(progressNeedsRestore(null)).toBe(false)
+    expect(progressNeedsRestore(undefined)).toBe(false)
+    expect(progressNeedsRestore({
+      runName: "alpha-run",
+      filePath: "final.html",
+      scrollY: 0,
+      scrollRatio: 0,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    })).toBe(false)
+    expect(progressNeedsRestore({
+      runName: "alpha-run",
+      filePath: "final.html",
+      scrollY: 250,
+      scrollRatio: 0,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    })).toBe(true)
+    expect(progressNeedsRestore({
+      runName: "alpha-run",
+      filePath: "final.html",
+      scrollY: 0,
+      scrollRatio: 0.42,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    })).toBe(true)
+  })
+
   test("embeds saved progress and client restore script", async () => {
     const progress = await setHtmlReaderProgress({
       runName: "alpha-run",
@@ -131,6 +158,10 @@ describe("html viewer progress wiring", () => {
     expect(html).toContain('data-scroll-ratio="0.42"')
     expect(html).toContain('"/html-progress"')
     expect(html).toContain("findScrollRoot")
+    expect(html).toContain("restoreWhenStable")
+    expect(html).toContain("html-viewer-frame-restoring")
+    expect(html).not.toContain("restoreWithRetries")
+    expect(html).toContain('class="html-viewer-frame html-viewer-frame-restoring"')
   })
 
   test("serveRawFile includes persisted progress in the viewer shell", async () => {
@@ -145,6 +176,7 @@ describe("html viewer progress wiring", () => {
     expect(html).toContain('data-html-progress-root')
     expect(html).toContain('data-scroll-y="333"')
     expect(html).toContain('data-scroll-ratio="0.25"')
+    expect(html).toContain('class="html-viewer-frame html-viewer-frame-restoring"')
   })
 
   test("defaults to top when no progress exists", async () => {
@@ -153,5 +185,7 @@ describe("html viewer progress wiring", () => {
     expect(html).toContain('data-html-progress-root')
     expect(html).toContain('data-scroll-y="0"')
     expect(html).toContain('data-scroll-ratio="0"')
+    expect(html).toContain('class="html-viewer-frame"')
+    expect(html).not.toContain('class="html-viewer-frame html-viewer-frame-restoring"')
   })
 })

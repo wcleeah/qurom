@@ -1,6 +1,12 @@
 import type { HtmlReaderProgress } from "./html-progress-store"
 import { escapeHtml } from "./utils"
 
+export function progressNeedsRestore(progress: HtmlReaderProgress | null | undefined): boolean {
+  const scrollY = progress?.scrollY ?? 0
+  const scrollRatio = progress?.scrollRatio ?? 0
+  return (Number.isFinite(scrollY) && scrollY > 0) || (Number.isFinite(scrollRatio) && scrollRatio > 0)
+}
+
 export function progressToDataAttrs(progress: HtmlReaderProgress | null | undefined): string {
   const scrollY = progress?.scrollY ?? 0
   const scrollRatio = progress?.scrollRatio ?? 0
@@ -88,10 +94,33 @@ export const HTML_PROGRESS_SCRIPT = /* html */ `
     }
     if (!Number.isFinite(y) || y < 0) y = 0
     if (y > maxScroll) y = maxScroll
-    if (target.kind === "window" && target.win) {
-      target.win.scrollTo(0, y)
-    } else {
-      target.el.scrollTop = y
+
+    const doc = target.el.ownerDocument
+    const root = doc && doc.documentElement
+    const body = doc && doc.body
+    const prevHtml = root ? root.style.scrollBehavior : ""
+    const prevBody = body ? body.style.scrollBehavior : ""
+    if (root) root.style.scrollBehavior = "auto"
+    if (body) body.style.scrollBehavior = "auto"
+    try {
+      if (target.kind === "window" && target.win) {
+        try {
+          target.win.scrollTo({ top: y, left: 0, behavior: "instant" })
+        } catch {
+          target.win.scrollTo(0, y)
+        }
+      } else if (typeof target.el.scrollTo === "function") {
+        try {
+          target.el.scrollTo({ top: y, left: 0, behavior: "instant" })
+        } catch {
+          target.el.scrollTop = y
+        }
+      } else {
+        target.el.scrollTop = y
+      }
+    } finally {
+      if (root) root.style.scrollBehavior = prevHtml
+      if (body) body.style.scrollBehavior = prevBody
     }
   }
 
@@ -150,6 +179,12 @@ export const HTML_PROGRESS_SCRIPT = /* html */ `
     scheduleSave(readPosition(boundScrollTarget))
   }
 
+  let restoreRaf = null
+  let restoring = false
+  const SETTLE_MS = 200
+  const MAX_WAIT_MS = 1800
+  const SAFETY_REVEAL_MS = 2500
+
   function unbindScroll() {
     if (boundScrollTarget) {
       if (boundScrollTarget.kind === "window" && boundScrollTarget.win) {
@@ -162,21 +197,7 @@ export const HTML_PROGRESS_SCRIPT = /* html */ `
     boundDoc = null
   }
 
-  function restoreWithRetries(target, scrollY, scrollRatio) {
-    suppressSaveUntil = Date.now() + 1500
-    const attempts = [0, 50, 150, 400, 1000]
-    for (const delay of attempts) {
-      setTimeout(() => {
-        applyPosition(target, scrollY, scrollRatio)
-      }, delay)
-    }
-  }
-
-  function bindIframe() {
-    const doc = iframe.contentDocument
-    if (!doc || !doc.documentElement) return
-    unbindScroll()
-    const target = findScrollRoot(doc)
+  function bindScroll(target, doc) {
     boundScrollTarget = target
     boundDoc = doc
     if (target.kind === "window" && target.win) {
@@ -184,11 +205,86 @@ export const HTML_PROGRESS_SCRIPT = /* html */ `
     } else if (target.el) {
       target.el.addEventListener("scroll", onScroll, { passive: true })
     }
-    if ((Number.isFinite(initialY) && initialY > 0) || (Number.isFinite(initialRatio) && initialRatio > 0)) {
-      restoreWithRetries(target, initialY, initialRatio)
+  }
+
+  function revealFrame() {
+    iframe.classList.remove("html-viewer-frame-restoring")
+  }
+
+  function cancelRestore() {
+    restoring = false
+    if (restoreRaf) {
+      cancelAnimationFrame(restoreRaf)
+      restoreRaf = null
     }
   }
 
+  function restoreWhenStable(scrollY, scrollRatio) {
+    cancelRestore()
+    iframe.classList.add("html-viewer-frame-restoring")
+    restoring = true
+    suppressSaveUntil = Date.now() + MAX_WAIT_MS + SETTLE_MS
+    const startedAt = Date.now()
+    let lastHeight = -1
+    let lastChangeAt = Date.now()
+
+    function finish() {
+      if (!restoring) return
+      restoring = false
+      if (restoreRaf) {
+        cancelAnimationFrame(restoreRaf)
+        restoreRaf = null
+      }
+      const doc = iframe.contentDocument
+      if (doc && doc.documentElement) {
+        unbindScroll()
+        const target = findScrollRoot(doc)
+        bindScroll(target, doc)
+        applyPosition(target, scrollY, scrollRatio)
+      }
+      revealFrame()
+      suppressSaveUntil = Date.now() + 400
+    }
+
+    function tick() {
+      if (!restoring) return
+      const doc = iframe.contentDocument
+      const target = doc && doc.documentElement ? findScrollRoot(doc) : null
+      const height = target && target.el ? target.el.scrollHeight : 0
+      if (height !== lastHeight) {
+        lastHeight = height
+        lastChangeAt = Date.now()
+      }
+      const now = Date.now()
+      if ((height > 0 && now - lastChangeAt >= SETTLE_MS) || now - startedAt >= MAX_WAIT_MS) {
+        finish()
+        return
+      }
+      restoreRaf = requestAnimationFrame(tick)
+    }
+
+    restoreRaf = requestAnimationFrame(tick)
+  }
+
+  function bindIframe() {
+    const doc = iframe.contentDocument
+    if (!doc || !doc.documentElement) {
+      cancelRestore()
+      revealFrame()
+      return
+    }
+    unbindScroll()
+    const target = findScrollRoot(doc)
+    bindScroll(target, doc)
+    if ((Number.isFinite(initialY) && initialY > 0) || (Number.isFinite(initialRatio) && initialRatio > 0)) {
+      restoreWhenStable(initialY, initialRatio)
+    } else {
+      cancelRestore()
+      revealFrame()
+    }
+  }
+
+  setTimeout(revealFrame, SAFETY_REVEAL_MS)
   iframe.addEventListener("load", bindIframe)
   if (iframe.contentDocument?.readyState === "complete") bindIframe()
 

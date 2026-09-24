@@ -11,7 +11,7 @@ import type { HtmlReaderProgress } from "./html-progress-store"
 import type { HtmlReaderRepairThread } from "./html-repair-store"
 import { repairThreadsToJson, HTML_REPAIR_SCRIPT } from "./html-viewer-repair"
 import { highlightsToJson, HTML_HIGHLIGHTS_SCRIPT } from "./html-viewer-highlights"
-import { HTML_PROGRESS_SCRIPT, progressToDataAttrs } from "./html-viewer-progress"
+import { HTML_PROGRESS_SCRIPT, progressNeedsRestore, progressToDataAttrs } from "./html-viewer-progress"
 import { appNavbarAction, appNavbarButton, renderAppNavbar } from "./app-nav"
 import { layoutHtmlViewer } from "./layout"
 import { HTML_OFFLINE_SAVE_SCRIPT } from "./offline-save-script"
@@ -217,6 +217,7 @@ export function renderHtmlViewerPage(
   })
 
   const progressAttrs = progressToDataAttrs(progress)
+  const restoringClass = progressNeedsRestore(progress) ? " html-viewer-frame-restoring" : ""
   const body = `<div class="html-viewer-shell">
   <div data-html-progress-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" ${progressAttrs}></div>
   <div data-html-highlights-root data-run-name="${escapeHtml(runName)}" data-file="${escapeHtml(filePath)}" data-highlights="${highlightsJson}" data-all-tags="${allTagsJson}"></div>
@@ -225,7 +226,7 @@ export function renderHtmlViewerPage(
   ${navbar}
   <div class="html-viewer-main">
     <div class="html-viewer-frame-wrap">
-      <iframe class="html-viewer-frame" src="${embedSrc}" title="${escapeHtml(baseName)}"></iframe>
+      <iframe class="html-viewer-frame${restoringClass}" src="${embedSrc}" title="${escapeHtml(baseName)}"></iframe>
     </div>
     <aside class="html-viewer-sidebar" data-html-viewer-sidebar>
       <div class="html-viewer-sidebar-header">

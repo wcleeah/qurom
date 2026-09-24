@@ -2880,6 +2880,11 @@ body.html-viewer-body {
   background: #fff;
 }
 
+.html-viewer-frame.html-viewer-frame-restoring {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .html-viewer-sidebar {
   width: 320px;
   flex-shrink: 0;
