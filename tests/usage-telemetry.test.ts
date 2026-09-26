@@ -139,6 +139,10 @@ describe("cursor pricing", () => {
     expect(resolveCursorPricingModelId("grok-4.7-high-fast")).toBe("grok-4.7-fast")
     expect(resolveCursorPricingModelId("gpt-5.6-sol-medium")).toBe("gpt-5.6-sol")
     expect(resolveCursorPricingModelId("claude-fable-5-1-thinking-high")).toBe("claude-fable-5-1")
+    expect(resolveCursorPricingModelId("cursor-grok-4.6-high")).toBe("grok-4.6")
+    expect(resolveCursorPricingModelId("cursor-grok-4.6-xhigh")).toBe("grok-4.6")
+    expect(resolveCursorPricingModelId("cursor-grok-4.6-medium")).toBe("grok-4.6")
+    expect(resolveCursorPricingModelId("cursor-grok-4.6-xhigh-fast")).toBe("grok-4.6-fast")
   })
 
   test("estimates grok-4.7 and claude sonnet 5 at current docs rates", () => {
@@ -327,6 +331,32 @@ describe("telemetry view", () => {
     expect(resolved.costAvailable).toBe(true)
     expect(resolved.usage.tokensIn).toBe(500)
     expect(resolved.usage.costUsd).toBeCloseTo(0.01)
+  })
+
+  test("fills missing csv-import cost from cursor-prefixed grok slugs", () => {
+    const resolved = resolveRunTelemetry({
+      version: 1,
+      sessions: [{
+        sessionId: "bc-grok",
+        role: "research-drafter",
+        provider: "cursor",
+        calls: [{
+          resolvedModel: "cursor-grok-4.6-high",
+          usage: {
+            tokensIn: 1_000_000,
+            tokensOut: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            costAvailable: false,
+            costEstimated: false,
+          },
+          usageSource: "csv-import",
+        }],
+      }],
+    })
+    expect(resolved.costAvailable).toBe(true)
+    expect(resolved.usage.costEstimated).toBe(true)
+    expect(resolved.usage.costUsd).toBeCloseTo(2)
   })
 
   test("resolveRunUsage remains compatible", () => {
