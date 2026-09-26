@@ -39,8 +39,7 @@ export function getCursorModelPricingTable(): CursorModelPricingFile {
   return table
 }
 
-export function resolveCursorPricingModelId(modelId: string | undefined): string | undefined {
-  if (!modelId || modelId === "default") return "auto"
+function resolveFromSlug(modelId: string): string | undefined {
   if (modelId === "auto") return "auto"
   if (modelId in table.models) return modelId
 
@@ -52,6 +51,19 @@ export function resolveCursorPricingModelId(modelId: string | undefined): string
     if (wantsFast && fastId in table.models) return fastId
     if (candidate in table.models) return candidate
   }
+
+  return undefined
+}
+
+export function resolveCursorPricingModelId(modelId: string | undefined): string | undefined {
+  if (!modelId || modelId === "default") return "auto"
+  if (modelId === "auto") return "auto"
+
+  const resolved = resolveFromSlug(modelId)
+  if (resolved) return resolved
+
+  // Cursor usage CSV prefixes native models (`cursor-grok-4.6-high`).
+  if (modelId.startsWith("cursor-")) return resolveFromSlug(modelId.slice("cursor-".length))
 
   return undefined
 }
@@ -92,4 +104,22 @@ export function estimateCursorCostUsd(
     + (cacheWriteTokens * cacheWriteRate) / 1_000_000
 
   return { costUsd, costAvailable: true, costEstimated: true }
+}
+
+/** Estimate cost from stored token buckets when CSV/SDK did not persist costAvailable. */
+export function estimateCursorCostFromUsage(
+  modelId: string | undefined,
+  usage: {
+    tokensIn: number
+    tokensOut: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
+  },
+): { costUsd: number; costAvailable: boolean; costEstimated: boolean } {
+  return estimateCursorCostUsd(modelId, {
+    inputTokens: usage.tokensIn,
+    outputTokens: usage.tokensOut,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+  })
 }

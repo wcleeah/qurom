@@ -1,3 +1,4 @@
+import { estimateCursorCostFromUsage } from "../cursor-pricing"
 import { addUsage, emptyUsage, type UsageTotals } from "../usage"
 import { type SessionPromptAccounting, type SessionTelemetryFile } from "../session-telemetry"
 import { tableWrap } from "./html"
@@ -10,25 +11,50 @@ function nodeAliases(nodeName: string): Set<string> {
   return new Set([nodeName, ...(def?.liveNodeAliases ?? []), def?.id, def?.pipelineLabel].filter(Boolean) as string[])
 }
 
+function fillMissingCursorCost(
+  usage: UsageTotals,
+  usageSource: SessionTelemetryFile["sessions"][number]["calls"][number]["usageSource"],
+  model?: string,
+): UsageTotals {
+  if (usage.costAvailable) return usage
+  if (usageSource === "opencode-import" || usageSource === "turso-import") return usage
+  if (!model) return usage
+  const estimated = estimateCursorCostFromUsage(model, usage)
+  if (!estimated.costAvailable) return usage
+  return {
+    ...usage,
+    costUsd: estimated.costUsd,
+    costAvailable: true,
+    costEstimated: true,
+  }
+}
+
 function normalizeUsageForDisplay(
   usage: UsageTotals,
   usageSource?: SessionTelemetryFile["sessions"][number]["calls"][number]["usageSource"],
+  model?: string,
 ): UsageTotals {
-  if ((usageSource === "turso-import" || usageSource === "opencode-import") && usage.costAvailable) {
-    return { ...usage, costEstimated: false }
+  const withCost = fillMissingCursorCost(usage, usageSource, model)
+  if ((usageSource === "turso-import" || usageSource === "opencode-import") && withCost.costAvailable) {
+    return { ...withCost, costEstimated: false }
   }
-  if (usageSource === "csv-import" && usage.costAvailable && !usage.costEstimated) {
-    return { ...usage, costEstimated: false }
+  if (usageSource === "csv-import" && withCost.costAvailable && !withCost.costEstimated) {
+    return { ...withCost, costEstimated: false }
   }
-  return usage
+  return withCost
 }
 
 function addSessionCallUsage(
   target: UsageTotals,
   call: SessionTelemetryFile["sessions"][number]["calls"][number],
+  session?: SessionTelemetryFile["sessions"][number],
 ) {
   if (!call.usage) return
-  addUsage(target, normalizeUsageForDisplay(call.usage, call.usageSource))
+  addUsage(target, normalizeUsageForDisplay(
+    call.usage,
+    call.usageSource,
+    call.resolvedModel ?? session?.requestedModel,
+  ))
 }
 
 /** Sum each session's calls once. Keep-alive sessions that touch several nodes still count once. */
@@ -43,7 +69,7 @@ export function sumSessionsForDisplay(
     for (const call of session.calls) {
       if (!call.usage) continue
       usage.usageAvailable = true
-      addSessionCallUsage(usage, call)
+      addSessionCallUsage(usage, call, session)
     }
   }
   return usage
@@ -272,7 +298,7 @@ export function usageByRoleFromSession(
     const snapshot = usageByAgent[session.role] ?? { ...emptyUsage(), usageAvailable: false }
     for (const call of session.calls) {
       if (!call.usage) continue
-      addSessionCallUsage(snapshot, call)
+      addSessionCallUsage(snapshot, call, session)
       snapshot.usageAvailable = true
     }
     if (snapshot.usageAvailable) usageByAgent[session.role] = snapshot
@@ -312,8 +338,8 @@ export function sessionTotalsForNode(
     for (const call of session.calls) {
       if (!callBelongsToNode(call, session, aliases, entries, nodeId)) continue
       usageAvailable = true
-      addSessionCallUsage(usage, call)
-      addSessionCallUsage(agent, call)
+      addSessionCallUsage(usage, call, session)
+      addSessionCallUsage(agent, call, session)
       agent.usageAvailable = true
     }
     if (agent.usageAvailable) usageByAgent[session.role] = agent
@@ -362,8 +388,8 @@ export function sessionTotalsForNodeRound(
     for (const call of session.calls) {
       if (!callMatchesNodeRound(call, session, aliases, roundEntries, round)) continue
       usageAvailable = true
-      addSessionCallUsage(usage, call)
-      addSessionCallUsage(agent, call)
+      addSessionCallUsage(usage, call, session)
+      addSessionCallUsage(agent, call, session)
       agent.usageAvailable = true
     }
     if (agent.usageAvailable) usageByAgent[session.role] = agent
@@ -500,7 +526,7 @@ function renderSessionUsageTableBody(
     for (const call of session.calls) {
       if (!call.usage) continue
       usageAvailable = true
-      addSessionCallUsage(usage, call)
+      addSessionCallUsage(usage, call, session)
     }
     const usageLabel = usageAvailable ? formatTokenPair(usage, true) : "—"
     const models = [...new Set(session.calls.map((call) => call.resolvedModel).filter(Boolean))]
