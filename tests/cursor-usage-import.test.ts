@@ -122,6 +122,29 @@ describe("matchCursorUsageRows", () => {
     expect(matches[1]?.tokensOut).toBe(5)
   })
 
+  test("estimates Included cost for cursor-prefixed grok CSV slugs", () => {
+    const csv = `Date,Cloud Agent ID,Automation ID,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens,Cost
+2026-08-20T18:00:00.000Z,bc-grok,,Included,cursor-grok-4.6-high,No,0,1000000,0,0,1000000,Included
+`
+    const { matches } = matchCursorUsageRows(parseCursorUsageCsv(csv), [
+      {
+        runDir: "/tmp/run-a",
+        runName: "run-a",
+        agentId: "bc-grok",
+        cursorRunId: "run-draft",
+        role: "research-drafter",
+        callIndex: 1,
+        durationMs: 1000,
+      },
+    ])
+
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.model).toBe("cursor-grok-4.6-high")
+    expect(matches[0]?.costAvailable).toBe(true)
+    expect(matches[0]?.costEstimated).toBe(true)
+    expect(matches[0]?.costUsd).toBeCloseTo(2)
+  })
+
   test("still matches when CSV has extra rows for the same agent", () => {
     const rows = parseCursorUsageCsv(SAMPLE_CSV).filter((row) => row.agentId === "bc-agent-one")
     const { matches, unmatchedCalls } = matchCursorUsageRows(rows, [
