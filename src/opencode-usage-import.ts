@@ -1,9 +1,10 @@
 import { Database } from "bun:sqlite"
 import { existsSync } from "node:fs"
-import { readdir, readFile, writeFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import { defaultOpenCodeDbPath } from "./data-paths"
+import { listRunDirectories, usageImportRoots } from "./run-archive"
 import {
   applySessionTelemetryEvent,
   readSessionTelemetry,
@@ -266,17 +267,14 @@ async function runHasOpenCodeSignal(runDir: string, telemetry: SessionTelemetryF
   return discovered.length > 0
 }
 
-async function listBackfillCandidates(runsDir: string): Promise<{
+async function listBackfillCandidates(runsDir: string, archiveDir?: string): Promise<{
   candidates: RunBackfillCandidate[]
   runsScanned: number
 }> {
-  const entries = await readdir(runsDir, { withFileTypes: true })
   const candidates: RunBackfillCandidate[] = []
   let runsScanned = 0
 
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue
-    const runDir = join(runsDir, entry.name)
+  for (const { runName, runDir } of await listRunDirectories(usageImportRoots(runsDir, archiveDir))) {
     const telemetry = await readSessionTelemetry(runDir)
     if (!(await runHasOpenCodeSignal(runDir, telemetry))) continue
 
@@ -290,7 +288,7 @@ async function listBackfillCandidates(runsDir: string): Promise<{
 
       bySession.set(session.sessionId, {
         runDir,
-        runName: entry.name,
+        runName,
         record: existing ?? {
           sessionId: session.sessionId,
           role: session.role,
@@ -306,7 +304,7 @@ async function listBackfillCandidates(runsDir: string): Promise<{
     for (const record of telemetry.sessions) {
       if (!sessionNeedsBackfill(record)) continue
       if (bySession.has(record.sessionId)) continue
-      bySession.set(record.sessionId, { runDir, runName: entry.name, record })
+      bySession.set(record.sessionId, { runDir, runName, record })
     }
 
     candidates.push(...bySession.values())
@@ -375,6 +373,7 @@ function mergeImportIntoSessionTelemetry(
 
 export async function applyOpenCodeUsageImport(input: {
   runsDir: string
+  archiveDir?: string
   dbPath?: string
 }): Promise<OpenCodeUsageImportSummary> {
   const dbPath = input.dbPath ?? defaultOpenCodeDbPath()
@@ -384,7 +383,7 @@ export async function applyOpenCodeUsageImport(input: {
 
   const db = openOpenCodeDb(dbPath)
   try {
-    const { candidates, runsScanned } = await listBackfillCandidates(input.runsDir)
+    const { candidates, runsScanned } = await listBackfillCandidates(input.runsDir, input.archiveDir)
     const sessionIds = [...new Set(candidates.map((item) => item.record.sessionId))]
     const usageBySession = fetchOpenCodeSessionUsage(db, sessionIds)
 

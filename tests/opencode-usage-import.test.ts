@@ -264,4 +264,169 @@ describe("applyOpenCodeUsageImport", () => {
     const existing = telemetry.sessions.find((session) => session.sessionId === "ses-has-usage")
     expect(existing?.calls[0]?.usageSource).toBe("sdk")
   })
+
+  test("does not scan archive unless archiveDir is passed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opencode-import-archive-"))
+    const runsDir = join(root, "runs")
+    const archiveDir = join(root, "archive")
+    const liveDir = join(runsDir, "live-run")
+    const archivedDir = join(archiveDir, "archived-run")
+    await mkdir(liveDir, { recursive: true })
+    await mkdir(archivedDir, { recursive: true })
+    await writeFile(
+      join(liveDir, "debug-log.jsonl"),
+      [
+        '{"ts":"2026-07-04T06:36:01.833Z","type":"node.start","node":"draftFullDraft","round":0}',
+        '{"ts":"2026-07-04T06:36:01.839Z","type":"session.created","sessionID":"ses-live","role":"research-drafter"}',
+      ].join("\n"),
+      "utf8",
+    )
+    await writeFile(
+      join(archivedDir, "debug-log.jsonl"),
+      [
+        '{"ts":"2026-07-04T06:38:58.016Z","type":"node.start","node":"runParallelAudits","round":0}',
+        '{"ts":"2026-07-04T06:38:58.020Z","type":"session.created","sessionID":"ses-archived","role":"logic-auditor"}',
+      ].join("\n"),
+      "utf8",
+    )
+
+    const dbPath = join(root, "opencode.db")
+    createTestOpenCodeDb(dbPath, [
+      {
+        sessionId: "ses-live",
+        data: {
+          role: "assistant",
+          agent: "research-drafter",
+          modelID: "claude-sonnet-4",
+          providerID: "anthropic",
+          cost: 0.15,
+          tokens: { input: 1000, output: 250, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1_700_000_000_000, completed: 1_700_000_004_500 },
+        },
+      },
+      {
+        sessionId: "ses-archived",
+        data: {
+          role: "assistant",
+          agent: "logic-auditor",
+          modelID: "claude-sonnet-4",
+          providerID: "anthropic",
+          cost: 0.2,
+          tokens: { input: 400, output: 80, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1_700_000_000_000, completed: 1_700_000_002_000 },
+        },
+      },
+    ])
+
+    const summary = await applyOpenCodeUsageImport({ runsDir, dbPath })
+    expect(summary.runsScanned).toBe(1)
+    expect(summary.matchedSessions).toBe(1)
+    expect(summary.runsUpdated).toBe(1)
+    expect((await readSessionTelemetry(liveDir)).sessions).toHaveLength(1)
+    expect((await readSessionTelemetry(archivedDir)).sessions).toHaveLength(0)
+  })
+
+  test("backfills archived OpenCode runs when archiveDir is set", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opencode-import-archive-"))
+    const runsDir = join(root, "runs")
+    const archiveDir = join(root, "archive")
+    const liveDir = join(runsDir, "live-run")
+    const archivedDir = join(archiveDir, "archived-run")
+    await mkdir(liveDir, { recursive: true })
+    await mkdir(archivedDir, { recursive: true })
+    await writeFile(
+      join(liveDir, "debug-log.jsonl"),
+      [
+        '{"ts":"2026-07-04T06:36:01.833Z","type":"node.start","node":"draftFullDraft","round":0}',
+        '{"ts":"2026-07-04T06:36:01.839Z","type":"session.created","sessionID":"ses-live","role":"research-drafter"}',
+      ].join("\n"),
+      "utf8",
+    )
+    await writeFile(
+      join(archivedDir, "debug-log.jsonl"),
+      [
+        '{"ts":"2026-07-04T06:38:58.016Z","type":"node.start","node":"runParallelAudits","round":0}',
+        '{"ts":"2026-07-04T06:38:58.020Z","type":"session.created","sessionID":"ses-archived","role":"logic-auditor"}',
+      ].join("\n"),
+      "utf8",
+    )
+
+    const dbPath = join(root, "opencode.db")
+    createTestOpenCodeDb(dbPath, [
+      {
+        sessionId: "ses-live",
+        data: {
+          role: "assistant",
+          agent: "research-drafter",
+          modelID: "claude-sonnet-4",
+          providerID: "anthropic",
+          cost: 0.15,
+          tokens: { input: 1000, output: 250, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1_700_000_000_000, completed: 1_700_000_004_500 },
+        },
+      },
+      {
+        sessionId: "ses-archived",
+        data: {
+          role: "assistant",
+          agent: "logic-auditor",
+          modelID: "claude-sonnet-4",
+          providerID: "anthropic",
+          cost: 0.2,
+          tokens: { input: 400, output: 80, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1_700_000_000_000, completed: 1_700_000_002_000 },
+        },
+      },
+    ])
+
+    const summary = await applyOpenCodeUsageImport({ runsDir, archiveDir, dbPath })
+    expect(summary.runsScanned).toBe(2)
+    expect(summary.matchedSessions).toBe(2)
+    expect(summary.runsUpdated).toBe(2)
+
+    const live = await readSessionTelemetry(liveDir)
+    expect(live.sessions[0]?.calls[0]?.usage?.tokensIn).toBe(1000)
+    const archived = await readSessionTelemetry(archivedDir)
+    expect(archived.sessions[0]?.sessionId).toBe("ses-archived")
+    expect(archived.sessions[0]?.calls[0]?.usage?.tokensOut).toBe(80)
+    expect(archived.sessions[0]?.calls[0]?.usageSource).toBe("opencode-import")
+  })
+
+  test("ignores a missing archive directory", async () => {
+    const runsDir = await mkdtemp(join(tmpdir(), "opencode-import-missing-archive-"))
+    const runDir = join(runsDir, "demo-run")
+    await mkdir(runDir, { recursive: true })
+    await writeFile(
+      join(runDir, "debug-log.jsonl"),
+      [
+        '{"ts":"2026-07-04T06:36:01.833Z","type":"node.start","node":"draftFullDraft","round":0}',
+        '{"ts":"2026-07-04T06:36:01.839Z","type":"session.created","sessionID":"ses-missing","role":"research-drafter"}',
+      ].join("\n"),
+      "utf8",
+    )
+
+    const dbPath = join(runsDir, "opencode.db")
+    createTestOpenCodeDb(dbPath, [
+      {
+        sessionId: "ses-missing",
+        data: {
+          role: "assistant",
+          agent: "research-drafter",
+          modelID: "claude-sonnet-4",
+          providerID: "anthropic",
+          cost: 0.15,
+          tokens: { input: 1000, output: 250, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1_700_000_000_000, completed: 1_700_000_004_500 },
+        },
+      },
+    ])
+
+    const summary = await applyOpenCodeUsageImport({
+      runsDir,
+      archiveDir: join(runsDir, "archive-missing"),
+      dbPath,
+    })
+    expect(summary.runsScanned).toBe(1)
+    expect(summary.matchedSessions).toBe(1)
+  })
 })

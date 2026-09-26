@@ -9,6 +9,7 @@ import {
   writeSessionTelemetry,
   type SessionTelemetryFile,
 } from "./session-telemetry"
+import { listRunDirectories, usageImportRoots } from "./run-archive"
 import { foldCursorUsage } from "./usage"
 
 export const CURSOR_USAGE_IMPORT_FILENAME = "cursor-usage-import.json"
@@ -215,13 +216,10 @@ function scopeForMetadataCall(
   return inferScopeFromNodeHistory(call.completedAtMs, nodeHistoryByRunDir.get(call.runDir) ?? [])
 }
 
-async function listCursorMetadataCalls(runsDir: string): Promise<CursorMetadataCall[]> {
-  const entries = await readdir(runsDir, { withFileTypes: true })
+async function listCursorMetadataCalls(runsDir: string, archiveDir?: string): Promise<CursorMetadataCall[]> {
   const calls: CursorMetadataCall[] = []
 
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue
-    const runDir = join(runsDir, entry.name)
+  for (const { runName, runDir } of await listRunDirectories(usageImportRoots(runsDir, archiveDir))) {
     const files = await readdir(runDir)
     for (const file of files) {
       if (!file.endsWith("-metadata.json") || !file.startsWith("cursor-")) continue
@@ -245,7 +243,7 @@ async function listCursorMetadataCalls(runsDir: string): Promise<CursorMetadataC
         const callMatch = file.match(/-call-(\d+)-/)
         calls.push({
           runDir,
-          runName: entry.name,
+          runName,
           agentId: metadata.agentId,
           cursorRunId: metadata.runId,
           role: metadata.role,
@@ -421,11 +419,12 @@ function mergeImportIntoSessionTelemetry(
 
 export async function applyCursorUsageImport(input: {
   runsDir: string
+  archiveDir?: string
   rows: CursorUsageCsvRow[]
   sourceFile: string
   totalCsvRows?: number
 }): Promise<CursorUsageImportSummary> {
-  const calls = await listCursorMetadataCalls(input.runsDir)
+  const calls = await listCursorMetadataCalls(input.runsDir, input.archiveDir)
   const nodeHistoryByRunDir = new Map<string, CursorNodeHistoryEntry[]>()
   for (const call of calls) {
     if (nodeHistoryByRunDir.has(call.runDir)) continue

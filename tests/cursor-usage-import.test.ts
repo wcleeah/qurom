@@ -347,4 +347,116 @@ describe("applyCursorUsageImport", () => {
     expect(second.sessions[0]?.round).toBe(0)
     expect(second.sessions[0]?.calls[0]?.usage?.costUsd).toBeCloseTo(1.23)
   })
+
+  test("does not scan archive unless archiveDir is passed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "quorum-import-"))
+    const runsDir = join(root, "runs")
+    const archiveDir = join(root, "archive")
+    const liveDir = join(runsDir, "live-run")
+    const archivedDir = join(archiveDir, "archived-run")
+    await mkdir(liveDir, { recursive: true })
+    await mkdir(archivedDir, { recursive: true })
+
+    await writeFile(join(liveDir, "cursor-reader-interviewer-call-1-attempt-1-run-live-metadata.json"), JSON.stringify({
+      agentId: "bc-agent-two",
+      runId: "run-live",
+      role: "reader-interviewer",
+      callIndex: 1,
+      requestedArtifact: "reader-profile-0.json",
+    }))
+    await writeFile(join(liveDir, "cursor-reader-interviewer-call-1-attempt-1-run-live-result.json"), JSON.stringify({
+      durationMs: 2000,
+    }))
+    await writeFile(join(archivedDir, "cursor-reader-interviewer-call-1-attempt-1-run-arch-metadata.json"), JSON.stringify({
+      agentId: "bc-agent-one",
+      runId: "run-arch",
+      role: "reader-interviewer",
+      callIndex: 1,
+      requestedArtifact: "reader-profile-0.json",
+    }))
+    await writeFile(join(archivedDir, "cursor-reader-interviewer-call-1-attempt-1-run-arch-result.json"), JSON.stringify({
+      durationMs: 1000,
+    }))
+
+    const summary = await applyCursorUsageImport({
+      runsDir,
+      rows: parseCursorUsageCsv(SAMPLE_CSV),
+      sourceFile: "usage.csv",
+    })
+
+    expect(summary.runsUpdated).toBe(1)
+    expect(summary.matchedCalls).toBe(1)
+    expect((await readSessionTelemetry(liveDir)).sessions).toHaveLength(1)
+    expect((await readSessionTelemetry(archivedDir)).sessions).toHaveLength(0)
+  })
+
+  test("writes import overlay into archived runs when archiveDir is set", async () => {
+    const root = await mkdtemp(join(tmpdir(), "quorum-import-"))
+    const runsDir = join(root, "runs")
+    const archiveDir = join(root, "archive")
+    const liveDir = join(runsDir, "live-run")
+    const archivedDir = join(archiveDir, "archived-run")
+    await mkdir(liveDir, { recursive: true })
+    await mkdir(archivedDir, { recursive: true })
+
+    await writeFile(join(liveDir, "cursor-reader-interviewer-call-1-attempt-1-run-live-metadata.json"), JSON.stringify({
+      agentId: "bc-agent-two",
+      runId: "run-live",
+      role: "reader-interviewer",
+      callIndex: 1,
+      requestedArtifact: "reader-profile-0.json",
+    }))
+    await writeFile(join(liveDir, "cursor-reader-interviewer-call-1-attempt-1-run-live-result.json"), JSON.stringify({
+      durationMs: 2000,
+    }))
+    await writeFile(join(archivedDir, "cursor-reader-interviewer-call-1-attempt-1-run-arch-metadata.json"), JSON.stringify({
+      agentId: "bc-agent-one",
+      runId: "run-arch",
+      role: "reader-interviewer",
+      callIndex: 1,
+      requestedArtifact: "reader-profile-0.json",
+    }))
+    await writeFile(join(archivedDir, "cursor-reader-interviewer-call-1-attempt-1-run-arch-result.json"), JSON.stringify({
+      durationMs: 1000,
+    }))
+
+    const summary = await applyCursorUsageImport({
+      runsDir,
+      archiveDir,
+      rows: parseCursorUsageCsv(SAMPLE_CSV),
+      sourceFile: "usage.csv",
+    })
+
+    expect(summary.runsUpdated).toBe(2)
+    expect(summary.matchedCalls).toBe(2)
+    expect((await readSessionTelemetry(liveDir)).sessions[0]?.calls[0]?.usage?.tokensOut).toBe(800)
+    expect((await readSessionTelemetry(archivedDir)).sessions[0]?.calls[0]?.usage?.tokensOut).toBe(400)
+    expect((await readSessionTelemetry(archivedDir)).sessions[0]?.calls[0]?.usageSource).toBe("csv-import")
+  })
+
+  test("ignores a missing archive directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "quorum-import-"))
+    const runDir = join(root, "sample-run")
+    await mkdir(runDir, { recursive: true })
+    await writeFile(join(runDir, "cursor-reader-interviewer-call-1-attempt-1-run-abc-metadata.json"), JSON.stringify({
+      agentId: "bc-agent-two",
+      runId: "run-abc",
+      role: "reader-interviewer",
+      callIndex: 1,
+      requestedArtifact: "reader-profile-0.json",
+    }))
+    await writeFile(join(runDir, "cursor-reader-interviewer-call-1-attempt-1-run-abc-result.json"), JSON.stringify({
+      durationMs: 2000,
+    }))
+
+    const summary = await applyCursorUsageImport({
+      runsDir: root,
+      archiveDir: join(root, "archive-missing"),
+      rows: parseCursorUsageCsv(SAMPLE_CSV).filter((row) => row.agentId === "bc-agent-two"),
+      sourceFile: "usage.csv",
+    })
+
+    expect(summary.matchedCalls).toBe(1)
+    expect(summary.runsUpdated).toBe(1)
+  })
 })

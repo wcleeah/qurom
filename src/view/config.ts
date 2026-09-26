@@ -40,6 +40,7 @@ import {
   savedModelParams,
 } from "./role-binding-form"
 import { renderRoleBindingSnapshotsSection } from "./role-binding-snapshots"
+import { getArchiveDir } from "./paths"
 import { viewServerAdminEnabled } from "./server-options"
 import { escapeHtml } from "./utils"
 import { mcpServerSchema, type McpServer } from "../mcp-config"
@@ -154,11 +155,11 @@ function renderCursorUsageImportSection(importSummary?: CursorUsageImportSummary
   const summary = importSummary ?? lastCursorUsageImport
   const summaryHtml = summary
     ? `<div class="outcome-banner approved">Imported ${escapeHtml(summary.sourceFile)}: matched ${summary.matchedCalls}/${summary.metadataCalls} Cursor calls across ${summary.runsUpdated} run(s). Unmatched: ${summary.unmatchedCalls}.</div>`
-    : `<p class="tiny-text muted-text">Upload a Cursor usage CSV export to backfill token usage, cost (when present in the CSV), and models for cloud agent calls in existing runs.</p>`
+    : `<p class="tiny-text muted-text">Upload a Cursor usage CSV export to backfill token usage, cost (when present in the CSV), and models for cloud agent calls in existing runs, including archived ones.</p>`
 
   return section("Cursor usage import", `${summaryHtml}
 <form class="config-form" method="POST" action="/config/cursor-usage-import" enctype="multipart/form-data">
-  <label class="form-field"><span>Usage CSV</span><input class="form-input" type="file" name="csv" accept=".csv,text/csv" required><small>Matches by Cloud Agent ID. Finished calls are paired in time order; failed retries and empty Free rows are skipped so one extra metadata file no longer drops the whole agent.</small></label>
+  <label class="form-field"><span>Usage CSV</span><input class="form-input" type="file" name="csv" accept=".csv,text/csv" required><small>Matches by Cloud Agent ID across live and archived runs. Finished calls are paired in time order; failed retries and empty Free rows are skipped so one extra metadata file no longer drops the whole agent.</small></label>
   <div class="form-actions"><button type="submit" class="btn btn-primary">Import usage into runs</button></div>
 </form>`)
 }
@@ -168,7 +169,7 @@ function renderOpenCodeUsageImportSection(importSummary?: OpenCodeUsageImportSum
   const dbPath = defaultOpenCodeDbPath()
   const dbAvailable = isOpenCodeDbConfigured(dbPath)
   const statusHtml = dbAvailable
-    ? `<p class="tiny-text muted-text">Creates or fills <code>session-telemetry.json</code> for OpenCode runs by reading session IDs from each run's debug log and looking up usage in OpenCode's local database at <code>${escapeHtml(dbPath)}</code>.</p>`
+    ? `<p class="tiny-text muted-text">Creates or fills <code>session-telemetry.json</code> for OpenCode runs, including archived ones, by reading session IDs from each run's debug log and looking up usage in OpenCode's local database at <code>${escapeHtml(dbPath)}</code>.</p>`
     : `<div class="outcome-banner failed">OpenCode database not found at <code>${escapeHtml(dbPath)}</code>. Run OpenCode locally first, or set <code>OPENCODE_DB</code> to the correct path.</div>`
   const summaryHtml = summary
     ? `<div class="outcome-banner approved">Backfilled ${summary.matchedSessions}/${summary.sessionsNeedingBackfill} OpenCode session(s) across ${summary.runsUpdated} run(s). Unmatched: ${summary.unmatchedSessions}.</div>`
@@ -487,6 +488,7 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
 
       const summary = await applyCursorUsageImport({
         runsDir: config.env.QUORUM_RUNS_DIR,
+        archiveDir: getArchiveDir(),
         rows,
         sourceFile: file.name,
         totalCsvRows,
@@ -503,6 +505,7 @@ export async function handleConfigPost(req: Request, path: string): Promise<Resp
     try {
       const summary = await applyOpenCodeUsageImport({
         runsDir: config.env.QUORUM_RUNS_DIR,
+        archiveDir: getArchiveDir(),
       })
       lastOpenCodeUsageImport = summary
       return renderConfigIndex({ opencodeImportSummary: summary })
