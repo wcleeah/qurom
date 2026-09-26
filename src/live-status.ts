@@ -49,6 +49,10 @@ export interface LiveStatus {
   agents: Record<string, LiveAgentStatus>
   nodeHistory: NodeHistoryEntry[]
   error?: string
+  /** Accumulated ms the graph was waiting (reader interview, etc.). */
+  pausedMs?: number
+  /** Wall clock when the current wait started. */
+  pausedAt?: number
   awaitingReaderReply?: {
     turn: number
     answeredQuestions: Array<{ question: string; answer: string }>
@@ -98,8 +102,19 @@ export function createLiveStatusWriter(
     return typeof runDir === "function" ? runDir() : runDir
   }
 
+  function closeOpenPause(at = Date.now()) {
+    if (status.pausedAt == null) return
+    status.pausedMs = (status.pausedMs ?? 0) + Math.max(0, at - status.pausedAt)
+    status.pausedAt = undefined
+  }
+
   function setAwaitingReaderReply(value: LiveStatus["awaitingReaderReply"]) {
     status.awaitingReaderReply = value
+    if (value) {
+      if (status.pausedAt == null) status.pausedAt = Date.now()
+    } else {
+      closeOpenPause()
+    }
     scheduleWriteStatus()
   }
 
@@ -157,6 +172,7 @@ export function createLiveStatusWriter(
         } else if (event.phase === "complete") {
           status.phase = "complete"
           status.awaitingReaderReply = undefined
+          closeOpenPause()
           clearInterval(interval)
           void writeRunStatusSnapshot()
           void deleteStatus()
@@ -164,6 +180,7 @@ export function createLiveStatusWriter(
           status.phase = "error"
           status.error = event.error instanceof Error ? event.error.message : String(event.error ?? "")
           status.awaitingReaderReply = undefined
+          closeOpenPause()
           clearInterval(interval)
           void writeRunStatusSnapshot()
           void deleteStatus()

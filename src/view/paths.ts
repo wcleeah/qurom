@@ -1,3 +1,4 @@
+import { existsSync, statSync } from "node:fs"
 import { mkdir, readdir, rename, stat } from "node:fs/promises"
 import { basename, resolve } from "node:path"
 
@@ -29,19 +30,33 @@ export const RUNS_DIR = getRunsDir()
 export const PORT = parseInt(process.env.VIEW_PORT ?? "3000", 10)
 export const HOST = process.env.VIEW_HOST ?? "0.0.0.0"
 
-/** Resolve a run URL segment to the on-disk directory name (exact or requestId suffix). */
-export async function resolveRunName(runName: string): Promise<string | null> {
+function constrainToRoot(root: string, runName: string): string {
+  const resolved = resolve(root, runName)
+  if (!resolved.startsWith(root + "/") && resolved !== root) {
+    throw new Error("Path traversal blocked")
+  }
+  return resolved
+}
+
+function dirExists(path: string): boolean {
   try {
-    const direct = safeRunPath(runName)
+    return existsSync(path) && statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+async function resolveNameInRoot(runName: string, root: string): Promise<string | null> {
+  try {
+    const direct = constrainToRoot(root, runName)
     if ((await stat(direct)).isDirectory()) return runName
   } catch {
-    // not an exact match — try fuzzy lookup below
+    // fuzzy lookup below
   }
 
-  const runsDir = getRunsDir()
   let dirs: string[]
   try {
-    const entries = await readdir(runsDir, { withFileTypes: true })
+    const entries = await readdir(root, { withFileTypes: true })
     dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name)
   } catch {
     return null
@@ -54,13 +69,34 @@ export async function resolveRunName(runName: string): Promise<string | null> {
   return includeMatch ?? null
 }
 
+/** Always under runs/, even if the directory does not exist yet (unarchive dest). */
+export function runsOnlyPath(runName: string): string {
+  return constrainToRoot(getRunsDir(), runName)
+}
+
+/** Resolve a run URL segment to the on-disk directory name (exact or requestId suffix). */
+export async function resolveRunName(runName: string): Promise<string | null> {
+  return (await resolveNameInRoot(runName, getRunsDir()))
+    ?? (await resolveNameInRoot(runName, getArchiveDir()))
+}
+
+/** Existing run directory: runs/ if present, otherwise archive/. Missing runs stay under runs/. */
 export function safeRunPath(runName: string): string {
-  const runsDir = getRunsDir()
-  const resolved = resolve(runsDir, runName)
-  if (!resolved.startsWith(runsDir + "/") && resolved !== runsDir) {
-    throw new Error("Path traversal blocked")
+  const inRuns = runsOnlyPath(runName)
+  if (dirExists(inRuns)) return inRuns
+  const inArchive = constrainToRoot(getArchiveDir(), runName)
+  if (dirExists(inArchive)) return inArchive
+  return inRuns
+}
+
+export function isArchivedRun(runName: string): boolean {
+  try {
+    const path = safeRunPath(runName)
+    const archiveDir = getArchiveDir()
+    return path === archiveDir || path.startsWith(`${archiveDir}/`)
+  } catch {
+    return false
   }
-  return resolved
 }
 
 export function safeArchivePath(runName: string): string {
@@ -74,27 +110,7 @@ export function safeArchivePath(runName: string): string {
 
 /** Resolve a run URL segment to an on-disk directory name under archive/. */
 export async function resolveArchiveRunName(runName: string): Promise<string | null> {
-  try {
-    const direct = safeArchivePath(runName)
-    if ((await stat(direct)).isDirectory()) return runName
-  } catch {
-    // not an exact match — try fuzzy lookup below
-  }
-
-  const archiveDir = getArchiveDir()
-  let dirs: string[]
-  try {
-    const entries = await readdir(archiveDir, { withFileTypes: true })
-    dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name)
-  } catch {
-    return null
-  }
-
-  if (dirs.includes(runName)) return runName
-  const suffixMatch = dirs.find((dir) => dir.endsWith(`-${runName}`))
-  if (suffixMatch) return suffixMatch
-  const includeMatch = dirs.find((dir) => dir.includes(runName))
-  return includeMatch ?? null
+  return resolveNameInRoot(runName, getArchiveDir())
 }
 
 export function safeFilePath(runName: string, filePath: string): string {
@@ -112,7 +128,7 @@ export function safeFilePath(runName: string, filePath: string): string {
 
 /** Move a run directory from runs/ into archive/. Returns the destination path. */
 export async function archiveRunDirectory(runName: string): Promise<string> {
-  return archiveRunPath(safeRunPath(runName), getArchiveDir())
+  return archiveRunPath(runsOnlyPath(runName), getArchiveDir())
 }
 
 /**
@@ -133,7 +149,7 @@ export async function unarchiveRunDirectory(runName: string): Promise<string> {
 
   const runsDir = getRunsDir()
   await mkdir(runsDir, { recursive: true })
-  const dest = safeRunPath(runName)
+  const dest = runsOnlyPath(runName)
   try {
     await stat(dest)
     throw new Error(`Cannot unarchive: a run named "${runName}" already exists`)

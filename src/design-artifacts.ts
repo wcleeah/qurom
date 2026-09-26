@@ -68,6 +68,26 @@ export function isDesignHtmlArtifact(filename: string): boolean {
   return LEGACY_DESIGN_HTML_ROUND_RE.test(filename) || designHtmlRoleFromFilename(filename) !== undefined
 }
 
+/** User-facing label for a design pipeline role (not a research round). */
+export function designStageLabel(role: string): string {
+  switch (role) {
+    case DESIGNER_ROLE: return "HTML designer"
+    case GRAPHICAL_ENHANCER_ROLE: return "Graphical enhancer"
+    case LEGACY_INTERACTIVE_ENHANCER_ROLE: return "Graphical enhancer (legacy)"
+    case READING_EXPERIENCE_ENHANCER_ROLE: return "Reading experience"
+    case HTML_REVIEWER_ROLE: return "HTML review"
+    default: return role.replace(/-/g, " ")
+  }
+}
+
+export function designHtmlPanelTitle(filename: string): string {
+  const role = designHtmlRoleFromFilename(filename)
+  if (role) return designStageLabel(role)
+  const round = filename.match(LEGACY_DESIGN_HTML_ROUND_RE)?.[1]
+  if (round) return `Legacy HTML · round ${round}`
+  return filename
+}
+
 export function designHtmlArtifacts(files: string[]): string[] {
   const roleFiles: string[] = []
   for (const role of DESIGN_HTML_PIPELINE_ROLES) {

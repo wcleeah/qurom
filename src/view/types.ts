@@ -21,7 +21,7 @@ export interface RunMeta {
   unread: boolean
   /** Last time the run detail page was opened (ms epoch). */
   accessedAt?: number
-  /** Pipeline wall time from telemetry / live status. */
+  /** Time the graph was actually moving (excludes interview waits). */
   elapsedMs?: number
   costUsd?: number
   costAvailable?: boolean
@@ -91,6 +91,8 @@ export interface LiveStatus {
   agents: Record<string, LiveAgentStatus>
   nodeHistory: NodeHistoryEntry[]
   error?: string
+  pausedMs?: number
+  pausedAt?: number
   awaitingReaderReply?: {
     turn: number
     answeredQuestions: Array<{ question: string; answer: string }>

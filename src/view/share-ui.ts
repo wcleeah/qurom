@@ -1,9 +1,15 @@
 import { escapeHtml } from "./utils"
 import { sharePathForToken, type ShareLink } from "./share-store"
 
-export function renderSharePanel(runName: string, link: ShareLink | null): string {
+export function renderSharePanel(runName: string, link: ShareLink | null, options?: { readOnly?: boolean }): string {
   const encodedRun = escapeHtml(runName)
+  const readOnly = options?.readOnly === true
   if (!link) {
+    if (readOnly) {
+      return `<div class="share-panel">
+  <p class="tiny-text muted-text">No public share link.</p>
+</div>`
+    }
     return `<div class="share-panel" data-share-panel data-run-name="${encodedRun}">
   <button type="button" class="btn btn-primary" data-share-create>Create share link</button>
   <p class="tiny-text muted-text share-status" data-share-status></p>
@@ -11,13 +17,18 @@ export function renderSharePanel(runName: string, link: ShareLink | null): strin
   }
 
   const path = sharePathForToken(link.token)
+  const actions = readOnly
+    ? `<div class="share-actions">
+      <button type="button" class="btn" data-share-copy>Copy link</button>
+    </div>`
+    : `<div class="share-actions">
+      <button type="button" class="btn" data-share-copy>Copy link</button>
+      <button type="button" class="btn btn-secondary" data-share-revoke>Revoke</button>
+    </div>`
   return `<div class="share-panel" data-share-panel data-run-name="${encodedRun}" data-share-token="${escapeHtml(link.token)}">
   <div class="share-active">
     <a class="hero-link share-url" href="${escapeHtml(path)}" target="_blank" rel="noopener" data-share-url>${escapeHtml(path)}</a>
-    <div class="share-actions">
-      <button type="button" class="btn" data-share-copy>Copy link</button>
-      <button type="button" class="btn btn-secondary" data-share-revoke>Revoke</button>
-    </div>
+    ${actions}
   </div>
   <p class="tiny-text muted-text share-status" data-share-status></p>
 </div>`

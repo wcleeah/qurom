@@ -73,7 +73,7 @@ function renderRun(run: StaticRun): string {
 <p class="eyebrow">Completed quorum run</p>
 <h1>${escapeHtml(run.topic)}</h1>
 ${run.summary ? `<p class="lede">${escapeHtml(run.summary)}</p>` : ""}
-<p class="meta">Run ${escapeHtml(run.name)} · ${run.roundCount} research round${run.roundCount === 1 ? "" : "s"} · ${run.designRoundCount} design round${run.designRoundCount === 1 ? "" : "s"}</p>
+<p class="meta">Run ${escapeHtml(run.name)} · ${run.roundCount} research round${run.roundCount === 1 ? "" : "s"} · ${run.designRoundCount} design stage${run.designRoundCount === 1 ? "" : "s"}</p>
 <div class="actions">
   <a class="button" href="share/">Open published HTML</a>
   <a class="button secondary" href="../../">Back to all runs</a>

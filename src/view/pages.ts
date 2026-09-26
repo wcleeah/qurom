@@ -5,6 +5,12 @@ import { listArticleTags, listAllTags, listNoteTags } from "../tags-store"
 import { renderArticleTagsSection, TAG_FORMS_SCRIPT } from "./tag-ui"
 import { renderNewRunForm, NEW_RUN_FORM_SCRIPT } from "./new-run-form"
 import { renderOpencodeBootstrapBanner } from "./opencode-bootstrap-view"
+import {
+  designHtmlArtifacts,
+  designHtmlPanelTitle,
+  designHtmlRoleFromFilename,
+  designStageLabel,
+} from "../design-artifacts"
 import { hasReviewableMarkdown } from "../readability/posthoc"
 import { POSTHOC_REPORT_FILENAME } from "../readability/schema"
 import { renderRunControlsSection, renderUnarchiveForm, resolveRunResumeActions } from "./run-controls"
@@ -17,7 +23,7 @@ import { renderAgentActivity, renderFailureBanner, renderInterviewChatCard } fro
 import { computeStats, deriveResearchStatus, filterRunsForIndex, getRunFiles, listArchivedRuns, listRuns, readLiveStatus, readNodeHistory, readRunSessionTelemetry, resolveRunCreatedAtMs } from "./data"
 import { getNodeDefinition, isRebuttalsViewerNode, REBUTTALS_VIEWER_NODE_ID } from "./node-registry"
 import { renderNodeDashboard, renderGlobalResearchRoundStrip, renderNodeGrid, renderNodeMiniPipeline, nodePageRoundNumbers } from "./node-view"
-import { renderLiveStatusMeta, renderRoundStrip } from "./round-view"
+import { renderLiveStatusMeta, renderRoundStrip, livePipelineLine } from "./round-view"
 import { indexRunArtifacts } from "./run-artifacts"
 import { renderRunTelemetryStrip, renderSessionTelemetryTable, resolveRunTelemetry, runElapsedMs } from "./telemetry-view"
 import { renderFileBrowser } from "./file-browser"
@@ -33,17 +39,45 @@ import { tableWrap } from "./html"
 import { renderDebugLogHtml, type DebugLogEntry } from "./debug-log-viewer"
 import { appNavbarAction } from "./app-nav"
 import { badge, layout, formatDate, formatRelative, phaseBadge, designPhaseBadge, designStatusLabel } from "./layout"
-import { getRunsDir, resolveRunName, safeFilePath, safeRunPath } from "./paths"
+import { getRunsDir, isArchivedRun, resolveRunName, safeFilePath, safeRunPath } from "./paths"
 import { renderRefreshControls } from "./refresh-controls"
 import { READ_SCRIPT } from "./read-script"
 import { isRunUnread, touchRunAccess } from "./read-store"
 import { renderSharePanel, SHARE_SCRIPT } from "./share-ui"
 import { getShareLinkByRun, getShareLinkByToken, isValidShareToken } from "./share-store"
 import { contentType, escapeHtml, formatBytes, formatCostUsd, formatElapsed, formatUsagePair, renderMarkdown, statusDot } from "./utils"
-import type { RequestJson, RunStatus } from "./types"
+import type { RequestJson, RunMeta, RunStatus } from "./types"
 
 function renderCreatedAt(ms: number): string {
   return `<span class="run-created" title="${escapeHtml(formatDate(ms))}">${escapeHtml(formatRelative(ms))}</span>`
+}
+
+function renderIndexRunCard(run: RunMeta, options?: { archived?: boolean }): string {
+  const iconsStr = run.hasFinalHtml ? ` <span class="tiny-text muted-text">html</span>` : ""
+  const designBadge = run.designStatus
+    ? `<span class="badge ${run.designStatus === "approved" ? "badge-approved" : run.designStatus === "failed" ? "badge-failed" : "badge-running"} design-badge">design: ${escapeHtml(designStatusLabel(run.designStatus))}</span>`
+    : ""
+  const costLabel = run.costAvailable
+    ? formatCostUsd(run.costUsd ?? 0, { estimated: run.costEstimated })
+    : "—"
+  const elapsedLabel = run.elapsedMs !== undefined ? formatElapsed(run.elapsedMs) : "—"
+  const archived = options?.archived === true
+
+  return `<div class="run-card">
+  <div class="run-card-top">
+    ${archived ? "" : renderReadButton(run.name, run.unread)}
+    <div class="run-card-title">
+      <a href="/runs/${encodeURIComponent(run.name)}">${escapeHtml(run.topic)}${iconsStr}</a>
+    </div>
+    <div class="row-inline-spread">${badge(run.status)}${designBadge}</div>
+  </div>
+  <div class="run-card-meta">
+    ${renderCreatedAt(run.createdAt)}
+    <span>${escapeHtml(costLabel)}</span>
+    <span>${escapeHtml(elapsedLabel)}</span>
+    ${archived ? renderUnarchiveForm(run.name) : ""}
+  </div>
+</div>`
 }
 
 function renderReadButton(runName: string, unread: boolean): string {
@@ -301,12 +335,14 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
   // Active run hero — scan all runs so filters don't hide it
   let activeRunHtml = ""
   let hasActiveRun = false
+  const pinnedRunning = new Set<string>()
   if (!showArchived) {
     for (const run of allRuns) {
       if (run.status !== "running") continue
       const liveStatus = await readLiveStatus(run.name)
       if (!liveStatus) continue
       hasActiveRun = true
+      pinnedRunning.add(run.name)
       const nodeHistory = await readNodeHistory(run.name)
       const sessionTelemetry = await readRunSessionTelemetry(run.name)
       const elapsedMs = run.elapsedMs ?? runElapsedMs(liveStatus, nodeHistory)
@@ -317,6 +353,7 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
         .slice(0, 4)
         .map(([name, a]) => `${statusDot(a.status)} ${escapeHtml(name)}${a.tool ? ` · ${escapeHtml(a.tool)}` : ""}`)
         .join(" · ")
+      const pipeline = livePipelineLine(liveStatus)
       activeRunHtml += `<div class="card active-run-hero">
   <div class="active-run-header">
     <span class="badge badge-running">● Active</span>
@@ -325,71 +362,30 @@ export async function renderIndex(searchParams = new URLSearchParams()): Promise
     <a href="/runs/${encodeURIComponent(run.name)}">${escapeHtml(run.topic)}</a>
   </div>
   <div class="active-run-pipeline">
-    ${escapeHtml(liveStatus.node ?? "running")} · Round ${liveStatus.round}/${liveStatus.maxRounds} · ${escapeHtml(elapsed)}${escapeHtml(usageLabel)}
+    ${escapeHtml(pipeline)}${elapsed ? ` · ${escapeHtml(elapsed)}` : ""}${escapeHtml(usageLabel)}
   </div>
   ${agentList ? `<div class="active-run-agents">${agentList}</div>` : ""}
 </div>`
     }
   }
 
+  const listedRuns = showArchived ? runs : runs.filter((run) => !pinnedRunning.has(run.name))
+
   // Run cards
   let runCards = ""
-  if (runs.length === 0) {
+  if (listedRuns.length === 0) {
     runCards = showArchived
       ? `<div class="empty-state">No archived runs.</div>`
       : showUnreadOnly
         ? `<div class="empty-state">No unread runs. <a href="/?read=1">Show read runs</a></div>`
         : showReadOnly
           ? `<div class="empty-state">No read runs. <a href="/">Show unread runs</a></div>`
-          : `<div class="empty-state">No runs found in <code>${escapeHtml(getRunsDir())}</code></div>`
-  } else if (showArchived) {
-    for (const run of runs) {
-      const iconsStr = run.hasFinalHtml ? ` <span class="tiny-text muted-text">html</span>` : ""
-      const designBadge = run.designStatus
-        ? `<span class="badge ${run.designStatus === "approved" ? "badge-approved" : run.designStatus === "failed" ? "badge-failed" : "badge-running"} design-badge">design: ${escapeHtml(designStatusLabel(run.designStatus))}</span>`
-        : ""
-
-      runCards += `<div class="run-card">
-  <div class="run-card-top">
-    <div class="run-card-title">
-      <span>${escapeHtml(run.topic)}${iconsStr}</span>
-      <div class="tiny-text muted-text">${escapeHtml(run.name)}</div>
-    </div>
-    <div class="row-inline-spread">${badge(run.status)}${designBadge}</div>
-  </div>
-  <div class="run-card-meta">
-    ${renderCreatedAt(run.createdAt)}
-    ${renderUnarchiveForm(run.name)}
-  </div>
-</div>`
-    }
+          : runs.length > 0 && pinnedRunning.size > 0
+            ? ""
+            : `<div class="empty-state">No runs found in <code>${escapeHtml(getRunsDir())}</code></div>`
   } else {
-    for (const run of runs) {
-      const iconsStr = run.hasFinalHtml ? ` <span class="tiny-text muted-text">html</span>` : ""
-
-      const designBadge = run.designStatus
-        ? `<span class="badge ${run.designStatus === "approved" ? "badge-approved" : run.designStatus === "failed" ? "badge-failed" : "badge-running"} design-badge">design: ${escapeHtml(designStatusLabel(run.designStatus))}</span>`
-        : ""
-
-      const costLabel = run.costAvailable
-        ? formatCostUsd(run.costUsd ?? 0, { estimated: run.costEstimated })
-        : "—"
-      const elapsedLabel = run.elapsedMs !== undefined ? formatElapsed(run.elapsedMs) : "—"
-
-      runCards += `<div class="run-card">
-  <div class="run-card-top">
-    ${renderReadButton(run.name, run.unread)}
-    <div class="run-card-title">
-      <a href="/runs/${encodeURIComponent(run.name)}">${escapeHtml(run.topic)}${iconsStr}</a>
-    </div>
-    <div class="row-inline-spread">${badge(run.status)}${designBadge}</div>
-  </div>
-  <div class="run-card-meta">
-    ${renderCreatedAt(run.createdAt)}
-    <span>${escapeHtml(costLabel)}</span>
-    <span>${escapeHtml(elapsedLabel)}</span>
-  </div>
-</div>`
+    for (const run of listedRuns) {
+      runCards += renderIndexRunCard(run, { archived: showArchived })
     }
   }
 
@@ -444,27 +440,25 @@ export async function getFileSizes(runName: string, files: string[]): Promise<Ma
 
 export async function readDesignSummary(_runName: string, files: string[]): Promise<{
   status: "approved" | "failed" | "running"
-  round: number
+  stages: string[]
   hasFinalHtml: boolean
   hasDesignFiles: boolean
   hasFailure: boolean
 } | null> {
-  const designHtmlFiles = files
-    .filter((f) => /^design-html-.+\.html$/.test(f))
-    .sort()
-
+  const designHtmlFiles = designHtmlArtifacts(files)
   const hasFinalHtml = files.includes("final.html")
   const hasFailure = files.includes("design-failure.json")
   if (designHtmlFiles.length === 0 && !hasFinalHtml && !hasFailure) {
     return null
   }
 
-  const latest = designHtmlFiles[designHtmlFiles.length - 1]
-  const roundMatch = latest?.match(/round-(\d+)/)
-  const round = roundMatch ? parseInt(roundMatch[1]) : Math.max(0, designHtmlFiles.length - 1)
+  const stages = designHtmlFiles.map((file) => {
+    const role = designHtmlRoleFromFilename(file)
+    return role ? designStageLabel(role) : designHtmlPanelTitle(file)
+  })
   return {
     status: hasFailure ? "failed" : hasFinalHtml ? "approved" : "running",
-    round,
+    stages,
     hasFinalHtml,
     hasDesignFiles: designHtmlFiles.length > 0 || hasFinalHtml,
     hasFailure,
@@ -549,12 +543,15 @@ export async function renderRun(name: string): Promise<Response> {
       : design.status === "failed" ? "failed"
       : "needs-revision"
 
+    const stageLabel = design.stages.length > 0
+      ? design.stages.map((stage) => escapeHtml(stage)).join(" → ")
+      : "—"
     designSummaryHtml = `<div class="section">
   <h2>Design</h2>
   <div class="structured-card">
     <div class="outcome-banner ${escapeHtml(designOutcomeClass)}">${designOutcomeLabel}</div>
     ${tableWrap(`<table class="summary-table">
-      <tr><td>HTML drafts</td><td>${countByPattern(files, /^design-html-.+\.html$/)}</td></tr>
+      <tr><td>Stages</td><td>${stageLabel}</td></tr>
       ${design.hasFinalHtml ? `<tr><td>Final HTML</td><td>final.html ready</td></tr>` : ""}
       ${design.hasFailure ? `<tr><td>Error</td><td class="danger-text">design-failure.json</td></tr>` : ""}
     </table>`)}
@@ -567,12 +564,13 @@ export async function renderRun(name: string): Promise<Response> {
   const finalOutputLinks: string[] = []
 
   let sharePanelHtml = ""
+  const archived = isArchivedRun(name)
   if (hasFinalHtml) {
     finalOutputLinks.push(`<a class="hero-link" href="/runs/${encodeURIComponent(name)}/raw/final.html">
   Open final.html →
 </a>`)
     const shareLink = await getShareLinkByRun(name)
-    sharePanelHtml = renderSharePanel(name, shareLink)
+    sharePanelHtml = renderSharePanel(name, shareLink, { readOnly: archived })
   } else {
     if (hasFinalMd) {
       const sz = fileSizes.get("final.md") ?? 0
@@ -662,7 +660,7 @@ export async function renderRun(name: string): Promise<Response> {
     hasInputMd: files.includes("input.md"),
     hasTopic: Boolean(requestJson?.topic?.trim()),
     hasReaderProfile: files.includes("reader-profile.json"),
-    hasReviewableMarkdown: hasReviewableMarkdown(files),
+    hasReviewableMarkdown: archived ? false : hasReviewableMarkdown(files),
     designStatus: design?.status ?? null,
   })
   const runControlsHtml = renderRunControlsSection({
@@ -674,6 +672,7 @@ export async function renderRun(name: string): Promise<Response> {
     runActiveGlobally,
     maxConcurrent,
     hasExistingReadabilityReview: files.includes(POSTHOC_REPORT_FILENAME),
+    archived,
   })
 
   const filesLinkSection = `<div class="section"><p><a href="/runs/${encodeURIComponent(name)}/files">Browse all ${files.length} files →</a></p></div>`
@@ -700,7 +699,8 @@ export async function renderRun(name: string): Promise<Response> {
       runName: name,
       tags: articleTags,
       allTags,
-      canRetag: true,
+      canRetag: !archived,
+      viewOnly: archived,
     })
   }
   const designSummarySection = `<div id="design-summary-section">${designSummaryHtml}</div>`
@@ -750,21 +750,23 @@ ${agentActivitySection}
 ${nodeGridSection}
 ${sessionTelemetrySection}
 ${debugLogSection}
-${renderFindingsMcpCheckPanel(name)}
+${archived ? "" : renderFindingsMcpCheckPanel(name)}
 ${markdownSection}
 ${filesSection}
 ${READ_SCRIPT}
-${FINDINGS_MCP_CHECK_SCRIPT}
+${archived ? "" : FINDINGS_MCP_CHECK_SCRIPT}
 ${hasFinalHtml ? SHARE_SCRIPT : ""}
 ${hasResearchRounds ? ROUND_TABS_SCRIPT : ""}
 ${isRunning ? POLLING_SCRIPT : ""}
-${articleTagsSection ? TAG_FORMS_SCRIPT : ""}`
+${articleTagsSection && !archived ? TAG_FORMS_SCRIPT : ""}`
 
   const html = layout(`${escapeHtml(topic)} — quorum run`, body, {
     extraHead,
     navbar: {
       section: "runs",
-      back: { href: "/", label: "← Back to runs" },
+      back: archived
+        ? { href: "/?archived=1", label: "← Back to archived" }
+        : { href: "/", label: "← Back to runs" },
       title: topic,
     },
   })

@@ -21,6 +21,7 @@ import {
   renderSessionTelemetryTable,
   resolveRunTelemetry,
   resolveRunUsage,
+  runElapsedMs,
   sessionTotalsForNode,
   sessionTotalsForNodeRound,
   sessionsForNodeScope,
@@ -244,6 +245,42 @@ describe("telemetry view", () => {
     expect(html).toContain("elapsed")
     expect(html).toContain("1.2k in / 300 out")
     expect(html).toContain("~$0.042 est.")
+  })
+
+  test("runElapsedMs counts only time the graph was moving", () => {
+    const now = 1_000_000
+    expect(runElapsedMs({
+      phase: "running",
+      runStartedAt: now - 60_000,
+      pausedMs: 10_000,
+      pausedAt: now - 5_000,
+      awaitingReaderReply: {
+        turn: 1,
+        answeredQuestions: [],
+        newQuestions: ["Goal?"],
+        transcript: [],
+      },
+      round: 0,
+      maxRounds: 2,
+      agents: {},
+      nodeHistory: [],
+    }, [], now)).toBe(45_000)
+
+    expect(runElapsedMs({
+      phase: "complete",
+      runStartedAt: 1_000,
+      pausedMs: 2_000,
+      round: 0,
+      maxRounds: 2,
+      agents: {},
+      nodeHistory: [{
+        node: "draftFullDraft",
+        startedAt: 1_000,
+        completedAt: 9_000,
+        status: "completed",
+        round: 0,
+      }],
+    }, [])).toBe(6_000)
   })
 
   test("formatTokenPair splits cache buckets when present", () => {

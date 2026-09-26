@@ -7,6 +7,7 @@ import {
   DESIGN_WORKING_FILENAME,
   designHtmlArtifactName,
   designHtmlArtifacts,
+  designStageLabel,
   designWorkingPath,
   latestDesignHtmlArtifact,
   presentDesignHtmlArtifact,
@@ -22,6 +23,13 @@ describe("design artifacts", () => {
     expect(designHtmlArtifactName("interactive-enhancer")).toBe("design-html-interactive-enhancer.html")
     expect(designHtmlArtifactName("reading-experience-enhancer")).toBe("design-html-reading-experience-enhancer.html")
     expect(designHtmlArtifactName("html-reviewer")).toBe("design-html-html-reviewer.html")
+  })
+
+  test("labels design stages without round language", () => {
+    expect(designStageLabel("html-designer")).toBe("HTML designer")
+    expect(designStageLabel("graphical-enhancer")).toBe("Graphical enhancer")
+    expect(designStageLabel("reading-experience-enhancer")).toBe("Reading experience")
+    expect(designStageLabel("html-reviewer")).toBe("HTML review")
   })
 
   test("orders pipeline artifacts and prefers the latest role stage", () => {

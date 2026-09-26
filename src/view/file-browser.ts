@@ -25,7 +25,6 @@ export function renderFileBrowser(input: {
     "Research Rounds",
     "Rebuttals",
     "Design",
-    "Design Rounds",
     "Debug",
     "Other",
   ]

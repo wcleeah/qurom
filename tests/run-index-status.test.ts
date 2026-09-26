@@ -102,9 +102,10 @@ describe("list vs detail status after resume", () => {
     expect(runs[0]?.status).toBe("running")
 
     const index = await (await renderIndex(new URLSearchParams("all=1"))).text()
-    expect(index).toContain('<span class="badge badge-running">running</span>')
-    expect(index).not.toContain('<span class="badge badge-failed">failed</span>')
     expect(index).toContain("● Active")
+    expect(index).not.toContain('<span class="badge badge-failed">failed</span>')
+    expect(index).not.toContain('<span class="badge badge-running">running</span>')
+    expect(index).toContain("Photography")
 
     const detail = await (await renderRun("photo-run")).text()
     expect(detail).toContain("Research: running")

@@ -14,7 +14,7 @@ import {
   removeNoteTag,
 } from "../tags-store"
 import { getLibraryNote } from "./library-notes-store"
-import { resolveRunName, safeFilePath, safeRunPath } from "./paths"
+import { isArchivedRun, resolveRunName, safeFilePath, safeRunPath } from "./paths"
 
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status })
@@ -28,6 +28,10 @@ async function resolveRun(runRef: string): Promise<string> {
 
 function wantsJson(req: Request): boolean {
   return (req.headers.get("accept") ?? "").includes("application/json")
+}
+
+function archivedViewOnly(): Response {
+  return json({ error: "Tags on archived runs are view-only" }, 409)
 }
 
 function redirectRun(runName: string): Response {
@@ -53,6 +57,7 @@ export async function handleTagsApi(req: Request, path: string): Promise<Respons
     }
 
     if (req.method === "POST" && !slug) {
+      if (isArchivedRun(runName)) return archivedViewOnly()
       const raw = await req.text()
       let tag = ""
       if (raw.trim().startsWith("{")) {
@@ -67,6 +72,7 @@ export async function handleTagsApi(req: Request, path: string): Promise<Respons
     }
 
     if (req.method === "DELETE" && slug) {
+      if (isArchivedRun(runName)) return archivedViewOnly()
       const removed = await removeArticleTag(runName, slug)
       if (!removed) return json({ error: "Tag not found or not removable" }, 404)
       return json({ ok: true, tags: await listArticleTags(runName) })
@@ -76,6 +82,7 @@ export async function handleTagsApi(req: Request, path: string): Promise<Respons
   const retagMatch = path.match(/^\/api\/runs\/(.+?)\/retag$/)
   if (retagMatch && req.method === "POST") {
     const runName = await resolveRun(decodeURIComponent(retagMatch[1]))
+    if (isArchivedRun(runName)) return archivedViewOnly()
     const runDir = safeRunPath(runName)
     const finalPath = safeFilePath(runName, "final.md")
     const finalFile = Bun.file(finalPath)
@@ -117,6 +124,7 @@ export async function handleTagsApi(req: Request, path: string): Promise<Respons
   const propagateMatch = path.match(/^\/api\/runs\/(.+?)\/tags\/propagate$/)
   if (propagateMatch && req.method === "POST") {
     const runName = await resolveRun(decodeURIComponent(propagateMatch[1]))
+    if (isArchivedRun(runName)) return archivedViewOnly()
     const result = await propagateArticleTagsToNotes(runName)
     if (!wantsJson(req)) return redirectRun(runName)
     return json({ ok: true, ...result })

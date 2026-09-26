@@ -269,6 +269,7 @@ export async function listRuns(): Promise<RunMeta[]> {
 /** List runs that have been moved into the archive directory. */
 export async function listArchivedRuns(): Promise<RunMeta[]> {
   const metas = await collectRunMetasFromDir(getArchiveDir())
+  await Promise.all(metas.map((meta) => enrichRunIndexFields(meta)))
   metas.sort((a, b) => b.mtime - a.mtime)
   return metas
 }
@@ -491,7 +492,7 @@ export function classifyFile(filename: string): FileClass {
     const role = filename.replace(/^design-html-/, "").replace(/\.html$/, "")
     return { group: "Design", subGroup: "HTML Drafts", label: `HTML · ${role}`, description: "Role-staged design HTML artifact" }
   }
-  if (filename === "design-failure.json") return { group: "Design Rounds", subGroup: "Failures", label: "Design failure details", description: "Design pipeline error payload" }
+  if (filename === "design-failure.json") return { group: "Design", subGroup: "Failures", label: "Design failure details", description: "Design pipeline error payload" }
   return { group: "Other", subGroup: "Unclassified", label: filename, description: "Additional artifact" }
 }
 

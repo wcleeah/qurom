@@ -74,9 +74,14 @@ describe("live status without usage", () => {
       const runStatus = JSON.parse(await readFile(join(dir, "run-status.json"), "utf8")) as {
         phase: string
         awaitingReaderReply?: unknown
+        pausedMs?: number
+        pausedAt?: number
       }
       expect(runStatus.phase).toBe("complete")
       expect(runStatus.awaitingReaderReply).toBeUndefined()
+      expect(typeof runStatus.pausedMs).toBe("number")
+      expect(runStatus.pausedMs).toBeGreaterThan(0)
+      expect(runStatus.pausedAt).toBeUndefined()
     } finally {
       liveWriter.dispose()
       await rm(dir, { recursive: true, force: true })
